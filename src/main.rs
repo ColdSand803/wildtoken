@@ -83,8 +83,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .route("/health", get(handlers::admin::health_check))
         .route("/", get(|| async { axum::response::Redirect::to("/admin") }))
+        // Default console: dark OLED (static-v2). Legacy light UI kept at /admin-v1.
         .route("/admin", get(serve_admin_html))
-        .route("/admin-v2", get(serve_admin_v2_html))
+        .route("/admin-v1", get(serve_admin_v1_html))
+        .route(
+            "/admin-v2",
+            get(|| async { axum::response::Redirect::permanent("/admin") }),
+        )
         .route("/v1/{*path}", any(handlers::proxy::proxy_handler))
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
         .nest_service("/static-v2", tower_http::services::ServeDir::new("static-v2"))
@@ -104,14 +109,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Serve admin static HTML page
+/// Default admin console: dark OLED UI (static-v2).
 async fn serve_admin_html() -> axum::response::Response {
-    serve_html_file("static/admin.html").await
+    serve_html_file("static-v2/admin.html").await
 }
 
-/// Serve the ui-ux-pro-max dark OLED admin console (static-v2).
-async fn serve_admin_v2_html() -> axum::response::Response {
-    serve_html_file("static-v2/admin.html").await
+/// Legacy light admin console (static/).
+async fn serve_admin_v1_html() -> axum::response::Response {
+    serve_html_file("static/admin.html").await
 }
 
 async fn serve_html_file(path: &str) -> axum::response::Response {
