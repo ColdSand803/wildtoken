@@ -1,0 +1,28 @@
+services:
+  wildtoken:
+    build: .
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: sqlite:/data/wildtoken.db?mode=rwc
+      APP__SERVER__HOST: 0.0.0.0
+      APP__SERVER__PORT: "3100"
+      APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS: "300"
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./data/wildtoken.db:/data/wildtoken.db
+      - ./data/wildtoken.db-shm:/data/wildtoken.db-shm
+      - ./data/wildtoken.db-wal:/data/wildtoken.db-wal
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-fsS",
+          "http://127.0.0.1:3100/health",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

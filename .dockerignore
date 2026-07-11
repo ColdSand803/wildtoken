@@ -1,0 +1,7 @@
+.git
+target
+*.db
+*.db-shm
+*.db-wal
+wildtoken.db*
+*.log

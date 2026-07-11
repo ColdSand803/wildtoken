@@ -1,0 +1,28 @@
+# Environment and local secrets
+.env
+.env.*
+!.env.example
+
+# Rust / cargo
+/target
+
+# Local AI skill installs (use global ~/.opencode or ~/.config/opencode)
+.opencode/
+
+# Runtime data and logs
+*.log
+*.pid
+*.db
+*.db-shm
+*.db-wal
+wildtoken.db*
+*.sqlite
+*.sqlite3
+
+# Editors and operating systems
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
