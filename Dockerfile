@@ -8,7 +8,6 @@ WORKDIR /app
 
 COPY .wildtoken.bin /usr/local/bin/wildtoken
 COPY static ./static
-COPY static-v2 ./static-v2
 COPY config ./config
 
 ENV APP__SERVER__HOST=0.0.0.0 \

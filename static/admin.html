@@ -1,27 +1,47 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>WildToken Admin</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("wildtoken_theme");
+          if (t !== "light" && t !== "dark") t = "dark";
+          document.documentElement.setAttribute("data-theme", t);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
+    <div class="aurora" aria-hidden="true">
+      <span class="aurora-blob aurora-a"></span>
+      <span class="aurora-blob aurora-b"></span>
+      <span class="aurora-blob aurora-c"></span>
+    </div>
     <div class="app-shell">
       <nav class="topbar">
         <div class="topbar-brand">
           <span class="brand-mark" aria-hidden="true">
             <svg width="22" height="22" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <rect width="64" height="64" rx="12" fill="currentColor" />
-              <path d="M32 14v18M32 32l15 10M32 32L17 42" stroke="#fff" stroke-width="4" stroke-linecap="round" />
-              <circle cx="32" cy="14" r="4.5" fill="#fff" />
-              <circle cx="47" cy="42" r="4.5" fill="#fff" />
-              <circle cx="17" cy="42" r="4.5" fill="#fff" />
-              <circle cx="32" cy="32" r="7" fill="#fff" />
+              <rect width="64" height="64" rx="14" fill="currentColor" />
+              <path d="M32 14v18M32 32l15 10M32 32L17 42" stroke="var(--brand-ink)" stroke-width="4" stroke-linecap="round" />
+              <circle cx="32" cy="14" r="4.5" fill="var(--brand-ink)" />
+              <circle cx="47" cy="42" r="4.5" fill="var(--brand-ink)" />
+              <circle cx="17" cy="42" r="4.5" fill="var(--brand-ink)" />
+              <circle cx="32" cy="32" r="7" fill="var(--brand-ink)" />
+              <circle cx="32" cy="32" r="3" fill="currentColor" />
             </svg>
           </span>
           <div class="brand-text">
@@ -34,7 +54,18 @@
           <button type="button" class="nav-link" data-view="logs">日志</button>
           <button type="button" class="nav-link" data-view="tokens">令牌</button>
         </div>
-        <button type="button" id="admin-logout" class="secondary ghost nav-logout">退出</button>
+        <div class="topbar-actions">
+          <button
+            type="button"
+            id="theme-toggle"
+            class="secondary ghost theme-toggle"
+            aria-label="切换到浅色主题"
+            title="切换主题"
+          >
+            <span class="theme-toggle-icon" aria-hidden="true"></span>
+          </button>
+          <button type="button" id="admin-logout" class="secondary ghost nav-logout">退出</button>
+        </div>
       </nav>
 
       <main class="content">
@@ -399,6 +430,19 @@
     </dialog>
     <dialog id="admin-token-dialog" class="admin-token-dialog">
       <form id="admin-token-form" class="admin-token-panel">
+        <div class="login-brand" aria-hidden="true">
+          <span class="login-mark">
+            <svg width="36" height="36" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="64" height="64" rx="14" fill="currentColor" />
+              <path d="M32 14v18M32 32l15 10M32 32L17 42" stroke="var(--brand-ink)" stroke-width="4" stroke-linecap="round" />
+              <circle cx="32" cy="14" r="4.5" fill="var(--brand-ink)" />
+              <circle cx="47" cy="42" r="4.5" fill="var(--brand-ink)" />
+              <circle cx="17" cy="42" r="4.5" fill="var(--brand-ink)" />
+              <circle cx="32" cy="32" r="7" fill="var(--brand-ink)" />
+              <circle cx="32" cy="32" r="3" fill="currentColor" />
+            </svg>
+          </span>
+        </div>
         <div class="modal-head">
           <div>
             <h2>管理员登录</h2>

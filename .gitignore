@@ -5,6 +5,7 @@
 
 # Rust / cargo
 /target
+.wildtoken.bin
 
 # Local AI skill installs (use global ~/.opencode or ~/.config/opencode)
 .opencode/
@@ -18,6 +19,7 @@
 wildtoken.db*
 *.sqlite
 *.sqlite3
+data/
 
 # Editors and operating systems
 .idea/

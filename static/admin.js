@@ -2296,3 +2296,42 @@ if (getAdminToken()) {
 } else {
   openAdminTokenDialog();
 }
+
+
+// ── Theme toggle (dark default / light) ───────────────────
+const THEME_KEY = "wildtoken_theme";
+const themeToggle = document.querySelector("#theme-toggle");
+
+function getStoredTheme() {
+  try {
+    const value = localStorage.getItem(THEME_KEY);
+    return value === "light" || value === "dark" ? value : "dark";
+  } catch {
+    return "dark";
+  }
+}
+
+function applyTheme(theme) {
+  const next = theme === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", next);
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    /* ignore quota / private mode */
+  }
+  if (themeToggle) {
+    const toLight = next === "dark";
+    themeToggle.setAttribute("aria-label", toLight ? "切换到浅色主题" : "切换到深色主题");
+    themeToggle.title = toLight ? "切换到浅色" : "切换到深色";
+  }
+}
+
+function cycleTheme() {
+  const current = document.documentElement.getAttribute("data-theme") || getStoredTheme();
+  applyTheme(current === "dark" ? "light" : "dark");
+}
+
+applyTheme(getStoredTheme());
+if (themeToggle) {
+  themeToggle.addEventListener("click", cycleTheme);
+}
