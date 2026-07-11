@@ -84,8 +84,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/health", get(handlers::admin::health_check))
         .route("/", get(|| async { axum::response::Redirect::to("/admin") }))
         .route("/admin", get(serve_admin_html))
+        .route("/admin-v2", get(serve_admin_v2_html))
         .route("/v1/{*path}", any(handlers::proxy::proxy_handler))
         .nest_service("/static", tower_http::services::ServeDir::new("static"))
+        .nest_service("/static-v2", tower_http::services::ServeDir::new("static-v2"))
         .merge(admin_routes)
         .layer(TraceLayer::new_for_http())
         .layer(CorsLayer::new()
@@ -104,8 +106,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Serve admin static HTML page
 async fn serve_admin_html() -> axum::response::Response {
-    let html_path = "static/admin.html";
-    match tokio::fs::read_to_string(html_path).await {
+    serve_html_file("static/admin.html").await
+}
+
+/// Serve the ui-ux-pro-max dark OLED admin console (static-v2).
+async fn serve_admin_v2_html() -> axum::response::Response {
+    serve_html_file("static-v2/admin.html").await
+}
+
+async fn serve_html_file(path: &str) -> axum::response::Response {
+    match tokio::fs::read_to_string(path).await {
         Ok(html) => axum::response::Response::builder()
             .header("content-type", "text/html; charset=utf-8")
             .body(axum::body::Body::from(html))
