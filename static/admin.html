@@ -360,6 +360,11 @@
                 </form>
               </section>
 
+              <section class="settings-card" aria-labelledby="model-test-templates-title">
+                <div class="settings-card-head"><div><h3 id="model-test-templates-title">模型测试请求包装</h3><p>Codex / OpenCode 包装决定接口协议和请求头；Prompt 在测试窗口中独立选择。</p></div><button id="new-model-test-template" type="button" class="secondary">新增包装</button></div>
+                <div id="model-test-template-list" class="model-test-template-list" aria-live="polite"><p class="settings-loading">进入设置页后加载模板。</p></div>
+              </section>
+
               <section class="settings-card settings-readonly" aria-labelledby="gateway-default-title">
                 <div class="settings-card-head"><div><h3 id="gateway-default-title">网关默认值</h3><p>启动时读取的默认上游超时。</p></div><span class="settings-readonly-tag">只读</span></div>
                 <div class="settings-note"><strong>默认上游超时：<span id="settings-default-timeout">由启动配置决定</span></strong><p>现有渠道均有明确的超时值；请前往「渠道」按渠道管理。本页不提供动态全局超时设置。</p></div>
@@ -680,6 +685,39 @@
       popover="manual"
       hidden
     ></div>
+    <dialog id="model-test-dialog" class="upstream-dialog" aria-labelledby="model-test-title">
+      <form id="model-test-form" class="upstream-dialog-panel">
+        <div class="modal-head upstream-modal-head">
+          <div><h2 id="model-test-title">测试模型</h2><p id="model-test-summary">向当前渠道发送一次实际模型请求。</p></div>
+          <button id="model-test-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><span aria-hidden="true">×</span></button>
+        </div>
+        <div class="upstream-dialog-body">
+          <label class="field"><span class="field-label">模型</span><select id="model-test-model" required></select><span class="field-hint">可使用此渠道配置的模型，或从上游刷新后选择。</span></label>
+          <label class="field"><span class="field-label">请求包装</span><select id="model-test-template" required></select><span id="model-test-template-hint" class="field-hint"></span></label>
+          <label class="field"><span class="field-label">Prompt 模板</span><select id="model-test-prompt-template" required></select></label>
+          <label class="field test-model-prompt"><span class="field-label">本次 Prompt</span><textarea id="model-test-prompt" rows="6" maxlength="20000" required></textarea></label>
+          <div class="test-model-result" id="model-test-result" hidden>
+            <div class="test-model-result-head"><strong id="model-test-result-status"></strong><span id="model-test-result-meta" class="muted"></span></div>
+            <div class="test-model-response"><span class="field-label">模型回复</span><pre id="model-test-result-body"></pre></div>
+            <details class="test-model-details"><summary>展开完整请求</summary><pre id="model-test-request-body"></pre></details>
+            <details class="test-model-details"><summary>展开完整响应</summary><pre id="model-test-response-body"></pre></details>
+          </div>
+        </div>
+        <div class="modal-footer"><button id="model-test-refresh-models" type="button" class="secondary">刷新模型</button><button id="model-test-submit" type="submit">发送测试</button></div>
+      </form>
+    </dialog>
+    <dialog id="model-test-template-dialog" class="confirm-dialog" aria-labelledby="model-test-template-title">
+      <form id="model-test-template-form" class="confirm-panel">
+        <div class="modal-head"><div><h2 id="model-test-template-title">新增测试模板</h2><p>提示词会作为实际测试请求的一部分发送给渠道。</p></div><button id="model-test-template-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><span aria-hidden="true">×</span></button></div>
+        <input id="model-test-template-id" type="hidden" />
+        <div class="form-grid">
+          <label class="field span-2"><span class="field-label">模板名称</span><input id="model-test-template-name" maxlength="80" required placeholder="例如：简短中文响应" /></label>
+          <label class="field span-2"><span class="field-label">接口类型</span><select id="model-test-template-kind"><option value="responses">Responses（Codex）</option><option value="chat_completions">Chat Completions（OpenCode）</option></select></label>
+          <label class="field span-2"><span class="field-label">提示词</span><textarea id="model-test-template-prompt" rows="6" maxlength="20000" required></textarea></label>
+        </div>
+        <div class="modal-actions"><button id="model-test-template-cancel" type="button" class="secondary">取消</button><button type="submit">保存模板</button></div>
+      </form>
+    </dialog>
     <dialog id="token-dialog" class="upstream-dialog">
       <form id="token-form" class="upstream-dialog-panel">
         <div class="modal-head upstream-modal-head">

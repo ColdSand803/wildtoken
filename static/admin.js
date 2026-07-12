@@ -178,6 +178,37 @@ const rotatedTokenCopy = document.querySelector("#rotated-token-copy");
 const rotatedTokenLogout = document.querySelector("#rotated-token-logout");
 const systemRefreshButton = document.querySelector("#system-refresh");
 const systemInfoGrid = document.querySelector("#system-info-grid");
+const modelTestDialog = document.querySelector("#model-test-dialog");
+const modelTestForm = document.querySelector("#model-test-form");
+const modelTestTitle = document.querySelector("#model-test-title");
+const modelTestSummary = document.querySelector("#model-test-summary");
+const modelTestClose = document.querySelector("#model-test-close");
+const modelTestModel = document.querySelector("#model-test-model");
+const modelTestTemplate = document.querySelector("#model-test-template");
+const modelTestPromptTemplate = document.querySelector("#model-test-prompt-template");
+const modelTestTemplateHint = document.querySelector("#model-test-template-hint");
+const modelTestPrompt = document.querySelector("#model-test-prompt");
+const modelTestRefreshModels = document.querySelector("#model-test-refresh-models");
+const modelTestSubmit = document.querySelector("#model-test-submit");
+const modelTestResult = document.querySelector("#model-test-result");
+const modelTestResultStatus = document.querySelector("#model-test-result-status");
+const modelTestResultMeta = document.querySelector("#model-test-result-meta");
+const modelTestResultBody = document.querySelector("#model-test-result-body");
+const modelTestRequestBody = document.querySelector("#model-test-request-body");
+const modelTestResponseBody = document.querySelector("#model-test-response-body");
+const modelTestTemplateList = document.querySelector("#model-test-template-list");
+const newModelTestTemplateButton = document.querySelector("#new-model-test-template");
+const modelTestTemplateDialog = document.querySelector("#model-test-template-dialog");
+const modelTestTemplateForm = document.querySelector("#model-test-template-form");
+const modelTestTemplateClose = document.querySelector("#model-test-template-close");
+const modelTestTemplateCancel = document.querySelector("#model-test-template-cancel");
+const modelTestTemplateId = document.querySelector("#model-test-template-id");
+const modelTestTemplateName = document.querySelector("#model-test-template-name");
+const modelTestTemplateKind = document.querySelector("#model-test-template-kind");
+const modelTestTemplatePrompt = document.querySelector("#model-test-template-prompt");
+let modelTestTemplates = [];
+let modelTestPromptTemplates = [];
+let modelTestUpstream = null;
 
 const modelDialog = document.querySelector("#model-dialog");
 const modelDialogTitle = document.querySelector("#model-dialog-title");
@@ -1729,15 +1760,144 @@ function renderSystemInfo(system) {
 async function loadSettingsPage() {
   updatePreferenceControls();
   try {
-    const [settings, system] = await Promise.all([api("/api/admin/settings"), api("/api/admin/system")]);
+    const [settings, system, templates] = await Promise.all([api("/api/admin/settings"), api("/api/admin/system"), api("/api/admin/settings/model-test-templates")]);
     fillServerSettings(settings);
     renderSystemInfo(system);
+    modelTestTemplates = templates;
+    renderModelTestTemplates();
   } catch (error) {
     if (currentViewFromHash() === "settings") {
       setSettingsStatus("无法加载设置，请检查连接后重试。", "error");
       if (systemInfoGrid) systemInfoGrid.innerHTML = `<p class="settings-loading">运行信息暂不可用。</p>`;
     }
   }
+}
+
+function templateKindLabel(kind) {
+  return kind === "responses" ? "Responses" : "Chat Completions";
+}
+
+function renderModelTestTemplates() {
+  if (!modelTestTemplateList) return;
+  if (modelTestTemplates.length === 0) {
+    modelTestTemplateList.innerHTML = `<p class="settings-loading">暂无模板。请新增一个模板后再测试模型。</p>`;
+    return;
+  }
+  modelTestTemplateList.innerHTML = modelTestTemplates.map((template) => `
+    <div class="model-test-template-item">
+      <div><strong>${escapeHtml(template.name)} <span class="muted">${escapeHtml(templateKindLabel(template.request_kind))}</span></strong><p title="${escapeHtml(template.prompt)}">${escapeHtml(template.prompt)}</p></div>
+      <div class="model-test-template-actions"><button type="button" class="secondary small" data-model-template-action="edit" data-template-id="${template.id}">编辑</button><button type="button" class="secondary small danger" data-model-template-action="delete" data-template-id="${template.id}">删除</button></div>
+    </div>`).join("");
+}
+
+function closeModelTestDialog() {
+  modelTestUpstream = null;
+  if (modelTestDialog.open && typeof modelTestDialog.close === "function") modelTestDialog.close();
+  else modelTestDialog.removeAttribute("open");
+}
+
+function renderModelTestTemplateOptions() {
+  const current = Number(modelTestTemplate.value);
+  modelTestTemplate.innerHTML = modelTestTemplates.map((template) => `<option value="${template.id}">${escapeHtml(template.name)} · ${escapeHtml(templateKindLabel(template.request_kind))}</option>`).join("");
+  if (modelTestTemplates.some((template) => template.id === current)) modelTestTemplate.value = String(current);
+  updateModelTestTemplateHint();
+}
+
+function updateModelTestTemplateHint() {
+  const template = modelTestTemplates.find((item) => item.id === Number(modelTestTemplate.value));
+  modelTestTemplateHint.textContent = template ? `${templateKindLabel(template.request_kind)} 请求格式与头部。` : "请选择请求包装。";
+  const prompt = modelTestPromptTemplates.find((item) => item.id === Number(modelTestPromptTemplate.value));
+  modelTestPrompt.value = prompt?.prompt || "";
+}
+
+function formatHttpRequest(request) {
+  const url = new URL(request.url);
+  const headers = { host: url.host, ...(request.headers || {}) };
+  const lines = [`POST ${url.pathname}${url.search} HTTP/1.1`];
+  for (const [name, value] of Object.entries(headers).sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(`${name}: ${value}`);
+  }
+  return `${lines.join("\r\n")}\r\n\r\n${JSON.stringify(request.body || {}, null, 2)}`;
+}
+
+function formatHttpResponse(result) {
+  const status = result.status_code || 0;
+  const lines = [`HTTP/1.1 ${status}`];
+  for (const [name, value] of Object.entries(result.response_headers || {}).sort(([a], [b]) => a.localeCompare(b))) {
+    lines.push(`${name}: ${value}`);
+  }
+  return `${lines.join("\r\n")}\r\n\r\n${result.preview || result.message || ""}`;
+}
+
+function configuredModels(upstream) {
+  return [...new Set([
+    ...(upstream.model_names || []),
+    ...Object.values(upstream.model_mappings || {}),
+  ].filter(Boolean))];
+}
+
+function renderModelTestModelOptions(models, selected = "") {
+  const normalized = [...new Set(models)].sort((a, b) => a.localeCompare(b));
+  modelTestModel.innerHTML = normalized.length
+    ? normalized.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")
+    : `<option value="" disabled selected>此渠道尚未配置模型</option>`;
+  if (selected && normalized.includes(selected)) modelTestModel.value = selected;
+  modelTestSubmit.disabled = normalized.length === 0 || modelTestTemplates.length === 0;
+}
+
+async function openModelTestDialog(upstream) {
+  modelTestUpstream = upstream;
+  modelTestTitle.textContent = `测试模型：${upstream.name}`;
+  modelTestSummary.textContent = "向当前渠道发送一次实际模型请求。";
+  modelTestResult.hidden = true;
+  modelTestResultBody.textContent = "";
+  modelTestRequestBody.textContent = "";
+  modelTestResponseBody.textContent = "";
+  try {
+    [modelTestTemplates, modelTestPromptTemplates] = await Promise.all([api("/api/admin/settings/model-test-templates"), api("/api/admin/settings/model-test-prompts")]);
+    renderModelTestTemplateOptions();
+    modelTestPromptTemplate.innerHTML = modelTestPromptTemplates.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("");
+    updateModelTestTemplateHint();
+    renderModelTestModelOptions(configuredModels(upstream));
+    if (typeof modelTestDialog.showModal === "function") modelTestDialog.showModal();
+    else modelTestDialog.setAttribute("open", "");
+    if (configuredModels(upstream).length > 0) modelTestModel.focus();
+  } catch (error) {
+    setStatus(`无法打开模型测试：${error.message}`, "error");
+  }
+}
+
+async function refreshModelTestModels() {
+  if (!modelTestUpstream) return;
+  const previous = modelTestModel.value;
+  modelTestRefreshModels.disabled = true;
+  modelTestRefreshModels.textContent = "刷新中";
+  try {
+    const result = await api(`/api/admin/upstreams/${modelTestUpstream.id}/models`, { method: "POST" });
+    renderModelTestModelOptions(result.models || [], previous);
+  } catch (error) {
+    setStatus(`拉取模型失败：${error.message}`, "error");
+  } finally {
+    modelTestRefreshModels.disabled = false;
+    modelTestRefreshModels.textContent = "刷新模型";
+  }
+}
+
+function openModelTestTemplateDialog(template = null) {
+  modelTestTemplateForm.reset();
+  modelTestTemplateId.value = template?.id || "";
+  modelTestTemplateName.value = template?.name || "";
+  modelTestTemplateKind.value = template?.request_kind || "responses";
+  modelTestTemplatePrompt.value = template?.prompt || "Reply with exactly: WildToken test passed.";
+  document.querySelector("#model-test-template-title").textContent = template ? `编辑模板：${template.name}` : "新增测试模板";
+  if (typeof modelTestTemplateDialog.showModal === "function") modelTestTemplateDialog.showModal();
+  else modelTestTemplateDialog.setAttribute("open", "");
+  modelTestTemplateName.focus();
+}
+
+function closeModelTestTemplateDialog() {
+  if (modelTestTemplateDialog.open && typeof modelTestTemplateDialog.close === "function") modelTestTemplateDialog.close();
+  else modelTestTemplateDialog.removeAttribute("open");
 }
 
 async function saveServerSettings(event) {
@@ -2258,6 +2418,7 @@ function updateBackoffNotes() {
 
 function actionMenuMarkup(upstreamId) {
   return `
+    <button type="button" role="menuitem" data-action="test-model" data-id="${upstreamId}">测试模型</button>
     <button type="button" role="menuitem" data-action="test" data-id="${upstreamId}">测试连接</button>
     <button type="button" role="menuitem" data-action="balance" data-id="${upstreamId}">查询余额</button>
     <button type="button" role="menuitem" data-action="models" data-id="${upstreamId}">拉取模型</button>
@@ -3281,6 +3442,11 @@ async function handleUpstreamAction(button) {
     return;
   }
 
+  if (button.dataset.action === "test-model") {
+    await openModelTestDialog(upstream);
+    return;
+  }
+
   if (button.dataset.action === "duplicate") {
     duplicateUpstream(upstream);
     return;
@@ -4263,6 +4429,89 @@ settingsDefaultHome?.addEventListener("change", () => {
   try { localStorage.setItem(DEFAULT_HOME_KEY, settingsDefaultHome.value); } catch { /* ignore */ }
 });
 serverSettingsForm?.addEventListener("submit", saveServerSettings);
+newModelTestTemplateButton?.addEventListener("click", () => openModelTestTemplateDialog());
+modelTestTemplateList?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-model-template-action]");
+  if (!button) return;
+  const template = modelTestTemplates.find((item) => item.id === Number(button.dataset.templateId));
+  if (!template) return;
+  if (button.dataset.modelTemplateAction === "edit") {
+    openModelTestTemplateDialog(template);
+    return;
+  }
+  const confirmed = await requestConfirm({ title: "删除测试模板", message: `确定删除模板「${template.name}」？`, confirmLabel: "删除模板", danger: true });
+  if (!confirmed) return;
+  try {
+    await api(`/api/admin/settings/model-test-templates/${template.id}`, { method: "DELETE" });
+    modelTestTemplates = modelTestTemplates.filter((item) => item.id !== template.id);
+    renderModelTestTemplates();
+    setStatus("测试模板已删除。", "ok");
+  } catch (error) {
+    setStatus(`删除模板失败：${error.message}`, "error");
+  }
+});
+modelTestTemplateForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = modelTestTemplateId.value;
+  const payload = {
+    name: modelTestTemplateName.value.trim(),
+    request_kind: modelTestTemplateKind.value,
+    prompt: modelTestTemplatePrompt.value.trim(),
+  };
+  try {
+    const saved = await api(id ? `/api/admin/settings/model-test-templates/${id}` : "/api/admin/settings/model-test-templates", {
+      method: id ? "PATCH" : "POST",
+      body: JSON.stringify(payload),
+    });
+    modelTestTemplates = id
+      ? modelTestTemplates.map((item) => item.id === saved.id ? saved : item)
+      : [...modelTestTemplates, saved];
+    renderModelTestTemplates();
+    closeModelTestTemplateDialog();
+    setStatus("测试模板已保存。", "ok");
+  } catch (error) {
+    setStatus(`保存模板失败：${error.message}`, "error");
+  }
+});
+modelTestTemplateClose?.addEventListener("click", closeModelTestTemplateDialog);
+modelTestTemplateCancel?.addEventListener("click", closeModelTestTemplateDialog);
+modelTestTemplateDialog?.addEventListener("click", (event) => {
+  if (event.target === modelTestTemplateDialog) closeModelTestTemplateDialog();
+});
+modelTestTemplate?.addEventListener("change", updateModelTestTemplateHint);
+modelTestPromptTemplate?.addEventListener("change", updateModelTestTemplateHint);
+modelTestClose?.addEventListener("click", closeModelTestDialog);
+modelTestRefreshModels?.addEventListener("click", refreshModelTestModels);
+modelTestForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!modelTestUpstream) return;
+  modelTestSubmit.disabled = true;
+  modelTestSubmit.textContent = "测试中";
+  modelTestResult.hidden = true;
+  try {
+    const result = await api(`/api/admin/upstreams/${modelTestUpstream.id}/test-model`, {
+      method: "POST",
+      body: JSON.stringify({ model: modelTestModel.value, wrapper_id: Number(modelTestTemplate.value), prompt_template_id: Number(modelTestPromptTemplate.value), prompt: modelTestPrompt.value.trim() }),
+    });
+    modelTestResult.hidden = false;
+    modelTestResultStatus.textContent = result.ok ? `测试成功 · HTTP ${result.status_code}` : `测试失败${result.status_code ? ` · HTTP ${result.status_code}` : ""}`;
+    modelTestResultMeta.textContent = result.content_type || "";
+    modelTestPrompt.value = result.prompt || modelTestPrompt.value;
+    modelTestResultBody.textContent = result.reply || result.preview || result.message || "渠道未返回正文。";
+    modelTestRequestBody.textContent = formatHttpRequest(result.request || { url: "http://invalid/", headers: {}, body: {} });
+    modelTestResponseBody.textContent = formatHttpResponse(result);
+  } catch (error) {
+    modelTestResult.hidden = false;
+    modelTestResultStatus.textContent = "测试失败";
+    modelTestResultMeta.textContent = "";
+    modelTestResultBody.textContent = error.message;
+    modelTestRequestBody.textContent = "";
+    modelTestResponseBody.textContent = "";
+  } finally {
+    modelTestSubmit.disabled = false;
+    modelTestSubmit.textContent = "发送测试";
+  }
+});
 systemRefreshButton?.addEventListener("click", async () => {
   systemRefreshButton.disabled = true;
   try { await loadSettingsPage(); } finally { systemRefreshButton.disabled = false; }

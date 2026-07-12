@@ -33,7 +33,6 @@ pub struct UpstreamSettings {
 #[serde(default)]
 pub struct AdminSettings {
     pub token: String,
-    pub downstream_api_key: String,
 }
 
 impl Default for Settings {
@@ -76,7 +75,6 @@ impl Default for AdminSettings {
     fn default() -> Self {
         Self {
             token: "change-me".into(),
-            downstream_api_key: "sk-wildtoken".into(),
         }
     }
 }
@@ -99,11 +97,6 @@ impl Settings {
         if let Ok(token) = std::env::var("ADMIN_TOKEN") {
             if !token.is_empty() {
                 settings.admin.token = token;
-            }
-        }
-        if let Ok(key) = std::env::var("DOWNSTREAM_API_KEY") {
-            if !key.is_empty() {
-                settings.admin.downstream_api_key = key;
             }
         }
         if let Ok(url) = std::env::var("DATABASE_URL") {

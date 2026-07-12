@@ -19,8 +19,9 @@ use crate::models::request_log::{
     ModelFetchIn, ModelListOut, RequestLogPage, TestRequest, TokenUsageStatsOut,
 };
 use crate::models::settings::{
-    AdminTokenRotateIn, AdminTokenRotateOut, RuntimeLogSettingsSummary, RuntimeSettingsIn,
-    RuntimeSettingsOut, SystemInfoOut,
+    AdminTokenRotateIn, AdminTokenRotateOut, ModelTestPromptTemplate, ModelTestPromptTemplateIn,
+    ModelTestRequest, ModelTestTemplate, ModelTestTemplateIn, RuntimeLogSettingsSummary,
+    RuntimeSettingsIn, RuntimeSettingsOut, SystemInfoOut,
 };
 use crate::models::token::{ApiTokenDetailOut, ApiTokenIn};
 use crate::models::upstream::{
@@ -43,6 +44,44 @@ fn build_url(base_url: &str, path: &str, query: &str) -> String {
     } else {
         format!("{target}?{query}")
     }
+}
+
+fn extract_model_test_reply(payload: &serde_json::Value) -> Option<String> {
+    if let Some(content) = payload
+        .pointer("/choices/0/message/content")
+        .and_then(serde_json::Value::as_str)
+    {
+        return Some(content.to_owned());
+    }
+    let output = payload.get("output")?.as_array()?;
+    let text = output
+        .iter()
+        .filter_map(|item| item.get("content")?.as_array())
+        .flat_map(|content| content.iter())
+        .filter_map(|item| item.get("text")?.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+fn codex_model_test_headers() -> HashMap<String, String> {
+    let mut bytes = [0_u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    let request_id = URL_SAFE_NO_PAD.encode(bytes);
+    let headers = HashMap::from([
+        ("accept".into(), "text/event-stream".into()),
+        ("accept-encoding".into(), "identity".into()),
+        ("content-type".into(), "application/json".into()),
+        ("originator".into(), "codex-tui".into()),
+        ("session-id".into(), request_id.clone()),
+        ("thread-id".into(), request_id.clone()),
+        ("user-agent".into(), "codex-tui/0.144.1 (Fedora 44.0.0; x86_64) xterm-256color (codex-tui; 0.144.1)".into()),
+        ("x-client-request-id".into(), request_id.clone()),
+        ("x-codex-beta-features".into(), "memories,remote_compaction_v2".into()),
+        ("x-codex-turn-metadata".into(), serde_json::json!({"installation_id": request_id, "session_id": request_id, "thread_id": request_id, "turn_id": request_id, "window_id": request_id}).to_string()),
+        ("x-codex-window-id".into(), format!("{request_id}:0")),
+    ]);
+    headers
 }
 
 fn extract_model_ids(payload: &serde_json::Value) -> Vec<String> {
@@ -166,6 +205,110 @@ pub async fn admin_update_runtime_settings(
         }
     }
     Ok(Json(RuntimeSettingsOut::from(&updated)))
+}
+
+pub async fn admin_list_model_test_templates(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+) -> Result<Json<Vec<ModelTestTemplate>>, AppError> {
+    Ok(Json(
+        settings_db::list_model_test_templates(&state.db).await?,
+    ))
+}
+
+pub async fn admin_create_model_test_template(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Json(input): Json<ModelTestTemplateIn>,
+) -> Result<Response, AppError> {
+    input
+        .validate()
+        .map_err(|message| AppError::BadRequest(message.into()))?;
+    match settings_db::create_model_test_template(&state.db, &input).await {
+        Ok(template) => Ok((StatusCode::CREATED, Json(template)).into_response()),
+        Err(AppError::Database(error)) if error.to_string().contains("UNIQUE") => {
+            Err(AppError::BadRequest("template name already exists".into()))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub async fn admin_update_model_test_template(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<i64>,
+    Json(input): Json<ModelTestTemplateIn>,
+) -> Result<Json<ModelTestTemplate>, AppError> {
+    input
+        .validate()
+        .map_err(|message| AppError::BadRequest(message.into()))?;
+    let template = settings_db::update_model_test_template(&state.db, id, &input)
+        .await?
+        .ok_or_else(|| AppError::NotFound("model test template not found".into()))?;
+    Ok(Json(template))
+}
+
+pub async fn admin_delete_model_test_template(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    if settings_db::delete_model_test_template(&state.db, id).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound("model test template not found".into()))
+    }
+}
+
+pub async fn admin_list_model_test_prompt_templates(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+) -> Result<Json<Vec<ModelTestPromptTemplate>>, AppError> {
+    Ok(Json(
+        settings_db::list_model_test_prompt_templates(&state.db).await?,
+    ))
+}
+pub async fn admin_create_model_test_prompt_template(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Json(input): Json<ModelTestPromptTemplateIn>,
+) -> Result<Response, AppError> {
+    input
+        .validate()
+        .map_err(|m| AppError::BadRequest(m.into()))?;
+    Ok((
+        StatusCode::CREATED,
+        Json(settings_db::create_model_test_prompt_template(&state.db, &input).await?),
+    )
+        .into_response())
+}
+pub async fn admin_update_model_test_prompt_template(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<i64>,
+    Json(input): Json<ModelTestPromptTemplateIn>,
+) -> Result<Json<ModelTestPromptTemplate>, AppError> {
+    input
+        .validate()
+        .map_err(|m| AppError::BadRequest(m.into()))?;
+    Ok(Json(
+        settings_db::update_model_test_prompt_template(&state.db, id, &input)
+            .await?
+            .ok_or_else(|| AppError::NotFound("model test prompt template not found".into()))?,
+    ))
+}
+pub async fn admin_delete_model_test_prompt_template(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<i64>,
+) -> Result<StatusCode, AppError> {
+    if settings_db::delete_model_test_prompt_template(&state.db, id).await? {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(AppError::NotFound(
+            "model test prompt template not found".into(),
+        ))
+    }
 }
 
 // ── Admin credential and system information ──────────────────────────────────
@@ -444,6 +587,126 @@ pub async fn admin_test_upstream(
             "ok": false,
             "status_code": null,
             "message": e.to_string(),
+        }))),
+    }
+}
+
+pub async fn admin_test_upstream_model(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<i64>,
+    Json(data): Json<ModelTestRequest>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    data.validate()
+        .map_err(|message| AppError::BadRequest(message.into()))?;
+    let row = upstream_db::get_upstream(&state.db, id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("upstream not found".into()))?;
+    let template = settings_db::list_model_test_templates(&state.db)
+        .await?
+        .into_iter()
+        .find(|item| item.id == data.wrapper_id)
+        .ok_or_else(|| AppError::NotFound("model test wrapper not found".into()))?;
+    let prompt_template = settings_db::list_model_test_prompt_templates(&state.db)
+        .await?
+        .into_iter()
+        .find(|item| item.id == data.prompt_template_id)
+        .ok_or_else(|| AppError::NotFound("model test prompt template not found".into()))?;
+    let prompt = if data.prompt.trim().is_empty() {
+        prompt_template.prompt
+    } else {
+        data.prompt.trim().to_owned()
+    };
+    let target_path = match template.request_kind.as_str() {
+        "responses" => "responses",
+        "chat_completions" => "chat/completions",
+        _ => {
+            return Err(AppError::BadRequest(
+                "unsupported template request kind".into(),
+            ))
+        }
+    };
+    let target_url = build_url(&row.base_url, target_path, "");
+    let payload = match template.request_kind.as_str() {
+        "responses" => serde_json::json!({
+            "model": data.model.trim(),
+            "input": prompt,
+            "max_output_tokens": 1000,
+        }),
+        "chat_completions" => serde_json::json!({
+            "model": data.model.trim(),
+            "messages": [{ "role": "user", "content": prompt }],
+            "max_tokens": 1000,
+        }),
+        _ => unreachable!(),
+    };
+    let mut request_headers = if template.name == "Codex" {
+        codex_model_test_headers()
+    } else {
+        HashMap::from([("content-type".into(), "application/json".into())])
+    };
+    for (key, value) in parse_extra_headers(&row.extra_headers) {
+        request_headers.insert(key, value);
+    }
+    let mut req = state.http_client.post(&target_url).json(&payload).timeout(
+        std::time::Duration::from_secs_f64(row.timeout_seconds.max(1.0)),
+    );
+    for (key, value) in &request_headers {
+        req = req.header(key, value);
+    }
+    let auth_preview = if row.api_key.as_deref().is_some_and(|key| !key.is_empty()) {
+        "Bearer [configured upstream key]"
+    } else {
+        "[not configured]"
+    };
+    if let Some(key) = row.api_key.filter(|key| !key.is_empty()) {
+        req = req.header("Authorization", format!("Bearer {key}"));
+    }
+    request_headers.insert("authorization".into(), auth_preview.into());
+    match req.send().await {
+        Ok(response) => {
+            let status = response.status().as_u16();
+            let content_type = response
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_owned);
+            let response_headers: HashMap<String, String> = response
+                .headers()
+                .iter()
+                .map(|(name, value)| {
+                    let sensitive =
+                        matches!(name.as_str(), "set-cookie" | "authorization" | "x-api-key");
+                    (
+                        name.to_string(),
+                        if sensitive {
+                            "[redacted]".into()
+                        } else {
+                            value.to_str().unwrap_or("[binary]").to_string()
+                        },
+                    )
+                })
+                .collect();
+            let response_body = response.text().await.unwrap_or_default();
+            let reply = serde_json::from_str::<serde_json::Value>(&response_body)
+                .ok()
+                .and_then(|payload| extract_model_test_reply(&payload));
+            let preview: String = response_body.chars().take(10_000).collect();
+            Ok(Json(serde_json::json!({
+                "ok": status < 400,
+                "status_code": status,
+                "content_type": content_type,
+                "response_headers": response_headers,
+                "prompt": prompt,
+                "request": { "url": target_url, "headers": request_headers, "body": payload },
+                "reply": reply,
+                "preview": preview,
+            })))
+        }
+        Err(error) => Ok(Json(serde_json::json!({
+            "ok": false,
+            "status_code": null,
+            "message": error.to_string(),
         }))),
     }
 }

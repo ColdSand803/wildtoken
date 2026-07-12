@@ -18,9 +18,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::proxy::matcher::BackoffManager;
-use crate::state::{
-    bootstrap_admin_credential, init_db, load_runtime_settings, seed_default_token, AppState,
-};
+use crate::state::{bootstrap_admin_credential, init_db, load_runtime_settings, AppState};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -40,7 +38,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. Setup database
     let db = sqlx::SqlitePool::connect(&database_url).await?;
     init_db(&db).await?;
-    seed_default_token(&db, &settings).await?;
     let runtime_settings = load_runtime_settings(&db).await;
     let admin_credential = bootstrap_admin_credential(&db, settings.admin.token.clone()).await?;
     // The startup token is bootstrap material only; never retain it as a fallback.
@@ -85,6 +82,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "/api/admin/settings/admin-token/rotate",
             post(handlers::admin::admin_rotate_admin_token),
         )
+        .route(
+            "/api/admin/settings/model-test-templates",
+            get(handlers::admin::admin_list_model_test_templates)
+                .post(handlers::admin::admin_create_model_test_template),
+        )
+        .route(
+            "/api/admin/settings/model-test-templates/{id}",
+            patch(handlers::admin::admin_update_model_test_template)
+                .delete(handlers::admin::admin_delete_model_test_template),
+        )
+        .route(
+            "/api/admin/settings/model-test-prompts",
+            get(handlers::admin::admin_list_model_test_prompt_templates)
+                .post(handlers::admin::admin_create_model_test_prompt_template),
+        )
+        .route(
+            "/api/admin/settings/model-test-prompts/{id}",
+            patch(handlers::admin::admin_update_model_test_prompt_template)
+                .delete(handlers::admin::admin_delete_model_test_prompt_template),
+        )
         .route("/api/admin/system", get(handlers::admin::admin_system_info))
         // Upstreams
         .route(
@@ -112,6 +129,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route(
             "/api/admin/upstreams/{id}/test",
             post(handlers::admin::admin_test_upstream),
+        )
+        .route(
+            "/api/admin/upstreams/{id}/test-model",
+            post(handlers::admin::admin_test_upstream_model),
         )
         .route(
             "/api/admin/upstreams/{id}/models",

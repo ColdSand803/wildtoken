@@ -1,5 +1,91 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ModelTestTemplate {
+    pub id: i64,
+    pub name: String,
+    pub request_kind: String,
+    pub prompt: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelTestTemplateIn {
+    pub name: String,
+    pub request_kind: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelTestRequest {
+    pub model: String,
+    pub wrapper_id: i64,
+    pub prompt_template_id: i64,
+    #[serde(default)]
+    pub prompt: String,
+}
+
+impl ModelTestRequest {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.model.trim().is_empty() || self.model.len() > 500 {
+            return Err("model must be between 1 and 500 bytes");
+        }
+        if self.wrapper_id < 1 || self.prompt_template_id < 1 {
+            return Err("wrapper_id and prompt_template_id must be positive");
+        }
+        if self.prompt.len() > 20_000 {
+            return Err("prompt must be at most 20000 bytes");
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ModelTestPromptTemplate {
+    pub id: i64,
+    pub name: String,
+    pub prompt: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelTestPromptTemplateIn {
+    pub name: String,
+    pub prompt: String,
+}
+
+impl ModelTestPromptTemplateIn {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.name.trim().is_empty() || self.name.chars().count() > 80 {
+            return Err("prompt template name must be between 1 and 80 characters");
+        }
+        if self.prompt.trim().is_empty() || self.prompt.len() > 20_000 {
+            return Err("prompt template prompt must be between 1 and 20000 bytes");
+        }
+        Ok(())
+    }
+}
+
+impl ModelTestTemplateIn {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.name.trim().is_empty() || self.name.chars().count() > 80 {
+            return Err("template name must be between 1 and 80 characters");
+        }
+        if !matches!(self.request_kind.as_str(), "responses" | "chat_completions") {
+            return Err("request_kind must be responses or chat_completions");
+        }
+        if self.prompt.trim().is_empty() || self.prompt.len() > 20_000 {
+            return Err("template prompt must be between 1 and 20000 bytes");
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct AdminCredential {
     pub credential_hash: String,

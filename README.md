@@ -22,7 +22,7 @@ docker compose up -d --build
 http://127.0.0.1:3100/admin
 ```
 
-管理界面和管理接口（`/api/admin/*`）需要 Admin Token。可以从 `.env.example` 复制一份 `.env`，设置 `ADMIN_TOKEN` 和 `DOWNSTREAM_API_KEY`。首次启动时，`DOWNSTREAM_API_KEY` 会作为初始下游令牌导入令牌管理页。
+管理界面和管理接口（`/api/admin/*`）需要 Admin Token。可以从 `.env.example` 复制一份 `.env`，设置 `ADMIN_TOKEN`。下游 API 令牌在管理界面的「令牌」页创建和管理。
 
 ## 配置
 
@@ -43,7 +43,7 @@ url = "sqlite:wildtoken.db?mode=rwc"
 APP__SERVER__PORT=3100 DATABASE_URL='sqlite:wildtoken.db?mode=rwc' cargo run
 ```
 
-为兼容旧配置，`.env` 里的 `ADMIN_TOKEN`、`DOWNSTREAM_API_KEY`、`DATABASE_URL` 也会被读取。
+为兼容旧配置，`.env` 里的 `ADMIN_TOKEN`、`DATABASE_URL` 也会被读取。
 
 ## 路由规则
 
@@ -63,7 +63,7 @@ APP__SERVER__PORT=3100 DATABASE_URL='sqlite:wildtoken.db?mode=rwc' cargo run
 ```bash
 curl http://127.0.0.1:3100/v1/chat/completions \
   -H 'Content-Type: application/json' \
-  -H 'Authorization: Bearer <DOWNSTREAM_API_KEY>' \
+  -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>' \
   -d '{
     "model": "gpt-4o-mini",
     "messages": [{"role": "user", "content": "hello"}]
@@ -74,6 +74,6 @@ curl http://127.0.0.1:3100/v1/chat/completions \
 
 ```bash
 curl http://127.0.0.1:3100/v1/models \
-  -H 'Authorization: Bearer <DOWNSTREAM_API_KEY>' \
+  -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>' \
   -H 'X-WildToken-Upstream: openai'
 ```

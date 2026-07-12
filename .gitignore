@@ -7,8 +7,12 @@
 /target
 .wildtoken.bin
 
-# Local AI skill installs (use global ~/.opencode or ~/.config/opencode)
+# Local AI tool state
 .opencode/
+.slim/
+.agents/
+.codex/
+.claude/
 
 # Runtime data and logs
 *.log
@@ -28,6 +32,3 @@ data/
 *.swo
 .DS_Store
 Thumbs.db
-
-# Deepwork local progress
-.slim/deepwork/

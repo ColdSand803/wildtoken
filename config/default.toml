@@ -10,4 +10,3 @@ default_timeout_seconds = 300.0
 
 [admin]
 token = "change-me"
-downstream_api_key = "sk-wildtoken"

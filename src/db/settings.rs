@@ -2,8 +2,114 @@ use sqlx::SqlitePool;
 
 use crate::{
     error::AppError,
-    models::settings::{AdminCredential, RuntimeSettings, RuntimeSettingsIn},
+    models::settings::{
+        AdminCredential, ModelTestPromptTemplate, ModelTestPromptTemplateIn, ModelTestTemplate,
+        ModelTestTemplateIn, RuntimeSettings, RuntimeSettingsIn,
+    },
 };
+
+pub async fn list_model_test_templates(
+    pool: &SqlitePool,
+) -> Result<Vec<ModelTestTemplate>, AppError> {
+    Ok(sqlx::query_as::<_, ModelTestTemplate>(
+        "SELECT id, name, request_kind, prompt, created_at, updated_at FROM model_test_templates ORDER BY id ASC",
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn create_model_test_template(
+    pool: &SqlitePool,
+    input: &ModelTestTemplateIn,
+) -> Result<ModelTestTemplate, AppError> {
+    let result = sqlx::query(
+        "INSERT INTO model_test_templates (name, request_kind, prompt, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))",
+    )
+    .bind(input.name.trim())
+    .bind(&input.request_kind)
+    .bind(&input.prompt)
+    .execute(pool)
+    .await?;
+    Ok(sqlx::query_as::<_, ModelTestTemplate>(
+        "SELECT id, name, request_kind, prompt, created_at, updated_at FROM model_test_templates WHERE id = ?",
+    )
+    .bind(result.last_insert_rowid())
+    .fetch_one(pool)
+    .await?)
+}
+
+pub async fn update_model_test_template(
+    pool: &SqlitePool,
+    id: i64,
+    input: &ModelTestTemplateIn,
+) -> Result<Option<ModelTestTemplate>, AppError> {
+    let result = sqlx::query(
+        "UPDATE model_test_templates SET name = ?, request_kind = ?, prompt = ?, updated_at = datetime('now') WHERE id = ?",
+    )
+    .bind(input.name.trim())
+    .bind(&input.request_kind)
+    .bind(&input.prompt)
+    .bind(id)
+    .execute(pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+    Ok(Some(
+        sqlx::query_as::<_, ModelTestTemplate>(
+            "SELECT id, name, request_kind, prompt, created_at, updated_at FROM model_test_templates WHERE id = ?",
+        )
+        .bind(id)
+        .fetch_one(pool)
+        .await?,
+    ))
+}
+
+pub async fn delete_model_test_template(pool: &SqlitePool, id: i64) -> Result<bool, AppError> {
+    Ok(sqlx::query("DELETE FROM model_test_templates WHERE id = ?")
+        .bind(id)
+        .execute(pool)
+        .await?
+        .rows_affected()
+        == 1)
+}
+
+pub async fn list_model_test_prompt_templates(
+    pool: &SqlitePool,
+) -> Result<Vec<ModelTestPromptTemplate>, AppError> {
+    Ok(sqlx::query_as("SELECT id, name, prompt, created_at, updated_at FROM model_test_prompt_templates ORDER BY id ASC").fetch_all(pool).await?)
+}
+
+pub async fn create_model_test_prompt_template(
+    pool: &SqlitePool,
+    input: &ModelTestPromptTemplateIn,
+) -> Result<ModelTestPromptTemplate, AppError> {
+    let result = sqlx::query("INSERT INTO model_test_prompt_templates (name, prompt, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))").bind(input.name.trim()).bind(&input.prompt).execute(pool).await?;
+    Ok(sqlx::query_as("SELECT id, name, prompt, created_at, updated_at FROM model_test_prompt_templates WHERE id = ?").bind(result.last_insert_rowid()).fetch_one(pool).await?)
+}
+
+pub async fn update_model_test_prompt_template(
+    pool: &SqlitePool,
+    id: i64,
+    input: &ModelTestPromptTemplateIn,
+) -> Result<Option<ModelTestPromptTemplate>, AppError> {
+    if sqlx::query("UPDATE model_test_prompt_templates SET name = ?, prompt = ?, updated_at = datetime('now') WHERE id = ?").bind(input.name.trim()).bind(&input.prompt).bind(id).execute(pool).await?.rows_affected() == 0 { return Ok(None); }
+    Ok(Some(sqlx::query_as("SELECT id, name, prompt, created_at, updated_at FROM model_test_prompt_templates WHERE id = ?").bind(id).fetch_one(pool).await?))
+}
+
+pub async fn delete_model_test_prompt_template(
+    pool: &SqlitePool,
+    id: i64,
+) -> Result<bool, AppError> {
+    Ok(
+        sqlx::query("DELETE FROM model_test_prompt_templates WHERE id = ?")
+            .bind(id)
+            .execute(pool)
+            .await?
+            .rows_affected()
+            == 1,
+    )
+}
 
 pub async fn load_admin_credential(pool: &SqlitePool) -> Result<Option<AdminCredential>, AppError> {
     Ok(sqlx::query_as::<_, AdminCredential>(
