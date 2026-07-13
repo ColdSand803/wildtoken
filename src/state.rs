@@ -129,11 +129,25 @@ async fn migrate_request_log_payloads_once(pool: &SqlitePool) -> Result<(), sqlx
             response_snapshot TEXT,
             downstream_response_override TEXT,
             downstream_response_is_override INTEGER NOT NULL DEFAULT 0
-                CHECK (downstream_response_is_override IN (0, 1))
+                CHECK (downstream_response_is_override IN (0, 1)),
+            bodies_cleared INTEGER NOT NULL DEFAULT 0
+                CHECK (bodies_cleared IN (0, 1))
         );"#,
     )
     .execute(&mut *tx)
     .await?;
+    let bodies_cleared_exists: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM pragma_table_info('request_log_payloads') WHERE name = 'bodies_cleared'",
+    )
+    .fetch_optional(&mut *tx)
+    .await?;
+    if bodies_cleared_exists.is_none() {
+        sqlx::query(
+            "ALTER TABLE request_log_payloads ADD COLUMN bodies_cleared INTEGER NOT NULL DEFAULT 0 CHECK (bodies_cleared IN (0, 1))",
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
 
     let already_applied: i64 =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name = ?)")
@@ -455,6 +469,12 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_request_logs_upstream_created_at ON request_logs(upstream_id, created_at);",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_request_log_payloads_bodies_cleared ON request_log_payloads(bodies_cleared, request_log_id);",
     )
     .execute(pool)
     .await?;

@@ -5,6 +5,9 @@ use crate::models::request_log::{
     RequestLogDetailOut, RequestLogOut, TokenUsageStatsOut, TokenUsageWindowOut,
 };
 
+const LOG_BODY_CLEANUP_BATCH_SIZE: i64 = 10;
+const LOG_BODY_CLEANUP_BATCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(25);
+
 // ── Internal query types (to avoid exceeding sqlx tuple limit) ──────────────
 
 #[derive(Debug, FromRow)]
@@ -320,8 +323,38 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
 }
 
 pub async fn clear_old_log_bodies(pool: &SqlitePool, keep_count: i64) -> Result<(), AppError> {
-    sqlx::query(
-        r#"UPDATE request_log_payloads
+    loop {
+        let affected =
+            clear_old_log_bodies_batch(pool, keep_count, LOG_BODY_CLEANUP_BATCH_SIZE).await?;
+        if affected == 0 {
+            break;
+        }
+
+        tokio::time::sleep(LOG_BODY_CLEANUP_BATCH_PAUSE).await;
+    }
+
+    Ok(())
+}
+
+async fn clear_old_log_bodies_batch(
+    pool: &SqlitePool,
+    keep_count: i64,
+    batch_size: i64,
+) -> Result<u64, AppError> {
+    let result = sqlx::query(
+        r#"WITH eligible AS (
+            SELECT p.request_log_id
+            FROM request_log_payloads AS p
+            WHERE p.bodies_cleared = 0
+              AND p.request_log_id NOT IN (
+                  SELECT id FROM request_logs
+                  ORDER BY created_at DESC, id DESC
+                  LIMIT ?
+              )
+            ORDER BY p.request_log_id
+            LIMIT ?
+        )
+        UPDATE request_log_payloads
         SET request_snapshot = CASE
                 WHEN request_snapshot IS NULL OR request_snapshot = '' THEN request_snapshot
                 WHEN json_valid(request_snapshot) = 1 THEN CASE
@@ -367,49 +400,16 @@ pub async fn clear_old_log_bodies(pool: &SqlitePool, keep_count: i64) -> Result<
                     ELSE '{"body":{"cleared":true}}'
                 END
                 ELSE '{"body":{"cleared":true}}'
-            END
-        WHERE request_log_id NOT IN (
-            SELECT id FROM request_logs
-            ORDER BY created_at DESC, id DESC
-            LIMIT ?
-        ) AND (
-            CASE
-                WHEN request_snapshot IS NULL OR request_snapshot = '' THEN 0
-                WHEN json_valid(request_snapshot) = 0 THEN 1
-                WHEN json_type(request_snapshot) != 'object' THEN 1
-                WHEN COALESCE(json_extract(request_snapshot, '$.body.cleared'), 0) != 1 THEN 1
-                ELSE 0
-            END = 1
-            OR CASE
-                WHEN upstream_request_is_override = 0 THEN 0
-                WHEN upstream_request_override IS NULL OR upstream_request_override = '' THEN 0
-                WHEN json_valid(upstream_request_override) = 0 THEN 1
-                WHEN json_type(upstream_request_override) != 'object' THEN 1
-                WHEN COALESCE(json_extract(upstream_request_override, '$.body.cleared'), 0) != 1 THEN 1
-                ELSE 0
-            END = 1
-            OR CASE
-                WHEN response_snapshot IS NULL OR response_snapshot = '' THEN 0
-                WHEN json_valid(response_snapshot) = 0 THEN 1
-                WHEN json_type(response_snapshot) != 'object' THEN 1
-                WHEN COALESCE(json_extract(response_snapshot, '$.body.cleared'), 0) != 1 THEN 1
-                ELSE 0
-            END = 1
-            OR CASE
-                WHEN downstream_response_is_override = 0 THEN 0
-                WHEN downstream_response_override IS NULL OR downstream_response_override = '' THEN 0
-                WHEN json_valid(downstream_response_override) = 0 THEN 1
-                WHEN json_type(downstream_response_override) != 'object' THEN 1
-                WHEN COALESCE(json_extract(downstream_response_override, '$.body.cleared'), 0) != 1 THEN 1
-                ELSE 0
-            END = 1
-        )"#,
+            END,
+            bodies_cleared = 1
+        WHERE request_log_id IN (SELECT request_log_id FROM eligible)"#,
     )
     .bind(keep_count)
+    .bind(batch_size)
     .execute(pool)
     .await?;
 
-    Ok(())
+    Ok(result.rows_affected())
 }
 
 #[cfg(test)]
@@ -418,6 +418,7 @@ mod tests {
 
     use super::{
         clear_old_log_bodies, delete_old_logs, get_log_detail, list_logs, token_usage_stats,
+        LOG_BODY_CLEANUP_BATCH_SIZE,
     };
 
     async fn test_pool() -> SqlitePool {
@@ -466,7 +467,8 @@ mod tests {
                 upstream_request_is_override INTEGER NOT NULL DEFAULT 0,
                 response_snapshot TEXT,
                 downstream_response_override TEXT,
-                downstream_response_is_override INTEGER NOT NULL DEFAULT 0
+                downstream_response_is_override INTEGER NOT NULL DEFAULT 0,
+                bodies_cleared INTEGER NOT NULL DEFAULT 0
             )"#,
         )
         .execute(&pool)
@@ -728,6 +730,62 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(after_repeat, old);
+
+        let bodies_cleared: i64 = sqlx::query_scalar(
+            "SELECT bodies_cleared FROM request_log_payloads WHERE request_log_id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(bodies_cleared, 1);
+    }
+
+    #[tokio::test]
+    async fn cleanup_finishes_rows_spanning_multiple_small_batches() {
+        let pool = test_pool().await;
+        let old_count = LOG_BODY_CLEANUP_BATCH_SIZE + 2;
+        for id in 1..=old_count {
+            insert_log(&pool, id, "2026-01-01").await;
+            sqlx::query(
+                "INSERT INTO request_log_payloads (request_log_id, request_snapshot) VALUES (?, ?)",
+            )
+            .bind(id)
+            .bind(r#"{"body":{"text":"old"}}"#)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        let recent_id = old_count + 1;
+        insert_log(&pool, recent_id, "2026-01-02").await;
+        sqlx::query(
+            "INSERT INTO request_log_payloads (request_log_id, request_snapshot) VALUES (?, ?)",
+        )
+        .bind(recent_id)
+        .bind(r#"{"body":{"text":"recent"}}"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        clear_old_log_bodies(&pool, 1).await.unwrap();
+
+        let cleared_old_rows: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM request_log_payloads WHERE request_log_id <= ? AND bodies_cleared = 1",
+        )
+        .bind(old_count)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cleared_old_rows, old_count);
+
+        let recent: (i64, String) = sqlx::query_as(
+            "SELECT bodies_cleared, request_snapshot FROM request_log_payloads WHERE request_log_id = ?",
+        )
+        .bind(recent_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(recent.0, 0);
+        assert_eq!(recent.1, r#"{"body":{"text":"recent"}}"#);
     }
 
     #[tokio::test]
