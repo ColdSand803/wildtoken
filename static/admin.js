@@ -2886,11 +2886,14 @@ function formatThroughput(log) {
     return "";
   }
   const rate = outputTokensPerSecond(log);
-  if (rate === null) {
-    return "流，-t/s";
-  }
-  const displayRate = rate.toFixed(1).replace(/\.0$/, "");
-  return `流，${displayRate}t/s`;
+  const displayRate = rate === null ? "—" : rate.toFixed(1).replace(/\.0$/, "");
+  const rateTitle = rate === null ? "暂无输出吞吐数据" : `输出吞吐 ${displayRate} tokens/s`;
+  return `
+    <span class="stream-throughput" title="${escapeHtml(rateTitle)}" aria-label="流式响应，${escapeHtml(rateTitle)}">
+      <span class="stream-state"><span class="stream-state-dot" aria-hidden="true"></span>流式</span>
+      <span class="throughput-stat"><small>TPS</small><strong>${escapeHtml(displayRate)}</strong></span>
+    </span>
+  `;
 }
 
 /** Render the server-side count of all requests during the trailing minute. */
@@ -2995,8 +2998,11 @@ function renderLogRows(items, options = {}) {
       </td>
       <td data-col="status">${status}</td>
       <td class="duration-cell" data-col="duration">
-        <span>${formatFirstTokenTime(log.first_token_ms)} / ${formatTotalDurationTime(log)}</span>
-        ${throughput ? `<span class="muted">${throughput}</span>` : ""}
+        <span class="latency-metrics">
+          <span class="latency-metric"><small>首字</small>${formatFirstTokenTime(log.first_token_ms)}</span>
+          <span class="latency-metric"><small>总耗时</small>${formatTotalDurationTime(log)}</span>
+        </span>
+        ${throughput}
       </td>
       <td class="tokens-cell" data-col="tokens">${formatTokens(log)}</td>
     `;

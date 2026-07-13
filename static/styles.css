@@ -1365,8 +1365,26 @@ td.no-match-state {
 }
 
 .duration-cell {
-  min-width: 150px;
+  min-width: 178px;
   white-space: nowrap;
+}
+
+.latency-metrics {
+  align-items: end;
+  display: flex;
+  gap: 8px;
+}
+
+.latency-metric {
+  display: grid;
+  gap: 3px;
+}
+
+.latency-metric > small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .first-token-time,
@@ -1411,6 +1429,53 @@ td.no-match-state {
   background: var(--panel-muted);
   border-color: var(--line);
   color: var(--muted);
+}
+
+.stream-throughput {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+  margin-top: 7px;
+}
+
+.stream-state {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 5px;
+}
+
+.stream-state-dot {
+  background: var(--ok);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--ok-soft);
+  height: 6px;
+  width: 6px;
+}
+
+.throughput-stat {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.throughput-stat small {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.throughput-stat strong {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 650;
+  line-height: 1;
 }
 
 .tokens-cell {
