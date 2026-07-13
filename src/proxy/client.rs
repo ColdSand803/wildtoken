@@ -190,6 +190,7 @@ fn json_has_visible_token(obj: &serde_json::Value) -> bool {
             || t == "response.reasoning_text.delta"
             || t == "response.reasoning_summary_text.delta"
             || t == "response.function_call_arguments.delta"
+            || t == "response.custom_tool_call_input.delta"
     }) && (non_empty_str(&obj["delta"])
         || obj["delta"].as_object().is_some_and(|m| !m.is_empty()))
     {
@@ -698,6 +699,12 @@ mod tests {
     #[test]
     fn anthropic_content_delta_counts_as_first_token() {
         let event = b"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n";
+        assert_eq!(extract_first_token_ms(event), Some(0));
+    }
+
+    #[test]
+    fn responses_custom_tool_call_delta_counts_as_first_token() {
+        let event = b"data: {\"type\":\"response.custom_tool_call_input.delta\",\"delta\":\"const\"}\n\n";
         assert_eq!(extract_first_token_ms(event), Some(0));
     }
 }
