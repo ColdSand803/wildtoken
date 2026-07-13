@@ -141,7 +141,12 @@ fn truncate_body(body: &[u8], budget: usize) -> serde_json::Value {
 mod tests {
     use std::collections::HashMap;
 
-    use super::{snapshot_request, snapshot_response, truncate_body};
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    use super::{
+        encode_snapshot_pair, insert_log_entry, snapshot_request, snapshot_response, truncate_body,
+        LogEntry,
+    };
 
     #[test]
     fn request_and_response_snapshots_redact_mixed_case_sensitive_headers() {
@@ -198,16 +203,201 @@ mod tests {
             serde_json::json!({"cleared": true, "byte_length": 4})
         );
     }
+
+    #[test]
+    fn snapshot_pair_distinguishes_same_from_explicitly_missing_override() {
+        let snapshot = serde_json::json!({"body": {"text": "hello"}});
+
+        let same = encode_snapshot_pair(Some(snapshot.clone()), Some(snapshot.clone()));
+        assert_eq!(same.canonical, Some(snapshot.to_string()));
+        assert!(!same.is_override);
+        assert_eq!(same.override_value, None);
+
+        let missing = encode_snapshot_pair(Some(snapshot), None);
+        assert!(missing.is_override);
+        assert_eq!(missing.override_value, None);
+
+        let both_missing = encode_snapshot_pair(None, None);
+        assert!(!both_missing.is_override);
+        assert_eq!(both_missing.canonical, None);
+        assert_eq!(both_missing.override_value, None);
+    }
+
+    async fn create_request_logs_table(pool: &sqlx::SqlitePool) {
+        sqlx::query(
+            r#"CREATE TABLE request_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                method TEXT NOT NULL,
+                path TEXT NOT NULL,
+                downstream_token_id INTEGER,
+                downstream_token_name TEXT,
+                client_type TEXT NOT NULL DEFAULT 'unknown',
+                upstream_id INTEGER,
+                upstream_name TEXT,
+                model TEXT,
+                reasoning_effort TEXT,
+                response_reasoning_effort TEXT,
+                stream INTEGER NOT NULL,
+                status_code INTEGER,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                total_tokens INTEGER,
+                duration_ms INTEGER,
+                first_token_ms INTEGER,
+                error TEXT,
+                downstream_request TEXT,
+                upstream_request TEXT,
+                upstream_response TEXT,
+                downstream_response TEXT
+            )"#,
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn log_insert_writes_metadata_and_deduplicated_payload_atomically() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        create_request_logs_table(&pool).await;
+        sqlx::query(
+            r#"CREATE TABLE request_log_payloads (
+                request_log_id INTEGER PRIMARY KEY REFERENCES request_logs(id) ON DELETE CASCADE,
+                request_snapshot TEXT,
+                upstream_request_override TEXT,
+                upstream_request_is_override INTEGER NOT NULL DEFAULT 0 CHECK (upstream_request_is_override IN (0, 1)),
+                response_snapshot TEXT,
+                downstream_response_override TEXT,
+                downstream_response_is_override INTEGER NOT NULL DEFAULT 0 CHECK (downstream_response_is_override IN (0, 1))
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let request = serde_json::json!({"body": {"text": "request"}});
+        let response = serde_json::json!({"body": {"text": "response"}});
+        insert_log_entry(
+            &pool,
+            LogEntry {
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                downstream_request: Some(request.clone()),
+                upstream_request: Some(request.clone()),
+                upstream_response: Some(response.clone()),
+                downstream_response: None,
+                ..LogEntry::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let legacy_payloads: (Option<String>, Option<String>, Option<String>, Option<String>) =
+            sqlx::query_as(
+                "SELECT downstream_request, upstream_request, upstream_response, downstream_response FROM request_logs WHERE id = 1",
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(legacy_payloads, (None, None, None, None));
+
+        let payload: (
+            Option<String>,
+            Option<String>,
+            i64,
+            Option<String>,
+            Option<String>,
+            i64,
+        ) = sqlx::query_as(
+            r#"SELECT request_snapshot, upstream_request_override,
+                      upstream_request_is_override, response_snapshot,
+                      downstream_response_override, downstream_response_is_override
+               FROM request_log_payloads WHERE request_log_id = 1"#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(payload.0, Some(request.to_string()));
+        assert_eq!(payload.1, None);
+        assert_eq!(payload.2, 0);
+        assert_eq!(payload.3, Some(response.to_string()));
+        assert_eq!(payload.4, None);
+        assert_eq!(payload.5, 1);
+    }
+
+    #[tokio::test]
+    async fn payload_insert_failure_rolls_back_metadata() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        create_request_logs_table(&pool).await;
+
+        let result = insert_log_entry(
+            &pool,
+            LogEntry {
+                method: "POST".to_string(),
+                path: "/v1/responses".to_string(),
+                ..LogEntry::default()
+            },
+        )
+        .await;
+        assert!(result.is_err());
+
+        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_logs")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(count, 0);
+    }
 }
 
 // ── Async log writer ────────────────────────────────────────────────────────
+
+#[derive(Debug, PartialEq)]
+struct EncodedSnapshotPair {
+    canonical: Option<String>,
+    override_value: Option<String>,
+    is_override: bool,
+}
+
+/// Store one canonical snapshot and only retain the peer when it differs.
+///
+/// The explicit flag is intentionally independent of `override_value`: a null
+/// override with the flag set means that the peer snapshot was absent, while a
+/// clear flag means it was identical to the canonical snapshot.
+fn encode_snapshot_pair(
+    canonical: Option<serde_json::Value>,
+    peer: Option<serde_json::Value>,
+) -> EncodedSnapshotPair {
+    let is_override = canonical != peer;
+    let override_value = if is_override {
+        peer.map(|value| value.to_string())
+    } else {
+        None
+    };
+
+    EncodedSnapshotPair {
+        canonical: canonical.map(|value| value.to_string()),
+        override_value,
+        is_override,
+    }
+}
 
 /// Spawn a background task to write the log entry so the caller is not blocked
 /// and the write cannot be cancelled by the caller's drop.
 pub fn schedule_log(pool: &sqlx::SqlitePool, entry: LogEntry) {
     let pool = pool.clone();
     tokio::spawn(async move {
-        let _ = insert_log_entry(&pool, entry).await;
+        if let Err(error) = insert_log_entry(&pool, entry).await {
+            tracing::error!(?error, "failed to persist request log");
+        }
     });
 }
 
@@ -216,25 +406,11 @@ async fn insert_log_entry(
     entry: LogEntry,
 ) -> Result<(), crate::error::AppError> {
     let stream_int: i64 = if entry.stream { 1 } else { 0 };
+    let request_payload = encode_snapshot_pair(entry.downstream_request, entry.upstream_request);
+    let response_payload = encode_snapshot_pair(entry.upstream_response, entry.downstream_response);
+    let mut transaction = pool.begin().await?;
 
-    let downstream_request = entry
-        .downstream_request
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-    let upstream_request = entry
-        .upstream_request
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-    let upstream_response = entry
-        .upstream_response
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-    let downstream_response = entry
-        .downstream_response
-        .map(|v| v.to_string())
-        .unwrap_or_default();
-
-    sqlx::query(
+    let result = sqlx::query(
         r#"INSERT INTO request_logs
             (method, path, downstream_token_id, downstream_token_name, client_type,
              upstream_id, upstream_name, model,
@@ -244,14 +420,14 @@ async fn insert_log_entry(
              downstream_request, upstream_request,
              upstream_response, downstream_response,
              created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, ?, ?, datetime('now'))"#,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                NULL, NULL, NULL, NULL, datetime('now'))"#,
     )
     .bind(&entry.method)
     .bind(&entry.path)
     .bind(entry.downstream_token_id)
     .bind(&entry.downstream_token_name)
-    .bind(&entry.client_type)
+    .bind(entry.client_type.as_deref().unwrap_or("unknown"))
     .bind(entry.upstream_id)
     .bind(&entry.upstream_name)
     .bind(&entry.model)
@@ -265,12 +441,36 @@ async fn insert_log_entry(
     .bind(entry.duration_ms)
     .bind(entry.first_token_ms)
     .bind(&entry.error)
-    .bind(&downstream_request)
-    .bind(&upstream_request)
-    .bind(&upstream_response)
-    .bind(&downstream_response)
-    .execute(pool)
+    .execute(&mut *transaction)
     .await?;
+
+    sqlx::query(
+        r#"INSERT INTO request_log_payloads
+            (request_log_id, request_snapshot,
+             upstream_request_override, upstream_request_is_override,
+             response_snapshot,
+             downstream_response_override, downstream_response_is_override)
+        VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+    )
+    .bind(result.last_insert_rowid())
+    .bind(&request_payload.canonical)
+    .bind(&request_payload.override_value)
+    .bind(if request_payload.is_override {
+        1_i64
+    } else {
+        0
+    })
+    .bind(&response_payload.canonical)
+    .bind(&response_payload.override_value)
+    .bind(if response_payload.is_override {
+        1_i64
+    } else {
+        0
+    })
+    .execute(&mut *transaction)
+    .await?;
+
+    transaction.commit().await?;
 
     Ok(())
 }
@@ -282,8 +482,12 @@ pub async fn cleanup_loop(
     pool: sqlx::SqlitePool,
     runtime_settings: std::sync::Arc<tokio::sync::RwLock<crate::models::settings::RuntimeSettings>>,
 ) {
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
+
     loop {
-        tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        // A Tokio interval's first tick is immediate, so stale payloads are
+        // cleaned on startup instead of waiting an hour after every deploy.
+        interval.tick().await;
 
         let settings = runtime_settings.read().await.clone();
         if let Err(e) =

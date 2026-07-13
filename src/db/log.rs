@@ -53,10 +53,12 @@ struct LogDetailRow {
     duration_ms: Option<i32>,
     first_token_ms: Option<i32>,
     error: Option<String>,
-    downstream_request: Option<String>,
-    upstream_request: Option<String>,
-    upstream_response: Option<String>,
-    downstream_response: Option<String>,
+    request_snapshot: Option<String>,
+    upstream_request_override: Option<String>,
+    upstream_request_is_override: i32,
+    response_snapshot: Option<String>,
+    downstream_response_override: Option<String>,
+    downstream_response_is_override: i32,
 }
 
 // ── Public functions ────────────────────────────────────────────────────────
@@ -155,11 +157,11 @@ pub async fn list_logs(
         })
         .collect();
 
-    let mut rpm_query = QueryBuilder::<Sqlite>::new(
+    let recent_rpm: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM request_logs WHERE created_at >= datetime('now', '-60 seconds')",
-    );
-    push_log_filters(&mut rpm_query, upstream_id, search, status);
-    let recent_rpm: i64 = rpm_query.build_query_scalar().fetch_one(pool).await?;
+    )
+    .fetch_one(pool)
+    .await?;
 
     Ok((outputs, recent_rpm))
 }
@@ -169,58 +171,77 @@ pub async fn get_log_detail(
     log_id: i64,
 ) -> Result<Option<RequestLogDetailOut>, AppError> {
     let row: Option<LogDetailRow> = sqlx::query_as(
-        r#"SELECT id, created_at, method, path,
-                  downstream_token_id, downstream_token_name,
-                  client_type,
-                  upstream_id, upstream_name, model, reasoning_effort, response_reasoning_effort,
-                  stream, status_code,
-                  prompt_tokens, completion_tokens, total_tokens,
-                  duration_ms, first_token_ms,
-                  error,
-                  downstream_request, upstream_request,
-                  upstream_response, downstream_response
-           FROM request_logs
-           WHERE id = ?"#,
+        r#"SELECT l.id, l.created_at, l.method, l.path,
+                  l.downstream_token_id, l.downstream_token_name,
+                  l.client_type,
+                  l.upstream_id, l.upstream_name, l.model,
+                  l.reasoning_effort, l.response_reasoning_effort,
+                  l.stream, l.status_code,
+                  l.prompt_tokens, l.completion_tokens, l.total_tokens,
+                  l.duration_ms, l.first_token_ms,
+                  l.error,
+                  p.request_snapshot,
+                  p.upstream_request_override,
+                  COALESCE(p.upstream_request_is_override, 0)
+                      AS upstream_request_is_override,
+                  p.response_snapshot,
+                  p.downstream_response_override,
+                  COALESCE(p.downstream_response_is_override, 0)
+                      AS downstream_response_is_override
+           FROM request_logs AS l
+           LEFT JOIN request_log_payloads AS p ON p.request_log_id = l.id
+           WHERE l.id = ?"#,
     )
     .bind(log_id)
     .fetch_optional(pool)
     .await?;
 
-    Ok(row.map(|r| RequestLogDetailOut {
-        base: RequestLogOut {
-            id: r.id,
-            created_at: r.created_at,
-            method: r.method,
-            path: r.path,
-            downstream_token_id: r.downstream_token_id,
-            downstream_token_name: r.downstream_token_name,
-            client_type: r.client_type,
-            upstream_id: r.upstream_id,
-            upstream_name: r.upstream_name,
-            model: r.model,
-            reasoning_effort: r.reasoning_effort,
-            response_reasoning_effort: r.response_reasoning_effort,
-            stream: r.stream,
-            status_code: r.status_code,
-            prompt_tokens: r.prompt_tokens,
-            completion_tokens: r.completion_tokens,
-            total_tokens: r.total_tokens,
-            duration_ms: r.duration_ms,
-            first_token_ms: r.first_token_ms,
-            error: r.error,
-        },
-        downstream_request: r
-            .downstream_request
-            .and_then(|s| serde_json::from_str(&s).ok()),
-        upstream_request: r
-            .upstream_request
-            .and_then(|s| serde_json::from_str(&s).ok()),
-        upstream_response: r
-            .upstream_response
-            .and_then(|s| serde_json::from_str(&s).ok()),
-        downstream_response: r
-            .downstream_response
-            .and_then(|s| serde_json::from_str(&s).ok()),
+    Ok(row.map(|r| {
+        let upstream_request = if r.upstream_request_is_override != 0 {
+            r.upstream_request_override.as_deref()
+        } else {
+            r.request_snapshot.as_deref()
+        };
+        let downstream_response = if r.downstream_response_is_override != 0 {
+            r.downstream_response_override.as_deref()
+        } else {
+            r.response_snapshot.as_deref()
+        };
+
+        RequestLogDetailOut {
+            base: RequestLogOut {
+                id: r.id,
+                created_at: r.created_at,
+                method: r.method,
+                path: r.path,
+                downstream_token_id: r.downstream_token_id,
+                downstream_token_name: r.downstream_token_name,
+                client_type: r.client_type,
+                upstream_id: r.upstream_id,
+                upstream_name: r.upstream_name,
+                model: r.model,
+                reasoning_effort: r.reasoning_effort,
+                response_reasoning_effort: r.response_reasoning_effort,
+                stream: r.stream,
+                status_code: r.status_code,
+                prompt_tokens: r.prompt_tokens,
+                completion_tokens: r.completion_tokens,
+                total_tokens: r.total_tokens,
+                duration_ms: r.duration_ms,
+                first_token_ms: r.first_token_ms,
+                error: r.error,
+            },
+            downstream_request: r
+                .request_snapshot
+                .as_deref()
+                .and_then(|s| serde_json::from_str(s).ok()),
+            upstream_request: upstream_request.and_then(|s| serde_json::from_str(s).ok()),
+            upstream_response: r
+                .response_snapshot
+                .as_deref()
+                .and_then(|s| serde_json::from_str(s).ok()),
+            downstream_response: downstream_response.and_then(|s| serde_json::from_str(s).ok()),
+        }
     }))
 }
 
@@ -282,138 +303,88 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
     })
 }
 
-pub async fn insert_log(
-    pool: &SqlitePool,
-    method: &str,
-    path: &str,
-    upstream_id: Option<i64>,
-    upstream_name: Option<&str>,
-    model: Option<&str>,
-    reasoning_effort: Option<&str>,
-    stream: bool,
-    status_code: Option<i32>,
-    prompt_tokens: Option<i32>,
-    completion_tokens: Option<i32>,
-    total_tokens: Option<i32>,
-    duration_ms: Option<i32>,
-    first_token_ms: Option<i32>,
-    error: Option<&str>,
-    downstream_request: &str,
-    upstream_request: &str,
-    upstream_response: &str,
-    downstream_response: &str,
-) -> Result<(), AppError> {
-    let stream_int: i32 = if stream { 1 } else { 0 };
-
-    sqlx::query(
-        r#"INSERT INTO request_logs
-            (method, path,
-             upstream_id, upstream_name, model, reasoning_effort,
-             stream, status_code,
-             prompt_tokens, completion_tokens, total_tokens,
-             duration_ms, first_token_ms, error,
-             downstream_request, upstream_request,
-             upstream_response, downstream_response, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))"#,
-    )
-    .bind(method)
-    .bind(path)
-    .bind(upstream_id)
-    .bind(upstream_name)
-    .bind(model)
-    .bind(reasoning_effort)
-    .bind(stream_int)
-    .bind(status_code)
-    .bind(prompt_tokens)
-    .bind(completion_tokens)
-    .bind(total_tokens)
-    .bind(duration_ms)
-    .bind(first_token_ms)
-    .bind(error)
-    .bind(downstream_request)
-    .bind(upstream_request)
-    .bind(upstream_response)
-    .bind(downstream_response)
-    .execute(pool)
-    .await?;
-
-    Ok(())
-}
-
 pub async fn clear_old_log_bodies(pool: &SqlitePool, keep_count: i64) -> Result<(), AppError> {
     sqlx::query(
-        r#"UPDATE request_logs
-        SET downstream_request = CASE
-                WHEN json_valid(downstream_request) = 1 THEN CASE
-                    WHEN json_type(downstream_request) = 'object' THEN CASE
-                        WHEN COALESCE(json_extract(downstream_request, '$.body.cleared'), 0) = 1 THEN downstream_request
-                        ELSE json_set(downstream_request, '$.body', json('{"cleared":true}'))
+        r#"UPDATE request_log_payloads
+        SET request_snapshot = CASE
+                WHEN request_snapshot IS NULL OR request_snapshot = '' THEN request_snapshot
+                WHEN json_valid(request_snapshot) = 1 THEN CASE
+                    WHEN json_type(request_snapshot) = 'object' THEN CASE
+                        WHEN COALESCE(json_extract(request_snapshot, '$.body.cleared'), 0) = 1 THEN request_snapshot
+                        ELSE json_set(request_snapshot, '$.body', json('{"cleared":true}'))
                     END
                     ELSE '{"body":{"cleared":true}}'
                 END
                 ELSE '{"body":{"cleared":true}}'
             END,
-            upstream_request = CASE
-                WHEN json_valid(upstream_request) = 1 THEN CASE
-                    WHEN json_type(upstream_request) = 'object' THEN CASE
-                        WHEN COALESCE(json_extract(upstream_request, '$.body.cleared'), 0) = 1 THEN upstream_request
-                        ELSE json_set(upstream_request, '$.body', json('{"cleared":true}'))
+            upstream_request_override = CASE
+                WHEN upstream_request_is_override = 0 THEN upstream_request_override
+                WHEN upstream_request_override IS NULL OR upstream_request_override = '' THEN upstream_request_override
+                WHEN json_valid(upstream_request_override) = 1 THEN CASE
+                    WHEN json_type(upstream_request_override) = 'object' THEN CASE
+                        WHEN COALESCE(json_extract(upstream_request_override, '$.body.cleared'), 0) = 1 THEN upstream_request_override
+                        ELSE json_set(upstream_request_override, '$.body', json('{"cleared":true}'))
                     END
                     ELSE '{"body":{"cleared":true}}'
                 END
                 ELSE '{"body":{"cleared":true}}'
             END,
-            upstream_response = CASE
-                WHEN json_valid(upstream_response) = 1 THEN CASE
-                    WHEN json_type(upstream_response) = 'object' THEN CASE
-                        WHEN COALESCE(json_extract(upstream_response, '$.body.cleared'), 0) = 1 THEN upstream_response
-                        ELSE json_set(upstream_response, '$.body', json('{"cleared":true}'))
+            response_snapshot = CASE
+                WHEN response_snapshot IS NULL OR response_snapshot = '' THEN response_snapshot
+                WHEN json_valid(response_snapshot) = 1 THEN CASE
+                    WHEN json_type(response_snapshot) = 'object' THEN CASE
+                        WHEN COALESCE(json_extract(response_snapshot, '$.body.cleared'), 0) = 1 THEN response_snapshot
+                        ELSE json_set(response_snapshot, '$.body', json('{"cleared":true}'))
                     END
                     ELSE '{"body":{"cleared":true}}'
                 END
                 ELSE '{"body":{"cleared":true}}'
             END,
-            downstream_response = CASE
-                WHEN json_valid(downstream_response) = 1 THEN CASE
-                    WHEN json_type(downstream_response) = 'object' THEN CASE
-                        WHEN COALESCE(json_extract(downstream_response, '$.body.cleared'), 0) = 1 THEN downstream_response
-                        ELSE json_set(downstream_response, '$.body', json('{"cleared":true}'))
+            downstream_response_override = CASE
+                WHEN downstream_response_is_override = 0 THEN downstream_response_override
+                WHEN downstream_response_override IS NULL OR downstream_response_override = '' THEN downstream_response_override
+                WHEN json_valid(downstream_response_override) = 1 THEN CASE
+                    WHEN json_type(downstream_response_override) = 'object' THEN CASE
+                        WHEN COALESCE(json_extract(downstream_response_override, '$.body.cleared'), 0) = 1 THEN downstream_response_override
+                        ELSE json_set(downstream_response_override, '$.body', json('{"cleared":true}'))
                     END
                     ELSE '{"body":{"cleared":true}}'
                 END
                 ELSE '{"body":{"cleared":true}}'
             END
-        WHERE id NOT IN (
+        WHERE request_log_id NOT IN (
             SELECT id FROM request_logs
             ORDER BY created_at DESC, id DESC
             LIMIT ?
         ) AND (
             CASE
-                WHEN downstream_request IS NULL OR downstream_request = '' THEN 1
-                WHEN json_valid(downstream_request) = 0 THEN 1
-                WHEN json_type(downstream_request) != 'object' THEN 1
-                WHEN COALESCE(json_extract(downstream_request, '$.body.cleared'), 0) != 1 THEN 1
+                WHEN request_snapshot IS NULL OR request_snapshot = '' THEN 0
+                WHEN json_valid(request_snapshot) = 0 THEN 1
+                WHEN json_type(request_snapshot) != 'object' THEN 1
+                WHEN COALESCE(json_extract(request_snapshot, '$.body.cleared'), 0) != 1 THEN 1
                 ELSE 0
             END = 1
             OR CASE
-                WHEN upstream_request IS NULL OR upstream_request = '' THEN 1
-                WHEN json_valid(upstream_request) = 0 THEN 1
-                WHEN json_type(upstream_request) != 'object' THEN 1
-                WHEN COALESCE(json_extract(upstream_request, '$.body.cleared'), 0) != 1 THEN 1
+                WHEN upstream_request_is_override = 0 THEN 0
+                WHEN upstream_request_override IS NULL OR upstream_request_override = '' THEN 0
+                WHEN json_valid(upstream_request_override) = 0 THEN 1
+                WHEN json_type(upstream_request_override) != 'object' THEN 1
+                WHEN COALESCE(json_extract(upstream_request_override, '$.body.cleared'), 0) != 1 THEN 1
                 ELSE 0
             END = 1
             OR CASE
-                WHEN upstream_response IS NULL OR upstream_response = '' THEN 1
-                WHEN json_valid(upstream_response) = 0 THEN 1
-                WHEN json_type(upstream_response) != 'object' THEN 1
-                WHEN COALESCE(json_extract(upstream_response, '$.body.cleared'), 0) != 1 THEN 1
+                WHEN response_snapshot IS NULL OR response_snapshot = '' THEN 0
+                WHEN json_valid(response_snapshot) = 0 THEN 1
+                WHEN json_type(response_snapshot) != 'object' THEN 1
+                WHEN COALESCE(json_extract(response_snapshot, '$.body.cleared'), 0) != 1 THEN 1
                 ELSE 0
             END = 1
             OR CASE
-                WHEN downstream_response IS NULL OR downstream_response = '' THEN 1
-                WHEN json_valid(downstream_response) = 0 THEN 1
-                WHEN json_type(downstream_response) != 'object' THEN 1
-                WHEN COALESCE(json_extract(downstream_response, '$.body.cleared'), 0) != 1 THEN 1
+                WHEN downstream_response_is_override = 0 THEN 0
+                WHEN downstream_response_override IS NULL OR downstream_response_override = '' THEN 0
+                WHEN json_valid(downstream_response_override) = 0 THEN 1
+                WHEN json_type(downstream_response_override) != 'object' THEN 1
+                WHEN COALESCE(json_extract(downstream_response_override, '$.body.cleared'), 0) != 1 THEN 1
                 ELSE 0
             END = 1
         )"#,
@@ -427,94 +398,329 @@ pub async fn clear_old_log_bodies(pool: &SqlitePool, keep_count: i64) -> Result<
 
 #[cfg(test)]
 mod tests {
-    use sqlx::SqlitePool;
+    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
-    use super::clear_old_log_bodies;
+    use super::{clear_old_log_bodies, delete_old_logs, get_log_detail, list_logs};
 
-    #[tokio::test]
-    async fn cleanup_handles_malformed_and_non_object_snapshots() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
-        sqlx::query(
-            "CREATE TABLE request_logs (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, downstream_request TEXT, upstream_request TEXT, upstream_response TEXT, downstream_response TEXT)",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query(
-            "INSERT INTO request_logs VALUES (1, '2026-01-01', NULL, '', 'not json', '[]')",
-        )
-        .execute(&pool)
-        .await
-        .unwrap();
-        sqlx::query("INSERT INTO request_logs VALUES (2, '2026-01-02', '{\"headers\":{\"x\":\"y\"},\"body\":{\"text\":\"old\"}}', '{\"body\":{\"text\":\"old\"}}', '{\"body\":{\"text\":\"old\"}}', '{\"body\":{\"text\":\"old\"}}')")
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("PRAGMA foreign_keys = ON")
             .execute(&pool)
             .await
             .unwrap();
-
-        clear_old_log_bodies(&pool, 0).await.unwrap();
-
-        let snapshots: (String, String, String, String) = sqlx::query_as(
-            "SELECT downstream_request, upstream_request, upstream_response, downstream_response FROM request_logs WHERE id = 1",
+        sqlx::query(
+            r#"CREATE TABLE request_logs (
+                id INTEGER PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                method TEXT NOT NULL DEFAULT 'POST',
+                path TEXT NOT NULL DEFAULT '/v1/responses',
+                downstream_token_id INTEGER,
+                downstream_token_name TEXT,
+                client_type TEXT NOT NULL DEFAULT 'unknown',
+                upstream_id INTEGER,
+                upstream_name TEXT,
+                model TEXT,
+                reasoning_effort TEXT,
+                response_reasoning_effort TEXT,
+                stream INTEGER NOT NULL DEFAULT 0,
+                status_code INTEGER,
+                prompt_tokens INTEGER,
+                completion_tokens INTEGER,
+                total_tokens INTEGER,
+                duration_ms INTEGER,
+                first_token_ms INTEGER,
+                error TEXT
+            )"#,
         )
-        .fetch_one(&pool)
+        .execute(&pool)
         .await
         .unwrap();
-        for snapshot in [snapshots.0, snapshots.1, snapshots.2, snapshots.3] {
-            assert_eq!(
-                serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()["body"]["cleared"],
-                true
-            );
-        }
+        sqlx::query(
+            r#"CREATE TABLE request_log_payloads (
+                request_log_id INTEGER PRIMARY KEY
+                    REFERENCES request_logs(id) ON DELETE CASCADE,
+                request_snapshot TEXT,
+                upstream_request_override TEXT,
+                upstream_request_is_override INTEGER NOT NULL DEFAULT 0,
+                response_snapshot TEXT,
+                downstream_response_override TEXT,
+                downstream_response_is_override INTEGER NOT NULL DEFAULT 0
+            )"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
 
-        let preserved: String =
-            sqlx::query_scalar("SELECT downstream_request FROM request_logs WHERE id = 2")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        let preserved: serde_json::Value = serde_json::from_str(&preserved).unwrap();
-        assert_eq!(preserved["headers"]["x"], "y");
-        assert_eq!(preserved["body"]["cleared"], true);
+    async fn insert_log(pool: &SqlitePool, id: i64, created_at: &str) {
+        sqlx::query("INSERT INTO request_logs (id, created_at) VALUES (?, ?)")
+            .bind(id)
+            .bind(created_at)
+            .execute(pool)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
-    async fn repeat_cleanup_does_not_rewrite_cleared_object_snapshots() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    async fn rpm_counts_all_requests_in_trailing_minute_independent_of_list_filters() {
+        let pool = test_pool().await;
         sqlx::query(
-            "CREATE TABLE request_logs (id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, downstream_request TEXT, upstream_request TEXT, upstream_response TEXT, downstream_response TEXT)",
+            r#"INSERT INTO request_logs (id, created_at, upstream_id, status_code) VALUES
+               (1, datetime('now'), 1, 200),
+               (2, datetime('now', '-30 seconds'), 2, 500),
+               (3, datetime('now', '-90 seconds'), 1, 200)"#,
         )
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query("INSERT INTO request_logs VALUES (1, '2026-01-01', '{\"headers\":{\"x\":\"y\"},\"body\":{\"text\":\"old\"}}', '{\"body\":{\"text\":\"old\"}}', '{\"body\":{\"text\":\"old\"}}', '{\"body\":{\"text\":\"old\"}}')")
-            .execute(&pool)
+
+        let (items, recent_rpm) = list_logs(&pool, 10, 0, Some(1), None, Some("2xx"))
             .await
             .unwrap();
 
-        clear_old_log_bodies(&pool, 0).await.unwrap();
-        let after_first: (String, String, String, String) = sqlx::query_as(
-            "SELECT downstream_request, upstream_request, upstream_response, downstream_response FROM request_logs WHERE id = 1",
+        assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), [1, 3]);
+        assert_eq!(recent_rpm, 2);
+    }
+
+    #[tokio::test]
+    async fn detail_reconstructs_canonical_overridden_and_null_snapshots() {
+        let pool = test_pool().await;
+        insert_log(&pool, 1, "2026-01-01").await;
+        insert_log(&pool, 2, "2026-01-02").await;
+
+        sqlx::query(
+            r#"INSERT INTO request_log_payloads
+               (request_log_id, request_snapshot,
+                upstream_request_override, upstream_request_is_override,
+                response_snapshot,
+                downstream_response_override, downstream_response_is_override)
+               VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(1_i64)
+        .bind(r#"{"kind":"downstream-request"}"#)
+        .bind(r#"{"kind":"ignored-request-override"}"#)
+        .bind(0_i32)
+        .bind(r#"{"kind":"upstream-response"}"#)
+        .bind(r#"{"kind":"downstream-response"}"#)
+        .bind(1_i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            r#"INSERT INTO request_log_payloads
+               (request_log_id, request_snapshot,
+                upstream_request_override, upstream_request_is_override,
+                response_snapshot,
+                downstream_response_override, downstream_response_is_override)
+               VALUES (?, ?, ?, ?, ?, ?, ?)"#,
+        )
+        .bind(2_i64)
+        .bind(r#"{"kind":"downstream-request"}"#)
+        .bind(Option::<String>::None)
+        .bind(1_i32)
+        .bind(r#"{"kind":"upstream-response"}"#)
+        .bind(Option::<String>::None)
+        .bind(1_i32)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let detail = get_log_detail(&pool, 1).await.unwrap().unwrap();
+        assert_eq!(
+            detail.downstream_request.unwrap()["kind"],
+            "downstream-request"
+        );
+        assert_eq!(
+            detail.upstream_request.unwrap()["kind"],
+            "downstream-request"
+        );
+        assert_eq!(
+            detail.upstream_response.unwrap()["kind"],
+            "upstream-response"
+        );
+        assert_eq!(
+            detail.downstream_response.unwrap()["kind"],
+            "downstream-response"
+        );
+
+        let null_override = get_log_detail(&pool, 2).await.unwrap().unwrap();
+        assert!(null_override.upstream_request.is_none());
+        assert!(null_override.downstream_response.is_none());
+        assert_eq!(
+            null_override.downstream_request.unwrap()["kind"],
+            "downstream-request"
+        );
+        assert_eq!(
+            null_override.upstream_response.unwrap()["kind"],
+            "upstream-response"
+        );
+    }
+
+    #[tokio::test]
+    async fn detail_without_payload_keeps_log_and_returns_empty_snapshots() {
+        let pool = test_pool().await;
+        insert_log(&pool, 1, "2026-01-01").await;
+
+        let detail = get_log_detail(&pool, 1).await.unwrap().unwrap();
+        assert_eq!(detail.base.id, 1);
+        assert!(detail.downstream_request.is_none());
+        assert!(detail.upstream_request.is_none());
+        assert!(detail.upstream_response.is_none());
+        assert!(detail.downstream_response.is_none());
+    }
+
+    #[tokio::test]
+    async fn cleanup_clears_only_old_active_snapshots_and_preserves_metadata() {
+        let pool = test_pool().await;
+        insert_log(&pool, 1, "2026-01-01").await;
+        insert_log(&pool, 2, "2026-01-02").await;
+
+        let ignored_override = r#"{"body":{"text":"must stay"}}"#;
+        sqlx::query(
+            r#"INSERT INTO request_log_payloads
+               (request_log_id, request_snapshot,
+                upstream_request_override, upstream_request_is_override,
+                response_snapshot,
+                downstream_response_override, downstream_response_is_override)
+               VALUES (?, ?, ?, 1, ?, ?, 0)"#,
+        )
+        .bind(1_i64)
+        .bind(r#"{"url":"/v1/responses","headers":{"x-request":"kept"},"body":{"secret":"request"}}"#)
+        .bind(r#"{"url":"https://upstream.test","headers":{"x-upstream":"kept"},"body":{"secret":"override"}}"#)
+        .bind(r#"{"status":201,"headers":{"x-response":"kept"},"body":{"secret":"response"}}"#)
+        .bind(ignored_override)
+        .execute(&pool)
+        .await
+        .unwrap();
+        let recent_request = r#"{"headers":{"recent":"kept"},"body":{"secret":"recent"}}"#;
+        sqlx::query(
+            r#"INSERT INTO request_log_payloads
+               (request_log_id, request_snapshot,
+                upstream_request_override, upstream_request_is_override,
+                response_snapshot,
+                downstream_response_override, downstream_response_is_override)
+               VALUES (?, ?, NULL, 0, ?, NULL, 0)"#,
+        )
+        .bind(2_i64)
+        .bind(recent_request)
+        .bind(r#"{"body":{"secret":"recent response"}}"#)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        clear_old_log_bodies(&pool, 1).await.unwrap();
+
+        let old: (String, String, String, String) = sqlx::query_as(
+            r#"SELECT request_snapshot, upstream_request_override,
+                      response_snapshot, downstream_response_override
+               FROM request_log_payloads WHERE request_log_id = 1"#,
         )
         .fetch_one(&pool)
         .await
         .unwrap();
+        let request: serde_json::Value = serde_json::from_str(&old.0).unwrap();
+        let upstream_request: serde_json::Value = serde_json::from_str(&old.1).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&old.2).unwrap();
+        assert_eq!(request["url"], "/v1/responses");
+        assert_eq!(request["headers"]["x-request"], "kept");
+        assert_eq!(request["body"], serde_json::json!({"cleared": true}));
+        assert_eq!(upstream_request["url"], "https://upstream.test");
+        assert_eq!(upstream_request["headers"]["x-upstream"], "kept");
+        assert_eq!(
+            upstream_request["body"],
+            serde_json::json!({"cleared": true})
+        );
+        assert_eq!(response["status"], 201);
+        assert_eq!(response["headers"]["x-response"], "kept");
+        assert_eq!(response["body"], serde_json::json!({"cleared": true}));
+        assert_eq!(old.3, ignored_override);
 
-        clear_old_log_bodies(&pool, 0).await.unwrap();
-        let after_second: (String, String, String, String) = sqlx::query_as(
-            "SELECT downstream_request, upstream_request, upstream_response, downstream_response FROM request_logs WHERE id = 1",
+        let recent_after: String = sqlx::query_scalar(
+            "SELECT request_snapshot FROM request_log_payloads WHERE request_log_id = 2",
         )
         .fetch_one(&pool)
         .await
         .unwrap();
+        assert_eq!(recent_after, recent_request);
 
-        assert_eq!(after_second, after_first);
+        clear_old_log_bodies(&pool, 1).await.unwrap();
+        let after_repeat: (String, String, String, String) = sqlx::query_as(
+            r#"SELECT request_snapshot, upstream_request_override,
+                      response_snapshot, downstream_response_override
+               FROM request_log_payloads WHERE request_log_id = 1"#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(after_repeat, old);
+    }
+
+    #[tokio::test]
+    async fn deleting_old_parent_log_cascades_to_payload() {
+        let pool = test_pool().await;
+        insert_log(&pool, 1, "2000-01-01").await;
+        sqlx::query("INSERT INTO request_logs (id, created_at) VALUES (2, datetime('now'))")
+            .execute(&pool)
+            .await
+            .unwrap();
+        for id in [1_i64, 2_i64] {
+            sqlx::query(
+                "INSERT INTO request_log_payloads (request_log_id, request_snapshot) VALUES (?, '{}')",
+            )
+            .bind(id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        delete_old_logs(&pool, 30).await.unwrap();
+
+        let old_log_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM request_logs WHERE id = 1")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let old_payload_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM request_log_payloads WHERE request_log_id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let recent_payload_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM request_log_payloads WHERE request_log_id = 2",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(old_log_count, 0);
+        assert_eq!(old_payload_count, 0);
+        assert_eq!(recent_payload_count, 1);
     }
 }
 
 pub async fn delete_old_logs(pool: &SqlitePool, retention_days: i64) -> Result<(), AppError> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query(
+        r#"DELETE FROM request_log_payloads
+           WHERE request_log_id IN (
+               SELECT id FROM request_logs
+               WHERE created_at < datetime('now', '-' || ? || ' days')
+           )"#,
+    )
+    .bind(retention_days)
+    .execute(&mut *transaction)
+    .await?;
     sqlx::query("DELETE FROM request_logs WHERE created_at < datetime('now', '-' || ? || ' days')")
         .bind(retention_days)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await?;
+    transaction.commit().await?;
 
     Ok(())
 }

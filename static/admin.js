@@ -2822,6 +2822,20 @@ function formatFirstTokenTime(ms) {
   return `<span class="first-token-time ${tone}" title="首字耗时 ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
 }
 
+function outputTokensPerSecond(log) {
+  const completionTokens = Number(log.completion_tokens);
+  const durationMs = Number(log.duration_ms);
+  if (
+    !Number.isFinite(completionTokens)
+    || completionTokens <= 0
+    || !Number.isFinite(durationMs)
+    || durationMs <= 0
+  ) {
+    return null;
+  }
+  return completionTokens / (durationMs / 1000);
+}
+
 function totalDurationRating(log) {
   const statusCode = Number(log.status_code);
   if (!Number.isFinite(statusCode)) {
@@ -2836,25 +2850,13 @@ function totalDurationRating(log) {
     return { tone: "neutral", basis: "总耗时无数据" };
   }
 
-  const completionTokens = Number(log.completion_tokens);
-  const firstTokenMs = Number(log.first_token_ms);
-  if (Number.isFinite(completionTokens) && completionTokens > 0) {
-    let generationMs = durationMs;
-    if (Number.isFinite(firstTokenMs) && firstTokenMs >= 0 && firstTokenMs < durationMs) {
-      generationMs = durationMs - firstTokenMs;
-    }
-    const generationSeconds = generationMs / 1000;
-    if (generationSeconds > 0) {
-      const outputRate = completionTokens / generationSeconds;
-      const displayRate = outputRate.toFixed(1).replace(/\.0$/, "");
-      const usedFirstToken = generationMs !== durationMs;
-      return {
-        tone: outputRate >= 20 ? "ok" : outputRate >= 8 ? "warn" : "danger",
-        basis: usedFirstToken
-          ? `按输出吞吐 ${displayRate} t/s 判定`
-          : `按全程输出吞吐 ${displayRate} t/s 判定`,
-      };
-    }
+  const outputRate = outputTokensPerSecond(log);
+  if (outputRate !== null) {
+    const displayRate = outputRate.toFixed(1).replace(/\.0$/, "");
+    return {
+      tone: outputRate >= 20 ? "ok" : outputRate >= 8 ? "warn" : "danger",
+      basis: `按全程输出吞吐 ${displayRate} t/s 判定`,
+    };
   }
 
   const totalTokens = Number(log.total_tokens);
@@ -2883,32 +2885,15 @@ function formatThroughput(log) {
   if (!log.stream) {
     return "";
   }
-  const completionTokens = Number(log.completion_tokens);
-  const durationMs = Number(log.duration_ms);
-  if (
-    !Number.isFinite(completionTokens)
-    || completionTokens <= 0
-    || !Number.isFinite(durationMs)
-    || durationMs <= 0
-  ) {
+  const rate = outputTokensPerSecond(log);
+  if (rate === null) {
     return "流，-t/s";
   }
-
-  // Prefer generation time after first token; if TTFT is missing/invalid, use full duration.
-  const firstTokenMs = Number(log.first_token_ms);
-  let generationMs = durationMs;
-  if (Number.isFinite(firstTokenMs) && firstTokenMs >= 0 && firstTokenMs < durationMs) {
-    generationMs = durationMs - firstTokenMs;
-  }
-  if (generationMs <= 0) {
-    return "流，-t/s";
-  }
-  const rate = completionTokens / (generationMs / 1000);
   const displayRate = rate.toFixed(1).replace(/\.0$/, "");
   return `流，${displayRate}t/s`;
 }
 
-/** Render the server-side count of matching requests during the trailing minute. */
+/** Render the server-side count of all requests during the trailing minute. */
 function updateLogRpm(recentRpm) {
   if (logRpm) {
     const count = Number(recentRpm);

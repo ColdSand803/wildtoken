@@ -17,6 +17,185 @@ use crate::{
     models::settings::{AdminCredential, RuntimeSettings},
 };
 
+const RESPONSE_REASONING_EFFORT_BACKFILL: &str = "request_logs_response_reasoning_effort_v1";
+const CLIENT_TYPE_BACKFILL: &str = "request_logs_client_type_v1";
+const REQUEST_LOG_PAYLOADS_MIGRATION: &str = "request_log_payloads_v1";
+
+async fn backfill_response_reasoning_effort_once(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let already_applied: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name = ?)")
+            .bind(RESPONSE_REASONING_EFFORT_BACKFILL)
+            .fetch_one(&mut *tx)
+            .await?;
+    if already_applied != 0 {
+        tx.commit().await?;
+        return Ok(());
+    }
+
+    sqlx::query(
+        r#"UPDATE request_logs
+           SET response_reasoning_effort = CASE
+               WHEN upstream_response LIKE '%"effort":"minimal"%' THEN 'minimal'
+               WHEN upstream_response LIKE '%"effort":"low"%' THEN 'low'
+               WHEN upstream_response LIKE '%"effort":"medium"%' THEN 'medium'
+               WHEN upstream_response LIKE '%"effort":"high"%' THEN 'high'
+               WHEN upstream_response LIKE '%"effort":"max"%' THEN 'max'
+           END
+           WHERE response_reasoning_effort IS NULL
+             AND (upstream_response LIKE '%"effort":"minimal"%'
+               OR upstream_response LIKE '%"effort":"low"%'
+               OR upstream_response LIKE '%"effort":"medium"%'
+               OR upstream_response LIKE '%"effort":"high"%'
+               OR upstream_response LIKE '%"effort":"max"%')"#,
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO app_migrations (name) VALUES (?)")
+        .bind(RESPONSE_REASONING_EFFORT_BACKFILL)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn backfill_client_type_once(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let already_applied: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name = ?)")
+            .bind(CLIENT_TYPE_BACKFILL)
+            .fetch_one(&mut *tx)
+            .await?;
+    if already_applied != 0 {
+        tx.commit().await?;
+        return Ok(());
+    }
+
+    sqlx::query(
+        r#"WITH classified AS (
+               SELECT id,
+                   CASE
+                       WHEN json_valid(downstream_request)
+                         AND LOWER(COALESCE(json_extract(downstream_request, '$.headers.user-agent'), '')) LIKE '%opencode%' THEN 'opencode'
+                       WHEN json_valid(downstream_request)
+                         AND LOWER(COALESCE(json_extract(downstream_request, '$.headers.user-agent'), '')) LIKE '%codex%' THEN 'codex'
+                       WHEN path = 'messages'
+                         OR (json_valid(downstream_request)
+                           AND (LOWER(COALESCE(json_extract(downstream_request, '$.headers.user-agent'), '')) LIKE '%claude%'
+                             OR COALESCE(json_extract(downstream_request, '$.headers.anthropic-version'), '') <> '')) THEN 'claude'
+                   END AS detected_client_type
+               FROM request_logs
+           )
+           UPDATE request_logs
+           SET client_type = (
+               SELECT detected_client_type
+               FROM classified
+               WHERE classified.id = request_logs.id
+           )
+           WHERE EXISTS (
+               SELECT 1
+               FROM classified
+               WHERE classified.id = request_logs.id
+                 AND classified.detected_client_type IS NOT NULL
+                 AND classified.detected_client_type IS NOT request_logs.client_type
+           )"#,
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO app_migrations (name) VALUES (?)")
+        .bind(CLIENT_TYPE_BACKFILL)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+async fn migrate_request_log_payloads_once(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        r#"CREATE TABLE IF NOT EXISTS request_log_payloads (
+            request_log_id INTEGER PRIMARY KEY
+                REFERENCES request_logs(id) ON DELETE CASCADE,
+            request_snapshot TEXT,
+            upstream_request_override TEXT,
+            upstream_request_is_override INTEGER NOT NULL DEFAULT 0
+                CHECK (upstream_request_is_override IN (0, 1)),
+            response_snapshot TEXT,
+            downstream_response_override TEXT,
+            downstream_response_is_override INTEGER NOT NULL DEFAULT 0
+                CHECK (downstream_response_is_override IN (0, 1))
+        );"#,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    let already_applied: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name = ?)")
+            .bind(REQUEST_LOG_PAYLOADS_MIGRATION)
+            .fetch_one(&mut *tx)
+            .await?;
+    if already_applied != 0 {
+        tx.commit().await?;
+        return Ok(());
+    }
+
+    sqlx::query(
+        r#"INSERT OR IGNORE INTO request_log_payloads (
+               request_log_id,
+               request_snapshot,
+               upstream_request_override,
+               upstream_request_is_override,
+               response_snapshot,
+               downstream_response_override,
+               downstream_response_is_override
+           )
+           SELECT id,
+               downstream_request,
+               CASE WHEN upstream_request IS NOT downstream_request THEN upstream_request END,
+               upstream_request IS NOT downstream_request,
+               upstream_response,
+               CASE WHEN downstream_response IS NOT upstream_response THEN downstream_response END,
+               downstream_response IS NOT upstream_response
+           FROM request_logs"#,
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    let parent_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_logs")
+        .fetch_one(&mut *tx)
+        .await?;
+    let payload_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_log_payloads")
+        .fetch_one(&mut *tx)
+        .await?;
+    if parent_count != payload_count {
+        let error = sqlx::Error::Protocol(format!(
+            "request log payload migration row-count mismatch: {parent_count} request_logs, {payload_count} request_log_payloads"
+        ));
+        tx.rollback().await?;
+        return Err(error);
+    }
+
+    sqlx::query(
+        r#"UPDATE request_logs
+           SET downstream_request = NULL,
+               upstream_request = NULL,
+               upstream_response = NULL,
+               downstream_response = NULL
+           WHERE downstream_request IS NOT NULL
+              OR upstream_request IS NOT NULL
+              OR upstream_response IS NOT NULL
+              OR downstream_response IS NOT NULL"#,
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query("INSERT INTO app_migrations (name) VALUES (?)")
+        .bind(REQUEST_LOG_PAYLOADS_MIGRATION)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 /// Application shared state.
 #[derive(Clone)]
 pub struct AppState {
@@ -156,12 +335,11 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .split_whitespace()
             .next()
             .expect("column definition must start with a name");
-        let exists: Option<String> = sqlx::query_scalar(
-            "SELECT name FROM pragma_table_info('request_logs') WHERE name = ?",
-        )
-        .bind(column)
-        .fetch_optional(pool)
-        .await?;
+        let exists: Option<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info('request_logs') WHERE name = ?")
+                .bind(column)
+                .fetch_optional(pool)
+                .await?;
         if exists.is_none() {
             sqlx::query(&format!("ALTER TABLE request_logs ADD COLUMN {definition}"))
                 .execute(pool)
@@ -169,34 +347,23 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         }
     }
 
+    // ---------- app_migrations ----------
     sqlx::query(
-        r#"UPDATE request_logs
-           SET response_reasoning_effort = CASE
-               WHEN upstream_response LIKE '%"effort":"minimal"%' THEN 'minimal'
-               WHEN upstream_response LIKE '%"effort":"low"%' THEN 'low'
-               WHEN upstream_response LIKE '%"effort":"medium"%' THEN 'medium'
-               WHEN upstream_response LIKE '%"effort":"high"%' THEN 'high'
-               WHEN upstream_response LIKE '%"effort":"max"%' THEN 'max'
-           END
-           WHERE response_reasoning_effort IS NULL"#,
+        r#"
+        CREATE TABLE IF NOT EXISTS app_migrations (
+            name       TEXT PRIMARY KEY,
+            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        "#,
     )
     .execute(pool)
     .await?;
 
-    sqlx::query(
-        r#"UPDATE request_logs
-           SET client_type = CASE
-               WHEN LOWER(CASE WHEN json_valid(downstream_request) THEN COALESCE(json_extract(downstream_request, '$.headers.user-agent'), '') ELSE '' END) LIKE '%opencode%' THEN 'opencode'
-               WHEN LOWER(CASE WHEN json_valid(downstream_request) THEN COALESCE(json_extract(downstream_request, '$.headers.user-agent'), '') ELSE '' END) LIKE '%codex%' THEN 'codex'
-               WHEN path = 'messages'
-                 OR LOWER(CASE WHEN json_valid(downstream_request) THEN COALESCE(json_extract(downstream_request, '$.headers.user-agent'), '') ELSE '' END) LIKE '%claude%'
-                 OR LOWER(CASE WHEN json_valid(downstream_request) THEN COALESCE(json_extract(downstream_request, '$.headers.anthropic-version'), '') ELSE '' END) <> '' THEN 'claude'
-               ELSE 'unknown'
-           END
-           WHERE json_valid(downstream_request)"#,
-    )
-    .execute(pool)
-    .await?;
+    // These derivations must consume the legacy snapshots before the payload
+    // migration clears them from the hot request_logs table.
+    backfill_response_reasoning_effort_once(pool).await?;
+    backfill_client_type_once(pool).await?;
+    migrate_request_log_payloads_once(pool).await?;
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at);",
@@ -221,18 +388,6 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             enabled     INTEGER NOT NULL DEFAULT 1,
             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        "#,
-    )
-    .execute(pool)
-    .await?;
-
-    // ---------- app_migrations ----------
-    sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS app_migrations (
-            name       TEXT PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
         );
         "#,
     )
@@ -343,7 +498,7 @@ mod tests {
     use std::{sync::atomic::AtomicI64, sync::Arc, time::Instant};
 
     use argon2::{Argon2, PasswordHash, PasswordVerifier};
-    use sqlx::SqlitePool;
+    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
     use tokio::sync::RwLock;
 
     use crate::{
@@ -352,7 +507,18 @@ mod tests {
         proxy::matcher::BackoffManager,
     };
 
-    use super::{hash_admin_token, init_db, verify_admin_token, AppState};
+    use super::{
+        hash_admin_token, init_db, verify_admin_token, AppState, CLIENT_TYPE_BACKFILL,
+        REQUEST_LOG_PAYLOADS_MIGRATION, RESPONSE_REASONING_EFFORT_BACKFILL,
+    };
+
+    async fn test_pool() -> SqlitePool {
+        SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap()
+    }
 
     fn state_with_credential(credential: AdminCredential) -> AppState {
         AppState {
@@ -369,7 +535,7 @@ mod tests {
 
     #[tokio::test]
     async fn initialization_does_not_overwrite_existing_runtime_settings() {
-        let pool = SqlitePool::connect("sqlite::memory:").await.unwrap();
+        let pool = test_pool().await;
         init_db(&pool).await.unwrap();
         sqlx::query(
             "UPDATE runtime_settings SET log_body_keep_count = 42, revision = 7 WHERE id = 1",
@@ -387,6 +553,280 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(row, (42, 7));
+    }
+
+    #[tokio::test]
+    async fn payload_migration_deduplicates_snapshots_null_safely() {
+        let pool = test_pool().await;
+        init_db(&pool).await.unwrap();
+        sqlx::query("DELETE FROM app_migrations WHERE name IN (?, ?, ?)")
+            .bind(RESPONSE_REASONING_EFFORT_BACKFILL)
+            .bind(CLIENT_TYPE_BACKFILL)
+            .bind(REQUEST_LOG_PAYLOADS_MIGRATION)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let shared_request = r#"{"headers":{"user-agent":"codex-cli"}}"#;
+        let shared_response = r#"{"body":{"effort":"high"}}"#;
+        sqlx::query(
+            r#"INSERT INTO request_logs (
+                   id, method, path, client_type, downstream_request,
+                   upstream_request, upstream_response, downstream_response
+               ) VALUES (1, 'POST', 'responses', 'unknown', ?, ?, ?, ?)"#,
+        )
+        .bind(shared_request)
+        .bind(shared_request)
+        .bind(shared_response)
+        .bind(shared_response)
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO request_logs (
+                   id, method, path, downstream_request, upstream_request,
+                   upstream_response, downstream_response
+               ) VALUES (2, 'POST', 'responses', NULL, 'upstream-only-request',
+                   'upstream-only-response', NULL)"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO request_logs (
+                   id, method, path, downstream_request, upstream_request,
+                   upstream_response, downstream_response
+               ) VALUES (3, 'POST', 'responses', 'downstream-only-request', NULL,
+                   NULL, 'downstream-only-response')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        init_db(&pool).await.unwrap();
+
+        type PayloadRow = (
+            i64,
+            Option<String>,
+            Option<String>,
+            i64,
+            Option<String>,
+            Option<String>,
+            i64,
+        );
+        let payloads: Vec<PayloadRow> = sqlx::query_as(
+            r#"SELECT request_log_id, request_snapshot,
+                   upstream_request_override, upstream_request_is_override,
+                   response_snapshot, downstream_response_override,
+                   downstream_response_is_override
+               FROM request_log_payloads ORDER BY request_log_id"#,
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            payloads,
+            vec![
+                (
+                    1,
+                    Some(shared_request.into()),
+                    None,
+                    0,
+                    Some(shared_response.into()),
+                    None,
+                    0,
+                ),
+                (
+                    2,
+                    None,
+                    Some("upstream-only-request".into()),
+                    1,
+                    Some("upstream-only-response".into()),
+                    None,
+                    1,
+                ),
+                (
+                    3,
+                    Some("downstream-only-request".into()),
+                    None,
+                    1,
+                    None,
+                    Some("downstream-only-response".into()),
+                    1,
+                ),
+            ]
+        );
+
+        let legacy_rows_with_payloads: i64 = sqlx::query_scalar(
+            r#"SELECT COUNT(*) FROM request_logs
+               WHERE downstream_request IS NOT NULL
+                  OR upstream_request IS NOT NULL
+                  OR upstream_response IS NOT NULL
+                  OR downstream_response IS NOT NULL"#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(legacy_rows_with_payloads, 0);
+        let derived: (String, Option<String>) = sqlx::query_as(
+            "SELECT client_type, response_reasoning_effort FROM request_logs WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(derived, ("codex".into(), Some("high".into())));
+
+        init_db(&pool).await.unwrap();
+        let payload_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_log_payloads")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(payload_count, 3);
+    }
+
+    #[tokio::test]
+    async fn legacy_backfills_update_only_changed_matched_rows_and_run_once() {
+        let pool = test_pool().await;
+        init_db(&pool).await.unwrap();
+        sqlx::query("DELETE FROM app_migrations WHERE name IN (?, ?, ?)")
+            .bind(RESPONSE_REASONING_EFFORT_BACKFILL)
+            .bind(CLIENT_TYPE_BACKFILL)
+            .bind(REQUEST_LOG_PAYLOADS_MIGRATION)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"CREATE TABLE request_log_migration_audit (
+                   kind TEXT NOT NULL, request_log_id INTEGER NOT NULL
+               );
+               CREATE TRIGGER audit_client_type_update
+               AFTER UPDATE OF client_type ON request_logs
+               BEGIN
+                   INSERT INTO request_log_migration_audit VALUES ('client_type', NEW.id);
+               END;
+               CREATE TRIGGER audit_reasoning_effort_update
+               AFTER UPDATE OF response_reasoning_effort ON request_logs
+               BEGIN
+                   INSERT INTO request_log_migration_audit VALUES ('response_reasoning_effort', NEW.id);
+               END;"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"INSERT INTO request_logs (
+                   id, method, path, client_type, response_reasoning_effort,
+                   downstream_request, upstream_response
+               ) VALUES
+                   (1, 'POST', 'responses', 'unknown', NULL,
+                       '{"headers":{"user-agent":"codex-cli"}}', '{"effort":"high"}'),
+                   (2, 'POST', 'responses', 'codex', 'high',
+                       '{"headers":{"user-agent":"codex-cli"}}', '{"effort":"high"}'),
+                   (3, 'POST', 'responses', 'unknown', NULL,
+                       '{"headers":{"user-agent":"generic-client"}}', '{"result":"ok"}')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        init_db(&pool).await.unwrap();
+
+        let updates: Vec<(String, i64)> = sqlx::query_as(
+            "SELECT kind, request_log_id FROM request_log_migration_audit ORDER BY kind",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            updates,
+            vec![
+                ("client_type".into(), 1),
+                ("response_reasoning_effort".into(), 1),
+            ]
+        );
+
+        sqlx::query("DELETE FROM request_log_migration_audit")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"UPDATE request_logs
+               SET client_type = 'unknown', response_reasoning_effort = NULL,
+                   downstream_request = '{"headers":{"user-agent":"codex-cli"}}',
+                   upstream_response = '{"effort":"high"}'
+               WHERE id = 3"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("DELETE FROM request_log_migration_audit")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        init_db(&pool).await.unwrap();
+
+        let audit_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM request_log_migration_audit")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(audit_count, 0);
+        let unchanged: (String, Option<String>) = sqlx::query_as(
+            "SELECT client_type, response_reasoning_effort FROM request_logs WHERE id = 3",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(unchanged, ("unknown".into(), None));
+    }
+
+    #[tokio::test]
+    async fn payload_migration_keeps_legacy_columns_when_row_counts_do_not_match() {
+        let pool = test_pool().await;
+        init_db(&pool).await.unwrap();
+        sqlx::query("DELETE FROM app_migrations WHERE name = ?")
+            .bind(REQUEST_LOG_PAYLOADS_MIGRATION)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"INSERT INTO request_logs (
+                   id, method, path, downstream_request, upstream_request
+               ) VALUES (1, 'POST', 'responses', 'downstream', 'upstream')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            r#"CREATE TRIGGER skip_payload_backfill
+               BEFORE INSERT ON request_log_payloads
+               BEGIN
+                   SELECT RAISE(IGNORE);
+               END;"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let error = init_db(&pool).await.unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("request log payload migration row-count mismatch"));
+        let legacy: (Option<String>, Option<String>) = sqlx::query_as(
+            "SELECT downstream_request, upstream_request FROM request_logs WHERE id = 1",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(legacy, (Some("downstream".into()), Some("upstream".into())));
+        let migration_marked: i64 =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name = ?)")
+                .bind(REQUEST_LOG_PAYLOADS_MIGRATION)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(migration_marked, 0);
     }
 
     #[tokio::test]

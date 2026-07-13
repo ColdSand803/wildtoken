@@ -23,10 +23,6 @@ pub struct RequestLogRow {
     pub duration_ms: Option<i32>,
     pub first_token_ms: Option<i32>,
     pub error: Option<String>,
-    pub downstream_request: Option<String>,
-    pub upstream_request: Option<String>,
-    pub upstream_response: Option<String>,
-    pub downstream_response: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
