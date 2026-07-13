@@ -11,9 +11,7 @@ services:
     ports:
       - "3100:3100"
     volumes:
-      - ./data/wildtoken.db:/data/wildtoken.db
-      - ./data/wildtoken.db-shm:/data/wildtoken.db-shm
-      - ./data/wildtoken.db-wal:/data/wildtoken.db-wal
+      - wildtoken-data:/data
     healthcheck:
       test:
         [
@@ -26,3 +24,6 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+volumes:
+  wildtoken-data:
