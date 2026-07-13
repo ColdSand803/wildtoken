@@ -122,6 +122,7 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             path                TEXT NOT NULL,
             downstream_token_id INTEGER REFERENCES api_tokens(id) ON DELETE SET NULL,
             downstream_token_name TEXT,
+            client_type         TEXT NOT NULL DEFAULT 'unknown',
             upstream_id         INTEGER REFERENCES upstreams(id) ON DELETE SET NULL,
             upstream_name       TEXT,
             model               TEXT,
@@ -147,6 +148,7 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     for definition in [
         "downstream_token_id INTEGER REFERENCES api_tokens(id) ON DELETE SET NULL",
         "downstream_token_name TEXT",
+        "client_type TEXT NOT NULL DEFAULT 'unknown'",
     ] {
         let column = definition
             .split_whitespace()
@@ -164,6 +166,20 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 .await?;
         }
     }
+
+    sqlx::query(
+        r#"UPDATE request_logs
+           SET client_type = CASE
+               WHEN LOWER(COALESCE(downstream_request, '')) LIKE '%opencode%' THEN 'opencode'
+               WHEN LOWER(COALESCE(downstream_request, '')) LIKE '%codex%' THEN 'codex'
+               WHEN LOWER(COALESCE(downstream_request, '')) LIKE '%claude%'
+                 OR LOWER(COALESCE(downstream_request, '')) LIKE '%anthropic-version%' THEN 'claude'
+               ELSE 'unknown'
+           END
+           WHERE client_type IS NULL OR client_type = 'unknown'"#,
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at);",

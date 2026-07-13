@@ -126,6 +126,12 @@ impl ClientAbortLogGuard {
         }
     }
 
+    fn set_client_type(&mut self, client_type: &str) {
+        if let Some(entry) = &mut self.entry {
+            entry.client_type = Some(client_type.to_string());
+        }
+    }
+
     fn set_upstream(&mut self, upstream_id: i64, upstream_name: &str, forward_model: Option<&str>) {
         if let Some(entry) = &mut self.entry {
             entry.upstream_id = Some(upstream_id);
@@ -191,6 +197,7 @@ pub async fn proxy_handler(
 
     let mut abort_log = ClientAbortLogGuard::new(&state.db, &method, path);
     abort_log.set_downstream_token(auth.token_id, &auth.token_name);
+    abort_log.set_client_type(&auth.client_type);
 
     let body_bytes = match axum::body::to_bytes(req.into_body(), 50 * 1024 * 1024).await {
         Ok(body) => body,
@@ -265,6 +272,7 @@ pub async fn proxy_handler(
         &upstream,
         auth.token_id,
         &auth.token_name,
+        &auth.client_type,
         forward_model.as_deref(),
         &method,
         path,

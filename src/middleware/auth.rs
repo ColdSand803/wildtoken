@@ -69,12 +69,35 @@ impl FromRequestParts<AppState> for AdminAuth {
 pub struct DownstreamAuth {
     pub token_id: i64,
     pub token_name: String,
+    pub client_type: String,
 }
 
 pub struct DownstreamAuthRejection {
     anthropic: bool,
     status: StatusCode,
     message: &'static str,
+}
+
+fn detect_client_type(parts: &Parts, anthropic: bool) -> String {
+    let user_agent = parts
+        .headers
+        .get(axum::http::header::USER_AGENT)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    if user_agent.contains("opencode") {
+        "opencode".into()
+    } else if user_agent.contains("codex") {
+        "codex".into()
+    } else if anthropic
+        || user_agent.contains("claude")
+        || parts.headers.contains_key("anthropic-version")
+    {
+        "claude".into()
+    } else {
+        "unknown".into()
+    }
 }
 
 impl IntoResponse for DownstreamAuthRejection {
@@ -159,6 +182,7 @@ impl FromRequestParts<AppState> for DownstreamAuth {
         Ok(DownstreamAuth {
             token_id,
             token_name,
+            client_type: detect_client_type(parts, anthropic),
         })
     }
 }

@@ -11,6 +11,7 @@ pub struct LogEntry {
     pub path: String,
     pub downstream_token_id: Option<i64>,
     pub downstream_token_name: Option<String>,
+    pub client_type: Option<String>,
     pub upstream_id: Option<i64>,
     pub upstream_name: Option<String>,
     pub model: Option<String>,
@@ -232,7 +233,7 @@ async fn insert_log_entry(
 
     sqlx::query(
         r#"INSERT INTO request_logs
-            (method, path, downstream_token_id, downstream_token_name,
+            (method, path, downstream_token_id, downstream_token_name, client_type,
              upstream_id, upstream_name, model,
              reasoning_effort, stream, status_code,
              prompt_tokens, completion_tokens, total_tokens,
@@ -241,12 +242,13 @@ async fn insert_log_entry(
              upstream_response, downstream_response,
              created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                ?, ?, ?, ?, datetime('now'))"#,
+                ?, ?, ?, ?, ?, datetime('now'))"#,
     )
     .bind(&entry.method)
     .bind(&entry.path)
     .bind(entry.downstream_token_id)
     .bind(&entry.downstream_token_name)
+    .bind(&entry.client_type)
     .bind(entry.upstream_id)
     .bind(&entry.upstream_name)
     .bind(&entry.model)
