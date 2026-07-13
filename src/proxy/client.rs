@@ -486,36 +486,112 @@ fn sse_bytes_line_has_visible_token(line: &[u8]) -> bool {
         .is_some_and(sse_line_has_visible_token)
 }
 
-fn observe_sse_chunk_for_first_token(
+fn is_terminal_sse_event_type(event_type: &str) -> bool {
+    matches!(
+        event_type,
+        "response.completed"
+            | "response.failed"
+            | "response.incomplete"
+            | "response.cancelled"
+            | "message_stop"
+            | "error"
+    )
+}
+
+fn sse_bytes_line_is_terminal(line: &[u8]) -> bool {
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    let Ok(line) = std::str::from_utf8(line) else {
+        return false;
+    };
+    let line = line.trim();
+
+    if line
+        .strip_prefix("event:")
+        .map(str::trim)
+        .is_some_and(is_terminal_sse_event_type)
+    {
+        return true;
+    }
+
+    let Some(data) = line.strip_prefix("data:").map(str::trim_start) else {
+        return false;
+    };
+    if data == "[DONE]" {
+        return true;
+    }
+
+    serde_json::from_str::<serde_json::Value>(data)
+        .ok()
+        .is_some_and(|value| {
+            value
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(is_terminal_sse_event_type)
+        })
+}
+
+fn observe_sse_line(
+    line: &[u8],
+    first_token_ms: &mut Option<i32>,
+    terminal_event_pending: &mut bool,
+    terminal_event_seen: &mut bool,
+    start: std::time::Instant,
+) {
+    if first_token_ms.is_none() && sse_bytes_line_has_visible_token(line) {
+        *first_token_ms = Some(start.elapsed().as_millis() as i32);
+    }
+
+    let line_without_cr = line.strip_suffix(b"\r").unwrap_or(line);
+    if line_without_cr.is_empty() {
+        if *terminal_event_pending {
+            *terminal_event_seen = true;
+        }
+        *terminal_event_pending = false;
+    } else if !*terminal_event_seen && sse_bytes_line_is_terminal(line) {
+        *terminal_event_pending = true;
+    }
+}
+
+fn observe_sse_chunk(
     chunk: &[u8],
     line_buf: &mut Vec<u8>,
     first_token_ms: &mut Option<i32>,
+    terminal_event_pending: &mut bool,
+    terminal_event_seen: &mut bool,
     start: std::time::Instant,
 ) {
-    if first_token_ms.is_some() {
-        return;
-    }
-
     line_buf.extend_from_slice(chunk);
     while let Some(pos) = line_buf.iter().position(|byte| *byte == b'\n') {
         let rest = line_buf.split_off(pos + 1);
         line_buf.truncate(pos);
-        let has_visible_token = sse_bytes_line_has_visible_token(line_buf);
+        observe_sse_line(
+            line_buf,
+            first_token_ms,
+            terminal_event_pending,
+            terminal_event_seen,
+            start,
+        );
         *line_buf = rest;
-        if has_visible_token {
-            *first_token_ms = Some(start.elapsed().as_millis() as i32);
-            break;
-        }
     }
 }
 
-fn observe_sse_end_for_first_token(
+fn observe_sse_end(
     line_buf: &[u8],
     first_token_ms: &mut Option<i32>,
+    terminal_event_pending: &mut bool,
+    terminal_event_seen: &mut bool,
     start: std::time::Instant,
 ) {
-    if first_token_ms.is_none() && sse_bytes_line_has_visible_token(line_buf) {
-        *first_token_ms = Some(start.elapsed().as_millis() as i32);
+    observe_sse_line(
+        line_buf,
+        first_token_ms,
+        terminal_event_pending,
+        terminal_event_seen,
+        start,
+    );
+    if *terminal_event_pending {
+        *terminal_event_seen = true;
+        *terminal_event_pending = false;
     }
 }
 
@@ -656,6 +732,8 @@ async fn read_response_body(
 ) -> Result<(Vec<u8>, Option<i32>), reqwest::Error> {
     let mut body_bytes = Vec::new();
     let mut first_token_ms = None;
+    let mut terminal_event_pending = false;
+    let mut terminal_event_seen = false;
     let mut line_buf = Vec::new();
     let mut stream = response.bytes_stream();
 
@@ -663,11 +741,24 @@ async fn read_response_body(
         let chunk = chunk?;
         body_bytes.extend_from_slice(&chunk);
 
-        observe_sse_chunk_for_first_token(&chunk, &mut line_buf, &mut first_token_ms, start);
+        observe_sse_chunk(
+            &chunk,
+            &mut line_buf,
+            &mut first_token_ms,
+            &mut terminal_event_pending,
+            &mut terminal_event_seen,
+            start,
+        );
     }
 
     // Final partial line (rare, but keep parity with buffered detection).
-    observe_sse_end_for_first_token(&line_buf, &mut first_token_ms, start);
+    observe_sse_end(
+        &line_buf,
+        &mut first_token_ms,
+        &mut terminal_event_pending,
+        &mut terminal_event_seen,
+        start,
+    );
 
     Ok((body_bytes, first_token_ms))
 }
@@ -677,6 +768,8 @@ struct SseStreamState {
     body_bytes: Vec<u8>,
     line_buf: Vec<u8>,
     first_token_ms: Option<i32>,
+    terminal_event_pending: bool,
+    terminal_event_seen: bool,
     start: std::time::Instant,
     upstream_status: u16,
     response_headers: HashMap<String, String>,
@@ -703,7 +796,13 @@ impl SseStreamState {
             return;
         };
 
-        observe_sse_end_for_first_token(&self.line_buf, &mut self.first_token_ms, self.start);
+        observe_sse_end(
+            &self.line_buf,
+            &mut self.first_token_ms,
+            &mut self.terminal_event_pending,
+            &mut self.terminal_event_seen,
+            self.start,
+        );
         let (prompt_tokens, completion_tokens, total_tokens) =
             extract_usage(&self.body_bytes, &self.content_type);
         let response_reasoning_effort =
@@ -742,11 +841,22 @@ impl SseStreamState {
 impl Drop for SseStreamState {
     fn drop(&mut self) {
         if self.log_entry.is_some() {
-            self.record_response_health();
-            self.finish_log(
-                499,
-                Some("client disconnected before the SSE response completed".to_string()),
+            observe_sse_end(
+                &self.line_buf,
+                &mut self.first_token_ms,
+                &mut self.terminal_event_pending,
+                &mut self.terminal_event_seen,
+                self.start,
             );
+            if self.terminal_event_seen {
+                self.finish_complete();
+            } else {
+                self.record_response_health();
+                self.finish_log(
+                    499,
+                    Some("client disconnected before the SSE response completed".to_string()),
+                );
+            }
         }
     }
 }
@@ -887,6 +997,8 @@ pub async fn proxy_request(
             body_bytes: Vec::new(),
             line_buf: Vec::new(),
             first_token_ms: None,
+            terminal_event_pending: false,
+            terminal_event_seen: false,
             start,
             upstream_status: status_u16,
             response_headers: resp_headers.clone(),
@@ -906,12 +1018,17 @@ pub async fn proxy_request(
             match stream_state.stream.next().await {
                 Some(Ok(chunk)) => {
                     stream_state.body_bytes.extend_from_slice(&chunk);
-                    observe_sse_chunk_for_first_token(
+                    observe_sse_chunk(
                         &chunk,
                         &mut stream_state.line_buf,
                         &mut stream_state.first_token_ms,
+                        &mut stream_state.terminal_event_pending,
+                        &mut stream_state.terminal_event_seen,
                         stream_state.start,
                     );
+                    if stream_state.terminal_event_seen {
+                        stream_state.finish_complete();
+                    }
                     Some((Ok::<Bytes, std::io::Error>(chunk), stream_state))
                 }
                 Some(Err(error)) => {
@@ -1032,7 +1149,7 @@ pub async fn proxy_request(
 mod tests {
     use super::{
         build_forward_headers, extract_first_token_ms, extract_usage, prepare_upstream_body,
-        proxy_request, validate_header_overrides,
+        proxy_request, sse_bytes_line_is_terminal, validate_header_overrides,
     };
     use crate::{
         config::Settings,
@@ -1117,6 +1234,23 @@ mod tests {
             extract_usage(response, "text/event-stream"),
             (Some(99424), Some(440), Some(99864))
         );
+    }
+
+    #[test]
+    fn recognizes_sse_protocol_terminal_events() {
+        for line in [
+            b"data: [DONE]".as_slice(),
+            b"event: response.completed".as_slice(),
+            b"data: {\"type\":\"response.failed\"}".as_slice(),
+            b"event: message_stop".as_slice(),
+            b"event: error".as_slice(),
+        ] {
+            assert!(sse_bytes_line_is_terminal(line));
+        }
+
+        assert!(!sse_bytes_line_is_terminal(
+            b"event: response.output_item.done"
+        ));
     }
 
     #[test]

@@ -338,32 +338,48 @@ mod tests {
     };
     use tokio::sync::{Notify, RwLock};
 
-    const FIRST_EVENT: &[u8] = b"data: {\"choices\":[{\"delta\":{\"content\":\"first\"}}]}\n\n";
-    const FINAL_EVENTS: &[u8] = b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\ndata: [DONE]\n\n";
+    const FIRST_EVENT: &[u8] = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n";
+    const FINAL_EVENT_HEADER: &[u8] = b"event: response.completed\n";
+    const FINAL_EVENT_DATA: &[u8] = b"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}}\n\n";
 
     #[tokio::test]
     async fn sse_is_streamed_end_to_end_and_logged_after_completion() {
         let release_final_event = Arc::new(Notify::new());
+        let keep_upstream_open = Arc::new(Notify::new());
         let upstream_release = Arc::clone(&release_final_event);
+        let upstream_keep_open = Arc::clone(&keep_upstream_open);
         let upstream_app = Router::new().route(
-            "/v1/chat/completions",
+            "/v1/responses",
             post(move || {
                 let release = Arc::clone(&upstream_release);
+                let keep_open = Arc::clone(&upstream_keep_open);
                 async move {
-                    let stream =
-                        futures::stream::unfold((0_u8, release), |(step, release)| async move {
+                    let stream = futures::stream::unfold(
+                        (0_u8, release, keep_open),
+                        |(step, release, keep_open)| async move {
                             match step {
                                 0 => Some((
                                     Ok::<Bytes, Infallible>(Bytes::from_static(FIRST_EVENT)),
-                                    (1, release),
+                                    (1, release, keep_open),
                                 )),
                                 1 => {
                                     release.notified().await;
-                                    Some((Ok(Bytes::from_static(FINAL_EVENTS)), (2, release)))
+                                    Some((
+                                        Ok(Bytes::from_static(FINAL_EVENT_HEADER)),
+                                        (2, release, keep_open),
+                                    ))
                                 }
-                                _ => None,
+                                2 => Some((
+                                    Ok(Bytes::from_static(FINAL_EVENT_DATA)),
+                                    (3, release, keep_open),
+                                )),
+                                _ => {
+                                    keep_open.notified().await;
+                                    None
+                                }
                             }
-                        });
+                        },
+                    );
                     Response::builder()
                         .status(StatusCode::OK)
                         .header(header::CONTENT_TYPE, "text/event-stream; charset=utf-8")
@@ -424,10 +440,10 @@ mod tests {
         let response = tokio::time::timeout(
             Duration::from_secs(1),
             reqwest::Client::new()
-                .post(format!("http://{proxy_address}/v1/chat/completions"))
+                .post(format!("http://{proxy_address}/v1/responses"))
                 .bearer_auth("downstream-secret")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(r#"{"model":"stream-model","stream":true,"messages":[]}"#)
+                .body(r#"{"model":"stream-model","stream":true,"input":[]}"#)
                 .send(),
         )
         .await
@@ -460,7 +476,10 @@ mod tests {
         {
             received.extend_from_slice(&chunk.unwrap());
         }
-        assert_eq!(&received[FIRST_EVENT.len()..], FINAL_EVENTS);
+        assert_eq!(
+            &received[FIRST_EVENT.len()..],
+            [FINAL_EVENT_HEADER, FINAL_EVENT_DATA].concat()
+        );
 
         let log = tokio::time::timeout(Duration::from_secs(1), async {
             loop {
@@ -509,7 +528,7 @@ mod tests {
         let response_snapshot: serde_json::Value =
             serde_json::from_str(&response_snapshot).unwrap();
         let logged_body = response_snapshot["body"]["text"].as_str().unwrap();
-        assert!(logged_body.contains("\"content\":\"first\""));
+        assert!(logged_body.contains("\"delta\":\"first\""));
         assert!(logged_body.contains("\"total_tokens\":18"));
 
         proxy_server.abort();
