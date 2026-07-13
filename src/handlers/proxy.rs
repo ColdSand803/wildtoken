@@ -60,14 +60,26 @@ fn get_upstream_selector(headers: &HeaderMap, query: Option<&str>) -> Option<Str
     })
 }
 
-fn openai_error_response(status: StatusCode, message: &str, error_type: &str) -> Response {
-    let body = json!({
-        "error": {
-            "message": message,
-            "type": error_type,
-            "code": null
-        }
-    });
+fn protocol_error_response(
+    status: StatusCode,
+    path: &str,
+    message: &str,
+    error_type: &str,
+) -> Response {
+    let body = if path.trim_matches('/') == "messages" {
+        json!({
+            "type": "error",
+            "error": {"type": error_type, "message": message}
+        })
+    } else {
+        json!({
+            "error": {
+                "message": message,
+                "type": error_type,
+                "code": null
+            }
+        })
+    };
     Response::builder()
         .status(status)
         .header("content-type", "application/json")
@@ -210,8 +222,9 @@ pub async fn proxy_handler(
 
     let Some((upstream, forward_model)) = selected else {
         abort_log.disarm();
-        return Ok(openai_error_response(
+        return Ok(protocol_error_response(
             StatusCode::SERVICE_UNAVAILABLE,
+            path,
             "No enabled upstream is configured",
             "upstream_not_configured",
         ));
@@ -220,7 +233,7 @@ pub async fn proxy_handler(
     abort_log.set_upstream(upstream.id, &upstream.name, forward_model.as_deref());
     let log_body_max_bytes = state.runtime_settings.read().await.log_body_max_bytes as usize;
     let upstream_url = client::build_upstream_url(&upstream, path, query);
-    let fwd_headers = client::build_forward_headers(&headers, &upstream);
+    let fwd_headers = client::build_forward_headers(&headers, &upstream, path);
     let downstream_snap = logging::snapshot_request(
         &method,
         &upstream_url,

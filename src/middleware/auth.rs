@@ -1,6 +1,7 @@
 use axum::{
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
+    response::{IntoResponse, Response},
     Json,
 };
 use std::sync::atomic::Ordering;
@@ -67,21 +68,67 @@ impl FromRequestParts<AppState> for AdminAuth {
 /// Returns an OpenAI-compatible error body on failure.
 pub struct DownstreamAuth;
 
+pub struct DownstreamAuthRejection {
+    anthropic: bool,
+    status: StatusCode,
+    message: &'static str,
+}
+
+impl IntoResponse for DownstreamAuthRejection {
+    fn into_response(self) -> Response {
+        if self.anthropic {
+            (
+                self.status,
+                Json(serde_json::json!({
+                    "type": "error",
+                    "error": {"type": "authentication_error", "message": self.message}
+                })),
+            )
+                .into_response()
+        } else {
+            (
+                self.status,
+                Json(serde_json::json!({
+                    "error": {
+                        "message": self.message,
+                        "type": "invalid_api_key",
+                        "code": "invalid_api_key"
+                    }
+                })),
+            )
+                .into_response()
+        }
+    }
+}
+
 impl FromRequestParts<AppState> for DownstreamAuth {
-    type Rejection = (StatusCode, Json<serde_json::Value>);
+    type Rejection = DownstreamAuthRejection;
 
     async fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        let anthropic = parts.uri.path().trim_end_matches('/') == "/v1/messages";
         let auth_header = parts
             .headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
 
-        let token = if auth_header.to_lowercase().starts_with("bearer ") {
+        let bearer_token = if auth_header.to_lowercase().starts_with("bearer ") {
             auth_header[7..].trim()
+        } else {
+            ""
+        };
+        let token = if !bearer_token.is_empty() {
+            bearer_token
+        } else if anthropic {
+            parts
+                .headers
+                .get("x-api-key")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .trim()
         } else {
             ""
         };
@@ -91,24 +138,18 @@ impl FromRequestParts<AppState> for DownstreamAuth {
                 .bind(token)
                 .fetch_optional(&state.db)
                 .await
-                .map_err(|_| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(serde_json::json!({"error": "database error"})),
-                    )
+                .map_err(|_| DownstreamAuthRejection {
+                    anthropic,
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    message: "database error",
                 })?;
 
         if row.is_none() {
-            return Err((
-                StatusCode::UNAUTHORIZED,
-                Json(serde_json::json!({
-                    "error": {
-                        "message": "Incorrect API key provided",
-                        "type": "invalid_api_key",
-                        "code": "invalid_api_key"
-                    }
-                })),
-            ));
+            return Err(DownstreamAuthRejection {
+                anthropic,
+                status: StatusCode::UNAUTHORIZED,
+                message: "Incorrect API key provided",
+            });
         }
 
         Ok(DownstreamAuth)

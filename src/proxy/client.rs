@@ -22,6 +22,8 @@ pub const HOP_BY_HOP_HEADERS: &[&str] = &[
     "proxy-authorization",
     "proxy-authenticate",
     "x-wildtoken-upstream",
+    // This is a downstream Anthropic credential. Never leak it to an upstream.
+    "x-api-key",
 ];
 
 /// Headers whose values should be redacted in logging context.
@@ -76,6 +78,7 @@ pub fn build_upstream_url(
 pub fn build_forward_headers(
     downstream_headers: &axum::http::HeaderMap,
     upstream: &UpstreamRow,
+    path: &str,
 ) -> HashMap<String, String> {
     let mut out = HashMap::new();
 
@@ -96,10 +99,20 @@ pub fn build_forward_headers(
     // Prefer uncompressed responses so we can log usage from body text.
     out.insert("accept-encoding".into(), "identity".into());
 
-    // Always override Authorization when upstream has an api_key.
+    let is_anthropic_messages = path.trim_matches('/') == "messages";
+
+    // Always replace downstream credentials with the selected upstream key.
     if let Some(ref key) = upstream.api_key {
         if !key.is_empty() {
-            out.insert("authorization".into(), format!("Bearer {key}"));
+            if is_anthropic_messages {
+                out.insert("x-api-key".into(), key.to_string());
+                // All supported Anthropic Messages API versions use this value.
+                // A configured extra header below can explicitly override it.
+                out.entry("anthropic-version".into())
+                    .or_insert_with(|| "2023-06-01".into());
+            } else {
+                out.insert("authorization".into(), format!("Bearer {key}"));
+            }
         }
     }
 
@@ -124,6 +137,23 @@ fn non_empty_str(value: &serde_json::Value) -> bool {
 /// Counts text deltas and the first non-empty tool-call delta (common when the
 /// model streams only function calls without content/reasoning text).
 fn json_has_visible_token(obj: &serde_json::Value) -> bool {
+    // Anthropic Messages API streaming events.
+    if obj
+        .get("type")
+        .and_then(|v| v.as_str())
+        .is_some_and(|t| t == "content_block_delta" || t == "content_block_start")
+    {
+        let delta = obj.get("delta").or_else(|| obj.get("content_block"));
+        if let Some(delta) = delta {
+            if non_empty_str(&delta["text"])
+                || non_empty_str(&delta["thinking"])
+                || non_empty_str(&delta["partial_json"])
+            {
+                return true;
+            }
+        }
+    }
+
     if let Some(choices) = obj.get("choices").and_then(|v| v.as_array()) {
         for choice in choices {
             let delta = &choice["delta"];
@@ -412,7 +442,7 @@ pub async fn proxy_request(
     let reasoning_effort = extract_reasoning_effort(body);
 
     let url = build_upstream_url(upstream, path, query_params);
-    let fwd_headers = build_forward_headers(downstream_headers, upstream);
+    let fwd_headers = build_forward_headers(downstream_headers, upstream, path);
     let log_body_max_bytes = state.runtime_settings.read().await.log_body_max_bytes as usize;
 
     let downstream_snap =
@@ -582,7 +612,11 @@ pub async fn proxy_request(
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_usage, prepare_upstream_body};
+    use super::{
+        build_forward_headers, extract_first_token_ms, extract_usage, prepare_upstream_body,
+    };
+    use crate::models::upstream::UpstreamRow;
+    use axum::http::{HeaderMap, HeaderValue};
     use serde_json::json;
 
     #[test]
@@ -627,5 +661,43 @@ mod tests {
             extract_usage(response, "text/event-stream"),
             (Some(99424), Some(440), Some(99864))
         );
+    }
+
+    #[test]
+    fn anthropic_messages_uses_upstream_x_api_key_and_hides_downstream_key() {
+        let mut downstream = HeaderMap::new();
+        downstream.insert("x-api-key", HeaderValue::from_static("downstream-secret"));
+        let upstream = UpstreamRow {
+            id: 1,
+            name: "anthropic".into(),
+            base_url: "https://api.anthropic.com".into(),
+            api_key: Some("upstream-secret".into()),
+            model_names: "[]".into(),
+            model_prefixes: "[]".into(),
+            model_mappings: "{}".into(),
+            priority: 100,
+            enabled: 1,
+            extra_headers: "{}".into(),
+            timeout_seconds: 30.0,
+            created_at: "".into(),
+            updated_at: "".into(),
+        };
+
+        let headers = build_forward_headers(&downstream, &upstream, "messages");
+        assert_eq!(
+            headers.get("x-api-key"),
+            Some(&"upstream-secret".to_string())
+        );
+        assert_eq!(
+            headers.get("anthropic-version"),
+            Some(&"2023-06-01".to_string())
+        );
+        assert!(!headers.contains_key("authorization"));
+    }
+
+    #[test]
+    fn anthropic_content_delta_counts_as_first_token() {
+        let event = b"data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello\"}}\n\n";
+        assert_eq!(extract_first_token_ms(event), Some(0));
     }
 }

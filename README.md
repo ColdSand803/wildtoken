@@ -1,6 +1,6 @@
 # WildToken
 
-WildToken 是一个 Rust 版 OpenAI 兼容 LLM API 中转服务，监听 `3100` 端口。它向下游暴露 `/v1/*` API，并按渠道配置把请求转发到不同上游服务。
+WildToken 是一个 Rust 版 OpenAI 与 Anthropic Messages API 兼容的 LLM API 中转服务，监听 `3100` 端口。它向下游暴露 `/v1/*` API，并按渠道配置把请求转发到不同上游服务。
 
 ## 启动
 
@@ -58,6 +58,8 @@ APP__SERVER__PORT=3100 DATABASE_URL='sqlite:wildtoken.db?mode=rwc' cargo run
 
 调用 `/v1/*` 需要携带令牌管理页中启用的下游令牌。
 
+`POST /v1/messages` 兼容 Anthropic Messages API：可用标准的 `x-api-key` 下游令牌和 `anthropic-version` 请求头。请求、响应和 SSE 事件均原样透传；为此类请求配置渠道 API Key 时，WildToken 会向上游使用 `x-api-key`，并在未指定时补充 `anthropic-version: 2023-06-01`。因此该渠道的 Base URL 应指向 Anthropic 兼容上游（例如 `https://api.anthropic.com`）。
+
 ## 下游调用示例
 
 ```bash
@@ -66,6 +68,20 @@ curl http://127.0.0.1:3100/v1/chat/completions \
   -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>' \
   -d '{
     "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "hello"}]
+  }'
+```
+
+Anthropic Messages API：
+
+```bash
+curl http://127.0.0.1:3100/v1/messages \
+  -H 'Content-Type: application/json' \
+  -H 'x-api-key: <DOWNSTREAM_TOKEN>' \
+  -H 'anthropic-version: 2023-06-01' \
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 128,
     "messages": [{"role": "user", "content": "hello"}]
   }'
 ```
