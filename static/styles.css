@@ -3495,7 +3495,7 @@ td.no-match-state {
 }
 
 .dashboard-kpis,
-.dashboard-token-kpis {
+.dashboard-window-kpis {
   display: grid;
   gap: 10px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3505,7 +3505,7 @@ td.no-match-state {
   margin-bottom: 14px;
 }
 
-.dashboard-token-card {
+.dashboard-window-card {
   margin-bottom: 14px;
 }
 
@@ -3835,7 +3835,7 @@ html[data-density="compact"] .dashboard-latency-summary {
 }
 
 html[data-density="compact"] .dashboard-kpis,
-html[data-density="compact"] .dashboard-token-kpis {
+html[data-density="compact"] .dashboard-window-kpis {
   gap: 8px;
 }
 
@@ -3843,7 +3843,7 @@ html[data-density="compact"] .dashboard-kpis {
   margin-bottom: 10px;
 }
 
-html[data-density="compact"] .dashboard-token-card {
+html[data-density="compact"] .dashboard-window-card {
   margin-bottom: 10px;
 }
 
@@ -3853,14 +3853,14 @@ html[data-density="compact"] .dashboard-grid {
 
 @media (max-width: 1100px) {
   .dashboard-kpis,
-  .dashboard-token-kpis {
+  .dashboard-window-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 760px) {
   .dashboard-kpis,
-  .dashboard-token-kpis {
+  .dashboard-window-kpis {
     grid-template-columns: minmax(0, 1fr);
   }
 

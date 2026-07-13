@@ -117,6 +117,7 @@ const dashboardScope = document.querySelector("#dashboard-scope");
 const dashboardRefreshButton = document.querySelector("#dashboard-refresh");
 const dashboardKpis = document.querySelector("#dashboard-kpis");
 const dashboardTokenKpis = document.querySelector("#dashboard-token-kpis");
+const dashboardRequestKpis = document.querySelector("#dashboard-request-kpis");
 const dashboardStatusChart = document.querySelector("#dashboard-status-chart");
 const dashboardStatusMeta = document.querySelector("#dashboard-status-meta");
 const dashboardLatencyChart = document.querySelector("#dashboard-latency-chart");
@@ -846,6 +847,17 @@ function tokenUsageCard(label, usage, scopeLabel) {
   };
 }
 
+function requestCountCard(label, usage, scopeLabel) {
+  const requestCount = Number(usage?.all_request_count);
+  const safeCount = Number.isFinite(requestCount) && requestCount > 0 ? requestCount : 0;
+  return {
+    value: formatCompactNumber(safeCount),
+    label,
+    hint: `${scopeLabel} · 全部日志`,
+    tone: "",
+  };
+}
+
 function renderDashboardKpiCards(container, cards) {
   if (!container) return;
   container.innerHTML = cards.map((card) => `
@@ -1015,6 +1027,12 @@ function renderDashboard() {
     tokenUsageCard("1d Tokens", dashboardTokenUsage?.one_day, "最近 24 小时"),
     tokenUsageCard("7d Tokens", dashboardTokenUsage?.seven_days, "最近 7 天"),
     tokenUsageCard("30d Tokens", dashboardTokenUsage?.thirty_days, "最近 30 天"),
+  ]);
+  renderDashboardKpiCards(dashboardRequestKpis, [
+    requestCountCard("今天请求", dashboardTokenUsage?.today, "本地日累计"),
+    requestCountCard("1d 请求", dashboardTokenUsage?.one_day, "最近 24 小时"),
+    requestCountCard("7d 请求", dashboardTokenUsage?.seven_days, "最近 7 天"),
+    requestCountCard("30d 请求", dashboardTokenUsage?.thirty_days, "最近 30 天"),
   ]);
 
   const { c2, c4, c5, cOther } = countStatusBuckets(items);

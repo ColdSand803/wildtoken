@@ -69,7 +69,10 @@ pub struct RequestLogPage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenUsageWindowOut {
     pub total_tokens: i64,
+    /// Requests with a recorded token total, retained for the token usage card hint.
     pub request_count: i64,
+    /// Every request log in the window, including errors and responses without usage.
+    pub all_request_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

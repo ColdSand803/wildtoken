@@ -246,7 +246,7 @@ pub async fn get_log_detail(
 }
 
 pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, AppError> {
-    let row: (i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+    let row: (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
         r#"
         SELECT
             COALESCE(SUM(CASE
@@ -257,12 +257,18 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
                  AND total_tokens IS NOT NULL
                 THEN 1 ELSE 0 END), 0) AS today_requests,
             COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', 'localtime', 'start of day', 'utc')
+                THEN 1 ELSE 0 END), 0) AS today_all_requests,
+            COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', '-1 day')
                 THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS one_day_tokens,
             COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', '-1 day')
                  AND total_tokens IS NOT NULL
                 THEN 1 ELSE 0 END), 0) AS one_day_requests,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', '-1 day')
+                THEN 1 ELSE 0 END), 0) AS one_day_all_requests,
             COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', '-7 days')
                 THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS seven_days_tokens,
@@ -271,12 +277,18 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
                  AND total_tokens IS NOT NULL
                 THEN 1 ELSE 0 END), 0) AS seven_days_requests,
             COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', '-7 days')
+                THEN 1 ELSE 0 END), 0) AS seven_days_all_requests,
+            COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', '-30 days')
                 THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS thirty_days_tokens,
             COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', '-30 days')
                  AND total_tokens IS NOT NULL
-                THEN 1 ELSE 0 END), 0) AS thirty_days_requests
+                THEN 1 ELSE 0 END), 0) AS thirty_days_requests,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', '-30 days')
+                THEN 1 ELSE 0 END), 0) AS thirty_days_all_requests
         FROM request_logs
         "#,
     )
@@ -287,18 +299,22 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
         today: TokenUsageWindowOut {
             total_tokens: row.0,
             request_count: row.1,
+            all_request_count: row.2,
         },
         one_day: TokenUsageWindowOut {
-            total_tokens: row.2,
-            request_count: row.3,
+            total_tokens: row.3,
+            request_count: row.4,
+            all_request_count: row.5,
         },
         seven_days: TokenUsageWindowOut {
-            total_tokens: row.4,
-            request_count: row.5,
-        },
-        thirty_days: TokenUsageWindowOut {
             total_tokens: row.6,
             request_count: row.7,
+            all_request_count: row.8,
+        },
+        thirty_days: TokenUsageWindowOut {
+            total_tokens: row.9,
+            request_count: row.10,
+            all_request_count: row.11,
         },
     })
 }
@@ -400,7 +416,9 @@ pub async fn clear_old_log_bodies(pool: &SqlitePool, keep_count: i64) -> Result<
 mod tests {
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
-    use super::{clear_old_log_bodies, delete_old_logs, get_log_detail, list_logs};
+    use super::{
+        clear_old_log_bodies, delete_old_logs, get_log_detail, list_logs, token_usage_stats,
+    };
 
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
@@ -485,6 +503,57 @@ mod tests {
 
         assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), [1, 3]);
         assert_eq!(recent_rpm, 2);
+    }
+
+    #[tokio::test]
+    async fn usage_windows_count_all_requests_even_without_token_data() {
+        let pool = test_pool().await;
+        sqlx::query(
+            r#"INSERT INTO request_logs (id, created_at, total_tokens) VALUES
+               (1, datetime('now'), 100),
+               (2, datetime('now'), NULL),
+               (3, datetime('now', '-2 days'), 200),
+               (4, datetime('now', '-8 days'), NULL),
+               (5, datetime('now', '-31 days'), 400)"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let stats = token_usage_stats(&pool).await.unwrap();
+
+        assert_eq!(
+            (
+                stats.today.total_tokens,
+                stats.today.request_count,
+                stats.today.all_request_count,
+            ),
+            (100, 1, 2)
+        );
+        assert_eq!(
+            (
+                stats.one_day.total_tokens,
+                stats.one_day.request_count,
+                stats.one_day.all_request_count,
+            ),
+            (100, 1, 2)
+        );
+        assert_eq!(
+            (
+                stats.seven_days.total_tokens,
+                stats.seven_days.request_count,
+                stats.seven_days.all_request_count,
+            ),
+            (300, 2, 3)
+        );
+        assert_eq!(
+            (
+                stats.thirty_days.total_tokens,
+                stats.thirty_days.request_count,
+                stats.thirty_days.all_request_count,
+            ),
+            (300, 2, 4)
+        );
     }
 
     #[tokio::test]
