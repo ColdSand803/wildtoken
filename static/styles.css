@@ -963,12 +963,19 @@ th {
 
 .table-sort-button:hover,
 .table-sort-button:focus-visible {
+  background: var(--panel-muted);
+  box-shadow: none;
   color: var(--text);
 }
 
 .table-sort-button span {
   color: var(--accent);
   min-width: 0.75em;
+}
+
+.table-sort-button:hover span,
+.table-sort-button:focus-visible span {
+  color: var(--text);
 }
 
 tbody tr {
