@@ -644,6 +644,7 @@ function debounce(fn, wait = 150) {
 
 const DEFAULT_UPSTREAM_COLUMNS = {
   check: true,
+  id: true,
   name: true,
   base_url: true,
   models: true,
@@ -662,11 +663,12 @@ const DEFAULT_LOG_COLUMNS = {
   tokens: true,
 };
 
-const UPSTREAM_LOCKED_COLS = new Set(["check", "name", "actions"]);
+const UPSTREAM_LOCKED_COLS = new Set(["check", "id", "name", "actions"]);
 const LOG_LOCKED_COLS = new Set(["time", "status"]);
 
 const UPSTREAM_COL_LABELS = {
   check: "选择",
+  id: "ID",
   name: "名称",
   base_url: "Base URL",
   models: "模型匹配",
@@ -740,6 +742,7 @@ function cycleDensity() {
 
 let upstreamColumns = readJsonStorage(UPSTREAM_COLUMNS_KEY, DEFAULT_UPSTREAM_COLUMNS);
 let logColumns = readJsonStorage(LOG_COLUMNS_KEY, DEFAULT_LOG_COLUMNS);
+let upstreamSort = { key: "priority", direction: "desc" };
 
 function applyColumnVisibility(table, columns, prefix) {
   if (!table) return;
@@ -1292,7 +1295,58 @@ function getFilteredUpstreams() {
       .join(" ")
       .toLowerCase();
     return haystack.includes(query);
-  });
+  }).sort(compareUpstreams);
+}
+
+function upstreamStatusRank(upstream) {
+  if (!upstream.enabled) return 2;
+  return liveBackoffSeconds(upstream) > 0 ? 1 : 0;
+}
+
+function compareUpstreams(left, right) {
+  let comparison;
+  switch (upstreamSort.key) {
+    case "id":
+      comparison = left.id - right.id;
+      break;
+    case "name":
+      comparison = String(left.name || "").localeCompare(String(right.name || ""), "zh-CN");
+      break;
+    case "status":
+      comparison = upstreamStatusRank(left) - upstreamStatusRank(right);
+      break;
+    case "priority":
+    default:
+      comparison = left.priority - right.priority;
+      break;
+  }
+  if (comparison !== 0) {
+    return upstreamSort.direction === "asc" ? comparison : -comparison;
+  }
+  return left.id - right.id;
+}
+
+function updateUpstreamSortControls() {
+  if (!upstreamTable) return;
+  for (const button of upstreamTable.querySelectorAll("button[data-upstream-sort]")) {
+    const key = button.dataset.upstreamSort;
+    const direction = key === upstreamSort.key ? upstreamSort.direction : null;
+    button.closest("th")?.setAttribute(
+      "aria-sort",
+      direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none",
+    );
+    const indicator = button.querySelector("span");
+    if (indicator) indicator.textContent = direction === "asc" ? "↑" : direction === "desc" ? "↓" : "";
+  }
+}
+
+function setUpstreamSort(key) {
+  upstreamSort = {
+    key,
+    direction: upstreamSort.key === key && upstreamSort.direction === "asc" ? "desc" : "asc",
+  };
+  updateUpstreamSortControls();
+  renderRows();
 }
 
 function upstreamFiltersActive() {
@@ -2220,7 +2274,7 @@ function renderRows() {
   rows.innerHTML = "";
   renderUpstreamSummary();
 
-  const colCount = 7;
+  const colCount = 8;
 
   if (upstreamsLoading && !upstreamsLoadedOnce) {
     rows.innerHTML = skeletonRowsMarkup(colCount, 6);
@@ -2271,10 +2325,11 @@ function renderRows() {
           ${checked}
         />
       </td>
+      <td class="col-id" data-col="id">${upstream.id}</td>
       <td class="name-cell" data-col="name">
         <div class="name-stack">
           <strong title="${escapeHtml(upstream.name)}">${escapeHtml(upstream.name)}</strong>
-          <span class="muted">#${upstream.id} · ${upstream.api_key_set ? "API Key 已配置" : "使用下游 Authorization"}</span>
+          <span class="muted">${upstream.api_key_set ? "API Key 已配置" : "使用下游 Authorization"}</span>
         </div>
       </td>
       <td class="url-cell" data-col="base_url">
@@ -2585,7 +2640,6 @@ async function savePriorityEdit(input) {
       body: JSON.stringify({ priority: nextPriority }),
     });
     Object.assign(upstream, updated);
-    upstreams.sort((left, right) => right.priority - left.priority || left.id - right.id);
     renderRows();
     await loadUpstreams();
     setStatus(`渠道 ${updated.name} 的优先级已更新为 ${updated.priority}。`, "ok");
@@ -4600,6 +4654,11 @@ if (logColMenuBtn) {
   });
 }
 applyAllColumnVisibility();
+updateUpstreamSortControls();
+upstreamTable?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-upstream-sort]");
+  if (button) setUpstreamSort(button.dataset.upstreamSort);
+});
 
 // ── Batch enable/disable ─────────────────────────────────
 if (upstreamSelectAll) {

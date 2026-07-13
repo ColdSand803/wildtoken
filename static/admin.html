@@ -208,11 +208,12 @@
                     <th class="col-check" data-col="check">
                       <input type="checkbox" id="upstream-select-all" aria-label="全选当前筛选渠道" />
                     </th>
-                    <th data-col="name">名称</th>
+                    <th class="col-id" data-col="id" aria-sort="none"><button type="button" class="table-sort-button" data-upstream-sort="id">ID <span aria-hidden="true"></span></button></th>
+                    <th data-col="name" aria-sort="none"><button type="button" class="table-sort-button" data-upstream-sort="name">名称 <span aria-hidden="true"></span></button></th>
                     <th data-col="base_url">Base URL</th>
                     <th data-col="models">模型匹配</th>
-                    <th data-col="priority">优先级</th>
-                    <th class="col-status" data-col="status">状态</th>
+                    <th data-col="priority" aria-sort="descending"><button type="button" class="table-sort-button" data-upstream-sort="priority">优先级 <span aria-hidden="true">↓</span></button></th>
+                    <th class="col-status" data-col="status" aria-sort="none"><button type="button" class="table-sort-button" data-upstream-sort="status">状态 <span aria-hidden="true"></span></button></th>
                     <th class="col-actions" data-col="actions">操作</th>
                   </tr>
                 </thead>
