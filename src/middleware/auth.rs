@@ -4,9 +4,8 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use std::sync::atomic::Ordering;
 
-use crate::state::{verify_admin_token, AppState};
+use crate::state::AppState;
 
 // ── AdminAuth ────────────────────────────────────────────────────────────────
 
@@ -42,19 +41,10 @@ impl FromRequestParts<AppState> for AdminAuth {
             _ => return Err(unauthorized()),
         };
 
-        let credential = state.admin_credential.read().await.clone();
-        let credential_version = state.admin_credential_version.load(Ordering::Acquire);
-        let verified = verify_admin_token(credential.clone(), token).await;
-
-        // A rotation may have committed after this request took its snapshot.
-        // Rejecting on generation mismatch ensures old credentials fail closed
-        // for all requests started after that commit.
-        if !verified
-            || credential.credential_version != credential_version
-            || state.admin_credential_version.load(Ordering::Acquire) != credential_version
-        {
-            return Err(unauthorized());
-        }
+        let credential_version = state
+            .authenticate_admin_token(token)
+            .await
+            .ok_or_else(unauthorized)?;
 
         Ok(AdminAuth { credential_version })
     }

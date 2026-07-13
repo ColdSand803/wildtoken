@@ -63,6 +63,18 @@ pub fn snapshot_response(
     body: Option<&[u8]>,
     body_max_bytes: usize,
 ) -> serde_json::Value {
+    snapshot_response_with_body_length(status, headers, body, body.map(<[u8]>::len), body_max_bytes)
+}
+
+/// Build a response snapshot from a bounded body prefix while retaining the
+/// original response length.
+pub fn snapshot_response_with_body_length(
+    status: u16,
+    headers: &std::collections::HashMap<String, String>,
+    body: Option<&[u8]>,
+    body_byte_length: Option<usize>,
+    body_max_bytes: usize,
+) -> serde_json::Value {
     let redacted = redact_headers(headers);
     let mut obj = serde_json::json!({
         "status_code": status,
@@ -71,7 +83,8 @@ pub fn snapshot_response(
     });
 
     if let Some(b) = body {
-        obj["body"] = truncate_body(b, body_max_bytes);
+        obj["body"] =
+            truncate_body_with_length(b, body_max_bytes, body_byte_length.unwrap_or(b.len()));
     }
 
     obj
@@ -101,37 +114,63 @@ fn redact_headers(
 }
 
 fn truncate_body(body: &[u8], budget: usize) -> serde_json::Value {
+    truncate_body_with_length(body, budget, body.len())
+}
+
+fn truncate_body_with_length(
+    body: &[u8],
+    budget: usize,
+    original_byte_length: usize,
+) -> serde_json::Value {
     if budget == 0 {
-        return serde_json::json!({ "cleared": true, "byte_length": body.len() });
+        return serde_json::json!({
+            "cleared": true,
+            "byte_length": original_byte_length,
+        });
     }
     if body.is_empty() {
         return serde_json::json!({
             "text": "",
-            "byte_length": 0,
+            "byte_length": original_byte_length,
         });
     }
 
     // Text is cut on a UTF-8 boundary. Binary bytes are sliced before encoding.
-    if let Ok(text) = std::str::from_utf8(body) {
-        let mut cutoff = body.len().min(budget);
-        while cutoff > 0 && !text.is_char_boundary(cutoff) {
-            cutoff -= 1;
+    let slice = &body[..body.len().min(budget)];
+    let text_prefix = if body.len() == original_byte_length {
+        std::str::from_utf8(body).ok().and_then(|text| {
+            let mut cutoff = slice.len();
+            while cutoff > 0 && !text.is_char_boundary(cutoff) {
+                cutoff -= 1;
+            }
+            text.get(..cutoff)
+        })
+    } else {
+        match std::str::from_utf8(slice) {
+            Ok(text) => Some(text),
+            Err(error) if error.error_len().is_none() => {
+                std::str::from_utf8(&slice[..error.valid_up_to()]).ok()
+            }
+            Err(_) => None,
         }
-        let mut snapshot =
-            serde_json::json!({ "text": &text[..cutoff], "byte_length": body.len() });
-        if cutoff < body.len() {
+    };
+    if let Some(text) = text_prefix {
+        let mut snapshot = serde_json::json!({
+            "text": text,
+            "byte_length": original_byte_length,
+        });
+        if text.len() < original_byte_length {
             snapshot["truncated"] = serde_json::Value::Bool(true);
         }
         return snapshot;
     }
 
-    let slice = &body[..body.len().min(budget)];
     let mut snapshot = serde_json::json!({
         "base64": base64::engine::general_purpose::STANDARD.encode(slice),
         "encoding": "base64",
-        "byte_length": body.len(),
+        "byte_length": original_byte_length,
     });
-    if slice.len() < body.len() {
+    if slice.len() < original_byte_length {
         snapshot["truncated"] = serde_json::Value::Bool(true);
     }
     snapshot
@@ -144,8 +183,8 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::{
-        encode_snapshot_pair, insert_log_entry, snapshot_request, snapshot_response, truncate_body,
-        LogEntry,
+        encode_snapshot_pair, insert_log_entry, snapshot_request, snapshot_response,
+        snapshot_response_with_body_length, truncate_body, LogEntry,
     };
 
     #[test]
@@ -193,6 +232,10 @@ mod tests {
         assert_eq!(value["base64"], "/wE=");
         assert_eq!(value["byte_length"], 4);
         assert_eq!(value["truncated"], true);
+
+        let invalid_after_budget = truncate_body(&[b'a', 0xff], 1);
+        assert_eq!(invalid_after_budget["base64"], "YQ==");
+        assert_eq!(invalid_after_budget["byte_length"], 2);
     }
 
     #[test]
@@ -202,6 +245,21 @@ mod tests {
             value,
             serde_json::json!({"cleared": true, "byte_length": 4})
         );
+    }
+
+    #[test]
+    fn bounded_response_snapshot_retains_the_original_byte_length() {
+        let snapshot = snapshot_response_with_body_length(
+            200,
+            &HashMap::new(),
+            Some("aé".as_bytes()),
+            Some(100),
+            2,
+        );
+
+        assert_eq!(snapshot["body"]["text"], "a");
+        assert_eq!(snapshot["body"]["byte_length"], 100);
+        assert_eq!(snapshot["body"]["truncated"], true);
     }
 
     #[test]

@@ -19,8 +19,7 @@ pub use headers::{build_forward_headers, HOP_BY_HOP_HEADERS};
 use sse::sse_bytes_line_is_terminal;
 pub use sse::{extract_first_token_ms, extract_usage};
 use sse::{
-    extract_response_reasoning_effort, is_sse_content_type, observe_sse_chunk, read_response_body,
-    SseStreamState,
+    extract_response_reasoning_effort, is_sse_content_type, read_response_body, SseStreamState,
 };
 
 pub struct ProxyResponse {
@@ -282,24 +281,18 @@ pub async fn proxy_request(
             upstream_request: Some(upstream_snap),
             ..Default::default()
         };
-        let stream_state = SseStreamState {
-            stream: Box::pin(response.bytes_stream()),
-            body_bytes: Vec::new(),
-            line_buf: Vec::new(),
-            first_token_ms: None,
-            terminal_event_pending: false,
-            terminal_event_seen: false,
+        let stream_state = SseStreamState::new(
+            Box::pin(response.bytes_stream()),
             start,
-            upstream_status: status_u16,
-            response_headers: resp_headers.clone(),
-            content_type,
+            status_u16,
+            resp_headers.clone(),
             log_body_max_bytes,
-            log_entry: Some(log_entry),
-            pool: state.db.clone(),
-            backoff: Arc::clone(backoff),
-            upstream_id: upstream.id,
+            log_entry,
+            state.db.clone(),
+            Arc::clone(backoff),
+            upstream.id,
             auto_disabled,
-        };
+        );
         let body_stream = futures::stream::unfold(stream_state, |mut stream_state| async move {
             if stream_state.log_entry.is_none() {
                 return None;
@@ -307,16 +300,8 @@ pub async fn proxy_request(
 
             match stream_state.stream.next().await {
                 Some(Ok(chunk)) => {
-                    stream_state.body_bytes.extend_from_slice(&chunk);
-                    observe_sse_chunk(
-                        &chunk,
-                        &mut stream_state.line_buf,
-                        &mut stream_state.first_token_ms,
-                        &mut stream_state.terminal_event_pending,
-                        &mut stream_state.terminal_event_seen,
-                        stream_state.start,
-                    );
-                    if stream_state.terminal_event_seen {
+                    stream_state.observe_chunk(&chunk);
+                    if stream_state.terminal_event_seen() {
                         stream_state.finish_complete();
                     }
                     Some((Ok::<Bytes, std::io::Error>(chunk), stream_state))

@@ -18,7 +18,9 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::proxy::matcher::BackoffManager;
-use crate::state::{bootstrap_admin_credential, init_db, load_runtime_settings, AppState};
+use crate::state::{
+    bootstrap_admin_credential, init_db, load_runtime_settings, AdminAuthCache, AppState,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -60,6 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         runtime_settings: Arc::new(tokio::sync::RwLock::new(runtime_settings)),
         admin_credential_version: Arc::new(AtomicI64::new(admin_credential.credential_version)),
         admin_credential: Arc::new(tokio::sync::RwLock::new(admin_credential)),
+        admin_auth_cache: Arc::new(AdminAuthCache::new()),
         started_at: std::time::Instant::now(),
     };
 

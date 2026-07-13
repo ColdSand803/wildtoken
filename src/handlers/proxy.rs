@@ -320,7 +320,7 @@ mod tests {
         config::Settings,
         models::settings::{AdminCredential, RuntimeSettings},
         proxy::matcher::BackoffManager,
-        state::{init_db, AppState},
+        state::{init_db, AdminAuthCache, AppState},
     };
     use axum::{
         body::{Body, Bytes},
@@ -340,7 +340,7 @@ mod tests {
 
     const FIRST_EVENT: &[u8] = b"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"first\"}\n\n";
     const FINAL_EVENT_HEADER: &[u8] = b"event: response.completed\n";
-    const FINAL_EVENT_DATA: &[u8] = b"data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}}\n\n";
+    const FINAL_EVENT_DATA: &[u8] = b"data: {\"type\":\"response.completed\",\"response\":{\"reasoning\":{\"effort\":\"high\"},\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"total_tokens\":18}}}\n\n";
 
     #[tokio::test]
     async fn sse_is_streamed_end_to_end_and_logged_after_completion() {
@@ -416,17 +416,20 @@ mod tests {
         .await
         .unwrap();
 
+        let mut runtime_settings = RuntimeSettings::default();
+        runtime_settings.log_body_max_bytes = FIRST_EVENT.len() as i64;
         let state = AppState {
             db: db.clone(),
             http_client: reqwest::Client::new(),
             settings: Settings::default(),
             backoff: Arc::new(BackoffManager::new()),
-            runtime_settings: Arc::new(RwLock::new(RuntimeSettings::default())),
+            runtime_settings: Arc::new(RwLock::new(runtime_settings)),
             admin_credential: Arc::new(RwLock::new(AdminCredential {
                 credential_hash: "test".into(),
                 credential_version: 1,
             })),
             admin_credential_version: Arc::new(AtomicI64::new(1)),
+            admin_auth_cache: Arc::new(AdminAuthCache::new()),
             started_at: Instant::now(),
         };
         let proxy_app = Router::new()
@@ -494,10 +497,11 @@ mod tests {
                         Option<i32>,
                         Option<i32>,
                         Option<String>,
+                        Option<String>,
                     ),
                 >(
                     r#"SELECT id, stream, status_code, prompt_tokens, completion_tokens,
-                              total_tokens, first_token_ms, error
+                              total_tokens, first_token_ms, response_reasoning_effort, error
                        FROM request_logs"#,
                 )
                 .fetch_optional(&db)
@@ -516,7 +520,8 @@ mod tests {
         assert_eq!(log.2, Some(200));
         assert_eq!((log.3, log.4, log.5), (Some(11), Some(7), Some(18)));
         assert!(log.6.is_some());
-        assert_eq!(log.7, None);
+        assert_eq!(log.7.as_deref(), Some("high"));
+        assert_eq!(log.8, None);
 
         let response_snapshot: String = sqlx::query_scalar(
             "SELECT response_snapshot FROM request_log_payloads WHERE request_log_id = ?",
@@ -528,8 +533,10 @@ mod tests {
         let response_snapshot: serde_json::Value =
             serde_json::from_str(&response_snapshot).unwrap();
         let logged_body = response_snapshot["body"]["text"].as_str().unwrap();
-        assert!(logged_body.contains("\"delta\":\"first\""));
-        assert!(logged_body.contains("\"total_tokens\":18"));
+        assert_eq!(logged_body.as_bytes(), FIRST_EVENT);
+        assert_eq!(response_snapshot["body"]["byte_length"], received.len());
+        assert_eq!(response_snapshot["body"]["truncated"], true);
+        assert!(!logged_body.contains("\"total_tokens\":18"));
 
         proxy_server.abort();
         upstream_server.abort();
