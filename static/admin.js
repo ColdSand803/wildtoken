@@ -32,6 +32,9 @@ const quickImportText = document.querySelector("#quick-import-text");
 const quickImportBaseUrlInput = document.querySelector("#quick-import-baseurl");
 const quickImportApiKeyInput = document.querySelector("#quick-import-apikey");
 const quickImportFillButton = document.querySelector("#quick-import-fill");
+const QUICK_IMPORT_DEFAULT_PRIORITY = 999;
+const QUICK_IMPORT_FILL_LABEL = "填入并拉取模型";
+let quickImportFetchController = null;
 
 const confirmDialog = document.querySelector("#confirm-dialog");
 const confirmTitle = document.querySelector("#confirm-title");
@@ -2221,7 +2224,8 @@ function suggestNameFromUrl(url) {
 
 function updateQuickImportFillState() {
   quickImportFillButton.disabled =
-    !quickImportBaseUrlInput.value.trim() && !quickImportApiKeyInput.value.trim();
+    Boolean(quickImportFetchController)
+    || (!quickImportBaseUrlInput.value.trim() && !quickImportApiKeyInput.value.trim());
 }
 
 function syncQuickImportFields() {
@@ -2236,9 +2240,11 @@ function syncQuickImportFields() {
 }
 
 function openQuickImportDialog() {
+  cancelQuickImportFetch();
   quickImportText.value = "";
   quickImportBaseUrlInput.value = "";
   quickImportApiKeyInput.value = "";
+  quickImportFillButton.textContent = QUICK_IMPORT_FILL_LABEL;
   updateQuickImportFillState();
   if (typeof quickImportDialog.showModal === "function") {
     quickImportDialog.showModal();
@@ -2248,7 +2254,24 @@ function openQuickImportDialog() {
   quickImportText.focus();
 }
 
+function setQuickImportInputsDisabled(disabled) {
+  quickImportText.disabled = disabled;
+  quickImportBaseUrlInput.disabled = disabled;
+  quickImportApiKeyInput.disabled = disabled;
+}
+
+function cancelQuickImportFetch() {
+  if (quickImportFetchController) {
+    quickImportFetchController.abort();
+    quickImportFetchController = null;
+  }
+  setQuickImportInputsDisabled(false);
+  quickImportFillButton.textContent = QUICK_IMPORT_FILL_LABEL;
+  updateQuickImportFillState();
+}
+
 function closeQuickImportDialog() {
+  cancelQuickImportFetch();
   if (quickImportDialog.open && typeof quickImportDialog.close === "function") {
     quickImportDialog.close();
   } else {
@@ -3922,12 +3945,50 @@ quickImportDialog.addEventListener("click", (event) => {
     closeQuickImportDialog();
   }
 });
+quickImportDialog.addEventListener("cancel", cancelQuickImportFetch);
 quickImportText.addEventListener("input", syncQuickImportFields);
 quickImportBaseUrlInput.addEventListener("input", updateQuickImportFillState);
 quickImportApiKeyInput.addEventListener("input", updateQuickImportFillState);
-quickImportFillButton.addEventListener("click", () => {
+quickImportFillButton.addEventListener("click", async () => {
   const baseUrl = quickImportBaseUrlInput.value.trim();
   const apiKey = quickImportApiKeyInput.value.trim();
+  let models = [];
+  let fetchError = null;
+
+  if (baseUrl) {
+    const controller = new AbortController();
+    quickImportFetchController = controller;
+    setQuickImportInputsDisabled(true);
+    quickImportFillButton.textContent = "正在拉取模型";
+    updateQuickImportFillState();
+    setStatus(`正在从 ${baseUrl} 拉取全部模型...`);
+    try {
+      const result = await api("/api/admin/upstreams/fetch-models", {
+        method: "POST",
+        signal: controller.signal,
+        body: JSON.stringify({
+          base_url: baseUrl,
+          api_key: apiKey || null,
+          extra_headers: {},
+          timeout_seconds: 300,
+        }),
+      });
+      models = result.models;
+    } catch (error) {
+      if (error.name === "AbortError") {
+        return;
+      }
+      fetchError = error;
+    } finally {
+      if (quickImportFetchController === controller) {
+        quickImportFetchController = null;
+        setQuickImportInputsDisabled(false);
+        quickImportFillButton.textContent = QUICK_IMPORT_FILL_LABEL;
+        updateQuickImportFillState();
+      }
+    }
+  }
+
   resetForm();
   if (baseUrl) {
     fields.baseUrl.value = baseUrl;
@@ -3939,9 +4000,26 @@ quickImportFillButton.addEventListener("click", () => {
   if (apiKey) {
     fields.apiKey.value = apiKey;
   }
+  fields.modelNames.value = joinList(models);
+  fields.priority.value = QUICK_IMPORT_DEFAULT_PRIORITY;
   closeQuickImportDialog();
   openUpstreamDialog();
-  setStatus("已从快速导入填入 Base URL / API Key，请检查并补充名称等信息后保存。", "ok");
+  if (fetchError) {
+    setStatus(
+      `已填入快速导入信息并将优先级设为 ${QUICK_IMPORT_DEFAULT_PRIORITY}；自动拉取模型失败：${fetchError.message}。可在表单中重试。`,
+      "error",
+    );
+  } else if (baseUrl) {
+    setStatus(
+      `已填入 ${models.length} 个模型，优先级为 ${QUICK_IMPORT_DEFAULT_PRIORITY}。请检查后保存。`,
+      "ok",
+    );
+  } else {
+    setStatus(
+      `已填入快速导入信息，优先级为 ${QUICK_IMPORT_DEFAULT_PRIORITY}。填写 Base URL 后可拉取模型。`,
+      "ok",
+    );
+  }
 });
 
 fetchModelsButton.addEventListener("click", async () => {

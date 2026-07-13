@@ -462,7 +462,7 @@
               <label class="field">
                 <span class="field-label">优先级</span>
                 <input id="priority" type="number" min="0" max="100000" value="100" />
-                <span class="field-hint">数字越小越优先。</span>
+                <span class="field-hint">数字越大越优先。</span>
               </label>
               <label class="field">
                 <span class="field-label">超时秒数</span>
@@ -521,7 +521,7 @@
         <div class="modal-head">
           <div>
             <h2>快速导入</h2>
-            <p>粘贴含 Base URL 与 API Key 的文本，识别后填入新增表单。</p>
+            <p>粘贴含 Base URL 与 API Key 的文本。导入时会自动拉取并填入全部模型，优先级默认设为 999。</p>
           </div>
           <button id="quick-import-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><span aria-hidden="true">×</span></button>
         </div>
@@ -544,7 +544,7 @@
         </label>
         <div class="modal-actions">
           <button id="quick-import-cancel" type="button" class="secondary">取消</button>
-          <button id="quick-import-fill" type="button" disabled>填入表单</button>
+          <button id="quick-import-fill" type="button" disabled>填入并拉取模型</button>
         </div>
       </div>
     </dialog>
