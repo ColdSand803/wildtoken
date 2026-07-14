@@ -326,9 +326,7 @@ tokenRows.addEventListener("click", (event) => {
   handleTokenAction(button);
 });
 
-tokenDialog.addEventListener("click", (event) => {
-  if (event.target === tokenDialog) closeTokenDialog();
-});
+dismissOnBackdropClick(tokenDialog, closeTokenDialog);
 
 newTokenButton.addEventListener("click", () => openTokenDialog("new"));
 

@@ -110,9 +110,7 @@ modelTestTemplateForm?.addEventListener("submit", async (event) => {
 });
 modelTestTemplateClose?.addEventListener("click", closeModelTestTemplateDialog);
 modelTestTemplateCancel?.addEventListener("click", closeModelTestTemplateDialog);
-modelTestTemplateDialog?.addEventListener("click", (event) => {
-  if (event.target === modelTestTemplateDialog) closeModelTestTemplateDialog();
-});
+dismissOnBackdropClick(modelTestTemplateDialog, closeModelTestTemplateDialog);
 modelTestTemplate?.addEventListener("change", updateModelTestTemplateHint);
 modelTestPromptTemplate?.addEventListener("change", updateModelTestTemplateHint);
 modelTestClose?.addEventListener("click", closeModelTestDialog);
@@ -495,11 +493,7 @@ if (commandPaletteInput) {
   });
 }
 if (commandPalette) {
-  commandPalette.addEventListener("click", (event) => {
-    if (event.target === commandPalette) {
-      closeCommandPalette();
-    }
-  });
+  dismissOnBackdropClick(commandPalette, closeCommandPalette);
   commandPalette.addEventListener("cancel", (event) => {
     event.preventDefault();
     closeCommandPalette();

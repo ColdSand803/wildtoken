@@ -6,6 +6,25 @@ const adminTokenInput = document.querySelector("#admin-token-input");
 const adminTokenError = document.querySelector("#admin-token-error");
 const adminLogoutButton = document.querySelector("#admin-logout");
 
+// A click on a native dialog backdrop is reported after the pointer is released.
+// Remember where the gesture began so a text selection that ends outside the
+// window cannot be mistaken for a backdrop click and dismiss the dialog.
+function dismissOnBackdropClick(dialog, dismiss) {
+  let beganOnBackdrop = false;
+
+  dialog?.addEventListener("pointerdown", (event) => {
+    beganOnBackdrop = event.button === 0 && event.target === dialog;
+  });
+  dialog?.addEventListener("pointercancel", () => {
+    beganOnBackdrop = false;
+  });
+  dialog?.addEventListener("click", (event) => {
+    const shouldDismiss = beganOnBackdrop && event.target === dialog;
+    beganOnBackdrop = false;
+    if (shouldDismiss) dismiss();
+  });
+}
+
 const balanceDialog = document.querySelector("#balance-dialog");
 const balanceTitle = document.querySelector("#balance-title");
 const balanceSummary = document.querySelector("#balance-summary");
@@ -377,6 +396,7 @@ function requestConfirm({
     }
 
     let settled = false;
+    let beganOnBackdrop = false;
     const finish = (value) => {
       if (settled) return;
       settled = true;
@@ -384,6 +404,8 @@ function requestConfirm({
       confirmCancel.removeEventListener("click", onCancel);
       confirmClose.removeEventListener("click", onCancel);
       confirmDialog.removeEventListener("cancel", onCancelEvent);
+      confirmDialog.removeEventListener("pointerdown", onPointerDown);
+      confirmDialog.removeEventListener("pointercancel", onPointerCancel);
       confirmDialog.removeEventListener("click", onBackdrop);
       if (confirmDialog.open && typeof confirmDialog.close === "function") {
         confirmDialog.close();
@@ -405,8 +427,16 @@ function requestConfirm({
       event.preventDefault();
       finish(false);
     };
+    const onPointerDown = (event) => {
+      beganOnBackdrop = event.button === 0 && event.target === confirmDialog;
+    };
+    const onPointerCancel = () => {
+      beganOnBackdrop = false;
+    };
     const onBackdrop = (event) => {
-      if (event.target === confirmDialog) {
+      const shouldDismiss = beganOnBackdrop && event.target === confirmDialog;
+      beganOnBackdrop = false;
+      if (shouldDismiss) {
         finish(false);
       }
     };
@@ -422,6 +452,8 @@ function requestConfirm({
     confirmCancel.addEventListener("click", onCancel);
     confirmClose.addEventListener("click", onCancel);
     confirmDialog.addEventListener("cancel", onCancelEvent);
+    confirmDialog.addEventListener("pointerdown", onPointerDown);
+    confirmDialog.addEventListener("pointercancel", onPointerCancel);
     confirmDialog.addEventListener("click", onBackdrop);
 
     if (typeof confirmDialog.showModal === "function") {

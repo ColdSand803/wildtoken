@@ -103,10 +103,19 @@
               </div>
             </div>
 
-            <div id="dashboard-kpis" class="dashboard-kpis" aria-live="polite"></div>
+            <section class="dashboard-metric-section" aria-labelledby="dashboard-overview-title">
+              <div class="dashboard-metric-head">
+                <div>
+                  <h3 id="dashboard-overview-title">近窗概览</h3>
+                  <p class="dashboard-card-sub">已加载日志与渠道状态</p>
+                </div>
+                <span class="dashboard-card-meta">实时快照</span>
+              </div>
+              <div id="dashboard-kpis" class="dashboard-kpis" aria-live="polite"></div>
+            </section>
 
-            <section class="dashboard-card dashboard-window-card" aria-labelledby="dashboard-token-title">
-              <div class="dashboard-card-head">
+            <section class="dashboard-metric-section" aria-labelledby="dashboard-token-title">
+              <div class="dashboard-metric-head">
                 <div>
                   <h3 id="dashboard-token-title">Tokens 统计</h3>
                   <p class="dashboard-card-sub">按请求日志中的 token 用量汇总</p>
@@ -116,8 +125,8 @@
               <div id="dashboard-token-kpis" class="dashboard-window-kpis" aria-live="polite"></div>
             </section>
 
-            <section class="dashboard-card dashboard-window-card" aria-labelledby="dashboard-request-title">
-              <div class="dashboard-card-head">
+            <section class="dashboard-metric-section" aria-labelledby="dashboard-request-title">
+              <div class="dashboard-metric-head">
                 <div>
                   <h3 id="dashboard-request-title">请求统计</h3>
                   <p class="dashboard-card-sub">按全部请求日志条数汇总</p>
@@ -127,8 +136,8 @@
               <div id="dashboard-request-kpis" class="dashboard-window-kpis" aria-live="polite"></div>
             </section>
 
-            <section class="dashboard-card dashboard-window-card" aria-labelledby="dashboard-runtime-title">
-              <div class="dashboard-card-head">
+            <section class="dashboard-metric-section" aria-labelledby="dashboard-runtime-title">
+              <div class="dashboard-metric-head">
                 <div>
                   <h3 id="dashboard-runtime-title">运行态</h3>
                   <p class="dashboard-card-sub">当前流、断连、日志写入与清理状态</p>

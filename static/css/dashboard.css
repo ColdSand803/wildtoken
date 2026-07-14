@@ -1,9 +1,5 @@
 /* ── Dashboard ─────────────────────────────────────────── */
 
-.dashboard-panel > .panel-head {
-  margin-bottom: 16px;
-}
-
 .dashboard-kpis,
 .dashboard-window-kpis {
   display: grid;
@@ -12,11 +8,18 @@
 }
 
 .dashboard-kpis {
-  margin-bottom: 14px;
+  margin-bottom: 0;
 }
 
-.dashboard-window-card {
-  margin-bottom: 14px;
+.dashboard-metric-section {
+  margin: 0 0 22px;
+  padding: 0;
+}
+
+.dashboard-metric-section + .dashboard-metric-section,
+.dashboard-grid {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 20px;
 }
 
 .kpi-card,
@@ -131,7 +134,8 @@
   grid-column: 1 / -1;
 }
 
-.dashboard-card-head {
+.dashboard-card-head,
+.dashboard-metric-head {
   align-items: baseline;
   border-bottom: 0;
   display: flex;
@@ -141,7 +145,8 @@
   padding-bottom: 0;
 }
 
-.dashboard-card-head h3 {
+.dashboard-card-head h3,
+.dashboard-metric-head h3 {
   color: var(--text);
   font-size: var(--text-md);
   font-weight: 600;
@@ -350,15 +355,17 @@ html[data-density="compact"] .dashboard-window-kpis {
 }
 
 html[data-density="compact"] .dashboard-kpis {
-  margin-bottom: 10px;
+  margin-bottom: 0;
 }
 
-html[data-density="compact"] .dashboard-window-card {
-  margin-bottom: 10px;
+html[data-density="compact"] .dashboard-metric-section {
+  margin-bottom: 16px;
+  padding: 0;
 }
 
 html[data-density="compact"] .dashboard-grid {
   gap: 8px;
+  padding-top: 14px;
 }
 
 @media (max-width: 1100px) {

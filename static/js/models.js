@@ -482,19 +482,11 @@ newButton.addEventListener("click", () => {
 });
 resetButton.addEventListener("click", cancelUpstreamDialog);
 upstreamDialogClose.addEventListener("click", cancelUpstreamDialog);
-upstreamDialog.addEventListener("click", (event) => {
-  if (event.target === upstreamDialog) {
-    cancelUpstreamDialog();
-  }
-});
+dismissOnBackdropClick(upstreamDialog, cancelUpstreamDialog);
 quickImportButton.addEventListener("click", openQuickImportDialog);
 quickImportClose.addEventListener("click", closeQuickImportDialog);
 quickImportCancel.addEventListener("click", closeQuickImportDialog);
-quickImportDialog.addEventListener("click", (event) => {
-  if (event.target === quickImportDialog) {
-    closeQuickImportDialog();
-  }
-});
+dismissOnBackdropClick(quickImportDialog, closeQuickImportDialog);
 quickImportDialog.addEventListener("cancel", cancelQuickImportFetch);
 quickImportText.addEventListener("input", syncQuickImportFields);
 quickImportBaseUrlInput.addEventListener("input", updateQuickImportFillState);
@@ -602,11 +594,7 @@ modelClearAllButton.addEventListener("click", () => {
 modelSaveSelectionButton.addEventListener("click", saveModelSelection);
 modelCancelSelectionButton.addEventListener("click", closeModelDialog);
 modelDialogClose.addEventListener("click", closeModelDialog);
-modelDialog.addEventListener("click", (event) => {
-  if (event.target === modelDialog) {
-    closeModelDialog();
-  }
-});
+dismissOnBackdropClick(modelDialog, closeModelDialog);
 
 for (const link of navLinks) {
   link.addEventListener("click", () => switchView(link.dataset.view));
@@ -700,18 +688,10 @@ for (const button of document.querySelectorAll(".log-detail-expand")) {
   });
 }
 logDetailClose.addEventListener("click", closeLogDetailDialog);
-logDetailDialog.addEventListener("click", (event) => {
-  if (event.target === logDetailDialog) {
-    closeLogDetailDialog();
-  }
-});
+dismissOnBackdropClick(logDetailDialog, closeLogDetailDialog);
 
 balanceClose.addEventListener("click", closeBalanceDialog);
-balanceDialog.addEventListener("click", (event) => {
-  if (event.target === balanceDialog) {
-    closeBalanceDialog();
-  }
-});
+dismissOnBackdropClick(balanceDialog, closeBalanceDialog);
 
 adminTokenDialog.addEventListener("cancel", (event) => {
   event.preventDefault();
