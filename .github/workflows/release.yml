@@ -333,7 +333,7 @@ jobs:
             macos-binaries/aarch64/wildtoken \
             -output "$package/wildtoken"
           chmod 755 "$package/wildtoken"
-          lipo -verify_arch x86_64 arm64 "$package/wildtoken"
+          lipo "$package/wildtoken" -verify_arch x86_64 arm64
           cp -R static config "$package/"
           cp README.md .env.example "$package/"
 
