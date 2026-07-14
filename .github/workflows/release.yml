@@ -144,7 +144,8 @@ jobs:
             sleep 1
           done
           curl -fsS 'http://127.0.0.1:3110/health' >/dev/null
-          curl -fsS 'http://127.0.0.1:3110/admin' | grep -q 'WildToken Admin'
+          curl -fsS 'http://127.0.0.1:3110/admin' -o "$RUNNER_TEMP/wildtoken-linux-admin.html"
+          grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-linux-admin.html"
           kill "$pid"
           wait "$pid" || true
           trap - EXIT
@@ -288,7 +289,8 @@ jobs:
             sleep 1
           done
           curl -fsS 'http://127.0.0.1:3110/health' >/dev/null
-          curl -fsS 'http://127.0.0.1:3110/admin' | grep -q 'WildToken Admin'
+          curl -fsS 'http://127.0.0.1:3110/admin' -o "$RUNNER_TEMP/wildtoken-macos-${{ matrix.arch }}-admin.html"
+          grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-macos-${{ matrix.arch }}-admin.html"
           kill "$pid"
           wait "$pid" || true
           trap - EXIT
@@ -353,7 +355,8 @@ jobs:
             sleep 1
           done
           curl -fsS 'http://127.0.0.1:3110/health' >/dev/null
-          curl -fsS 'http://127.0.0.1:3110/admin' | grep -q 'WildToken Admin'
+          curl -fsS 'http://127.0.0.1:3110/admin' -o "$RUNNER_TEMP/wildtoken-macos-admin.html"
+          grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-macos-admin.html"
           kill "$pid"
           wait "$pid" || true
           trap - EXIT
