@@ -523,6 +523,7 @@ pub struct AppState {
     pub(crate) admin_auth_cache: Arc<AdminAuthCache>,
     pub runtime_metrics: Arc<RuntimeMetrics>,
     pub log_writer: crate::proxy::logging::LogWriter,
+    pub log_stats: Arc<crate::db::log_stats::LogStatsCache>,
     pub started_at: Instant,
 }
 

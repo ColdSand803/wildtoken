@@ -3,6 +3,7 @@ use std::sync::Arc;
 use base64::Engine as _;
 use tokio::sync::mpsc;
 
+use crate::db::log_stats::{LogStatsCache, PersistedLogStats};
 use crate::state::RuntimeMetrics;
 
 const SLOW_DB_OPERATION_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(1);
@@ -443,7 +444,8 @@ mod tests {
         create_request_log_payloads_table(&pool).await;
 
         let metrics = Arc::new(RuntimeMetrics::new());
-        let writer = spawn_log_writer(pool.clone(), metrics.clone());
+        let log_stats = Arc::new(crate::db::log_stats::LogStatsCache::empty());
+        let writer = spawn_log_writer(pool.clone(), metrics.clone(), log_stats.clone());
         for path in ["/v1/responses", "/v1/chat/completions"] {
             schedule_log(
                 &writer,
@@ -483,6 +485,11 @@ mod tests {
         assert_eq!(snapshot.log_write_batches_total, 1);
         assert_eq!(snapshot.log_dropped_total, 0);
         assert_eq!(snapshot.log_write_failures_total, 0);
+
+        let log_stats_snapshot = log_stats.snapshot();
+        assert_eq!(log_stats_snapshot.total_log_count, 2);
+        assert_eq!(log_stats_snapshot.log_count_24h, 2);
+        assert_eq!(log_stats_snapshot.recent_one_minute_log_count, 2);
     }
 
     #[tokio::test]
@@ -545,9 +552,13 @@ fn encode_snapshot_pair(
     }
 }
 
-pub fn spawn_log_writer(pool: sqlx::SqlitePool, metrics: Arc<RuntimeMetrics>) -> LogWriter {
+pub fn spawn_log_writer(
+    pool: sqlx::SqlitePool,
+    metrics: Arc<RuntimeMetrics>,
+    log_stats: Arc<LogStatsCache>,
+) -> LogWriter {
     let (sender, receiver) = mpsc::channel(LOG_QUEUE_CAPACITY);
-    tokio::spawn(log_writer_loop(pool, metrics.clone(), receiver));
+    tokio::spawn(log_writer_loop(pool, metrics.clone(), log_stats, receiver));
     LogWriter { sender, metrics }
 }
 
@@ -559,6 +570,7 @@ pub fn schedule_log(writer: &LogWriter, entry: LogEntry) {
 async fn log_writer_loop(
     pool: sqlx::SqlitePool,
     metrics: Arc<RuntimeMetrics>,
+    log_stats: Arc<LogStatsCache>,
     mut receiver: mpsc::Receiver<LogEntry>,
 ) {
     let mut batch = Vec::with_capacity(LOG_WRITE_BATCH_SIZE);
@@ -593,7 +605,10 @@ async fn log_writer_loop(
 
         let started_at = std::time::Instant::now();
         match insert_log_batch_with_retry(&pool, &entries).await {
-            Ok(()) => metrics.record_log_written(entry_count),
+            Ok(persisted_entries) => {
+                metrics.record_log_written(entry_count);
+                log_stats.record_persisted_entries(&persisted_entries);
+            }
             Err(error) => {
                 metrics.record_log_write_failure_count(entry_count);
                 tracing::error!(?error, entry_count, "failed to persist request logs");
@@ -612,15 +627,15 @@ async fn log_writer_loop(
 async fn insert_log_batch_with_retry(
     pool: &sqlx::SqlitePool,
     entries: &[LogEntry],
-) -> Result<(), crate::error::AppError> {
+) -> Result<Vec<PersistedLogStats>, crate::error::AppError> {
     if entries.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let mut attempt = 0;
     loop {
         match insert_log_batch(pool, entries).await {
-            Ok(()) => return Ok(()),
+            Ok(persisted_entries) => return Ok(persisted_entries),
             Err(error) if is_database_locked(&error) && attempt + 1 < LOG_WRITE_MAX_ATTEMPTS => {
                 let delay_ms = LOG_WRITE_RETRY_BASE_DELAY_MS * (1_u64 << attempt.min(4));
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
@@ -645,14 +660,15 @@ async fn insert_log_entry(
     entry: LogEntry,
 ) -> Result<(), crate::error::AppError> {
     let entries = [entry];
-    insert_log_batch(pool, &entries).await
+    insert_log_batch(pool, &entries).await.map(|_| ())
 }
 
 async fn insert_log_batch(
     pool: &sqlx::SqlitePool,
     entries: &[LogEntry],
-) -> Result<(), crate::error::AppError> {
+) -> Result<Vec<PersistedLogStats>, crate::error::AppError> {
     let mut transaction = pool.begin().await?;
+    let mut persisted_entries = Vec::with_capacity(entries.len());
 
     for entry in entries {
         let stream_int: i64 = if entry.stream { 1 } else { 0 };
@@ -698,6 +714,7 @@ async fn insert_log_batch(
         .bind(&entry.error)
         .execute(&mut *transaction)
         .await?;
+        let log_id = result.last_insert_rowid();
 
         sqlx::query(
             r#"INSERT INTO request_log_payloads
@@ -707,7 +724,7 @@ async fn insert_log_batch(
              downstream_response_override, downstream_response_is_override)
         VALUES (?, ?, ?, ?, ?, ?, ?)"#,
         )
-        .bind(result.last_insert_rowid())
+        .bind(log_id)
         .bind(&request_payload.canonical)
         .bind(&request_payload.override_value)
         .bind(if request_payload.is_override {
@@ -724,11 +741,17 @@ async fn insert_log_batch(
         })
         .execute(&mut *transaction)
         .await?;
+
+        persisted_entries.push(PersistedLogStats {
+            id: log_id,
+            created_at_unix_seconds: chrono::Utc::now().timestamp(),
+            total_tokens: entry.total_tokens.map(i64::from),
+        });
     }
 
     transaction.commit().await?;
 
-    Ok(())
+    Ok(persisted_entries)
 }
 
 // ── Background cleanup ──────────────────────────────────────────────────────
@@ -738,6 +761,7 @@ pub async fn cleanup_loop(
     pool: sqlx::SqlitePool,
     runtime_settings: std::sync::Arc<tokio::sync::RwLock<crate::models::settings::RuntimeSettings>>,
     metrics: Arc<RuntimeMetrics>,
+    log_stats: Arc<LogStatsCache>,
 ) {
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
     tokio::time::sleep(CLEANUP_STARTUP_DELAY).await;
@@ -766,6 +790,16 @@ pub async fn cleanup_loop(
             tracing::error!("delete_old_logs failed: {:?}", e);
         }
         if delete_started_at.elapsed() >= SLOW_DB_OPERATION_THRESHOLD {
+            metrics.record_slow_db_operation();
+        }
+        let stats_refresh_started_at = std::time::Instant::now();
+        if let Err(e) = log_stats.refresh_from_db(&pool).await {
+            tracing::warn!(
+                "request log statistics refresh after cleanup failed: {:?}",
+                e
+            );
+        }
+        if stats_refresh_started_at.elapsed() >= SLOW_DB_OPERATION_THRESHOLD {
             metrics.record_slow_db_operation();
         }
         metrics.finish_cleanup(cleanup_succeeded, cleanup_started_at.elapsed());

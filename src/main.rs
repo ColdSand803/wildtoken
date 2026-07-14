@@ -56,7 +56,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Create shared state
     let runtime_metrics = Arc::new(RuntimeMetrics::new());
-    let log_writer = proxy::logging::spawn_log_writer(db.clone(), runtime_metrics.clone());
+    let log_stats = Arc::new(db::log_stats::LogStatsCache::load(&db).await?);
+    let log_writer =
+        proxy::logging::spawn_log_writer(db.clone(), runtime_metrics.clone(), log_stats.clone());
     let state = AppState {
         db: db.clone(),
         http_client,
@@ -68,14 +70,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         admin_auth_cache: Arc::new(AdminAuthCache::new()),
         runtime_metrics,
         log_writer,
+        log_stats,
         started_at: std::time::Instant::now(),
     };
 
-    // 6. Spawn background cleanup
+    // 6. Spawn background maintenance
+    tokio::spawn(db::log_stats::refresh_loop(
+        db.clone(),
+        state.log_stats.clone(),
+        state.runtime_metrics.clone(),
+    ));
     tokio::spawn(proxy::logging::cleanup_loop(
         db.clone(),
         state.runtime_settings.clone(),
         state.runtime_metrics.clone(),
+        state.log_stats.clone(),
     ));
 
     // 7. Build router

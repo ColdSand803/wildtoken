@@ -419,8 +419,12 @@ mod tests {
         let mut runtime_settings = RuntimeSettings::default();
         runtime_settings.log_body_max_bytes = FIRST_EVENT.len() as i64;
         let runtime_metrics = Arc::new(RuntimeMetrics::new());
-        let log_writer =
-            crate::proxy::logging::spawn_log_writer(db.clone(), runtime_metrics.clone());
+        let log_stats = Arc::new(crate::db::log_stats::LogStatsCache::empty());
+        let log_writer = crate::proxy::logging::spawn_log_writer(
+            db.clone(),
+            runtime_metrics.clone(),
+            log_stats.clone(),
+        );
         let state = AppState {
             db: db.clone(),
             http_client: reqwest::Client::new(),
@@ -435,6 +439,7 @@ mod tests {
             admin_auth_cache: Arc::new(AdminAuthCache::new()),
             runtime_metrics: runtime_metrics.clone(),
             log_writer,
+            log_stats,
             started_at: Instant::now(),
         };
         let proxy_app = Router::new()

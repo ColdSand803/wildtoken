@@ -1,9 +1,9 @@
 use sqlx::{FromRow, QueryBuilder, Sqlite, SqlitePool};
 
 use crate::error::AppError;
-use crate::models::request_log::{
-    RequestLogDetailOut, RequestLogOut, TokenUsageStatsOut, TokenUsageWindowOut,
-};
+use crate::models::request_log::{RequestLogDetailOut, RequestLogOut};
+#[cfg(test)]
+use crate::models::request_log::{TokenUsageStatsOut, TokenUsageWindowOut};
 use crate::state::RuntimeMetrics;
 
 const LOG_BODY_CLEANUP_BATCH_SIZE: i64 = 4;
@@ -126,7 +126,7 @@ pub async fn list_logs(
     upstream_id: Option<i64>,
     search: Option<&str>,
     status: Option<&str>,
-) -> Result<(Vec<RequestLogOut>, i64), AppError> {
+) -> Result<Vec<RequestLogOut>, AppError> {
     let mut query = QueryBuilder::<Sqlite>::new(
         "SELECT id, created_at, method, path,
                 downstream_token_id, downstream_token_name,
@@ -173,13 +173,7 @@ pub async fn list_logs(
         })
         .collect();
 
-    let recent_rpm: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM request_logs WHERE created_at >= datetime('now', '-60 seconds')",
-    )
-    .fetch_one(pool)
-    .await?;
-
-    Ok((outputs, recent_rpm))
+    Ok(outputs)
 }
 
 pub async fn get_log_detail(
@@ -261,6 +255,7 @@ pub async fn get_log_detail(
     }))
 }
 
+#[cfg(test)]
 pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, AppError> {
     let row: (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
         r#"
@@ -545,7 +540,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rpm_counts_all_requests_in_trailing_minute_independent_of_list_filters() {
+    async fn list_filters_do_not_affect_returned_logs() {
         let pool = test_pool().await;
         sqlx::query(
             r#"INSERT INTO request_logs (id, created_at, upstream_id, status_code) VALUES
@@ -557,12 +552,11 @@ mod tests {
         .await
         .unwrap();
 
-        let (items, recent_rpm) = list_logs(&pool, 10, 0, Some(1), None, Some("2xx"))
+        let items = list_logs(&pool, 10, 0, Some(1), None, Some("2xx"))
             .await
             .unwrap();
 
         assert_eq!(items.iter().map(|item| item.id).collect::<Vec<_>>(), [1, 3]);
-        assert_eq!(recent_rpm, 2);
     }
 
     #[tokio::test]

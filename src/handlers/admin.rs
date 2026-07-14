@@ -217,22 +217,7 @@ pub async fn admin_system_info(
     } else {
         None
     };
-    let total_log_count = sqlx::query_scalar("SELECT COUNT(*) FROM request_logs")
-        .fetch_one(&state.db)
-        .await
-        .unwrap_or(0);
-    let log_count_24h = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM request_logs WHERE created_at >= datetime('now', '-24 hours')",
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
-    let recent_one_minute_log_count = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM request_logs WHERE created_at >= datetime('now', '-60 seconds')",
-    )
-    .fetch_one(&state.db)
-    .await
-    .unwrap_or(0);
+    let log_stats = state.log_stats.snapshot();
     let (enabled_upstream_count, total_upstream_count) = sqlx::query_as::<_, (i64, i64)>(
         "SELECT COALESCE(SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END), 0), COUNT(*) FROM upstreams",
     )
@@ -249,11 +234,11 @@ pub async fn admin_system_info(
         current_server_time: chrono::Local::now().to_rfc3339(),
         database_ok,
         database_allocated_bytes,
-        total_log_count,
-        log_count_24h,
+        total_log_count: log_stats.total_log_count,
+        log_count_24h: log_stats.log_count_24h,
         enabled_upstream_count,
         total_upstream_count,
-        recent_one_minute_log_count,
+        recent_one_minute_log_count: log_stats.recent_one_minute_log_count,
         runtime_log_settings: RuntimeLogSettingsSummary {
             log_body_keep_count: settings.log_body_keep_count,
             log_retention_days: settings.log_retention_days,
@@ -416,7 +401,7 @@ pub async fn admin_list_logs(
         .status
         .as_deref()
         .filter(|status| matches!(*status, "2xx" | "4xx" | "5xx" | "none"));
-    let (mut items, recent_rpm) = log_db::list_logs(
+    let mut items = log_db::list_logs(
         &state.db,
         limit + 1,
         offset,
@@ -429,6 +414,7 @@ pub async fn admin_list_logs(
     if has_more {
         items.truncate(limit as usize);
     }
+    let recent_rpm = state.log_stats.snapshot().recent_one_minute_log_count;
     Ok(Json(RequestLogPage {
         items,
         has_more,
@@ -440,7 +426,7 @@ pub async fn admin_token_usage_stats(
     State(state): State<AppState>,
     _auth: AdminAuth,
 ) -> Result<Json<TokenUsageStatsOut>, AppError> {
-    Ok(Json(log_db::token_usage_stats(&state.db).await?))
+    Ok(Json(state.log_stats.snapshot().token_usage))
 }
 
 pub async fn admin_get_log_detail(
