@@ -351,11 +351,7 @@ mod tests {
                 total_tokens INTEGER,
                 duration_ms INTEGER,
                 first_token_ms INTEGER,
-                error TEXT,
-                downstream_request TEXT,
-                upstream_request TEXT,
-                upstream_response TEXT,
-                downstream_response TEXT
+                error TEXT
             )"#,
         )
         .execute(pool)
@@ -372,7 +368,8 @@ mod tests {
                 upstream_request_is_override INTEGER NOT NULL DEFAULT 0 CHECK (upstream_request_is_override IN (0, 1)),
                 response_snapshot TEXT,
                 downstream_response_override TEXT,
-                downstream_response_is_override INTEGER NOT NULL DEFAULT 0 CHECK (downstream_response_is_override IN (0, 1))
+                downstream_response_is_override INTEGER NOT NULL DEFAULT 0 CHECK (downstream_response_is_override IN (0, 1)),
+                bodies_cleared INTEGER NOT NULL DEFAULT 0 CHECK (bodies_cleared IN (0, 1))
             )"#,
         )
         .execute(pool)
@@ -406,15 +403,6 @@ mod tests {
         )
         .await
         .unwrap();
-
-        let legacy_payloads: (Option<String>, Option<String>, Option<String>, Option<String>) =
-            sqlx::query_as(
-                "SELECT downstream_request, upstream_request, upstream_response, downstream_response FROM request_logs WHERE id = 1",
-            )
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(legacy_payloads, (None, None, None, None));
 
         let payload: (
             Option<String>,
@@ -756,12 +744,9 @@ async fn insert_log_batch(
              upstream_id, upstream_name, model,
              reasoning_effort, response_reasoning_effort, stream, status_code,
              prompt_tokens, completion_tokens, total_tokens,
-             duration_ms, first_token_ms, error,
-             downstream_request, upstream_request,
-             upstream_response, downstream_response,
-             created_at)
+             duration_ms, first_token_ms, error, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                NULL, NULL, NULL, NULL, datetime('now'))"#,
+                datetime('now'))"#,
         )
         .bind(&entry.method)
         .bind(&entry.path)

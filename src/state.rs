@@ -22,10 +22,6 @@ use crate::{
     models::settings::{AdminCredential, RuntimeSettings},
 };
 
-const RESPONSE_REASONING_EFFORT_BACKFILL: &str = "request_logs_response_reasoning_effort_v1";
-const CLIENT_TYPE_BACKFILL: &str = "request_logs_client_type_v1";
-const REQUEST_LOG_PAYLOADS_MIGRATION: &str = "request_log_payloads_v1";
-
 type AdminTokenMac = Hmac<Sha256>;
 
 const SSE_RECENT_DISCONNECT_WINDOW: Duration = Duration::from_secs(10 * 60);
@@ -35,195 +31,6 @@ fn unix_seconds_now() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs() as i64)
         .unwrap_or(0)
-}
-
-async fn backfill_response_reasoning_effort_once(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    let already_applied: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name = ?)")
-            .bind(RESPONSE_REASONING_EFFORT_BACKFILL)
-            .fetch_one(&mut *tx)
-            .await?;
-    if already_applied != 0 {
-        tx.commit().await?;
-        return Ok(());
-    }
-
-    sqlx::query(
-        r#"UPDATE request_logs
-           SET response_reasoning_effort = CASE
-               WHEN upstream_response LIKE '%"effort":"minimal"%' THEN 'minimal'
-               WHEN upstream_response LIKE '%"effort":"low"%' THEN 'low'
-               WHEN upstream_response LIKE '%"effort":"medium"%' THEN 'medium'
-               WHEN upstream_response LIKE '%"effort":"high"%' THEN 'high'
-               WHEN upstream_response LIKE '%"effort":"max"%' THEN 'max'
-           END
-           WHERE response_reasoning_effort IS NULL
-             AND (upstream_response LIKE '%"effort":"minimal"%'
-               OR upstream_response LIKE '%"effort":"low"%'
-               OR upstream_response LIKE '%"effort":"medium"%'
-               OR upstream_response LIKE '%"effort":"high"%'
-               OR upstream_response LIKE '%"effort":"max"%')"#,
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query("INSERT INTO app_migrations (name) VALUES (?)")
-        .bind(RESPONSE_REASONING_EFFORT_BACKFILL)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(())
-}
-
-async fn backfill_client_type_once(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    let already_applied: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name = ?)")
-            .bind(CLIENT_TYPE_BACKFILL)
-            .fetch_one(&mut *tx)
-            .await?;
-    if already_applied != 0 {
-        tx.commit().await?;
-        return Ok(());
-    }
-
-    sqlx::query(
-        r#"WITH classified AS (
-               SELECT id,
-                   CASE
-                       WHEN json_valid(downstream_request)
-                         AND LOWER(COALESCE(json_extract(downstream_request, '$.headers.user-agent'), '')) LIKE '%opencode%' THEN 'opencode'
-                       WHEN json_valid(downstream_request)
-                         AND LOWER(COALESCE(json_extract(downstream_request, '$.headers.user-agent'), '')) LIKE '%codex%' THEN 'codex'
-                       WHEN path = 'messages'
-                         OR (json_valid(downstream_request)
-                           AND (LOWER(COALESCE(json_extract(downstream_request, '$.headers.user-agent'), '')) LIKE '%claude%'
-                             OR COALESCE(json_extract(downstream_request, '$.headers.anthropic-version'), '') <> '')) THEN 'claude'
-                   END AS detected_client_type
-               FROM request_logs
-           )
-           UPDATE request_logs
-           SET client_type = (
-               SELECT detected_client_type
-               FROM classified
-               WHERE classified.id = request_logs.id
-           )
-           WHERE EXISTS (
-               SELECT 1
-               FROM classified
-               WHERE classified.id = request_logs.id
-                 AND classified.detected_client_type IS NOT NULL
-                 AND classified.detected_client_type IS NOT request_logs.client_type
-           )"#,
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query("INSERT INTO app_migrations (name) VALUES (?)")
-        .bind(CLIENT_TYPE_BACKFILL)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(())
-}
-
-async fn migrate_request_log_payloads_once(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    sqlx::query(
-        r#"CREATE TABLE IF NOT EXISTS request_log_payloads (
-            request_log_id INTEGER PRIMARY KEY
-                REFERENCES request_logs(id) ON DELETE CASCADE,
-            request_snapshot TEXT,
-            upstream_request_override TEXT,
-            upstream_request_is_override INTEGER NOT NULL DEFAULT 0
-                CHECK (upstream_request_is_override IN (0, 1)),
-            response_snapshot TEXT,
-            downstream_response_override TEXT,
-            downstream_response_is_override INTEGER NOT NULL DEFAULT 0
-                CHECK (downstream_response_is_override IN (0, 1)),
-            bodies_cleared INTEGER NOT NULL DEFAULT 0
-                CHECK (bodies_cleared IN (0, 1))
-        );"#,
-    )
-    .execute(&mut *tx)
-    .await?;
-    let bodies_cleared_exists: Option<String> = sqlx::query_scalar(
-        "SELECT name FROM pragma_table_info('request_log_payloads') WHERE name = 'bodies_cleared'",
-    )
-    .fetch_optional(&mut *tx)
-    .await?;
-    if bodies_cleared_exists.is_none() {
-        sqlx::query(
-            "ALTER TABLE request_log_payloads ADD COLUMN bodies_cleared INTEGER NOT NULL DEFAULT 0 CHECK (bodies_cleared IN (0, 1))",
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
-
-    let already_applied: i64 =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_migrations WHERE name = ?)")
-            .bind(REQUEST_LOG_PAYLOADS_MIGRATION)
-            .fetch_one(&mut *tx)
-            .await?;
-    if already_applied != 0 {
-        tx.commit().await?;
-        return Ok(());
-    }
-
-    sqlx::query(
-        r#"INSERT OR IGNORE INTO request_log_payloads (
-               request_log_id,
-               request_snapshot,
-               upstream_request_override,
-               upstream_request_is_override,
-               response_snapshot,
-               downstream_response_override,
-               downstream_response_is_override
-           )
-           SELECT id,
-               downstream_request,
-               CASE WHEN upstream_request IS NOT downstream_request THEN upstream_request END,
-               upstream_request IS NOT downstream_request,
-               upstream_response,
-               CASE WHEN downstream_response IS NOT upstream_response THEN downstream_response END,
-               downstream_response IS NOT upstream_response
-           FROM request_logs"#,
-    )
-    .execute(&mut *tx)
-    .await?;
-
-    let parent_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_logs")
-        .fetch_one(&mut *tx)
-        .await?;
-    let payload_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_log_payloads")
-        .fetch_one(&mut *tx)
-        .await?;
-    if parent_count != payload_count {
-        let error = sqlx::Error::Protocol(format!(
-            "request log payload migration row-count mismatch: {parent_count} request_logs, {payload_count} request_log_payloads"
-        ));
-        tx.rollback().await?;
-        return Err(error);
-    }
-
-    sqlx::query(
-        r#"UPDATE request_logs
-           SET downstream_request = NULL,
-               upstream_request = NULL,
-               upstream_response = NULL,
-               downstream_response = NULL
-           WHERE downstream_request IS NOT NULL
-              OR upstream_request IS NOT NULL
-              OR upstream_response IS NOT NULL
-              OR downstream_response IS NOT NULL"#,
-    )
-    .execute(&mut *tx)
-    .await?;
-    sqlx::query("INSERT INTO app_migrations (name) VALUES (?)")
-        .bind(REQUEST_LOG_PAYLOADS_MIGRATION)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(())
 }
 
 struct CachedAdminToken {
@@ -584,7 +391,7 @@ impl AppState {
     }
 }
 
-/// Create database tables and enable WAL mode + foreign keys.
+/// Create the current database schema, seed defaults, and enable SQLite runtime settings.
 pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query("PRAGMA journal_mode=WAL;")
         .execute(pool)
@@ -668,56 +475,31 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             total_tokens        INTEGER,
             duration_ms         INTEGER,
             first_token_ms      INTEGER,
-            error               TEXT,
-            downstream_request  TEXT,
-            upstream_request    TEXT,
-            upstream_response   TEXT,
-            downstream_response TEXT
+            error               TEXT
         );
         "#,
     )
     .execute(pool)
     .await?;
 
-    for definition in [
-        "downstream_token_id INTEGER REFERENCES api_tokens(id) ON DELETE SET NULL",
-        "downstream_token_name TEXT",
-        "client_type TEXT NOT NULL DEFAULT 'unknown'",
-        "response_reasoning_effort TEXT",
-    ] {
-        let column = definition
-            .split_whitespace()
-            .next()
-            .expect("column definition must start with a name");
-        let exists: Option<String> =
-            sqlx::query_scalar("SELECT name FROM pragma_table_info('request_logs') WHERE name = ?")
-                .bind(column)
-                .fetch_optional(pool)
-                .await?;
-        if exists.is_none() {
-            sqlx::query(&format!("ALTER TABLE request_logs ADD COLUMN {definition}"))
-                .execute(pool)
-                .await?;
-        }
-    }
-
-    // ---------- app_migrations ----------
     sqlx::query(
-        r#"
-        CREATE TABLE IF NOT EXISTS app_migrations (
-            name       TEXT PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        "#,
+        r#"CREATE TABLE IF NOT EXISTS request_log_payloads (
+            request_log_id INTEGER PRIMARY KEY
+                REFERENCES request_logs(id) ON DELETE CASCADE,
+            request_snapshot TEXT,
+            upstream_request_override TEXT,
+            upstream_request_is_override INTEGER NOT NULL DEFAULT 0
+                CHECK (upstream_request_is_override IN (0, 1)),
+            response_snapshot TEXT,
+            downstream_response_override TEXT,
+            downstream_response_is_override INTEGER NOT NULL DEFAULT 0
+                CHECK (downstream_response_is_override IN (0, 1)),
+            bodies_cleared INTEGER NOT NULL DEFAULT 0
+                CHECK (bodies_cleared IN (0, 1))
+        );"#,
     )
     .execute(pool)
     .await?;
-
-    // These derivations must consume the legacy snapshots before the payload
-    // migration clears them from the hot request_logs table.
-    backfill_response_reasoning_effort_once(pool).await?;
-    backfill_client_type_once(pool).await?;
-    migrate_request_log_payloads_once(pool).await?;
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at);",
