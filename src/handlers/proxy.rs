@@ -431,14 +431,27 @@ pub async fn list_models_handler(
     State(state): State<AppState>,
     _auth: DownstreamAuth,
 ) -> Result<Json<serde_json::Value>, AppError> {
+    if let Some(cached) = state.models_list_cache.get().await {
+        return Ok(Json(cached));
+    }
+
     let upstreams = crate::db::upstream::list_enabled_upstreams(&state.db).await?;
     let ids = aggregate_model_ids(&upstreams);
-    Ok(Json(openai_models_list_response(ids)))
+    let response = openai_models_list_response(ids);
+
+    // Double-check: another concurrent miss may have already filled the cache.
+    if let Some(cached) = state.models_list_cache.get().await {
+        return Ok(Json(cached));
+    }
+    state.models_list_cache.set(response.clone()).await;
+    Ok(Json(response))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{aggregate_model_ids, openai_models_list_response, proxy_handler};
+    use super::{
+        aggregate_model_ids, list_models_handler, openai_models_list_response, proxy_handler,
+    };
     use crate::models::upstream::UpstreamRow;
     use crate::{
         config::Settings,
@@ -494,6 +507,7 @@ mod tests {
             runtime_metrics,
             log_writer,
             log_stats,
+            models_list_cache: Arc::new(crate::state::ModelsListCache::new()),
             started_at: Instant::now(),
         }
     }
@@ -766,6 +780,7 @@ mod tests {
             runtime_metrics: runtime_metrics.clone(),
             log_writer,
             log_stats,
+            models_list_cache: Arc::new(crate::state::ModelsListCache::new()),
             started_at: Instant::now(),
         };
         let proxy_app = Router::new()
@@ -976,5 +991,84 @@ mod tests {
         assert_eq!(data[0]["object"], "model");
         assert_eq!(data[0]["created"], 0);
         assert_eq!(data[0]["owned_by"], "wildtoken");
+    }
+
+    #[tokio::test]
+    async fn list_models_handler_uses_cache_until_invalidated() {
+        let db = proxy_test_database().await;
+        sqlx::query(
+            r#"INSERT INTO upstreams
+               (name, base_url, model_names, model_prefixes, model_mappings, priority, weight, enabled)
+               VALUES ('a', 'http://example.com', '["gpt-4"]', '[]', '{}', 100, 100, 1)"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let state = test_proxy_state(db.clone(), RuntimeSettings::default()).await;
+        let app = Router::new()
+            .route("/v1/models", axum::routing::get(list_models_handler))
+            .with_state(state.clone());
+
+        let first = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/models")
+                    .header(header::AUTHORIZATION, "Bearer downstream-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+        let first_body = to_bytes(first.into_body(), 1024 * 1024).await.unwrap();
+        let first_json: serde_json::Value = serde_json::from_slice(&first_body).unwrap();
+        assert_eq!(first_json["data"][0]["id"], "gpt-4");
+
+        // Bypass admin handlers so only the cache can keep the old list.
+        sqlx::query(
+            r#"UPDATE upstreams SET model_names = '["gpt-4","gpt-5"]' WHERE name = 'a'"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+
+        let cached = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/models")
+                    .header(header::AUTHORIZATION, "Bearer downstream-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let cached_body = to_bytes(cached.into_body(), 1024 * 1024).await.unwrap();
+        let cached_json: serde_json::Value = serde_json::from_slice(&cached_body).unwrap();
+        assert_eq!(cached_json["data"].as_array().unwrap().len(), 1);
+
+        state.models_list_cache.invalidate().await;
+
+        let refreshed = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/models")
+                    .header(header::AUTHORIZATION, "Bearer downstream-secret")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let refreshed_body = to_bytes(refreshed.into_body(), 1024 * 1024).await.unwrap();
+        let refreshed_json: serde_json::Value = serde_json::from_slice(&refreshed_body).unwrap();
+        let ids: Vec<&str> = refreshed_json["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, vec!["gpt-4", "gpt-5"]);
     }
 }

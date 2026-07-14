@@ -314,6 +314,40 @@ impl AdminAuthCache {
     }
 }
 
+/// In-memory cache for the aggregated `GET /v1/models` response.
+///
+/// Invalidated explicitly on upstream write operations (create/update/enable/priority/delete).
+/// Concurrent misses may reload the same value; that is intentional and panic-free.
+pub struct ModelsListCache {
+    value: RwLock<Option<serde_json::Value>>,
+}
+
+impl ModelsListCache {
+    pub fn new() -> Self {
+        Self {
+            value: RwLock::new(None),
+        }
+    }
+
+    pub async fn get(&self) -> Option<serde_json::Value> {
+        self.value.read().await.clone()
+    }
+
+    pub async fn set(&self, value: serde_json::Value) {
+        *self.value.write().await = Some(value);
+    }
+
+    pub async fn invalidate(&self) {
+        *self.value.write().await = None;
+    }
+}
+
+impl Default for ModelsListCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Application shared state.
 #[derive(Clone)]
 pub struct AppState {
@@ -331,6 +365,7 @@ pub struct AppState {
     pub runtime_metrics: Arc<RuntimeMetrics>,
     pub log_writer: crate::proxy::logging::LogWriter,
     pub log_stats: Arc<crate::db::log_stats::LogStatsCache>,
+    pub models_list_cache: Arc<ModelsListCache>,
     pub started_at: Instant,
 }
 

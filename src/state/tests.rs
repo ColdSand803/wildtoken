@@ -46,6 +46,7 @@ fn state_with_credential(credential: AdminCredential) -> AppState {
         runtime_metrics,
         log_writer,
         log_stats,
+        models_list_cache: Arc::new(super::ModelsListCache::new()),
         started_at: Instant::now(),
     }
 }
@@ -325,4 +326,20 @@ async fn published_rotation_invalidates_the_admin_auth_cache() {
             .load(Ordering::Relaxed),
         3
     );
+}
+
+#[tokio::test]
+async fn models_list_cache_set_get_and_invalidate() {
+    let cache = super::ModelsListCache::new();
+    assert!(cache.get().await.is_none());
+
+    let payload = serde_json::json!({
+        "object": "list",
+        "data": [{"id": "gpt-4", "object": "model", "created": 0, "owned_by": "wildtoken"}]
+    });
+    cache.set(payload.clone()).await;
+    assert_eq!(cache.get().await, Some(payload));
+
+    cache.invalidate().await;
+    assert!(cache.get().await.is_none());
 }

@@ -76,6 +76,7 @@ async fn test_state() -> AppState {
         runtime_metrics,
         log_writer,
         log_stats,
+        models_list_cache: Arc::new(crate::state::ModelsListCache::new()),
         started_at: Instant::now(),
     }
 }

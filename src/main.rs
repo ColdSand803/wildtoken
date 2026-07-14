@@ -101,6 +101,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         runtime_metrics,
         log_writer,
         log_stats,
+        models_list_cache: Arc::new(crate::state::ModelsListCache::new()),
         started_at: std::time::Instant::now(),
     };
 

@@ -303,6 +303,7 @@ pub async fn admin_create_upstream(
     .await
     {
         Ok(mut out) => {
+            state.models_list_cache.invalidate().await;
             let runtime_settings = state.runtime_settings.read().await.clone();
             apply_runtime_health(&state, AutoWeightPolicy::from(&runtime_settings), &mut out);
             Ok((StatusCode::CREATED, Json(out)).into_response())
@@ -335,6 +336,7 @@ pub async fn admin_update_upstream(
         state.settings.upstream.default_timeout_seconds,
     )
     .await?;
+    state.models_list_cache.invalidate().await;
     if existing.auto_weight_enabled != i64::from(input.base.auto_weight_enabled)
         || (existing.enabled == 0 && input.base.enabled)
     {
@@ -355,6 +357,7 @@ pub async fn admin_set_upstream_enabled(
         return Err(AppError::NotFound("upstream not found".into()));
     }
     let mut out = upstream_db::set_upstream_enabled(&state.db, id, body.enabled).await?;
+    state.models_list_cache.invalidate().await;
     if body.enabled {
         state.auto_weight.reset(id);
     }
@@ -373,6 +376,7 @@ pub async fn admin_set_upstream_priority(
         return Err(AppError::NotFound("upstream not found".into()));
     }
     let mut out = upstream_db::set_upstream_priority(&state.db, id, body.priority).await?;
+    state.models_list_cache.invalidate().await;
     let runtime_settings = state.runtime_settings.read().await.clone();
     apply_runtime_health(&state, AutoWeightPolicy::from(&runtime_settings), &mut out);
     Ok(Json(out))
@@ -385,6 +389,7 @@ pub async fn admin_delete_upstream(
 ) -> Result<StatusCode, AppError> {
     let deleted = upstream_db::delete_upstream(&state.db, id).await?;
     if deleted {
+        state.models_list_cache.invalidate().await;
         state.auto_weight.reset(id);
         Ok(StatusCode::NO_CONTENT)
     } else {
