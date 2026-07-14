@@ -9,7 +9,6 @@ use crate::models::upstream::UpstreamRow;
 pub const BACKOFF_INITIAL_SECONDS: u64 = 60;
 pub const BACKOFF_STEP_SECONDS: u64 = 60;
 pub const BACKOFF_MAX_SECONDS: u64 = 300;
-pub const AUTO_DISABLE_STATUS_CODES: [u16; 3] = [401, 402, 403];
 
 struct BackoffState {
     until: Instant,

@@ -12,6 +12,9 @@ const LOG_WRITE_RETRY_BASE_DELAY_MS: u64 = 50;
 const LOG_WRITE_BATCH_SIZE: usize = 20;
 const LOG_WRITE_BATCH_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 const CLEANUP_STARTUP_DELAY: std::time::Duration = std::time::Duration::from_secs(120);
+const LOG_BODY_CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+const LOG_RETENTION_CLEANUP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(3600);
+const INCREMENTAL_VACUUM_MAX_PAGES: u32 = 4096;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -220,11 +223,16 @@ mod tests {
 
     use sqlx::sqlite::SqlitePoolOptions;
 
-    use crate::state::RuntimeMetrics;
+    use crate::{
+        db::log_stats::LogStatsCache,
+        models::settings::RuntimeSettings,
+        state::{init_db, RuntimeMetrics},
+    };
 
     use super::{
-        encode_snapshot_pair, insert_log_entry, schedule_log, snapshot_request, snapshot_response,
-        snapshot_response_with_body_length, spawn_log_writer, truncate_body, LogEntry,
+        encode_snapshot_pair, insert_log_entry, run_cleanup_pass, schedule_log, snapshot_request,
+        snapshot_response, snapshot_response_with_body_length, spawn_log_writer, truncate_body,
+        LogEntry,
     };
 
     #[test]
@@ -517,6 +525,67 @@ mod tests {
             .unwrap();
         assert_eq!(count, 0);
     }
+
+    #[tokio::test]
+    async fn frequent_cleanup_pass_defers_full_log_retention_work() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        init_db(&pool).await.unwrap();
+        sqlx::query(
+            r#"INSERT INTO request_logs (id, created_at, method, path) VALUES
+                   (1, '2000-01-01', 'POST', 'responses'),
+                   (2, datetime('now'), 'POST', 'responses')"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for id in [1_i64, 2_i64] {
+            sqlx::query(
+                "INSERT INTO request_log_payloads (request_log_id, request_snapshot) VALUES (?, ?)",
+            )
+            .bind(id)
+            .bind(r#"{"body":{"text":"captured"}}"#)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let mut settings = RuntimeSettings::default();
+        settings.log_body_keep_count = 1;
+        settings.log_retention_days = 30;
+        let metrics = RuntimeMetrics::new();
+        let log_stats = LogStatsCache::load(&pool).await.unwrap();
+
+        run_cleanup_pass(&pool, &settings, &metrics, &log_stats, false).await;
+        let old_after_body_pass: (i64, i64) = sqlx::query_as(
+            r#"SELECT l.id, p.bodies_cleared
+               FROM request_logs AS l
+               JOIN request_log_payloads AS p ON p.request_log_id = l.id
+               WHERE l.id = 1"#,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(old_after_body_pass, (1, 1));
+        assert_eq!(metrics.snapshot().cleanup_last_rows_cleared, 1);
+
+        run_cleanup_pass(&pool, &settings, &metrics, &log_stats, true).await;
+        let old_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM request_logs WHERE id = 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let recent_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM request_logs WHERE id = 2")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(old_count, 0);
+        assert_eq!(recent_count, 1);
+        assert_eq!(log_stats.snapshot().total_log_count, 1);
+    }
 }
 
 // ── Async log writer ────────────────────────────────────────────────────────
@@ -756,52 +825,98 @@ async fn insert_log_batch(
 
 // ── Background cleanup ──────────────────────────────────────────────────────
 
-/// Background task that periodically cleans old log bodies and deletes stale logs.
+/// Background task that keeps full bodies near the configured row limit and
+/// performs the heavier retention/statistics work hourly.
 pub async fn cleanup_loop(
     pool: sqlx::SqlitePool,
     runtime_settings: std::sync::Arc<tokio::sync::RwLock<crate::models::settings::RuntimeSettings>>,
     metrics: Arc<RuntimeMetrics>,
     log_stats: Arc<LogStatsCache>,
 ) {
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(3600));
     tokio::time::sleep(CLEANUP_STARTUP_DELAY).await;
+    let mut body_cleanup_interval = tokio::time::interval(LOG_BODY_CLEANUP_INTERVAL);
+    body_cleanup_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut next_retention_cleanup = tokio::time::Instant::now();
 
     loop {
-        interval.tick().await;
-
-        let settings = runtime_settings.read().await.clone();
-        let cleanup_started_at = std::time::Instant::now();
-        let mut cleanup_succeeded = true;
-        metrics.begin_cleanup();
-        if let Err(e) = crate::db::log::clear_old_log_bodies_with_metrics(
-            &pool,
-            settings.log_body_keep_count,
-            &metrics,
-        )
-        .await
-        {
-            cleanup_succeeded = false;
-            tracing::error!("clear_old_log_bodies failed: {:?}", e);
+        body_cleanup_interval.tick().await;
+        let now = tokio::time::Instant::now();
+        let run_retention_cleanup = now >= next_retention_cleanup;
+        if run_retention_cleanup {
+            next_retention_cleanup = now + LOG_RETENTION_CLEANUP_INTERVAL;
         }
 
+        let settings = runtime_settings.read().await.clone();
+        run_cleanup_pass(
+            &pool,
+            &settings,
+            &metrics,
+            &log_stats,
+            run_retention_cleanup,
+        )
+        .await;
+    }
+}
+
+async fn run_cleanup_pass(
+    pool: &sqlx::SqlitePool,
+    settings: &crate::models::settings::RuntimeSettings,
+    metrics: &RuntimeMetrics,
+    log_stats: &LogStatsCache,
+    run_retention_cleanup: bool,
+) {
+    let cleanup_started_at = std::time::Instant::now();
+    let mut cleanup_succeeded = true;
+    metrics.begin_cleanup();
+    if let Err(error) = crate::db::log::clear_old_log_bodies_with_metrics(
+        pool,
+        settings.log_body_keep_count,
+        metrics,
+    )
+    .await
+    {
+        cleanup_succeeded = false;
+        tracing::error!(?error, "clear_old_log_bodies failed");
+    }
+
+    if run_retention_cleanup {
         let delete_started_at = std::time::Instant::now();
-        if let Err(e) = crate::db::log::delete_old_logs(&pool, settings.log_retention_days).await {
+        if let Err(error) = crate::db::log::delete_old_logs(pool, settings.log_retention_days).await
+        {
             cleanup_succeeded = false;
-            tracing::error!("delete_old_logs failed: {:?}", e);
+            tracing::error!(?error, "delete_old_logs failed");
         }
         if delete_started_at.elapsed() >= SLOW_DB_OPERATION_THRESHOLD {
             metrics.record_slow_db_operation();
         }
+
         let stats_refresh_started_at = std::time::Instant::now();
-        if let Err(e) = log_stats.refresh_from_db(&pool).await {
+        if let Err(error) = log_stats.refresh_from_db(pool).await {
+            cleanup_succeeded = false;
             tracing::warn!(
-                "request log statistics refresh after cleanup failed: {:?}",
-                e
+                ?error,
+                "request log statistics refresh after cleanup failed"
             );
         }
         if stats_refresh_started_at.elapsed() >= SLOW_DB_OPERATION_THRESHOLD {
             metrics.record_slow_db_operation();
         }
-        metrics.finish_cleanup(cleanup_succeeded, cleanup_started_at.elapsed());
     }
+
+    let reclaim_started_at = std::time::Instant::now();
+    match crate::db::log::reclaim_free_pages(pool, INCREMENTAL_VACUUM_MAX_PAGES).await {
+        Ok(pages_reclaimed) if pages_reclaimed > 0 => {
+            tracing::debug!(pages_reclaimed, "reclaimed SQLite pages after log cleanup");
+        }
+        Ok(_) => {}
+        Err(error) => {
+            cleanup_succeeded = false;
+            tracing::error!(?error, "incremental SQLite vacuum failed");
+        }
+    }
+    if reclaim_started_at.elapsed() >= SLOW_DB_OPERATION_THRESHOLD {
+        metrics.record_slow_db_operation();
+    }
+
+    metrics.finish_cleanup(cleanup_succeeded, cleanup_started_at.elapsed());
 }

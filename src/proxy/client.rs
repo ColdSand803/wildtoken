@@ -6,7 +6,7 @@ use futures::StreamExt;
 use std::{collections::HashMap, sync::Arc};
 
 use super::logging;
-use super::matcher::{self, BackoffManager};
+use super::matcher::BackoffManager;
 
 mod headers;
 mod sse;
@@ -260,11 +260,6 @@ pub async fn proxy_request(
 
     let status_u16 = status.as_u16();
     if is_sse_content_type(&content_type) {
-        let auto_disabled = matcher::AUTO_DISABLE_STATUS_CODES.contains(&status_u16);
-        if auto_disabled {
-            let _ = crate::db::upstream::set_upstream_enabled(&state.db, upstream.id, false).await;
-        }
-
         let log_entry = logging::LogEntry {
             method: method.to_string(),
             path: path.to_string(),
@@ -292,7 +287,6 @@ pub async fn proxy_request(
             Arc::clone(backoff),
             state.runtime_metrics.clone(),
             upstream.id,
-            auto_disabled,
         );
         let body_stream = futures::stream::unfold(stream_state, |mut stream_state| async move {
             if stream_state.log_entry.is_none() {
@@ -354,13 +348,8 @@ pub async fn proxy_request(
         }
     };
 
-    let auto_disabled = matcher::AUTO_DISABLE_STATUS_CODES.contains(&status_u16);
-    if auto_disabled {
-        let _ = crate::db::upstream::set_upstream_enabled(&state.db, upstream.id, false).await;
-    }
-
-    // Backoff bookkeeping: success on 2xx or after auto-disable; else failure.
-    if auto_disabled || (200..300).contains(&status_u16) {
+    // Backoff bookkeeping: every non-2xx response is a temporary failure.
+    if (200..300).contains(&status_u16) {
         backoff.record_success(upstream.id);
     } else {
         backoff.record_failure(upstream.id);

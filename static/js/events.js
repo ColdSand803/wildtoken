@@ -150,24 +150,6 @@ systemRefreshButton?.addEventListener("click", async () => {
   try { await loadSettingsPage(); } finally { systemRefreshButton.disabled = false; }
 });
 rotateAdminTokenButton?.addEventListener("click", rotateAdminToken);
-rotatedTokenCopy?.addEventListener("click", async () => {
-  const copied = await copyTextToClipboard(rotatedTokenValue.textContent);
-  if (copied) {
-    rotatedTokenCopy.textContent = "已复制";
-    window.setTimeout(() => { rotatedTokenCopy.textContent = "复制"; }, 1800);
-  } else {
-    setStatus("浏览器拒绝复制，请手动复制后再退出。", "error");
-  }
-});
-rotatedTokenLogout?.addEventListener("click", () => {
-  rotatedTokenValue.textContent = "";
-  clearAdminToken();
-  location.reload();
-});
-rotatedTokenDialog?.addEventListener("cancel", (event) => event.preventDefault());
-rotatedTokenDialog?.addEventListener("click", (event) => {
-  if (event.target === rotatedTokenDialog) event.preventDefault();
-});
 
 // ── Dashboard controls ───────────────────────────────────
 if (dashboardRefreshButton) {
@@ -519,10 +501,6 @@ document.addEventListener("keydown", (event) => {
     if (commandPalette?.open) {
       event.preventDefault();
       closeCommandPalette();
-      return;
-    }
-    if (rotatedTokenDialog?.open) {
-      event.preventDefault();
       return;
     }
     const top = topOpenDialog();

@@ -49,6 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .parse::<SqliteConnectOptions>()?
         .statement_cache_capacity(sqlite_statement_cache_capacity)
         .pragma("foreign_keys", "ON")
+        .pragma("auto_vacuum", "INCREMENTAL")
         .pragma("cache_size", format!("-{sqlite_cache_size_kib}"))
         .pragma("mmap_size", sqlite_mmap_size_bytes.to_string());
     let db = SqlitePoolOptions::new()
@@ -57,6 +58,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .connect_with(db_connect_options)
         .await?;
     init_db(&db).await?;
+    let sqlite_auto_vacuum: i64 = sqlx::query_scalar("PRAGMA auto_vacuum")
+        .fetch_one(&db)
+        .await?;
+    if sqlite_auto_vacuum != 2 {
+        tracing::warn!(
+            sqlite_auto_vacuum,
+            "SQLite incremental auto-vacuum is not active; run a maintenance VACUUM once"
+        );
+    }
     let runtime_settings = load_runtime_settings(&db).await;
     let admin_credential = bootstrap_admin_credential(&db, settings.admin.token.clone()).await?;
     // The startup token is bootstrap material only; never retain it as a fallback.

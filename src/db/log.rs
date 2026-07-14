@@ -6,7 +6,7 @@ use crate::models::request_log::{RequestLogDetailOut, RequestLogOut};
 use crate::models::request_log::{TokenUsageStatsOut, TokenUsageWindowOut};
 use crate::state::RuntimeMetrics;
 
-const LOG_BODY_CLEANUP_BATCH_SIZE: i64 = 4;
+const LOG_BODY_CLEANUP_BATCH_SIZE: i64 = 8;
 const LOG_BODY_CLEANUP_BATCH_PAUSE: std::time::Duration = std::time::Duration::from_millis(25);
 const SLOW_DB_OPERATION_THRESHOLD: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -356,6 +356,38 @@ pub async fn clear_old_log_bodies_with_metrics(
     clear_old_log_bodies_inner(pool, keep_count, Some(metrics)).await
 }
 
+/// Return free SQLite pages to the filesystem when incremental auto-vacuum is enabled.
+///
+/// Existing databases need one full `VACUUM` after switching from `NONE` to
+/// `INCREMENTAL`; until then this safely acts as a no-op.
+pub async fn reclaim_free_pages(pool: &SqlitePool, max_pages: u32) -> Result<u64, AppError> {
+    if max_pages == 0 {
+        return Ok(0);
+    }
+
+    let auto_vacuum: i64 = sqlx::query_scalar("PRAGMA auto_vacuum")
+        .fetch_one(pool)
+        .await?;
+    if auto_vacuum != 2 {
+        return Ok(0);
+    }
+
+    let before: i64 = sqlx::query_scalar("PRAGMA freelist_count")
+        .fetch_one(pool)
+        .await?;
+    if before == 0 {
+        return Ok(0);
+    }
+
+    sqlx::query(&format!("PRAGMA incremental_vacuum({max_pages})"))
+        .execute(pool)
+        .await?;
+    let after: i64 = sqlx::query_scalar("PRAGMA freelist_count")
+        .fetch_one(pool)
+        .await?;
+    Ok(before.saturating_sub(after) as u64)
+}
+
 async fn clear_old_log_bodies_inner(
     pool: &SqlitePool,
     keep_count: i64,
@@ -418,20 +450,37 @@ async fn clear_old_log_bodies_batch(
         return Ok(0);
     }
 
-    let mut transaction = pool.begin().await?;
     let count = rows.len() as u64;
-    for row in rows {
-        let request_snapshot = clear_snapshot_body(row.request_snapshot, true);
-        let upstream_request_override = clear_snapshot_body(
-            row.upstream_request_override,
-            row.upstream_request_is_override != 0,
-        );
-        let response_snapshot = clear_snapshot_body(row.response_snapshot, true);
-        let downstream_response_override = clear_snapshot_body(
-            row.downstream_response_override,
-            row.downstream_response_is_override != 0,
-        );
+    let updates: Vec<_> = rows
+        .into_iter()
+        .map(|row| {
+            (
+                row.request_log_id,
+                clear_snapshot_body(row.request_snapshot, true),
+                clear_snapshot_body(
+                    row.upstream_request_override,
+                    row.upstream_request_is_override != 0,
+                ),
+                clear_snapshot_body(row.response_snapshot, true),
+                clear_snapshot_body(
+                    row.downstream_response_override,
+                    row.downstream_response_is_override != 0,
+                ),
+            )
+        })
+        .collect();
 
+    // Parse and shrink the potentially large JSON values before acquiring the
+    // SQLite write lock; the transaction only contains the bounded UPDATEs.
+    let mut transaction = pool.begin().await?;
+    for (
+        request_log_id,
+        request_snapshot,
+        upstream_request_override,
+        response_snapshot,
+        downstream_response_override,
+    ) in updates
+    {
         sqlx::query(
             r#"UPDATE request_log_payloads
                SET request_snapshot = ?,
@@ -445,7 +494,7 @@ async fn clear_old_log_bodies_batch(
         .bind(upstream_request_override)
         .bind(response_snapshot)
         .bind(downstream_response_override)
-        .bind(row.request_log_id)
+        .bind(request_log_id)
         .execute(&mut *transaction)
         .await?;
     }
@@ -479,11 +528,11 @@ fn clear_snapshot_body(snapshot: Option<String>, should_clear: bool) -> Option<S
 
 #[cfg(test)]
 mod tests {
-    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+    use sqlx::{sqlite::SqliteConnectOptions, sqlite::SqlitePoolOptions, SqlitePool};
 
     use super::{
-        clear_old_log_bodies, delete_old_logs, get_log_detail, list_logs, token_usage_stats,
-        LOG_BODY_CLEANUP_BATCH_SIZE,
+        clear_old_log_bodies, delete_old_logs, get_log_detail, list_logs, reclaim_free_pages,
+        token_usage_stats, LOG_BODY_CLEANUP_BATCH_SIZE,
     };
 
     async fn test_pool() -> SqlitePool {
@@ -933,6 +982,147 @@ mod tests {
         assert_eq!(old_log_count, 0);
         assert_eq!(old_payload_count, 0);
         assert_eq!(recent_payload_count, 1);
+    }
+
+    #[tokio::test]
+    async fn incremental_vacuum_reclaims_a_bounded_number_of_pages() {
+        let unique = format!(
+            "wildtoken-vacuum-test-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true)
+            .pragma("auto_vacuum", "INCREMENTAL");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+
+        let mode: i64 = sqlx::query_scalar("PRAGMA auto_vacuum")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(mode, 2);
+        sqlx::query("CREATE TABLE reclaim_test (id INTEGER PRIMARY KEY, payload BLOB NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            r#"WITH RECURSIVE ids(value) AS (
+                   SELECT 1 UNION ALL SELECT value + 1 FROM ids WHERE value < 128
+               )
+               INSERT INTO reclaim_test (id, payload)
+               SELECT value, zeroblob(8192) FROM ids"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query("DELETE FROM reclaim_test")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO reclaim_test (id, payload) VALUES (999, X'6B6565706572')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let before: i64 = sqlx::query_scalar("PRAGMA freelist_count")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(before > 0);
+        let reclaimed = reclaim_free_pages(&pool, 32).await.unwrap();
+        let after: i64 = sqlx::query_scalar("PRAGMA freelist_count")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(reclaimed > 0);
+        assert!(reclaimed <= 32);
+        assert_eq!(before - after, reclaimed as i64);
+        let keeper: Vec<u8> = sqlx::query_scalar("SELECT payload FROM reclaim_test WHERE id = 999")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(keeper, b"keeper");
+
+        pool.close().await;
+        let reopened = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().filename(&path))
+            .await
+            .unwrap();
+        let persisted_mode: i64 = sqlx::query_scalar("PRAGMA auto_vacuum")
+            .fetch_one(&reopened)
+            .await
+            .unwrap();
+        assert_eq!(persisted_mode, 2);
+        reopened.close().await;
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn incremental_vacuum_is_a_no_op_for_legacy_none_mode() {
+        let unique = format!(
+            "wildtoken-vacuum-none-test-{}-{}.db",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path = std::env::temp_dir().join(unique);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE legacy_reclaim_test (payload BLOB NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO legacy_reclaim_test VALUES (zeroblob(1048576))")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM legacy_reclaim_test")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let page_count_before: i64 = sqlx::query_scalar("PRAGMA page_count")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let freelist_before: i64 = sqlx::query_scalar("PRAGMA freelist_count")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert!(freelist_before > 0);
+        assert_eq!(reclaim_free_pages(&pool, 32).await.unwrap(), 0);
+        let page_count_after: i64 = sqlx::query_scalar("PRAGMA page_count")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let freelist_after: i64 = sqlx::query_scalar("PRAGMA freelist_count")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(page_count_after, page_count_before);
+        assert_eq!(freelist_after, freelist_before);
+
+        pool.close().await;
+        std::fs::remove_file(&path).unwrap();
     }
 }
 

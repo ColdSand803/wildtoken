@@ -847,14 +847,16 @@ async function saveServerSettings(event) {
 }
 
 async function rotateAdminToken() {
-  const confirmed = await requestRotationConfirm();
-  if (!confirmed) return;
+  const token = await requestRotationConfirm();
+  if (!token) return;
   rotateAdminTokenButton.disabled = true;
   try {
-    const result = await api("/api/admin/settings/admin-token/rotate", { method: "POST", body: JSON.stringify({ confirm: true }) });
-    rotatedTokenValue.textContent = result.token;
-    if (typeof rotatedTokenDialog.showModal === "function") rotatedTokenDialog.showModal(); else rotatedTokenDialog.setAttribute("open", "");
-    rotatedTokenCopy.focus();
+    await api("/api/admin/settings/admin-token/rotate", {
+      method: "POST",
+      body: JSON.stringify({ confirm: true, token }),
+    });
+    setAdminToken(token);
+    setStatus("管理员令牌已更换，当前控制台已改用新令牌。", "ok");
   } catch (error) {
     setStatus(error.status === 409 ? "令牌已被其他操作轮换，请重新登录。" : "轮换失败，请稍后重试。", "error");
   } finally {
@@ -864,27 +866,39 @@ async function rotateAdminToken() {
 
 function requestRotationConfirm() {
   return new Promise((resolve) => {
-    if (!rotateConfirmDialog) { resolve(false); return; }
+    if (!rotateConfirmDialog) { resolve(null); return; }
+    rotateAdminTokenInput.value = "";
     rotateConfirmCheck.checked = false;
     rotateConfirmSubmit.disabled = true;
-    const finish = (confirmed) => {
-      rotateConfirmSubmit.removeEventListener("click", approve);
+    const finish = (token) => {
+      rotateAdminTokenForm.removeEventListener("submit", approve);
       rotateConfirmCancel.removeEventListener("click", cancel);
       rotateConfirmCheck.removeEventListener("change", toggle);
+      rotateAdminTokenInput.removeEventListener("input", toggle);
       rotateConfirmDialog.removeEventListener("cancel", cancelEvent);
       if (rotateConfirmDialog.open) rotateConfirmDialog.close();
-      resolve(confirmed);
+      resolve(token);
     };
-    const approve = () => finish(true);
-    const cancel = () => finish(false);
-    const cancelEvent = (event) => { event.preventDefault(); finish(false); };
-    const toggle = () => { rotateConfirmSubmit.disabled = !rotateConfirmCheck.checked; };
-    rotateConfirmSubmit.addEventListener("click", approve);
+    const validToken = () => /^[\x21-\x7E]{8,256}$/.test(rotateAdminTokenInput.value.trim());
+    const approve = (event) => {
+      event.preventDefault();
+      const token = rotateAdminTokenInput.value.trim();
+      if (!rotateConfirmCheck.checked || !validToken()) {
+        rotateAdminTokenInput.reportValidity();
+        return;
+      }
+      finish(token);
+    };
+    const cancel = () => finish(null);
+    const cancelEvent = (event) => { event.preventDefault(); finish(null); };
+    const toggle = () => { rotateConfirmSubmit.disabled = !rotateConfirmCheck.checked || !validToken(); };
+    rotateAdminTokenForm.addEventListener("submit", approve);
     rotateConfirmCancel.addEventListener("click", cancel);
     rotateConfirmCheck.addEventListener("change", toggle);
+    rotateAdminTokenInput.addEventListener("input", toggle);
     rotateConfirmDialog.addEventListener("cancel", cancelEvent);
     if (typeof rotateConfirmDialog.showModal === "function") rotateConfirmDialog.showModal(); else rotateConfirmDialog.setAttribute("open", "");
-    rotateConfirmCheck.focus();
+    rotateAdminTokenInput.focus();
   });
 }
 

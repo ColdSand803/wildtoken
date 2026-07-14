@@ -422,7 +422,6 @@ pub(super) struct SseStreamState {
     pub(super) backoff: Arc<BackoffManager>,
     pub(super) metrics: Arc<RuntimeMetrics>,
     pub(super) upstream_id: i64,
-    pub(super) auto_disabled: bool,
 }
 
 impl SseStreamState {
@@ -438,7 +437,6 @@ impl SseStreamState {
         backoff: Arc<BackoffManager>,
         metrics: Arc<RuntimeMetrics>,
         upstream_id: i64,
-        auto_disabled: bool,
     ) -> Self {
         metrics.start_sse_stream();
         Self {
@@ -454,7 +452,6 @@ impl SseStreamState {
             backoff,
             metrics,
             upstream_id,
-            auto_disabled,
         }
     }
 
@@ -468,7 +465,7 @@ impl SseStreamState {
     }
 
     fn record_response_health(&self) {
-        if self.auto_disabled || (200..300).contains(&self.upstream_status) {
+        if (200..300).contains(&self.upstream_status) {
             self.backoff.record_success(self.upstream_id);
         } else {
             self.backoff.record_failure(self.upstream_id);

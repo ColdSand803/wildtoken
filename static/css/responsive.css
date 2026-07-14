@@ -189,6 +189,26 @@
     max-width: 100%;
   }
 
+  /* Keep the two channel identifiers visible with less horizontal scrolling. */
+  .upstream-table {
+    min-width: 880px;
+  }
+
+  .upstream-table .name-cell {
+    min-width: 128px;
+    width: 128px;
+  }
+
+  .upstream-table .url-cell {
+    max-width: 172px;
+    min-width: 172px;
+    width: 172px;
+  }
+
+  .upstream-table .name-stack .muted {
+    display: none;
+  }
+
   th,
   td {
     padding: 9px 10px;
@@ -425,6 +445,21 @@
   .content {
     padding-left: 8px;
     padding-right: 8px;
+  }
+
+  .upstream-table {
+    min-width: 800px;
+  }
+
+  .upstream-table .name-cell {
+    min-width: 108px;
+    width: 108px;
+  }
+
+  .upstream-table .url-cell {
+    max-width: 152px;
+    min-width: 152px;
+    width: 152px;
   }
 
   .topbar {

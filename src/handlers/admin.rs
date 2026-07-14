@@ -1,11 +1,9 @@
 use axum::{
     extract::{Path, Query, State},
-    http::{header, HeaderValue, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
     Json,
 };
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use rand::{rngs::OsRng, RngCore};
 use serde::Deserialize;
 
 use crate::db::{log as log_db, settings as settings_db, token as token_db};
@@ -13,9 +11,9 @@ use crate::error::AppError;
 use crate::middleware::auth::AdminAuth;
 use crate::models::request_log::{RequestLogCursorOut, RequestLogPage, TokenUsageStatsOut};
 use crate::models::settings::{
-    AdminTokenRotateIn, AdminTokenRotateOut, ModelTestPromptTemplate, ModelTestPromptTemplateIn,
-    ModelTestTemplate, ModelTestTemplateIn, RuntimeCleanupMetricsOut, RuntimeLogSettingsSummary,
-    RuntimeMetricsOut, RuntimeSettingsIn, RuntimeSettingsOut, SystemInfoOut,
+    AdminTokenRotateIn, ModelTestPromptTemplate, ModelTestPromptTemplateIn, ModelTestTemplate,
+    ModelTestTemplateIn, RuntimeCleanupMetricsOut, RuntimeLogSettingsSummary, RuntimeMetricsOut,
+    RuntimeSettingsIn, RuntimeSettingsOut, SystemInfoOut,
 };
 use crate::models::token::{ApiTokenDetailOut, ApiTokenIn};
 use crate::models::upstream::UpstreamEnabledIn;
@@ -175,17 +173,17 @@ pub async fn admin_rotate_admin_token(
     State(state): State<AppState>,
     auth: AdminAuth,
     Json(input): Json<AdminTokenRotateIn>,
-) -> Result<Response, AppError> {
+) -> Result<StatusCode, AppError> {
     if !input.confirm {
         return Err(AppError::BadRequest(
             "explicit confirmation is required".into(),
         ));
     }
 
-    let mut bytes = [0_u8; 32];
-    OsRng.fill_bytes(&mut bytes);
-    let token = URL_SAFE_NO_PAD.encode(bytes);
-    let hash = hash_admin_token(token.clone()).await?;
+    let token = input
+        .validated_token()
+        .map_err(|message| AppError::BadRequest(message.into()))?;
+    let hash = hash_admin_token(token.to_owned()).await?;
     let credential =
         settings_db::rotate_admin_credential(&state.db, &hash, auth.credential_version)
             .await?
@@ -194,11 +192,7 @@ pub async fn admin_rotate_admin_token(
     // The snapshot is published only after the credential transaction commits.
     // Publication is monotonic even if concurrent rotations finish out of order.
     state.publish_admin_credential(credential).await;
-    let mut response = Json(AdminTokenRotateOut { token }).into_response();
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    Ok(response)
+    Ok(StatusCode::NO_CONTENT)
 }
 
 pub async fn admin_system_info(

@@ -12,7 +12,8 @@ use crate::{
     state::{init_db, AdminAuthCache, AppState, RuntimeMetrics},
 };
 use axum::{
-    http::{HeaderMap, HeaderValue},
+    body::to_bytes,
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     routing::post,
     Json, Router,
 };
@@ -40,6 +41,40 @@ fn upstream_with_headers(path_base: String, extra_headers: serde_json::Value) ->
         timeout_seconds: 30.0,
         created_at: "".into(),
         updated_at: "".into(),
+    }
+}
+
+async fn test_state() -> AppState {
+    let db = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    init_db(&db).await.unwrap();
+    let runtime_metrics = Arc::new(RuntimeMetrics::new());
+    let log_stats = Arc::new(crate::db::log_stats::LogStatsCache::empty());
+    let log_writer = crate::proxy::logging::spawn_log_writer(
+        db.clone(),
+        runtime_metrics.clone(),
+        log_stats.clone(),
+        Settings::default().logging.log_queue_capacity,
+    );
+    AppState {
+        db,
+        http_client: reqwest::Client::new(),
+        settings: Settings::default(),
+        backoff: Arc::new(BackoffManager::new()),
+        runtime_settings: Arc::new(RwLock::new(RuntimeSettings::default())),
+        admin_credential: Arc::new(RwLock::new(AdminCredential {
+            credential_hash: "test".into(),
+            credential_version: 1,
+        })),
+        admin_credential_version: Arc::new(AtomicI64::new(1)),
+        admin_auth_cache: Arc::new(AdminAuthCache::new()),
+        runtime_metrics,
+        log_writer,
+        log_stats,
+        started_at: Instant::now(),
     }
 }
 
@@ -227,37 +262,7 @@ async fn anthropic_channel_overrides_reach_the_upstream_on_the_wire() {
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
 
-    let db = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect("sqlite::memory:")
-        .await
-        .unwrap();
-    init_db(&db).await.unwrap();
-    let runtime_metrics = Arc::new(RuntimeMetrics::new());
-    let log_stats = Arc::new(crate::db::log_stats::LogStatsCache::empty());
-    let log_writer = crate::proxy::logging::spawn_log_writer(
-        db.clone(),
-        runtime_metrics.clone(),
-        log_stats.clone(),
-        Settings::default().logging.log_queue_capacity,
-    );
-    let state = AppState {
-        db: db.clone(),
-        http_client: reqwest::Client::new(),
-        settings: Settings::default(),
-        backoff: Arc::new(BackoffManager::new()),
-        runtime_settings: Arc::new(RwLock::new(RuntimeSettings::default())),
-        admin_credential: Arc::new(RwLock::new(AdminCredential {
-            credential_hash: "test".into(),
-            credential_version: 1,
-        })),
-        admin_credential_version: Arc::new(AtomicI64::new(1)),
-        admin_auth_cache: Arc::new(AdminAuthCache::new()),
-        runtime_metrics,
-        log_writer,
-        log_stats,
-        started_at: Instant::now(),
-    };
+    let state = test_state().await;
     let upstream = upstream_with_headers(
         format!("http://{address}"),
         json!({
@@ -297,6 +302,88 @@ async fn anthropic_channel_overrides_reach_the_upstream_on_the_wire() {
     assert_eq!(headers["x-client-request"], "request-456");
     assert_eq!(headers["accept-encoding"], "identity");
     assert!(headers.get("authorization").is_none());
+
+    server.abort();
+}
+
+#[tokio::test]
+async fn authentication_and_payment_responses_do_not_disable_the_channel() {
+    let app = Router::new().route(
+        "/v1/responses",
+        post(|headers: HeaderMap| async move {
+            let status = headers
+                .get("x-test-status")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u16>().ok())
+                .and_then(|value| StatusCode::from_u16(value).ok())
+                .unwrap();
+            let is_sse = headers.contains_key("x-test-sse");
+            let content_type = if is_sse {
+                "text/event-stream"
+            } else {
+                "application/json"
+            };
+            let body = if is_sse {
+                "data: [DONE]\n\n"
+            } else {
+                r#"{"error":"test"}"#
+            };
+            (status, [(header::CONTENT_TYPE, content_type)], body)
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+
+    let state = test_state().await;
+    sqlx::query(
+        r#"INSERT INTO upstreams
+            (id, name, base_url, model_names, enabled, timeout_seconds)
+           VALUES (1, 'test-channel', ?, '[]', 1, 30)"#,
+    )
+    .bind(format!("http://{address}"))
+    .execute(&state.db)
+    .await
+    .unwrap();
+    let upstream = upstream_with_headers(format!("http://{address}"), json!({}));
+
+    for (status, is_sse) in [(401, false), (402, false), (403, false), (401, true)] {
+        let mut downstream = HeaderMap::new();
+        downstream.insert(
+            "x-test-status",
+            HeaderValue::from_str(&status.to_string()).unwrap(),
+        );
+        if is_sse {
+            downstream.insert("x-test-sse", HeaderValue::from_static("1"));
+        }
+
+        let result = proxy_request(
+            &state,
+            &state.backoff,
+            &upstream,
+            1,
+            "test-token",
+            "test-client",
+            None,
+            "POST",
+            "responses",
+            None,
+            &downstream,
+            br#"{"model":"test"}"#,
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.status.as_u16(), status);
+        let _ = to_bytes(result.body, usize::MAX).await.unwrap();
+
+        let enabled: i64 = sqlx::query_scalar("SELECT enabled FROM upstreams WHERE id = 1")
+            .fetch_one(&state.db)
+            .await
+            .unwrap();
+        assert_eq!(enabled, 1, "status {status} must not disable the channel");
+        assert!(state.backoff.is_backed_off(upstream.id));
+        state.backoff.record_success(upstream.id);
+    }
 
     server.abort();
 }

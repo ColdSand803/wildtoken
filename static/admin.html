@@ -394,7 +394,7 @@
               </section>
 
               <section class="settings-card" aria-labelledby="log-settings-title">
-                <div class="settings-card-head"><div><h3 id="log-settings-title">日志与存储</h3><p>这些策略由服务端保存，保存后用于新的快照；清理规则在下一轮清理周期生效。</p></div><span id="settings-revision" class="settings-revision">尚未加载</span></div>
+                <div class="settings-card-head"><div><h3 id="log-settings-title">日志与存储</h3><p>这些策略由服务端保存，保存后用于新的快照；正文清理通常在一分钟内生效，过期日志按小时删除。</p></div><span id="settings-revision" class="settings-revision">尚未加载</span></div>
                 <form id="server-settings-form" class="settings-server-form">
                   <div class="settings-fields-grid">
                     <label class="field"><span class="field-label">正文保留数量</span><input id="settings-body-keep-count" type="number" min="1" max="10000" required inputmode="numeric" /><span class="field-hint">每条日志保留的正文快照数量。</span></label>
@@ -416,8 +416,8 @@
               </section>
 
               <section class="settings-card settings-security" aria-labelledby="security-title">
-                <div class="settings-card-head"><div><h3 id="security-title">安全</h3><p>轮换后旧管理员令牌会立即失效；新令牌只显示一次。</p></div><span class="settings-security-mark">敏感操作</span></div>
-                <div class="settings-action-row"><div><strong>轮换管理员令牌</strong><p>先确认，再生成一枚新的访问凭证。请准备好立即复制并安全保存。</p></div><button id="rotate-admin-token" type="button" class="danger">轮换令牌</button></div>
+                <div class="settings-card-head"><div><h3 id="security-title">安全</h3><p>管理员令牌可由你自行设置；更换后旧令牌会立即失效。</p></div><span class="settings-security-mark">敏感操作</span></div>
+                <div class="settings-action-row"><div><strong>更换管理员令牌</strong><p>填写新的 Admin Token，保存后当前控制台会自动改用新令牌。</p></div><button id="rotate-admin-token" type="button" class="danger">更换令牌</button></div>
               </section>
 
               <section class="settings-card" aria-labelledby="system-title">
@@ -838,19 +838,16 @@
       </div>
     </dialog>
     <dialog id="rotate-confirm-dialog" class="confirm-dialog" aria-labelledby="rotate-confirm-title">
-      <div class="confirm-panel">
-        <div class="modal-head"><div><h2 id="rotate-confirm-title">轮换管理员令牌</h2><p>轮换后旧令牌立即失效。新令牌只显示一次，请确认你已准备好复制并安全保存。</p></div></div>
-        <label class="rotate-confirm-check"><input id="rotate-confirm-check" type="checkbox" /><span>我了解旧令牌会立即失效，且新令牌只显示一次。</span></label>
-        <div class="modal-actions confirm-actions"><button id="rotate-confirm-cancel" type="button" class="secondary">取消</button><button id="rotate-confirm-submit" type="button" class="danger" disabled>确认轮换</button></div>
-      </div>
-    </dialog>
-    <dialog id="rotated-token-dialog" class="confirm-dialog rotated-token-dialog" aria-labelledby="rotated-token-title">
-      <div class="confirm-panel rotated-token-panel">
-        <div class="modal-head"><div><h2 id="rotated-token-title">立即保存新令牌</h2><p>这枚管理员令牌只显示这一次。复制并保存后，退出当前控制台。</p></div></div>
-        <div class="one-time-token"><code id="rotated-token-value"></code><button id="rotated-token-copy" type="button" class="secondary">复制</button></div>
-        <p class="rotated-token-warning">当前控制台仍使用旧令牌。保存完成后退出登录；旧令牌已失效。</p>
-        <div class="modal-actions"><button id="rotated-token-logout" type="button">我已保存，退出登录</button></div>
-      </div>
+      <form id="rotate-admin-token-form" class="confirm-panel">
+        <div class="modal-head"><div><h2 id="rotate-confirm-title">更换管理员令牌</h2><p>设置一个新的 Admin Token。保存后旧令牌立即失效，当前控制台会自动改用新令牌。</p></div></div>
+        <label class="field">
+          <span class="field-label">新 Admin Token</span>
+          <input id="rotate-admin-token-input" type="password" autocomplete="new-password" minlength="8" maxlength="256" spellcheck="false" required />
+          <span class="field-hint">8–256 个可打印 ASCII 字符，不可包含空格。</span>
+        </label>
+        <label class="rotate-confirm-check"><input id="rotate-confirm-check" type="checkbox" /><span>我了解保存后旧令牌会立即失效。</span></label>
+        <div class="modal-actions confirm-actions"><button id="rotate-confirm-cancel" type="button" class="secondary">取消</button><button id="rotate-confirm-submit" type="submit" class="danger" disabled>保存并更换</button></div>
+      </form>
     </dialog>
     <dialog id="command-palette" class="command-palette-dialog">
       <div class="command-palette-panel">

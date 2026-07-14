@@ -97,11 +97,20 @@ pub struct AdminCredential {
 pub struct AdminTokenRotateIn {
     #[serde(default)]
     pub confirm: bool,
+    pub token: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct AdminTokenRotateOut {
-    pub token: String,
+impl AdminTokenRotateIn {
+    pub fn validated_token(&self) -> Result<&str, &'static str> {
+        let token = self.token.trim();
+        if !(8..=256).contains(&token.len()) {
+            return Err("admin token must be between 8 and 256 bytes");
+        }
+        if !token.bytes().all(|byte| byte.is_ascii_graphic()) {
+            return Err("admin token must contain only printable ASCII characters without spaces");
+        }
+        Ok(token)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -295,6 +304,31 @@ mod tests {
             revision: 0,
         }
         .validate()
+        .is_err());
+    }
+
+    #[test]
+    fn validates_user_supplied_admin_tokens() {
+        let input = AdminTokenRotateIn {
+            confirm: true,
+            token: "  user-chosen-admin-token  ".into(),
+        };
+        assert_eq!(input.validated_token().unwrap(), "user-chosen-admin-token");
+
+        for token in ["short", "contains space", "含中文的管理员令牌"] {
+            assert!(AdminTokenRotateIn {
+                confirm: true,
+                token: token.into(),
+            }
+            .validated_token()
+            .is_err());
+        }
+
+        assert!(AdminTokenRotateIn {
+            confirm: true,
+            token: "x".repeat(257),
+        }
+        .validated_token()
         .is_err());
     }
 }
