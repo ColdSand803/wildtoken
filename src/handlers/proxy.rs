@@ -556,13 +556,23 @@ mod tests {
             .await
             .unwrap();
         init_db(&db).await.unwrap();
+        insert_test_token(&db, "retry-test").await;
+        db
+    }
+
+    async fn insert_test_token(db: &sqlx::SqlitePool, name: &str) {
+        let plaintext = "downstream-secret";
+        let digest = crate::db::token::token_digest(plaintext);
         sqlx::query(
-            "INSERT INTO api_tokens (name, token) VALUES ('retry-test', 'downstream-secret')",
+            "INSERT INTO api_tokens (name, token, token_hash, token_preview) VALUES (?, ?, ?, ?)",
         )
-        .execute(&db)
+        .bind(name)
+        .bind(&digest)
+        .bind(&digest)
+        .bind(crate::db::token::token_preview(plaintext))
+        .execute(db)
         .await
         .unwrap();
-        db
     }
 
     fn proxy_request_for(model: &str) -> Request<Body> {
@@ -607,10 +617,12 @@ mod tests {
         .execute(&db)
         .await
         .unwrap();
-        let mut runtime_settings = RuntimeSettings::default();
-        runtime_settings.max_retries = 1;
-        runtime_settings.same_upstream_retry_interval_ms = 120;
-        runtime_settings.auto_weight_failure_penalty = 100;
+        let runtime_settings = RuntimeSettings {
+            max_retries: 1,
+            same_upstream_retry_interval_ms: 120,
+            auto_weight_failure_penalty: 100,
+            ..Default::default()
+        };
         let state = test_proxy_state(db, runtime_settings.clone()).await;
         let app = Router::new()
             .route("/v1/{*path}", any(proxy_handler))
@@ -694,10 +706,12 @@ mod tests {
         .execute(&db)
         .await
         .unwrap();
-        let mut runtime_settings = RuntimeSettings::default();
-        runtime_settings.max_retries = 1;
-        runtime_settings.same_upstream_retry_interval_ms = 1_000;
-        runtime_settings.auto_weight_failure_penalty = 100;
+        let runtime_settings = RuntimeSettings {
+            max_retries: 1,
+            same_upstream_retry_interval_ms: 1_000,
+            auto_weight_failure_penalty: 100,
+            ..Default::default()
+        };
         let state = test_proxy_state(db, runtime_settings).await;
         let app = Router::new()
             .route("/v1/{*path}", any(proxy_handler))
@@ -776,12 +790,7 @@ mod tests {
             .await
             .unwrap();
         init_db(&db).await.unwrap();
-        sqlx::query(
-            "INSERT INTO api_tokens (name, token) VALUES ('stream-test', 'downstream-secret')",
-        )
-        .execute(&db)
-        .await
-        .unwrap();
+        insert_test_token(&db, "stream-test").await;
         sqlx::query(
             r#"INSERT INTO upstreams
                 (name, base_url, model_names, enabled, timeout_seconds)
@@ -792,8 +801,10 @@ mod tests {
         .await
         .unwrap();
 
-        let mut runtime_settings = RuntimeSettings::default();
-        runtime_settings.log_body_max_bytes = FIRST_EVENT.len() as i64;
+        let runtime_settings = RuntimeSettings {
+            log_body_max_bytes: FIRST_EVENT.len() as i64,
+            ..Default::default()
+        };
         let runtime_metrics = Arc::new(RuntimeMetrics::new());
         let log_stats = Arc::new(crate::db::log_stats::LogStatsCache::empty());
         let log_writer = crate::proxy::logging::spawn_log_writer(

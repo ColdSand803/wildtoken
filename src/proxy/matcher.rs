@@ -161,7 +161,7 @@ impl AutoWeightManager {
                 let remaining = if state.score == 0 && policy.recovery_increment > 0 {
                     let elapsed = now.saturating_duration_since(state.last_adjusted_at);
                     let remaining = policy.recovery_interval.saturating_sub(elapsed);
-                    Some(((remaining.as_millis() + 999) / 1_000) as i64)
+                    Some(remaining.as_millis().div_ceil(1_000) as i64)
                 } else {
                     None
                 };
@@ -375,7 +375,7 @@ pub async fn select_upstream(
         .map(|u| (u, model_match_score(u, model)))
         .collect();
 
-    if let Some(_) = model {
+    if model.is_some() {
         // keep the best score
         let best = scored.iter().map(|(_, s)| *s).max().unwrap_or(0);
         if best <= 0 {

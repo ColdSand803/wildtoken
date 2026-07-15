@@ -621,6 +621,8 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             name        TEXT NOT NULL UNIQUE,
             description TEXT NOT NULL DEFAULT '',
             token       TEXT NOT NULL UNIQUE,
+            token_hash  TEXT NOT NULL,
+            token_preview TEXT NOT NULL,
             enabled     INTEGER NOT NULL DEFAULT 1,
             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
@@ -629,6 +631,7 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+    crate::db::token::migrate_legacy_token_storage(pool).await?;
 
     // ---------- runtime_settings ----------
     sqlx::query(

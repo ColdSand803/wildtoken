@@ -181,6 +181,7 @@ fn push_log_filters(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn list_logs(
     pool: &SqlitePool,
     limit: i32,
@@ -675,9 +676,7 @@ async fn clear_old_log_bodies_batch(
 }
 
 fn clear_snapshot_body(snapshot: Option<String>, should_clear: bool) -> Option<String> {
-    let Some(snapshot) = snapshot else {
-        return None;
-    };
+    let snapshot = snapshot?;
     if !should_clear || snapshot.is_empty() {
         return Some(snapshot);
     }
@@ -695,6 +694,27 @@ fn clear_snapshot_body(snapshot: Option<String>, should_clear: bool) -> Option<S
         }),
     );
     Some(value.to_string())
+}
+
+pub async fn delete_old_logs(pool: &SqlitePool, retention_days: i64) -> Result<(), AppError> {
+    let mut transaction = pool.begin().await?;
+    sqlx::query(
+        r#"DELETE FROM request_log_payloads
+           WHERE request_log_id IN (
+               SELECT id FROM request_logs
+               WHERE created_at < datetime('now', '-' || ? || ' days')
+           )"#,
+    )
+    .bind(retention_days)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query("DELETE FROM request_logs WHERE created_at < datetime('now', '-' || ? || ' days')")
+        .bind(retention_days)
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1399,25 +1419,4 @@ mod tests {
         pool.close().await;
         std::fs::remove_file(&path).unwrap();
     }
-}
-
-pub async fn delete_old_logs(pool: &SqlitePool, retention_days: i64) -> Result<(), AppError> {
-    let mut transaction = pool.begin().await?;
-    sqlx::query(
-        r#"DELETE FROM request_log_payloads
-           WHERE request_log_id IN (
-               SELECT id FROM request_logs
-               WHERE created_at < datetime('now', '-' || ? || ' days')
-           )"#,
-    )
-    .bind(retention_days)
-    .execute(&mut *transaction)
-    .await?;
-    sqlx::query("DELETE FROM request_logs WHERE created_at < datetime('now', '-' || ? || ' days')")
-        .bind(retention_days)
-        .execute(&mut *transaction)
-        .await?;
-    transaction.commit().await?;
-
-    Ok(())
 }

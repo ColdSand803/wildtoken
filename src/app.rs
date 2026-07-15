@@ -4,6 +4,7 @@ use axum::{
     Router,
 };
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use std::net::IpAddr;
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,12 +17,66 @@ use tower_http::trace::TraceLayer;
 use crate::config;
 use crate::db;
 use crate::handlers;
+use crate::models::settings::{validate_admin_token_value, AdminCredential};
 use crate::proxy;
 use crate::proxy::matcher::AutoWeightManager;
 use crate::state::{
-    bootstrap_admin_credential, init_db, load_runtime_settings, AdminAuthCache, AppState,
-    RuntimeMetrics,
+    bootstrap_admin_credential, init_db, load_runtime_settings, verify_admin_token, AdminAuthCache,
+    AppState, RuntimeMetrics,
 };
+
+fn is_loopback_bind_host(host: &str) -> bool {
+    let trimmed = host.trim();
+    let normalized = trimmed
+        .strip_prefix('[')
+        .and_then(|value| value.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    normalized.eq_ignore_ascii_case("localhost")
+        || normalized
+            .parse::<IpAddr>()
+            .is_ok_and(|address| address.is_loopback())
+}
+
+async fn load_or_bootstrap_admin_credential(
+    pool: &sqlx::SqlitePool,
+    startup_token: String,
+    bind_host: &str,
+) -> Result<AdminCredential, crate::error::AppError> {
+    let loopback_only = is_loopback_bind_host(bind_host);
+    if let Some(credential) = db::settings::load_admin_credential(pool).await? {
+        let uses_known_default =
+            verify_admin_token(credential.clone(), "change-me".to_owned()).await;
+        if uses_known_default && !loopback_only {
+            return Err(crate::error::AppError::BadRequest(
+                "refusing non-loopback startup with the legacy change-me admin credential; start on localhost and rotate it first"
+                    .into(),
+            ));
+        }
+        if uses_known_default {
+            tracing::warn!(
+                "the stored admin credential is still change-me; rotate it before exposing WildToken beyond localhost"
+            );
+        }
+        return Ok(credential);
+    }
+
+    let token = startup_token.trim();
+    if token.eq_ignore_ascii_case("change-me") {
+        if !loopback_only {
+            return Err(crate::error::AppError::BadRequest(
+                "a new database listening beyond localhost requires an explicit ADMIN_TOKEN".into(),
+            ));
+        }
+        tracing::warn!(
+            "using the local-only bootstrap admin token change-me; rotate it from the admin console"
+        );
+    } else {
+        validate_admin_token_value(token)
+            .map_err(|message| crate::error::AppError::BadRequest(message.into()))?;
+    }
+
+    bootstrap_admin_credential(pool, token.to_owned()).await
+}
 
 /// Build the browser-facing admin URL.
 ///
@@ -77,7 +132,12 @@ pub async fn run_server(
         );
     }
     let runtime_settings = load_runtime_settings(&db).await;
-    let admin_credential = bootstrap_admin_credential(&db, settings.admin.token.clone()).await?;
+    let admin_credential = load_or_bootstrap_admin_credential(
+        &db,
+        settings.admin.token.clone(),
+        &settings.server.host,
+    )
+    .await?;
     // The startup token is bootstrap material only; never retain it as a fallback.
     settings.admin.token.clear();
 
@@ -239,6 +299,19 @@ pub async fn run_server(
         ))
         .service(ServeDir::new("static"));
 
+    // Only the downstream compatibility API is intentionally cross-origin.
+    // The browser admin console is same-origin, so exposing its credentialed
+    // endpoints through permissive CORS would unnecessarily widen the attack surface.
+    let proxy_routes = Router::new()
+        .route("/v1/models", get(handlers::proxy::list_models_handler))
+        .route("/v1/{*path}", any(handlers::proxy::proxy_handler))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::any())
+                .allow_methods(Any)
+                .allow_headers(Any),
+        );
+
     let app = Router::new()
         .route("/health", get(handlers::admin::health_check))
         .route(
@@ -246,17 +319,10 @@ pub async fn run_server(
             get(|| async { axum::response::Redirect::to("/admin") }),
         )
         .route("/admin", get(serve_admin_html))
-        .route("/v1/models", get(handlers::proxy::list_models_handler))
-        .route("/v1/{*path}", any(handlers::proxy::proxy_handler))
         .nest_service("/static", static_service)
         .merge(admin_routes)
+        .merge(proxy_routes)
         .layer(TraceLayer::new_for_http())
-        .layer(
-            CorsLayer::new()
-                .allow_origin(AllowOrigin::any())
-                .allow_methods(Any)
-                .allow_headers(Any),
-        )
         .with_state(state);
 
     // 7. Bind and serve
@@ -297,7 +363,21 @@ async fn serve_html_file(path: &str) -> axum::response::Response {
 
 #[cfg(test)]
 mod tests {
-    use super::admin_url_from_settings;
+    use super::{
+        admin_url_from_settings, is_loopback_bind_host, load_or_bootstrap_admin_credential,
+    };
+    use crate::{db::settings::load_admin_credential, state::init_db};
+    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        init_db(&pool).await.unwrap();
+        pool
+    }
 
     #[test]
     fn admin_url_rewrites_wildcard_hosts() {
@@ -325,5 +405,54 @@ mod tests {
             admin_url_from_settings("192.168.1.10", 4000),
             "http://192.168.1.10:4000/admin"
         );
+    }
+
+    #[test]
+    fn loopback_detection_covers_ipv4_ipv6_and_localhost() {
+        for host in ["127.0.0.1", "127.2.3.4", "::1", "[::1]", "localhost"] {
+            assert!(is_loopback_bind_host(host), "{host} should be loopback");
+        }
+        for host in ["0.0.0.0", "::", "[::]", "192.168.1.10", "wildtoken.local"] {
+            assert!(
+                !is_loopback_bind_host(host),
+                "{host} should not be loopback"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn fresh_non_loopback_database_rejects_the_known_default() {
+        let pool = test_pool().await;
+        let error = load_or_bootstrap_admin_credential(&pool, "change-me".into(), "0.0.0.0")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("explicit ADMIN_TOKEN"));
+        assert!(load_admin_credential(&pool).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn existing_strong_database_credential_ignores_startup_material() {
+        let pool = test_pool().await;
+        let first =
+            load_or_bootstrap_admin_credential(&pool, "strong-admin-token".into(), "127.0.0.1")
+                .await
+                .unwrap();
+        let loaded = load_or_bootstrap_admin_credential(&pool, "change-me".into(), "0.0.0.0")
+            .await
+            .unwrap();
+        assert_eq!(loaded.credential_version, first.credential_version);
+        assert_eq!(loaded.credential_hash, first.credential_hash);
+    }
+
+    #[tokio::test]
+    async fn legacy_default_database_must_be_rotated_before_non_loopback_startup() {
+        let pool = test_pool().await;
+        load_or_bootstrap_admin_credential(&pool, "change-me".into(), "127.0.0.1")
+            .await
+            .unwrap();
+        let error = load_or_bootstrap_admin_credential(&pool, "ignored-token".into(), "::")
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("legacy change-me"));
     }
 }

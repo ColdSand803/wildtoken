@@ -1,7 +1,7 @@
 use config::{Config, ConfigError, Environment, File};
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     pub server: ServerSettings,
@@ -47,22 +47,10 @@ pub struct AdminSettings {
     pub token: String,
 }
 
-impl Default for Settings {
-    fn default() -> Self {
-        Self {
-            server: ServerSettings::default(),
-            database: DatabaseSettings::default(),
-            logging: LoggingSettings::default(),
-            upstream: UpstreamSettings::default(),
-            admin: AdminSettings::default(),
-        }
-    }
-}
-
 impl Default for ServerSettings {
     fn default() -> Self {
         Self {
-            host: "0.0.0.0".into(),
+            host: "127.0.0.1".into(),
             port: 3100,
         }
     }
@@ -113,11 +101,10 @@ impl Settings {
 
         let mut settings: Settings = Config::builder()
             .add_source(File::with_name("config/default").required(false))
-            .add_source(File::with_name(&format!("config/{}", run_env)).required(false))
+            .add_source(File::with_name(&format!("config/{run_env}")).required(false))
             .add_source(Environment::with_prefix("APP").separator("__"))
             .build()?
-            .try_deserialize()
-            .unwrap_or_default();
+            .try_deserialize()?;
 
         // Compatibility with legacy .env variables
         if let Ok(token) = std::env::var("ADMIN_TOKEN") {

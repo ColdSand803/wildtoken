@@ -610,13 +610,11 @@ impl Drop for SseStreamState {
             self.observation.finish(self.start);
             if self.observation.terminal_event_seen {
                 self.finish_complete();
-            } else {
-                if self.finish_log(
-                    499,
-                    Some("client disconnected before the SSE response completed".to_string()),
-                ) {
-                    self.metrics.record_sse_client_disconnect();
-                }
+            } else if self.finish_log(
+                499,
+                Some("client disconnected before the SSE response completed".to_string()),
+            ) {
+                self.metrics.record_sse_client_disconnect();
             }
         }
         self.metrics.finish_sse_stream();

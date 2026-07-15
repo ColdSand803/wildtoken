@@ -895,8 +895,8 @@
             </label>
             <label id="token-custom-row" class="field span-2">
               <span class="field-label">自定义令牌（可选）</span>
-              <input id="token-custom" autocomplete="off" spellcheck="false" placeholder="留空则自动生成" />
-              <span class="field-hint">填写后将直接作为下游 Authorization Bearer 令牌。</span>
+              <input id="token-custom" autocomplete="off" spellcheck="false" minlength="16" maxlength="256" placeholder="留空则自动生成" />
+              <span class="field-hint">需为 16–256 字节、无空格的可打印 ASCII；完整值仅在创建时显示一次。</span>
             </label>
             <div id="token-value-row" hidden class="field span-2 field-readonly">
               <span class="field-label">令牌</span>

@@ -15,7 +15,7 @@ use crate::models::settings::{
     ModelTestTemplateIn, RuntimeCleanupMetricsOut, RuntimeLogSettingsSummary, RuntimeMetricsOut,
     RuntimeSettingsIn, RuntimeSettingsOut, SystemInfoOut,
 };
-use crate::models::token::{ApiTokenDetailOut, ApiTokenIn};
+use crate::models::token::{ApiTokenIn, ApiTokenOut, ApiTokenUpdateIn};
 use crate::models::upstream::UpstreamEnabledIn;
 use crate::state::{hash_admin_token, AppState};
 
@@ -294,19 +294,11 @@ pub async fn admin_get_token(
     State(state): State<AppState>,
     _auth: AdminAuth,
     Path(id): Path<i64>,
-) -> Result<Json<ApiTokenDetailOut>, AppError> {
-    let row = token_db::get_token(&state.db, id)
+) -> Result<Json<ApiTokenOut>, AppError> {
+    let token = token_db::get_token(&state.db, id)
         .await?
         .ok_or_else(|| AppError::NotFound("token not found".into()))?;
-    Ok(Json(ApiTokenDetailOut {
-        id: row.id,
-        name: row.name,
-        description: row.description,
-        token: row.token,
-        enabled: row.enabled == 1,
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-    }))
+    Ok(Json(token))
 }
 
 pub async fn admin_create_token(
@@ -314,6 +306,9 @@ pub async fn admin_create_token(
     _auth: AdminAuth,
     Json(input): Json<ApiTokenIn>,
 ) -> Result<Response, AppError> {
+    input
+        .validate()
+        .map_err(|message| AppError::BadRequest(message.into()))?;
     match token_db::create_token(&state.db, &input).await {
         Ok(out) => Ok((StatusCode::CREATED, Json(out)).into_response()),
         Err(AppError::Database(e)) if e.to_string().contains("UNIQUE") => Err(
@@ -327,12 +322,15 @@ pub async fn admin_update_token(
     State(state): State<AppState>,
     _auth: AdminAuth,
     Path(id): Path<i64>,
-    Json(input): Json<ApiTokenIn>,
+    Json(input): Json<ApiTokenUpdateIn>,
 ) -> Result<Json<crate::models::token::ApiTokenOut>, AppError> {
+    input
+        .validate()
+        .map_err(|message| AppError::BadRequest(message.into()))?;
     if token_db::get_token(&state.db, id).await?.is_none() {
         return Err(AppError::NotFound("token not found".into()));
     }
-    let out = token_db::update_token(&state.db, id, &input.name, &input.description).await?;
+    let out = token_db::update_token(&state.db, id, &input).await?;
     Ok(Json(out))
 }
 

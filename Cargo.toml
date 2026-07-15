@@ -1,13 +1,12 @@
 [package]
 name = "wildtoken"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 [dependencies]
 # Web framework
 axum = "0.8.9"
 tokio = { version = "1.52", features = ["full"] }
-tokio-stream = "0.1.18"
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "compression-gzip", "fs", "set-header", "timeout"] }
 
@@ -17,7 +16,6 @@ serde_json = "1.0"
 
 # Database (SQLite via sqlx)
 sqlx = { version = "0.8.6", features = ["runtime-tokio", "sqlite", "migrate", "json", "chrono"] }
-sqlx-core = "0.8.6"
 
 # HTTP client
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls", "charset", "http2", "system-proxy"] }
@@ -33,9 +31,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Error handling
 thiserror = "2"
 
-# UUID
-uuid = { version = "1", features = ["v4", "serde"] }
-
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
@@ -48,9 +43,6 @@ subtle = "2.6"
 
 # Base64 (for body snapshots)
 base64 = "0.22"
-
-# Content encoding (gzip/deflate)
-flate2 = "1"
 
 # Async utilities
 futures = "0.3"

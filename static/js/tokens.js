@@ -53,14 +53,7 @@ function renderTokenRows() {
       <td><strong>${escapeHtml(t.name)}</strong></td>
       <td class="muted">${escapeHtml(t.description || "—")}</td>
       <td>
-        <button
-          type="button"
-          class="token-preview-button"
-          data-token-action="copy"
-          data-token-id="${t.id}"
-          title="点击复制完整令牌"
-          aria-label="复制 ${escapeHtml(t.name)} 的完整令牌"
-        ><code class="token-preview-code">${escapeHtml(t.token_preview)}</code></button>
+        <code class="token-preview-code" title="完整令牌仅在创建时显示一次">${escapeHtml(t.token_preview)}</code>
       </td>
       <td class="col-status">
         <button
@@ -199,32 +192,13 @@ async function editToken(token) {
 async function handleTokenAction(button) {
   const id = Number(button.dataset.tokenId);
   const token = tokens.find((t) => t.id === id);
-  if (!token && button.dataset.tokenAction !== "delete") {
+  if (!token) {
     setStatus("令牌已不存在，请刷新页面后重试。", "error");
     return;
   }
 
   if (button.dataset.tokenAction === "edit") {
     await editToken(token);
-    return;
-  }
-
-  if (button.dataset.tokenAction === "copy") {
-    button.disabled = true;
-    try {
-      const detail = await api(`/api/admin/tokens/${id}`);
-      const copied = await copyTextToClipboard(detail.token);
-      if (!copied) {
-        throw new Error("浏览器拒绝复制，请手动复制。");
-      }
-      button.classList.add("copied");
-      window.setTimeout(() => button.classList.remove("copied"), 1200);
-      setStatus(`令牌 ${detail.name} 已复制。`, "ok");
-    } catch (error) {
-      setStatus(`复制失败：${error.message}`, "error");
-    } finally {
-      button.disabled = false;
-    }
     return;
   }
 
@@ -251,56 +225,17 @@ async function handleTokenAction(button) {
   }
 
   if (button.dataset.tokenAction === "delete") {
-    const name = token ? token.name : String(id);
+    const name = token.name;
     const confirmed = await requestConfirm({
       title: "删除令牌",
-      message: `确定删除令牌「${name}」？若可读取完整令牌将支持撤销。`,
+      message: `确定删除令牌「${name}」？删除后无法恢复。`,
       confirmLabel: "删除令牌",
     });
     if (!confirmed) return;
     try {
-      let recreatePayload = null;
-      try {
-        const detail = await api(`/api/admin/tokens/${id}`);
-        if (detail?.token) {
-          recreatePayload = {
-            name: detail.name,
-            description: detail.description || "",
-            token: detail.token,
-            enabled: detail.enabled,
-          };
-        }
-      } catch {
-        recreatePayload = null;
-      }
       await api(`/api/admin/tokens/${id}`, { method: "DELETE" });
       await loadTokens();
-      if (recreatePayload) {
-        setStatus(`令牌「${name}」已删除。`, "ok", {
-          durationMs: 9000,
-          actionLabel: "撤销",
-          onAction: async () => {
-            const created = await api("/api/admin/tokens", {
-              method: "POST",
-              body: JSON.stringify({
-                name: recreatePayload.name,
-                description: recreatePayload.description || "",
-                token: recreatePayload.token,
-              }),
-            });
-            if (created?.id != null && recreatePayload.enabled === false) {
-              await api(`/api/admin/tokens/${created.id}/enabled`, {
-                method: "PATCH",
-                body: JSON.stringify({ enabled: false }),
-              });
-            }
-            await loadTokens();
-            setStatus(`已恢复令牌「${recreatePayload.name}」。`, "ok");
-          },
-        });
-      } else {
-        setStatus("令牌已删除。", "ok");
-      }
+      setStatus(`令牌「${name}」已删除。`, "ok");
     } catch (error) {
       setStatus(`删除失败：${error.message}`, "error");
     }
@@ -360,7 +295,7 @@ tokenForm.addEventListener("submit", async (event) => {
     payload.enabled = undefined;
   } else {
     payload.enabled = tokenEnabledCheckbox.checked;
-    payload.token = tokenCustomInput.value.trim() || null;
+    payload.token = tokenCustomInput.value === "" ? null : tokenCustomInput.value;
   }
 
   try {

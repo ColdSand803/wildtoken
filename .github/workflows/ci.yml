@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  checks:
+    name: Rust and JavaScript checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.88.0
+          components: clippy, rustfmt
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+      - name: Lint Rust
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --locked --all-targets
+
+      - name: Check JavaScript syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            node --check "$file"
+          done < <(find static/js -type f -name '*.js' -print0 | sort -z)
+
+  docker-smoke:
+    name: Docker smoke test
+    needs: checks
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      IMAGE_NAME: wildtoken:ci-${{ github.run_id }}-${{ github.run_attempt }}
+      CONTAINER_NAME: wildtoken-ci-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Build image
+        run: docker build --tag "$IMAGE_NAME" .
+
+      - name: Start container and verify endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          admin_token='ci-smoke-placeholder'
+          docker run --detach \
+            --name "$CONTAINER_NAME" \
+            --publish 127.0.0.1:3110:3100 \
+            --env "ADMIN_TOKEN=$admin_token" \
+            --tmpfs /data:rw,noexec,nosuid,size=64m \
+            "$IMAGE_NAME"
+
+          healthy=false
+          for _ in {1..60}; do
+            if curl --fail --silent --show-error \
+              http://127.0.0.1:3110/health \
+              --output "$RUNNER_TEMP/wildtoken-health.json"; then
+              healthy=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [[ "$healthy" != true ]]; then
+            echo "WildToken did not become healthy" >&2
+            exit 1
+          fi
+
+          grep -q '"status":"ok"' "$RUNNER_TEMP/wildtoken-health.json"
+          curl --fail --silent --show-error \
+            http://127.0.0.1:3110/admin \
+            --output "$RUNNER_TEMP/wildtoken-admin.html"
+          grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-admin.html"
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "x-admin-token: $admin_token" \
+            --header 'content-type: application/json' \
+            --data '{"name":"ci-smoke","description":"CI contract smoke","enabled":true}' \
+            http://127.0.0.1:3110/api/admin/tokens \
+            --output "$RUNNER_TEMP/wildtoken-token-created.json"
+
+          jq --exit-status '.enabled == true' \
+            "$RUNNER_TEMP/wildtoken-token-created.json" >/dev/null
+          token_id="$(jq --exit-status --raw-output '.id | numbers' \
+            "$RUNNER_TEMP/wildtoken-token-created.json")"
+          api_token="$(jq --exit-status --raw-output \
+            '.token | strings | select(length > 0)' \
+            "$RUNNER_TEMP/wildtoken-token-created.json")"
+
+          unauthenticated_status="$(curl --silent --show-error \
+            --output "$RUNNER_TEMP/wildtoken-models-unauthenticated.json" \
+            --write-out '%{http_code}' \
+            http://127.0.0.1:3110/v1/models)"
+          if [[ "$unauthenticated_status" != 401 ]]; then
+            echo "Unauthenticated /v1/models request was not rejected" >&2
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            --header "authorization: Bearer $api_token" \
+            http://127.0.0.1:3110/v1/models \
+            --output "$RUNNER_TEMP/wildtoken-models.json"
+          jq --exit-status \
+            '.object == "list" and (.data | type == "array")' \
+            "$RUNNER_TEMP/wildtoken-models.json" >/dev/null
+
+          curl --fail --silent --show-error \
+            --header "x-admin-token: $admin_token" \
+            "http://127.0.0.1:3110/api/admin/tokens/$token_id" \
+            --output "$RUNNER_TEMP/wildtoken-token-detail.json"
+          jq --exit-status 'has("token") | not' \
+            "$RUNNER_TEMP/wildtoken-token-detail.json" >/dev/null
+          if grep --fixed-strings --quiet -- "$api_token" \
+            "$RUNNER_TEMP/wildtoken-token-detail.json"; then
+            echo "Token detail response exposed the full token" >&2
+            exit 1
+          fi
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker logs "$CONTAINER_NAME" || true
+
+      - name: Clean up Docker resources
+        if: always()
+        shell: bash
+        run: |
+          docker rm --force "$CONTAINER_NAME" 2>/dev/null || true
+          docker image rm --force "$IMAGE_NAME" 2>/dev/null || true
+          rm -f \
+            "$RUNNER_TEMP/wildtoken-health.json" \
+            "$RUNNER_TEMP/wildtoken-admin.html" \
+            "$RUNNER_TEMP/wildtoken-token-created.json" \
+            "$RUNNER_TEMP/wildtoken-models-unauthenticated.json" \
+            "$RUNNER_TEMP/wildtoken-models.json" \
+            "$RUNNER_TEMP/wildtoken-token-detail.json"

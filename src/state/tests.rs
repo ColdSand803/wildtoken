@@ -135,6 +135,66 @@ async fn initialization_migrates_legacy_routing_columns_with_current_defaults() 
 }
 
 #[tokio::test]
+async fn initialization_migrates_legacy_api_tokens_without_retaining_plaintext() {
+    let pool = test_pool().await;
+    let plaintext = "legacy-downstream-token";
+    sqlx::query(
+        r#"CREATE TABLE api_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            description TEXT NOT NULL DEFAULT '',
+            token TEXT NOT NULL UNIQUE,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )"#,
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO api_tokens (name, description, token) VALUES ('legacy', 'old row', ?)",
+    )
+    .bind(plaintext)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    init_db(&pool).await.unwrap();
+
+    let columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('api_tokens') ORDER BY cid")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert!(columns.iter().any(|column| column == "token_hash"));
+    assert!(columns.iter().any(|column| column == "token_preview"));
+
+    let stored: (String, String, String) = sqlx::query_as(
+        "SELECT token, token_hash, token_preview FROM api_tokens WHERE name = 'legacy'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let expected_hash = crate::db::token::token_digest(plaintext);
+    assert_eq!(stored.0, expected_hash);
+    assert_eq!(stored.1, expected_hash);
+    assert_eq!(stored.2, crate::db::token::token_preview(plaintext));
+    assert_ne!(stored.0, plaintext);
+    assert_ne!(stored.1, plaintext);
+    assert_ne!(stored.2, plaintext);
+
+    init_db(&pool).await.unwrap();
+    let after_restart: (String, String, String) = sqlx::query_as(
+        "SELECT token, token_hash, token_preview FROM api_tokens WHERE name = 'legacy'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(after_restart, stored, "migration must be idempotent");
+}
+
+#[tokio::test]
 async fn initialization_creates_current_log_schema_without_legacy_payload_columns() {
     let pool = test_pool().await;
     init_db(&pool).await.unwrap();

@@ -102,15 +102,22 @@ pub struct AdminTokenRotateIn {
 
 impl AdminTokenRotateIn {
     pub fn validated_token(&self) -> Result<&str, &'static str> {
-        let token = self.token.trim();
-        if !(8..=256).contains(&token.len()) {
-            return Err("admin token must be between 8 and 256 bytes");
-        }
-        if !token.bytes().all(|byte| byte.is_ascii_graphic()) {
-            return Err("admin token must contain only printable ASCII characters without spaces");
-        }
-        Ok(token)
+        validate_admin_token_value(&self.token)
     }
+}
+
+pub fn validate_admin_token_value(value: &str) -> Result<&str, &'static str> {
+    let token = value.trim();
+    if !(8..=256).contains(&token.len()) {
+        return Err("admin token must be between 8 and 256 bytes");
+    }
+    if !token.bytes().all(|byte| byte.is_ascii_graphic()) {
+        return Err("admin token must contain only printable ASCII characters without spaces");
+    }
+    if token.eq_ignore_ascii_case("change-me") {
+        return Err("admin token must not use the known change-me placeholder");
+    }
+    Ok(token)
 }
 
 #[derive(Debug, Serialize)]
@@ -405,7 +412,7 @@ mod tests {
         };
         assert_eq!(input.validated_token().unwrap(), "user-chosen-admin-token");
 
-        for token in ["short", "contains space", "含中文的管理员令牌"] {
+        for token in ["short", "change-me", "contains space", "含中文的管理员令牌"] {
             assert!(AdminTokenRotateIn {
                 confirm: true,
                 token: token.into(),

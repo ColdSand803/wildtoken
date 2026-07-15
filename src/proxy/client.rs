@@ -154,6 +154,7 @@ pub(crate) fn prepare_upstream_body(
 // ── Main proxy function ─────────────────────────────────────────────────────
 
 /// Proxy a request to the upstream, streaming SSE bodies as they arrive.
+#[allow(clippy::too_many_arguments)]
 pub async fn proxy_request(
     state: &AppState,
     auto_weight_policy: AutoWeightPolicy,
@@ -296,9 +297,7 @@ pub async fn proxy_request(
             upstream.id,
         );
         let body_stream = futures::stream::unfold(stream_state, |mut stream_state| async move {
-            if stream_state.log_entry.is_none() {
-                return None;
-            }
+            stream_state.log_entry.as_ref()?;
 
             match stream_state.stream.next().await {
                 Some(Ok(chunk)) => {
