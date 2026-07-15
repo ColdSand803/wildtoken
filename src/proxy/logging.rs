@@ -559,9 +559,11 @@ mod tests {
             .unwrap();
         }
 
-        let mut settings = RuntimeSettings::default();
-        settings.log_body_keep_count = 1;
-        settings.log_retention_days = 30;
+        let settings = RuntimeSettings {
+            log_body_keep_count: 1,
+            log_retention_days: 30,
+            ..Default::default()
+        };
         let metrics = RuntimeMetrics::new();
         let log_stats = LogStatsCache::load(&pool).await.unwrap();
 
@@ -730,6 +732,7 @@ fn is_database_locked(error: &crate::error::AppError) -> bool {
     )
 }
 
+#[cfg(test)]
 async fn insert_log_entry(
     pool: &sqlx::SqlitePool,
     entry: LogEntry,

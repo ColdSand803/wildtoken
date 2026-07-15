@@ -1,33 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
-pub struct RequestLogRow {
-    pub id: i64,
-    pub created_at: String,
-    pub method: String,
-    pub path: String,
-    pub downstream_token_id: Option<i64>,
-    pub downstream_token_name: Option<String>,
-    pub client_type: String,
-    pub upstream_id: Option<i64>,
-    pub upstream_name: Option<String>,
-    pub model: Option<String>,
-    pub reasoning_effort: Option<String>,
-    pub response_reasoning_effort: Option<String>,
-    pub stream: i32,
-    pub status_code: Option<i32>,
-    pub prompt_tokens: Option<i32>,
-    pub completion_tokens: Option<i32>,
-    pub total_tokens: Option<i32>,
-    pub prompt_cached_tokens: Option<i32>,
-    pub cache_creation_tokens: Option<i32>,
-    pub completion_reasoning_tokens: Option<i32>,
-    pub duration_ms: Option<i32>,
-    pub first_token_ms: Option<i32>,
-    pub error: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequestLogOut {
     pub id: i64,
@@ -112,11 +85,6 @@ pub struct RequestLogTopStatsOut {
     pub channels: Vec<RequestLogTopItemOut>,
     pub model_tokens: Vec<RequestLogTopItemOut>,
     pub channel_tokens: Vec<RequestLogTopItemOut>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProxyError {
-    pub error: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

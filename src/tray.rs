@@ -40,12 +40,9 @@ pub fn run() {
                 }
             };
             rt.block_on(async move {
-                if let Err(e) = app::run_server(
-                    Some(ready_tx),
-                    async move {
-                        let _ = shutdown_rx.await;
-                    },
-                )
+                if let Err(e) = app::run_server(Some(ready_tx), async move {
+                    let _ = shutdown_rx.await;
+                })
                 .await
                 {
                     tracing::error!("WildToken server failed: {e}");
