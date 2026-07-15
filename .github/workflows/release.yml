@@ -32,7 +32,7 @@ jobs:
       version: ${{ steps.release.outputs.version }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -76,7 +76,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.commit }}
 
@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Check out release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.commit }}
 
@@ -156,7 +156,7 @@ jobs:
           tar -tzf "${package}.tar.gz" >/dev/null
 
       - name: Upload Linux archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-linux-x86_64
           path: wildtoken-*-linux-x86_64.tar.gz
@@ -169,7 +169,7 @@ jobs:
     runs-on: windows-2022
     steps:
       - name: Check out release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.commit }}
 
@@ -237,7 +237,7 @@ jobs:
           }
 
       - name: Upload Windows archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-windows-x86_64
           path: wildtoken-*-windows-x86_64.zip
@@ -262,7 +262,7 @@ jobs:
       MACOSX_DEPLOYMENT_TARGET: "11.0"
     steps:
       - name: Check out release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.commit }}
 
@@ -299,7 +299,7 @@ jobs:
           rm -f wildtoken.db wildtoken.db-shm wildtoken.db-wal
 
       - name: Upload architecture binary
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-binary-${{ matrix.arch }}
           path: target/${{ matrix.target }}/release/wildtoken
@@ -312,18 +312,18 @@ jobs:
     runs-on: macos-15
     steps:
       - name: Check out release commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.prepare.outputs.commit }}
 
       - name: Download Intel binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: macos-binary-x86_64
           path: macos-binaries/x86_64
 
       - name: Download Apple Silicon binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: macos-binary-aarch64
           path: macos-binaries/aarch64
@@ -369,7 +369,7 @@ jobs:
           tar -tzf "${package}.tar.gz" >/dev/null
 
       - name: Upload macOS archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-macos-universal
           path: wildtoken-*-macos-universal.tar.gz
@@ -384,7 +384,7 @@ jobs:
       contents: write
     steps:
       - name: Download release archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-*
           path: release-assets
