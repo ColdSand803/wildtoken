@@ -349,21 +349,25 @@ pub async fn top_log_stats(
         pool,
         window,
         "TRIM(model)",
+        "TRIM(model)",
         "model IS NOT NULL AND TRIM(model) <> ''",
         "1",
         None,
         limit,
     )
     .await?;
+    // Aggregate channels by upstream_id so renamed/same-name channels stay distinct.
+    // Display name prefers a non-empty upstream_name snapshot, else "#<id>".
+    let channel_name_expr = r#"CASE
+              WHEN upstream_name IS NOT NULL AND TRIM(upstream_name) <> '' THEN TRIM(upstream_name)
+              ELSE '#' || upstream_id
+           END"#;
     let channels = top_log_counts(
         pool,
         window,
-        r#"CASE
-              WHEN upstream_name IS NOT NULL AND TRIM(upstream_name) <> '' THEN TRIM(upstream_name)
-              WHEN upstream_id IS NOT NULL THEN '#' || upstream_id
-              ELSE NULL
-           END"#,
-        "upstream_id IS NOT NULL OR (upstream_name IS NOT NULL AND TRIM(upstream_name) <> '')",
+        channel_name_expr,
+        "upstream_id",
+        "upstream_id IS NOT NULL",
         "1",
         None,
         limit,
@@ -372,6 +376,7 @@ pub async fn top_log_stats(
     let model_tokens = top_log_counts(
         pool,
         window,
+        "TRIM(model)",
         "TRIM(model)",
         "model IS NOT NULL AND TRIM(model) <> ''",
         "COALESCE(total_tokens, 0)",
@@ -382,12 +387,9 @@ pub async fn top_log_stats(
     let channel_tokens = top_log_counts(
         pool,
         window,
-        r#"CASE
-              WHEN upstream_name IS NOT NULL AND TRIM(upstream_name) <> '' THEN TRIM(upstream_name)
-              WHEN upstream_id IS NOT NULL THEN '#' || upstream_id
-              ELSE NULL
-           END"#,
-        "upstream_id IS NOT NULL OR (upstream_name IS NOT NULL AND TRIM(upstream_name) <> '')",
+        channel_name_expr,
+        "upstream_id",
+        "upstream_id IS NOT NULL",
         "COALESCE(total_tokens, 0)",
         Some("total_tokens IS NOT NULL AND total_tokens > 0"),
         limit,
@@ -407,13 +409,20 @@ async fn top_log_counts(
     pool: &SqlitePool,
     window: LogTopWindow,
     name_expression: &str,
+    group_expression: &str,
     source_filter: &str,
     metric_expression: &str,
     metric_filter: Option<&str>,
     limit: i64,
 ) -> Result<Vec<RequestLogTopItemOut>, AppError> {
-    let mut query = QueryBuilder::<Sqlite>::new("SELECT name, SUM(value) AS count FROM (SELECT ");
+    // Group by `group_expression` (e.g. upstream_id), but surface a display `name`.
+    // When multiple names share one group key, MAX(name) picks a stable non-null label.
+    let mut query = QueryBuilder::<Sqlite>::new(
+        "SELECT MAX(name) AS name, SUM(value) AS count FROM (SELECT ",
+    );
     query
+        .push(group_expression)
+        .push(" AS group_key, ")
         .push(name_expression)
         .push(" AS name, ")
         .push(metric_expression)
@@ -426,7 +435,11 @@ async fn top_log_counts(
         query.push(" AND (").push(metric_filter).push(")");
     }
     query
-        .push(") WHERE name IS NOT NULL AND name <> '' GROUP BY name HAVING count > 0 ORDER BY count DESC, name COLLATE NOCASE ASC LIMIT ")
+        .push(
+            ") WHERE group_key IS NOT NULL AND name IS NOT NULL AND name <> '' \
+             GROUP BY group_key HAVING count > 0 \
+             ORDER BY count DESC, name COLLATE NOCASE ASC LIMIT ",
+        )
         .push_bind(limit);
 
     let rows: Vec<TopCountRow> = query.build_query_as().fetch_all(pool).await?;
@@ -1004,6 +1017,52 @@ mod tests {
                 .map(|item| (item.name.as_str(), item.count))
                 .collect::<Vec<_>>(),
             [("gpt-5", 2)]
+        );
+    }
+
+    #[tokio::test]
+    async fn top_log_stats_aggregate_channels_by_upstream_id() {
+        let pool = test_pool().await;
+        sqlx::query(
+            r#"INSERT INTO request_logs
+               (id, created_at, model, upstream_id, upstream_name, total_tokens)
+               VALUES
+               -- same display name, different ids → separate buckets
+               (1, datetime('now'), 'm', 1, 'shared', 100),
+               (2, datetime('now'), 'm', 2, 'shared', 200),
+               -- same id, renamed over time → one bucket, name from MAX
+               (3, datetime('now'), 'm', 3, 'alpha', 50),
+               (4, datetime('now'), 'm', 3, 'zeta', 150),
+               -- id present but empty name → fallback label
+               (5, datetime('now'), 'm', 4, '', 80),
+               -- name only, no id → excluded from channel rankings
+               (6, datetime('now'), 'm', NULL, 'orphan', 999)"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let stats = top_log_stats(&pool, LogTopWindow::ThreeDays, 10)
+            .await
+            .unwrap();
+        // Request counts: id3=2, id1=1, id2=1, id4=1 (orphan name-only excluded).
+        // Sort: count DESC, name ASC → zeta, #4, shared, shared.
+        assert_eq!(
+            stats
+                .channels
+                .iter()
+                .map(|item| (item.name.as_str(), item.count))
+                .collect::<Vec<_>>(),
+            [("zeta", 2), ("#4", 1), ("shared", 1), ("shared", 1)]
+        );
+        // Token totals: id2=200, id3=200, id1=100, id4=80.
+        assert_eq!(
+            stats
+                .channel_tokens
+                .iter()
+                .map(|item| (item.name.as_str(), item.count))
+                .collect::<Vec<_>>(),
+            [("shared", 200), ("zeta", 200), ("shared", 100), ("#4", 80)]
         );
     }
 
