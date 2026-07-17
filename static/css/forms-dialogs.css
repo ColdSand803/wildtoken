@@ -732,18 +732,6 @@ button.model-selection-remove:focus-visible {
   overflow: hidden;
 }
 
-.model-manual-entry summary {
-  color: var(--text-secondary);
-  cursor: pointer;
-  font-size: var(--text-base);
-  font-weight: 600;
-  padding: 9px 11px;
-}
-
-.model-manual-entry[open] summary {
-  border-bottom: 1px solid var(--line);
-}
-
 .model-manual-entry-body {
   align-items: end;
   display: grid;

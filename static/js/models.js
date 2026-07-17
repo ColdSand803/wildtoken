@@ -168,7 +168,6 @@ function openModelDialog(upstream, models, selectedNames, mode, options = {}) {
   modelFilter.value = "";
   modelSelectedOnly.checked = false;
   modelManualInput.value = "";
-  modelManualEntry.open = false;
   renderModelOptions();
   if (typeof modelDialog.showModal === "function") {
     modelDialog.showModal();
