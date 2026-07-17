@@ -538,6 +538,8 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             upstream_id         INTEGER REFERENCES upstreams(id) ON DELETE SET NULL,
             upstream_name       TEXT,
             model               TEXT,
+            request_model       TEXT,
+            upstream_model      TEXT,
             reasoning_effort    TEXT,
             response_reasoning_effort TEXT,
             stream              INTEGER NOT NULL DEFAULT 0,
@@ -556,12 +558,14 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
-    for column in [
-        "prompt_cached_tokens",
-        "cache_creation_tokens",
-        "completion_reasoning_tokens",
+    for (column, definition) in [
+        ("request_model", "TEXT"),
+        ("upstream_model", "TEXT"),
+        ("prompt_cached_tokens", "INTEGER"),
+        ("cache_creation_tokens", "INTEGER"),
+        ("completion_reasoning_tokens", "INTEGER"),
     ] {
-        ensure_column(pool, "request_logs", column, "INTEGER").await?;
+        ensure_column(pool, "request_logs", column, definition).await?;
     }
 
     sqlx::query(

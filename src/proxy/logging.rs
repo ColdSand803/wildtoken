@@ -31,6 +31,8 @@ pub struct LogEntry {
     pub upstream_id: Option<i64>,
     pub upstream_name: Option<String>,
     pub model: Option<String>,
+    pub request_model: Option<String>,
+    pub upstream_model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub response_reasoning_effort: Option<String>,
     pub stream: bool,
@@ -345,6 +347,8 @@ mod tests {
                 upstream_id INTEGER,
                 upstream_name TEXT,
                 model TEXT,
+                request_model TEXT,
+                upstream_model TEXT,
                 reasoning_effort TEXT,
                 response_reasoning_effort TEXT,
                 stream INTEGER NOT NULL,
@@ -761,12 +765,12 @@ async fn insert_log_batch(
         let result = sqlx::query(
             r#"INSERT INTO request_logs
             (method, path, downstream_token_id, downstream_token_name, client_type,
-             upstream_id, upstream_name, model,
+             upstream_id, upstream_name, model, request_model, upstream_model,
              reasoning_effort, response_reasoning_effort, stream, status_code,
              prompt_tokens, completion_tokens, total_tokens,
              prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
              duration_ms, first_token_ms, error, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                 datetime('now'))"#,
         )
         .bind(&entry.method)
@@ -777,6 +781,8 @@ async fn insert_log_batch(
         .bind(entry.upstream_id)
         .bind(&entry.upstream_name)
         .bind(&entry.model)
+        .bind(&entry.request_model)
+        .bind(&entry.upstream_model)
         .bind(&entry.reasoning_effort)
         .bind(&entry.response_reasoning_effort)
         .bind(stream_int)

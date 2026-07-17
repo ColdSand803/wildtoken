@@ -48,6 +48,43 @@ function formatLogChannelStack(log) {
   `;
 }
 
+function getLogModelRoute(log) {
+  const requestModel = String(log.request_model || "").trim();
+  const upstreamModel = String(log.upstream_model || "").trim();
+  const fallbackModel = String(log.model || "").trim();
+  const request = requestModel || fallbackModel;
+  const upstream = upstreamModel || (requestModel ? fallbackModel : "");
+  const mapped = Boolean(request && upstream && request !== upstream);
+  return { request, upstream, mapped };
+}
+
+function formatLogModelText(log) {
+  const route = getLogModelRoute(log);
+  if (route.mapped) {
+    return `${route.request} -> ${route.upstream}`;
+  }
+  return route.request || route.upstream || "-";
+}
+
+function renderLogModel(log) {
+  const route = getLogModelRoute(log);
+  if (!route.request && !route.upstream) {
+    return '<span class="muted">-</span>';
+  }
+  if (!route.mapped) {
+    const value = route.request || route.upstream;
+    return `<code title="${escapeHtml(value)}">${escapeHtml(value)}</code>`;
+  }
+  const title = `请求模型：${route.request}；上游模型：${route.upstream}`;
+  return `
+    <span class="model-route" title="${escapeHtml(title)}">
+      <code class="model-request">${escapeHtml(route.request)}</code>
+      <span class="model-route-arrow" aria-hidden="true">-&gt;</span>
+      <code class="model-upstream">${escapeHtml(route.upstream)}</code>
+    </span>
+  `;
+}
+
 function formatTokens(log) {
   const part = (value) => (value === null || value === undefined ? "-" : value);
   return `
@@ -330,7 +367,7 @@ function renderLogRows(items, options = {}) {
       <td class="channel-cell" data-col="channel">${channel}</td>
       <td class="token-cell" data-col="token">${log.downstream_token_name ? `<span title="#${log.downstream_token_id ?? "-"}">${escapeHtml(log.downstream_token_name)}</span>` : "<span class=\"muted\">-</span>"}</td>
       <td data-col="client"><span class="badge neutral">${escapeHtml(log.client_type || "unknown")}</span></td>
-      <td class="model-cell" data-col="model">${log.model ? `<code title="${escapeHtml(log.model)}">${escapeHtml(log.model)}</code>` : "<span class=\"muted\">-</span>"}</td>
+      <td class="model-cell" data-col="model">${renderLogModel(log)}</td>
       <td class="col-reasoning" data-col="reasoning">
         ${formatReasoningEffort(log.reasoning_effort, log.response_reasoning_effort)}
       </td>
@@ -535,7 +572,8 @@ function formatLogDetailMeta(detail) {
         ? "ok"
         : "neutral";
   const reasoning = formatReasoningEffort(detail.reasoning_effort, detail.response_reasoning_effort, { badge: false, fallback: "" });
-  const modelLine = [escapeHtml(detail.model || "-"), reasoning].filter(Boolean).join(" · ");
+  const modelText = formatLogModelText(detail);
+  const modelLine = [escapeHtml(modelText), reasoning].filter(Boolean).join(" · ");
   const streamLabel = detail.stream ? "流式" : "非流式";
   const extractedError = extractLogDetailError(detail);
   const statusErrorLine = extractedError
@@ -702,7 +740,7 @@ async function showLogDetail(logId) {
     const channel = formatLogChannelLabel(detail);
     const status = detail.status_code === null ? "无响应" : `HTTP ${detail.status_code}`;
     logDetailTitle.textContent = "请求详情";
-    logDetailSummary.textContent = `#${detail.id} · ${time} · ${channel} · ${detail.model || "-"} · ${status}`;
+    logDetailSummary.textContent = `#${detail.id} · ${time} · ${channel} · ${formatLogModelText(detail)} · ${status}`;
     if (logDetailMeta) {
       logDetailMeta.innerHTML = formatLogDetailMeta(detail);
     }

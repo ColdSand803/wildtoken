@@ -500,6 +500,30 @@ td.no-match-state {
   min-width: 150px;
 }
 
+.model-route {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.model-route code {
+  max-width: 76px;
+}
+
+.model-route-arrow {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.model-route .model-upstream {
+  border-color: var(--ok-border);
+  color: var(--ok);
+}
+
 .duration-cell {
   min-width: 178px;
   white-space: nowrap;

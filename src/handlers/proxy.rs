@@ -118,6 +118,7 @@ impl ClientAbortLogGuard {
     fn set_model(&mut self, model: Option<&str>) {
         if let Some(entry) = &mut self.entry {
             entry.model = model.map(str::to_string);
+            entry.request_model = model.map(str::to_string);
         }
     }
 
@@ -138,6 +139,7 @@ impl ClientAbortLogGuard {
         if let Some(entry) = &mut self.entry {
             entry.upstream_id = Some(upstream_id);
             entry.upstream_name = Some(upstream_name.to_string());
+            entry.upstream_model = forward_model.map(str::to_string);
             entry.model = forward_model
                 .map(str::to_string)
                 .or_else(|| entry.model.clone());
@@ -331,6 +333,7 @@ pub async fn proxy_handler(
             auth.token_id,
             &auth.token_name,
             &auth.client_type,
+            model.as_deref(),
             forward_model.as_deref(),
             &method,
             path,
@@ -509,7 +512,7 @@ mod tests {
         convert::Infallible,
         sync::{
             atomic::{AtomicI64, AtomicUsize, Ordering},
-            Arc,
+            Arc, Mutex,
         },
         time::{Duration, Instant},
     };
@@ -729,6 +732,109 @@ mod tests {
         assert_eq!(body, r#"{"source":"fallback"}"#);
         assert_eq!(primary_attempts.load(Ordering::SeqCst), 1);
         assert_eq!(fallback_attempts.load(Ordering::SeqCst), 1);
+        upstream_server.abort();
+    }
+
+    #[tokio::test]
+    async fn mapped_model_logs_request_and_upstream_models() {
+        let received_model = Arc::new(Mutex::new(None::<String>));
+        let upstream_received_model = Arc::clone(&received_model);
+        let upstream_app = Router::new().route(
+            "/v1/responses",
+            post(move |body: Bytes| {
+                let received_model = Arc::clone(&upstream_received_model);
+                async move {
+                    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+                    *received_model.lock().unwrap() =
+                        payload["model"].as_str().map(str::to_string);
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(r#"{"id":"resp","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#))
+                        .unwrap()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let upstream_address = listener.local_addr().unwrap();
+        let upstream_server =
+            tokio::spawn(async move { axum::serve(listener, upstream_app).await.unwrap() });
+
+        let db = proxy_test_database().await;
+        sqlx::query(
+            r#"INSERT INTO upstreams
+               (name, base_url, model_names, model_mappings, priority, weight, enabled)
+               VALUES ('mapped', ?, '[]', '{"public-model":"provider-model"}', 999, 100, 1)"#,
+        )
+        .bind(format!("http://{upstream_address}"))
+        .execute(&db)
+        .await
+        .unwrap();
+        let state = test_proxy_state(db, RuntimeSettings::default()).await;
+        let app = Router::new()
+            .route("/v1/{*path}", any(proxy_handler))
+            .with_state(state.clone());
+
+        let response = app
+            .oneshot(proxy_request_for("public-model"))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let _ = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert_eq!(
+            received_model.lock().unwrap().as_deref(),
+            Some("provider-model")
+        );
+
+        let log = tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let row = sqlx::query_as::<_, (Option<String>, Option<String>, Option<String>)>(
+                    "SELECT model, request_model, upstream_model FROM request_logs LIMIT 1",
+                )
+                .fetch_optional(&state.db)
+                .await
+                .unwrap();
+                if let Some(row) = row {
+                    break row;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("mapped request was not logged");
+        assert_eq!(log.0.as_deref(), Some("provider-model"));
+        assert_eq!(log.1.as_deref(), Some("public-model"));
+        assert_eq!(log.2.as_deref(), Some("provider-model"));
+
+        let by_request = crate::db::log::list_logs(
+            &state.db,
+            10,
+            0,
+            None,
+            None,
+            None,
+            Some("public-model"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(by_request.len(), 1);
+        let by_upstream = crate::db::log::list_logs(
+            &state.db,
+            10,
+            0,
+            None,
+            None,
+            None,
+            Some("provider-model"),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        assert_eq!(by_upstream.len(), 1);
+
         upstream_server.abort();
     }
 

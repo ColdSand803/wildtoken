@@ -26,6 +26,8 @@ struct LogListRow {
     upstream_id: Option<i64>,
     upstream_name: Option<String>,
     model: Option<String>,
+    request_model: Option<String>,
+    upstream_model: Option<String>,
     reasoning_effort: Option<String>,
     response_reasoning_effort: Option<String>,
     stream: i32,
@@ -53,6 +55,8 @@ struct LogDetailRow {
     upstream_id: Option<i64>,
     upstream_name: Option<String>,
     model: Option<String>,
+    request_model: Option<String>,
+    upstream_model: Option<String>,
     reasoning_effort: Option<String>,
     response_reasoning_effort: Option<String>,
     stream: i32,
@@ -155,6 +159,10 @@ fn push_log_filters(
         );
         query.push(" AND (LOWER(model) LIKE LOWER(");
         query.push_bind(search.clone());
+        query.push(") ESCAPE '\\' OR LOWER(request_model) LIKE LOWER(");
+        query.push_bind(search.clone());
+        query.push(") ESCAPE '\\' OR LOWER(upstream_model) LIKE LOWER(");
+        query.push_bind(search.clone());
         query.push(") ESCAPE '\\' OR LOWER(upstream_name) LIKE LOWER(");
         query.push_bind(search.clone());
         query.push(") ESCAPE '\\' OR LOWER(error) LIKE LOWER(");
@@ -197,7 +205,8 @@ pub async fn list_logs(
         "SELECT id, created_at, method, path,
                 downstream_token_id, downstream_token_name,
                 client_type,
-                upstream_id, upstream_name, model, reasoning_effort, response_reasoning_effort,
+                upstream_id, upstream_name, model, request_model, upstream_model,
+                reasoning_effort, response_reasoning_effort,
                 stream, status_code,
                 prompt_tokens, completion_tokens, total_tokens,
                 prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
@@ -237,6 +246,8 @@ pub async fn list_logs(
             upstream_id: r.upstream_id,
             upstream_name: r.upstream_name,
             model: r.model,
+            request_model: r.request_model,
+            upstream_model: r.upstream_model,
             reasoning_effort: r.reasoning_effort,
             response_reasoning_effort: r.response_reasoning_effort,
             stream: r.stream,
@@ -265,6 +276,7 @@ pub async fn get_log_detail(
                   l.downstream_token_id, l.downstream_token_name,
                   l.client_type,
                   l.upstream_id, l.upstream_name, l.model,
+                  l.request_model, l.upstream_model,
                   l.reasoning_effort, l.response_reasoning_effort,
                   l.stream, l.status_code,
                   l.prompt_tokens, l.completion_tokens, l.total_tokens,
@@ -311,6 +323,8 @@ pub async fn get_log_detail(
                 upstream_id: r.upstream_id,
                 upstream_name: r.upstream_name,
                 model: r.model,
+                request_model: r.request_model,
+                upstream_model: r.upstream_model,
                 reasoning_effort: r.reasoning_effort,
                 response_reasoning_effort: r.response_reasoning_effort,
                 stream: r.stream,
@@ -349,9 +363,9 @@ pub async fn top_log_stats(
         pool,
         window,
         TopLogCountSpec {
-            name_expression: "TRIM(model)",
-            group_expression: "TRIM(model)",
-            source_filter: "model IS NOT NULL AND TRIM(model) <> ''",
+            name_expression: "TRIM(COALESCE(request_model, model))",
+            group_expression: "TRIM(COALESCE(request_model, model))",
+            source_filter: "COALESCE(request_model, model) IS NOT NULL AND TRIM(COALESCE(request_model, model)) <> ''",
             metric_expression: "1",
             metric_filter: None,
         },
@@ -381,9 +395,9 @@ pub async fn top_log_stats(
         pool,
         window,
         TopLogCountSpec {
-            name_expression: "TRIM(model)",
-            group_expression: "TRIM(model)",
-            source_filter: "model IS NOT NULL AND TRIM(model) <> ''",
+            name_expression: "TRIM(COALESCE(request_model, model))",
+            group_expression: "TRIM(COALESCE(request_model, model))",
+            source_filter: "COALESCE(request_model, model) IS NOT NULL AND TRIM(COALESCE(request_model, model)) <> ''",
             metric_expression: "COALESCE(total_tokens, 0)",
             metric_filter: Some("total_tokens IS NOT NULL AND total_tokens > 0"),
         },
@@ -772,6 +786,8 @@ mod tests {
                 upstream_id INTEGER,
                 upstream_name TEXT,
                 model TEXT,
+                request_model TEXT,
+                upstream_model TEXT,
                 reasoning_effort TEXT,
                 response_reasoning_effort TEXT,
                 stream INTEGER NOT NULL DEFAULT 0,

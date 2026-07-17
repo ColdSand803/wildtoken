@@ -13,6 +13,8 @@ pub struct RequestLogOut {
     pub upstream_id: Option<i64>,
     pub upstream_name: Option<String>,
     pub model: Option<String>,
+    pub request_model: Option<String>,
+    pub upstream_model: Option<String>,
     pub reasoning_effort: Option<String>,
     pub response_reasoning_effort: Option<String>,
     pub stream: i32,
