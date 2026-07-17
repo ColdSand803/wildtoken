@@ -348,11 +348,13 @@ pub async fn top_log_stats(
     let models = top_log_counts(
         pool,
         window,
-        "TRIM(model)",
-        "TRIM(model)",
-        "model IS NOT NULL AND TRIM(model) <> ''",
-        "1",
-        None,
+        TopLogCountSpec {
+            name_expression: "TRIM(model)",
+            group_expression: "TRIM(model)",
+            source_filter: "model IS NOT NULL AND TRIM(model) <> ''",
+            metric_expression: "1",
+            metric_filter: None,
+        },
         limit,
     )
     .await?;
@@ -365,33 +367,39 @@ pub async fn top_log_stats(
     let channels = top_log_counts(
         pool,
         window,
-        channel_name_expr,
-        "upstream_id",
-        "upstream_id IS NOT NULL",
-        "1",
-        None,
+        TopLogCountSpec {
+            name_expression: channel_name_expr,
+            group_expression: "upstream_id",
+            source_filter: "upstream_id IS NOT NULL",
+            metric_expression: "1",
+            metric_filter: None,
+        },
         limit,
     )
     .await?;
     let model_tokens = top_log_counts(
         pool,
         window,
-        "TRIM(model)",
-        "TRIM(model)",
-        "model IS NOT NULL AND TRIM(model) <> ''",
-        "COALESCE(total_tokens, 0)",
-        Some("total_tokens IS NOT NULL AND total_tokens > 0"),
+        TopLogCountSpec {
+            name_expression: "TRIM(model)",
+            group_expression: "TRIM(model)",
+            source_filter: "model IS NOT NULL AND TRIM(model) <> ''",
+            metric_expression: "COALESCE(total_tokens, 0)",
+            metric_filter: Some("total_tokens IS NOT NULL AND total_tokens > 0"),
+        },
         limit,
     )
     .await?;
     let channel_tokens = top_log_counts(
         pool,
         window,
-        channel_name_expr,
-        "upstream_id",
-        "upstream_id IS NOT NULL",
-        "COALESCE(total_tokens, 0)",
-        Some("total_tokens IS NOT NULL AND total_tokens > 0"),
+        TopLogCountSpec {
+            name_expression: channel_name_expr,
+            group_expression: "upstream_id",
+            source_filter: "upstream_id IS NOT NULL",
+            metric_expression: "COALESCE(total_tokens, 0)",
+            metric_filter: Some("total_tokens IS NOT NULL AND total_tokens > 0"),
+        },
         limit,
     )
     .await?;
@@ -405,33 +413,36 @@ pub async fn top_log_stats(
     })
 }
 
+struct TopLogCountSpec<'a> {
+    name_expression: &'a str,
+    group_expression: &'a str,
+    source_filter: &'a str,
+    metric_expression: &'a str,
+    metric_filter: Option<&'a str>,
+}
+
 async fn top_log_counts(
     pool: &SqlitePool,
     window: LogTopWindow,
-    name_expression: &str,
-    group_expression: &str,
-    source_filter: &str,
-    metric_expression: &str,
-    metric_filter: Option<&str>,
+    spec: TopLogCountSpec<'_>,
     limit: i64,
 ) -> Result<Vec<RequestLogTopItemOut>, AppError> {
     // Group by `group_expression` (e.g. upstream_id), but surface a display `name`.
     // When multiple names share one group key, MAX(name) picks a stable non-null label.
-    let mut query = QueryBuilder::<Sqlite>::new(
-        "SELECT MAX(name) AS name, SUM(value) AS count FROM (SELECT ",
-    );
+    let mut query =
+        QueryBuilder::<Sqlite>::new("SELECT MAX(name) AS name, SUM(value) AS count FROM (SELECT ");
     query
-        .push(group_expression)
+        .push(spec.group_expression)
         .push(" AS group_key, ")
-        .push(name_expression)
+        .push(spec.name_expression)
         .push(" AS name, ")
-        .push(metric_expression)
+        .push(spec.metric_expression)
         .push(" AS value FROM request_logs WHERE created_at >= ")
         .push(window.cutoff_expression())
         .push(" AND (")
-        .push(source_filter)
+        .push(spec.source_filter)
         .push(")");
-    if let Some(metric_filter) = metric_filter {
+    if let Some(metric_filter) = spec.metric_filter {
         query.push(" AND (").push(metric_filter).push(")");
     }
     query

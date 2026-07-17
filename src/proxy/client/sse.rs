@@ -260,12 +260,8 @@ fn extract_usage_values(usage: &serde_json::Value) -> TokenUsage {
     let anthropic_style = is_anthropic_style_usage(usage);
     let prompt = if anthropic_style {
         // Anthropic: total input = residual input + cache write + cache read
-        sum_token_parts(&[
-            raw_prompt,
-            top_level_cache_creation,
-            top_level_cache_read,
-        ])
-        .or(raw_prompt)
+        sum_token_parts(&[raw_prompt, top_level_cache_creation, top_level_cache_read])
+            .or(raw_prompt)
     } else {
         // OpenAI: prompt/input is already the full input (cached is a subset)
         raw_prompt
