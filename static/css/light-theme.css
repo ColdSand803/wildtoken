@@ -131,8 +131,7 @@ html[data-theme="light"] tbody tr:hover {
   box-shadow: inset 3px 0 0 rgb(8 127 155 / 52%);
 }
 
-html[data-theme="light"] .url-cell-inner,
-html[data-theme="light"] .model-cell code {
+html[data-theme="light"] .url-cell-inner {
   background: #f4f7fa;
   border-color: #e0e8f0;
   color: #405269;

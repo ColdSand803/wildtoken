@@ -319,8 +319,7 @@ td.no-match-state {
   vertical-align: middle;
 }
 
-.url-cell code,
-.model-cell code {
+.url-cell code {
   background: var(--panel-subtle);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
@@ -500,27 +499,47 @@ td.no-match-state {
   min-width: 150px;
 }
 
+.model-text {
+  color: var(--text-secondary);
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: 1.25;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .model-route {
-  align-items: center;
-  display: inline-flex;
-  gap: 5px;
+  display: grid;
+  gap: 3px;
   max-width: 100%;
   min-width: 0;
 }
 
-.model-route code {
-  max-width: 76px;
+.model-route-line {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
 }
 
-.model-route-arrow {
+.model-route-line:first-child {
+  display: block;
+}
+
+.model-route-icon {
   color: var(--muted);
   flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 10px;
+  font-weight: 600;
+  line-height: 1.25;
+  white-space: nowrap;
 }
 
-.model-route .model-upstream {
-  border-color: var(--ok-border);
+.model-upstream {
   color: var(--ok);
 }
 
@@ -639,7 +658,7 @@ td.no-match-state {
 }
 
 .tokens-cell {
-  min-width: 260px;
+  min-width: 300px;
 }
 
 .priority-value {

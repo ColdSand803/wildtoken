@@ -478,13 +478,44 @@ async fn top_log_counts(
 }
 
 #[cfg(test)]
+#[derive(Debug, FromRow)]
+struct TokenUsageStatsRow {
+    today_tokens: i64,
+    today_prompt_tokens: i64,
+    today_prompt_cached_tokens: i64,
+    today_requests: i64,
+    today_all_requests: i64,
+    one_day_tokens: i64,
+    one_day_prompt_tokens: i64,
+    one_day_prompt_cached_tokens: i64,
+    one_day_requests: i64,
+    one_day_all_requests: i64,
+    seven_days_tokens: i64,
+    seven_days_prompt_tokens: i64,
+    seven_days_prompt_cached_tokens: i64,
+    seven_days_requests: i64,
+    seven_days_all_requests: i64,
+    thirty_days_tokens: i64,
+    thirty_days_prompt_tokens: i64,
+    thirty_days_prompt_cached_tokens: i64,
+    thirty_days_requests: i64,
+    thirty_days_all_requests: i64,
+}
+
+#[cfg(test)]
 pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, AppError> {
-    let row: (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+    let row: TokenUsageStatsRow = sqlx::query_as(
         r#"
         SELECT
             COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', 'localtime', 'start of day', 'utc')
                 THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS today_tokens,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', 'localtime', 'start of day', 'utc')
+                THEN COALESCE(prompt_tokens, 0) ELSE 0 END), 0) AS today_prompt_tokens,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', 'localtime', 'start of day', 'utc')
+                THEN COALESCE(prompt_cached_tokens, 0) ELSE 0 END), 0) AS today_prompt_cached_tokens,
             COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', 'localtime', 'start of day', 'utc')
                  AND total_tokens IS NOT NULL
@@ -497,6 +528,12 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
                 THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS one_day_tokens,
             COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', '-1 day')
+                THEN COALESCE(prompt_tokens, 0) ELSE 0 END), 0) AS one_day_prompt_tokens,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', '-1 day')
+                THEN COALESCE(prompt_cached_tokens, 0) ELSE 0 END), 0) AS one_day_prompt_cached_tokens,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', '-1 day')
                  AND total_tokens IS NOT NULL
                 THEN 1 ELSE 0 END), 0) AS one_day_requests,
             COALESCE(SUM(CASE
@@ -507,6 +544,12 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
                 THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS seven_days_tokens,
             COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', '-7 days')
+                THEN COALESCE(prompt_tokens, 0) ELSE 0 END), 0) AS seven_days_prompt_tokens,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', '-7 days')
+                THEN COALESCE(prompt_cached_tokens, 0) ELSE 0 END), 0) AS seven_days_prompt_cached_tokens,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', '-7 days')
                  AND total_tokens IS NOT NULL
                 THEN 1 ELSE 0 END), 0) AS seven_days_requests,
             COALESCE(SUM(CASE
@@ -515,6 +558,12 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
             COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', '-30 days')
                 THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS thirty_days_tokens,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', '-30 days')
+                THEN COALESCE(prompt_tokens, 0) ELSE 0 END), 0) AS thirty_days_prompt_tokens,
+            COALESCE(SUM(CASE
+                WHEN created_at >= datetime('now', '-30 days')
+                THEN COALESCE(prompt_cached_tokens, 0) ELSE 0 END), 0) AS thirty_days_prompt_cached_tokens,
             COALESCE(SUM(CASE
                 WHEN created_at >= datetime('now', '-30 days')
                  AND total_tokens IS NOT NULL
@@ -531,24 +580,32 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
 
     Ok(TokenUsageStatsOut {
         today: TokenUsageWindowOut {
-            total_tokens: row.0,
-            request_count: row.1,
-            all_request_count: row.2,
+            total_tokens: row.today_tokens,
+            prompt_tokens: row.today_prompt_tokens,
+            prompt_cached_tokens: row.today_prompt_cached_tokens,
+            request_count: row.today_requests,
+            all_request_count: row.today_all_requests,
         },
         one_day: TokenUsageWindowOut {
-            total_tokens: row.3,
-            request_count: row.4,
-            all_request_count: row.5,
+            total_tokens: row.one_day_tokens,
+            prompt_tokens: row.one_day_prompt_tokens,
+            prompt_cached_tokens: row.one_day_prompt_cached_tokens,
+            request_count: row.one_day_requests,
+            all_request_count: row.one_day_all_requests,
         },
         seven_days: TokenUsageWindowOut {
-            total_tokens: row.6,
-            request_count: row.7,
-            all_request_count: row.8,
+            total_tokens: row.seven_days_tokens,
+            prompt_tokens: row.seven_days_prompt_tokens,
+            prompt_cached_tokens: row.seven_days_prompt_cached_tokens,
+            request_count: row.seven_days_requests,
+            all_request_count: row.seven_days_all_requests,
         },
         thirty_days: TokenUsageWindowOut {
-            total_tokens: row.9,
-            request_count: row.10,
-            all_request_count: row.11,
+            total_tokens: row.thirty_days_tokens,
+            prompt_tokens: row.thirty_days_prompt_tokens,
+            prompt_cached_tokens: row.thirty_days_prompt_cached_tokens,
+            request_count: row.thirty_days_requests,
+            all_request_count: row.thirty_days_all_requests,
         },
     })
 }
@@ -932,12 +989,13 @@ mod tests {
     async fn usage_windows_count_all_requests_even_without_token_data() {
         let pool = test_pool().await;
         sqlx::query(
-            r#"INSERT INTO request_logs (id, created_at, total_tokens) VALUES
-               (1, datetime('now'), 100),
-               (2, datetime('now'), NULL),
-               (3, datetime('now', '-2 days'), 200),
-               (4, datetime('now', '-8 days'), NULL),
-               (5, datetime('now', '-31 days'), 400)"#,
+            r#"INSERT INTO request_logs
+               (id, created_at, prompt_tokens, prompt_cached_tokens, total_tokens) VALUES
+               (1, datetime('now'), 80, 20, 100),
+               (2, datetime('now'), NULL, NULL, NULL),
+               (3, datetime('now', '-2 days'), 120, 30, 200),
+               (4, datetime('now', '-8 days'), NULL, NULL, NULL),
+               (5, datetime('now', '-31 days'), 200, 50, 400)"#,
         )
         .execute(&pool)
         .await
@@ -948,34 +1006,42 @@ mod tests {
         assert_eq!(
             (
                 stats.today.total_tokens,
+                stats.today.prompt_tokens,
+                stats.today.prompt_cached_tokens,
                 stats.today.request_count,
                 stats.today.all_request_count,
             ),
-            (100, 1, 2)
+            (100, 80, 20, 1, 2)
         );
         assert_eq!(
             (
                 stats.one_day.total_tokens,
+                stats.one_day.prompt_tokens,
+                stats.one_day.prompt_cached_tokens,
                 stats.one_day.request_count,
                 stats.one_day.all_request_count,
             ),
-            (100, 1, 2)
+            (100, 80, 20, 1, 2)
         );
         assert_eq!(
             (
                 stats.seven_days.total_tokens,
+                stats.seven_days.prompt_tokens,
+                stats.seven_days.prompt_cached_tokens,
                 stats.seven_days.request_count,
                 stats.seven_days.all_request_count,
             ),
-            (300, 2, 3)
+            (300, 200, 50, 2, 3)
         );
         assert_eq!(
             (
                 stats.thirty_days.total_tokens,
+                stats.thirty_days.prompt_tokens,
+                stats.thirty_days.prompt_cached_tokens,
                 stats.thirty_days.request_count,
                 stats.thirty_days.all_request_count,
             ),
-            (300, 2, 4)
+            (300, 200, 50, 2, 4)
         );
     }
 

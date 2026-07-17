@@ -73,27 +73,60 @@ function renderLogModel(log) {
   }
   if (!route.mapped) {
     const value = route.request || route.upstream;
-    return `<code title="${escapeHtml(value)}">${escapeHtml(value)}</code>`;
+    return `<span class="model-text model-single" title="${escapeHtml(value)}">${escapeHtml(value)}</span>`;
   }
   const title = `请求模型：${route.request}；上游模型：${route.upstream}`;
   return `
     <span class="model-route" title="${escapeHtml(title)}">
-      <code class="model-request">${escapeHtml(route.request)}</code>
-      <span class="model-route-arrow" aria-hidden="true">-&gt;</span>
-      <code class="model-upstream">${escapeHtml(route.upstream)}</code>
+      <span class="model-route-line">
+        <span class="model-text model-request">${escapeHtml(route.request)}</span>
+      </span>
+      <span class="model-route-line model-route-target">
+        <span class="model-route-icon" aria-hidden="true">↳</span>
+        <span class="model-text model-upstream">${escapeHtml(route.upstream)}</span>
+      </span>
     </span>
   `;
 }
 
 function formatTokens(log) {
   const part = (value) => (value === null || value === undefined ? "-" : value);
+  const cacheHitRate = formatCacheHitRate(log);
+  const metrics = [
+    ["输入", log.prompt_tokens],
+    ["输出", log.completion_tokens],
+    ["总计", log.total_tokens],
+    ["缓存命中", log.prompt_cached_tokens],
+    ["缓存率", cacheHitRate],
+    ["思考", log.completion_reasoning_tokens],
+  ];
   return `
-    <span class="token-triple" aria-label="输入 输出 总计 tokens">
-      <span><b>${part(log.prompt_tokens)}</b><small>输入</small></span>
-      <span><b>${part(log.completion_tokens)}</b><small>输出</small></span>
-      <span><b>${part(log.total_tokens)}</b><small>总计</small></span>
+    <span class="token-triple" aria-label="输入 输出 总计 缓存命中 缓存率 思考 tokens">
+      ${metrics.map(([label, value]) => `
+        <span><b>${escapeHtml(String(part(value)))}</b><small>${escapeHtml(label)}</small></span>
+      `).join("")}
     </span>
   `;
+}
+
+function formatCacheHitRate(log) {
+  const cacheHit = Number(log.prompt_cached_tokens);
+  const input = Number(log.prompt_tokens);
+  if (
+    !Number.isFinite(cacheHit)
+    || !Number.isFinite(input)
+    || input <= 0
+  ) {
+    return "-";
+  }
+  const percent = (cacheHit / input) * 100;
+  if (percent === 0) {
+    return "0%";
+  }
+  if (percent < 10) {
+    return `${percent.toFixed(1)}%`;
+  }
+  return `${Math.round(percent)}%`;
 }
 
 function formatTokensPerSecondLine(log) {
@@ -111,24 +144,20 @@ function formatTokenDetailPanel(log) {
   const metric = ([label, value, tone]) => `
     <span class="log-detail-token-metric ${escapeHtml(tone)}">
       <small>${escapeHtml(label)}</small>
-      <b>${part(value)}</b>
+      <b>${escapeHtml(String(part(value)))}</b>
     </span>
   `;
-  // Column-flow panel: left column 输入/缓存读/缓存写, right column 输出/思考/总计.
-  const left = [
+  const metrics = [
     ["输入", log.prompt_tokens, "input"],
-    ["缓存读", log.prompt_cached_tokens, "cache-read"],
-    ["缓存写", log.cache_creation_tokens, "cache-write"],
-  ];
-  const right = [
     ["输出", log.completion_tokens, "output"],
-    ["思考", log.completion_reasoning_tokens, "reasoning"],
     ["总计", log.total_tokens, "total"],
+    ["缓存命中", log.prompt_cached_tokens, "cache-read"],
+    ["缓存率", formatCacheHitRate(log), "cache-rate"],
+    ["思考", log.completion_reasoning_tokens, "reasoning"],
   ];
   return `
-    <div class="log-detail-token-panel" aria-label="输入 缓存读取 缓存写入 输出 思考 总计 tokens">
-      ${left.map(metric).join("")}
-      ${right.map(metric).join("")}
+    <div class="log-detail-token-panel" aria-label="输入 输出 总计 缓存命中 缓存率 思考 tokens">
+      ${metrics.map(metric).join("")}
     </div>
   `;
 }

@@ -26,6 +26,39 @@ function tokenUsageCard(label, usage, scopeLabel) {
   };
 }
 
+function formatDashboardCacheHitRate(cacheHitTokens, inputTokens) {
+  if (
+    !Number.isFinite(cacheHitTokens)
+    || !Number.isFinite(inputTokens)
+    || inputTokens <= 0
+  ) {
+    return "—";
+  }
+  const percent = (cacheHitTokens / inputTokens) * 100;
+  if (percent === 0) {
+    return "0%";
+  }
+  if (percent < 10) {
+    return `${percent.toFixed(1)}%`;
+  }
+  return `${Math.round(percent)}%`;
+}
+
+function cacheHitRateCard(label, usage, scopeLabel) {
+  const cacheHitTokens = Number(usage?.prompt_cached_tokens);
+  const inputTokens = Number(usage?.prompt_tokens);
+  const hasInput = Number.isFinite(inputTokens) && inputTokens > 0;
+  const safeCacheHit = Number.isFinite(cacheHitTokens) && cacheHitTokens > 0 ? cacheHitTokens : 0;
+  return {
+    value: formatDashboardCacheHitRate(cacheHitTokens, inputTokens),
+    label,
+    hint: hasInput
+      ? `${scopeLabel} · 命中 ${formatCompactNumber(safeCacheHit)} / 输入 ${formatCompactNumber(inputTokens)}`
+      : `${scopeLabel} · 暂无输入 token`,
+    tone: "",
+  };
+}
+
 function requestCountCard(label, usage, scopeLabel) {
   const requestCount = Number(usage?.all_request_count);
   const safeCount = Number.isFinite(requestCount) && requestCount > 0 ? requestCount : 0;
@@ -233,6 +266,10 @@ function renderDashboard() {
     tokenUsageCard("1d Tokens", dashboardTokenUsage?.one_day, "最近 24 小时"),
     tokenUsageCard("7d Tokens", dashboardTokenUsage?.seven_days, "最近 7 天"),
     tokenUsageCard("30d Tokens", dashboardTokenUsage?.thirty_days, "最近 30 天"),
+    cacheHitRateCard("今天缓存率", dashboardTokenUsage?.today, "本地日累计"),
+    cacheHitRateCard("1d 缓存率", dashboardTokenUsage?.one_day, "最近 24 小时"),
+    cacheHitRateCard("7d 缓存率", dashboardTokenUsage?.seven_days, "最近 7 天"),
+    cacheHitRateCard("30d 缓存率", dashboardTokenUsage?.thirty_days, "最近 30 天"),
   ]);
   renderDashboardKpiCards(dashboardRequestKpis, [
     requestCountCard("今天请求", dashboardTokenUsage?.today, "本地日累计"),

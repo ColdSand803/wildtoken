@@ -22,6 +22,8 @@ pub struct PersistedLogStats {
     pub id: i64,
     pub created_at_unix_seconds: i64,
     pub total_tokens: Option<i64>,
+    pub prompt_tokens: Option<i64>,
+    pub prompt_cached_tokens: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +38,8 @@ struct LogStatsBucket {
     request_count: i64,
     token_request_count: i64,
     total_tokens: i64,
+    prompt_tokens: i64,
+    prompt_cached_tokens: i64,
 }
 
 #[derive(Debug, Default)]
@@ -58,6 +62,8 @@ struct LogStatsBucketRow {
     request_count: i64,
     token_request_count: i64,
     total_tokens: i64,
+    prompt_tokens: i64,
+    prompt_cached_tokens: i64,
 }
 
 pub struct LogStatsCache {
@@ -95,7 +101,9 @@ impl LogStatsCache {
                    COUNT(*) AS request_count,
                    COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END), 0)
                        AS token_request_count,
-                   COALESCE(SUM(total_tokens), 0) AS total_tokens
+                   COALESCE(SUM(total_tokens), 0) AS total_tokens,
+                   COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+                   COALESCE(SUM(prompt_cached_tokens), 0) AS prompt_cached_tokens
                FROM request_logs
                WHERE created_at >= datetime('now', '-30 days')
                GROUP BY bucket_start_unix_seconds
@@ -117,6 +125,8 @@ impl LogStatsCache {
                             request_count: row.request_count,
                             token_request_count: row.token_request_count,
                             total_tokens: row.total_tokens,
+                            prompt_tokens: row.prompt_tokens,
+                            prompt_cached_tokens: row.prompt_cached_tokens,
                         },
                     )
                 })
@@ -203,6 +213,14 @@ impl LogStatsState {
             bucket.token_request_count = bucket.token_request_count.saturating_add(1);
             bucket.total_tokens = bucket.total_tokens.saturating_add(total_tokens);
         }
+        if let Some(prompt_tokens) = entry.prompt_tokens {
+            bucket.prompt_tokens = bucket.prompt_tokens.saturating_add(prompt_tokens);
+        }
+        if let Some(prompt_cached_tokens) = entry.prompt_cached_tokens {
+            bucket.prompt_cached_tokens = bucket
+                .prompt_cached_tokens
+                .saturating_add(prompt_cached_tokens);
+        }
     }
 
     fn prune(&mut self, now: DateTime<Utc>) {
@@ -263,11 +281,17 @@ impl LogStatsBucket {
             .token_request_count
             .saturating_add(other.token_request_count);
         self.total_tokens = self.total_tokens.saturating_add(other.total_tokens);
+        self.prompt_tokens = self.prompt_tokens.saturating_add(other.prompt_tokens);
+        self.prompt_cached_tokens = self
+            .prompt_cached_tokens
+            .saturating_add(other.prompt_cached_tokens);
     }
 
     fn into_window(self) -> TokenUsageWindowOut {
         TokenUsageWindowOut {
             total_tokens: self.total_tokens,
+            prompt_tokens: self.prompt_tokens,
+            prompt_cached_tokens: self.prompt_cached_tokens,
             request_count: self.token_request_count,
             all_request_count: self.request_count,
         }
@@ -331,6 +355,8 @@ mod tests {
             r#"CREATE TABLE request_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                prompt_tokens INTEGER,
+                prompt_cached_tokens INTEGER,
                 total_tokens INTEGER
             )"#,
         )
@@ -344,12 +370,13 @@ mod tests {
     async fn refresh_groups_logs_into_usage_windows() {
         let pool = test_pool().await;
         sqlx::query(
-            r#"INSERT INTO request_logs (id, created_at, total_tokens) VALUES
-               (1, datetime('now'), 100),
-               (2, datetime('now'), NULL),
-               (3, datetime('now', '-2 days'), 200),
-               (4, datetime('now', '-8 days'), NULL),
-               (5, datetime('now', '-31 days'), 400)"#,
+            r#"INSERT INTO request_logs
+               (id, created_at, prompt_tokens, prompt_cached_tokens, total_tokens) VALUES
+               (1, datetime('now'), 80, 20, 100),
+               (2, datetime('now'), NULL, NULL, NULL),
+               (3, datetime('now', '-2 days'), 120, 30, 200),
+               (4, datetime('now', '-8 days'), NULL, NULL, NULL),
+               (5, datetime('now', '-31 days'), 200, 50, 400)"#,
         )
         .execute(&pool)
         .await
@@ -363,34 +390,42 @@ mod tests {
         assert_eq!(
             (
                 snapshot.token_usage.today.total_tokens,
+                snapshot.token_usage.today.prompt_tokens,
+                snapshot.token_usage.today.prompt_cached_tokens,
                 snapshot.token_usage.today.request_count,
                 snapshot.token_usage.today.all_request_count,
             ),
-            (100, 1, 2)
+            (100, 80, 20, 1, 2)
         );
         assert_eq!(
             (
                 snapshot.token_usage.one_day.total_tokens,
+                snapshot.token_usage.one_day.prompt_tokens,
+                snapshot.token_usage.one_day.prompt_cached_tokens,
                 snapshot.token_usage.one_day.request_count,
                 snapshot.token_usage.one_day.all_request_count,
             ),
-            (100, 1, 2)
+            (100, 80, 20, 1, 2)
         );
         assert_eq!(
             (
                 snapshot.token_usage.seven_days.total_tokens,
+                snapshot.token_usage.seven_days.prompt_tokens,
+                snapshot.token_usage.seven_days.prompt_cached_tokens,
                 snapshot.token_usage.seven_days.request_count,
                 snapshot.token_usage.seven_days.all_request_count,
             ),
-            (300, 2, 3)
+            (300, 200, 50, 2, 3)
         );
         assert_eq!(
             (
                 snapshot.token_usage.thirty_days.total_tokens,
+                snapshot.token_usage.thirty_days.prompt_tokens,
+                snapshot.token_usage.thirty_days.prompt_cached_tokens,
                 snapshot.token_usage.thirty_days.request_count,
                 snapshot.token_usage.thirty_days.all_request_count,
             ),
-            (300, 2, 4)
+            (300, 200, 50, 2, 4)
         );
     }
 
@@ -404,11 +439,15 @@ mod tests {
                 id: 1,
                 created_at_unix_seconds: now,
                 total_tokens: Some(12),
+                prompt_tokens: Some(9),
+                prompt_cached_tokens: Some(3),
             },
             PersistedLogStats {
                 id: 2,
                 created_at_unix_seconds: now,
                 total_tokens: None,
+                prompt_tokens: None,
+                prompt_cached_tokens: None,
             },
         ]);
 
@@ -416,6 +455,8 @@ mod tests {
         assert_eq!(snapshot.total_log_count, 2);
         assert_eq!(snapshot.log_count_24h, 2);
         assert_eq!(snapshot.token_usage.thirty_days.total_tokens, 12);
+        assert_eq!(snapshot.token_usage.thirty_days.prompt_tokens, 9);
+        assert_eq!(snapshot.token_usage.thirty_days.prompt_cached_tokens, 3);
         assert_eq!(snapshot.token_usage.thirty_days.request_count, 1);
         assert_eq!(snapshot.token_usage.thirty_days.all_request_count, 2);
     }
@@ -451,12 +492,16 @@ mod tests {
             id: 2,
             created_at_unix_seconds: chrono::Utc::now().timestamp(),
             total_tokens: Some(5),
+            prompt_tokens: Some(4),
+            prompt_cached_tokens: Some(1),
         }]);
         cache.refresh_from_db(&pool).await.unwrap();
 
         let snapshot = cache.snapshot();
         assert_eq!(snapshot.total_log_count, 2);
         assert_eq!(snapshot.token_usage.thirty_days.total_tokens, 15);
+        assert_eq!(snapshot.token_usage.thirty_days.prompt_tokens, 4);
+        assert_eq!(snapshot.token_usage.thirty_days.prompt_cached_tokens, 1);
         assert_eq!(snapshot.token_usage.thirty_days.request_count, 2);
         assert_eq!(snapshot.token_usage.thirty_days.all_request_count, 2);
     }

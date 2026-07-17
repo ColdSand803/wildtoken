@@ -547,7 +547,7 @@
   }
 
   .token-triple {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(3, minmax(54px, 1fr));
   }
 
   .log-detail-panel {

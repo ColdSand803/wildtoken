@@ -830,6 +830,8 @@ async fn insert_log_batch(
             id: log_id,
             created_at_unix_seconds: chrono::Utc::now().timestamp(),
             total_tokens: entry.total_tokens.map(i64::from),
+            prompt_tokens: entry.prompt_tokens.map(i64::from),
+            prompt_cached_tokens: entry.prompt_cached_tokens.map(i64::from),
         });
     }
 

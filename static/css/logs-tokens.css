@@ -34,9 +34,9 @@
 
 .token-triple {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  max-width: 320px;
+  max-width: 360px;
 }
 
 .token-triple span {
@@ -46,13 +46,13 @@
   display: grid;
   gap: 1px;
   min-width: 0;
-  padding: 4px 6px;
+  padding: 3px 5px;
 }
 
 .token-triple b {
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   font-weight: 600;
   line-height: 1.15;
@@ -196,11 +196,8 @@
 
 .log-detail-token-panel {
   display: grid;
-  gap: 6px 20px;
-  /* Column flow: 输入/缓存读/缓存写 fill column 1, 输出/思考/总计 column 2. */
-  grid-auto-flow: column;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-rows: repeat(3, auto);
+  gap: 6px 14px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-top: 8px;
 }
 
