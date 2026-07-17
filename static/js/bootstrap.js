@@ -95,7 +95,6 @@ function formatLogTimestamp(value) {
 }
 
 
-const logStatusBox = document.querySelector("#log-status");
 const logRpm = document.querySelector("#log-rpm");
 const logRows = document.querySelector("#log-rows");
 const logUpstreamFilter = document.querySelector("#log-upstream-filter");

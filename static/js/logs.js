@@ -758,18 +758,13 @@ async function loadLogs() {
       emptyTitle: "暂无请求日志",
       emptyCopy: filtersActive ? "全库中没有符合当前筛选条件的日志。" : "暂无代理请求记录。",
     });
-    const loaded = items.length;
-    const pageNo = logCursorStack.length + 1;
     updateLogRpm(page.recent_rpm);
-    logStatusBox.textContent = `${filtersActive ? "全库筛选" : "服务端分页"} · 已加载 ${loaded} 条 · 第 ${pageNo} 页 · 自动刷新 5s`;
-    logStatusBox.dataset.tone = "neutral";
     logPrevButton.disabled = logCursorStack.length === 0;
     logNextButton.disabled = !logHasMore || !logNextCursor;
     renderUpstreamSummary();
   } catch (error) {
     updateLogRpm(null);
-    logStatusBox.textContent = `加载失败：${error.message}`;
-    logStatusBox.dataset.tone = "error";
+    setStatus(`加载日志失败：${error.message}`, "error");
   } finally {
     logsLoading = false;
   }
