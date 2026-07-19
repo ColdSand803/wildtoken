@@ -441,11 +441,12 @@ pub async fn admin_list_logs(
     } else {
         None
     };
-    let recent_rpm = log_stats_db::recent_one_minute_log_count(&state.db).await?;
+    let recent_rate = log_stats_db::recent_one_minute_log_rate(&state.db).await?;
     Ok(Json(RequestLogPage {
         items,
         has_more,
-        recent_rpm,
+        recent_rpm: recent_rate.request_count,
+        recent_tpm: recent_rate.total_tokens,
         next_cursor,
     }))
 }

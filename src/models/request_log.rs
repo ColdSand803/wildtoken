@@ -51,6 +51,7 @@ pub struct RequestLogPage {
     pub items: Vec<RequestLogOut>,
     pub has_more: bool,
     pub recent_rpm: i64,
+    pub recent_tpm: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<RequestLogCursorOut>,
 }

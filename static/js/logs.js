@@ -263,21 +263,28 @@ function formatThroughput(log) {
   `;
 }
 
-/** Render the server-side count of all requests during the trailing minute. */
-function updateLogRpm(recentRpm) {
+/** Render server-side request and token totals during the trailing minute. */
+function updateLogRates(recentRpm, recentTpm) {
   if (logRpm) {
-    const count = Number(recentRpm);
-    const displayCount = Number.isFinite(count) && count >= 0
-      ? count.toLocaleString("zh-CN")
+    const rpm = recentRpm === null || recentRpm === undefined ? Number.NaN : Number(recentRpm);
+    const tpm = recentTpm === null || recentTpm === undefined ? Number.NaN : Number(recentTpm);
+    const displayRpm = Number.isFinite(rpm) && rpm >= 0
+      ? rpm.toLocaleString("zh-CN")
+      : "—";
+    const displayTpm = Number.isFinite(tpm) && tpm >= 0
+      ? tpm.toLocaleString("zh-CN")
       : "—";
     logRpm.innerHTML = `
       <span class="log-rpm-window">近 60 秒</span>
-      <span class="log-rpm-value">${displayCount}</span>
+      <span class="log-rpm-value">${displayRpm}</span>
       <span class="log-rpm-unit">RPM</span>
+      <span class="log-rpm-divider" aria-hidden="true">·</span>
+      <span class="log-rpm-value">${displayTpm}</span>
+      <span class="log-rpm-unit">TPM</span>
     `;
-    const label = displayCount === "—"
-      ? "最近 60 秒全局请求数暂不可用"
-      : `最近 60 秒全局请求数 ${displayCount} RPM`;
+    const label = displayRpm === "—" || displayTpm === "—"
+      ? "最近 60 秒全局请求数或 Token 数暂不可用"
+      : `最近 60 秒全局请求数 ${displayRpm} RPM；全局 Token 总数 ${displayTpm} TPM`;
     logRpm.title = `${label}；不受当前筛选和分页影响`;
     logRpm.setAttribute("aria-label", label);
   }
@@ -825,12 +832,12 @@ async function loadLogs() {
       emptyTitle: "暂无请求日志",
       emptyCopy: filtersActive ? "全库中没有符合当前筛选条件的日志。" : "暂无代理请求记录。",
     });
-    updateLogRpm(page.recent_rpm);
+    updateLogRates(page.recent_rpm, page.recent_tpm);
     logPrevButton.disabled = logCursorStack.length === 0;
     logNextButton.disabled = !logHasMore || !logNextCursor;
     renderUpstreamSummary();
   } catch (error) {
-    updateLogRpm(null);
+    updateLogRates(null, null);
     setStatus(`加载日志失败：${error.message}`, "error");
   } finally {
     logsLoading = false;

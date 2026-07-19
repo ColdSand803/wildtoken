@@ -197,6 +197,25 @@ pub async fn recent_one_minute_log_count(pool: &SqlitePool) -> Result<i64, AppEr
     .await?)
 }
 
+/// Request and token totals in the strict trailing 60-second window.
+#[derive(Debug, Clone, Copy, FromRow)]
+pub struct RecentLogRate {
+    pub request_count: i64,
+    pub total_tokens: i64,
+}
+
+pub async fn recent_one_minute_log_rate(pool: &SqlitePool) -> Result<RecentLogRate, AppError> {
+    Ok(sqlx::query_as(
+        r#"SELECT
+               COUNT(*) AS request_count,
+               COALESCE(SUM(total_tokens), 0) AS total_tokens
+           FROM request_logs
+           WHERE created_at >= datetime('now', '-60 seconds')"#,
+    )
+    .fetch_one(pool)
+    .await?)
+}
+
 impl LogStatsState {
     fn apply_persisted_entry(&mut self, entry: PersistedLogStats, now: DateTime<Utc>) {
         self.total_log_count = self.total_log_count.saturating_add(1);
@@ -343,7 +362,9 @@ mod tests {
 
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
-    use super::{recent_one_minute_log_count, LogStatsCache, PersistedLogStats};
+    use super::{
+        recent_one_minute_log_count, recent_one_minute_log_rate, LogStatsCache, PersistedLogStats,
+    };
 
     async fn test_pool() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
@@ -462,19 +483,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recent_one_minute_count_uses_strict_sixty_second_window() {
+    async fn recent_one_minute_rate_uses_strict_sixty_second_window() {
         let pool = test_pool().await;
         sqlx::query(
             r#"INSERT INTO request_logs (id, created_at, total_tokens) VALUES
                (1, datetime('now'), 10),
                (2, datetime('now', '-30 seconds'), 20),
-               (3, datetime('now', '-90 seconds'), 30)"#,
+               (3, datetime('now', '-5 seconds'), NULL),
+               (4, datetime('now', '-90 seconds'), 30)"#,
         )
         .execute(&pool)
         .await
         .unwrap();
 
-        assert_eq!(recent_one_minute_log_count(&pool).await.unwrap(), 2);
+        assert_eq!(recent_one_minute_log_count(&pool).await.unwrap(), 3);
+        let rate = recent_one_minute_log_rate(&pool).await.unwrap();
+        assert_eq!(rate.request_count, 3);
+        assert_eq!(rate.total_tokens, 30);
     }
 
     #[tokio::test]
