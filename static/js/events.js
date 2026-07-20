@@ -8,10 +8,16 @@ const THEMES = [
   { id: "dark", label: "深色", swatch: ["#020617", "#22d3ee"] },
   { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"] },
   { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"] },
+  { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"] },
 ];
 
+// 旧 id "animal" 迁移为 "animal-island"
+function normalizeThemeId(value) {
+  return value === "animal" ? "animal-island" : value;
+}
+
 function isKnownTheme(value) {
-  return THEMES.some((theme) => theme.id === value);
+  return THEMES.some((theme) => theme.id === normalizeThemeId(value));
 }
 
 function themeLabel(id) {
@@ -36,7 +42,7 @@ function focusThemeMenuChoice(position = "selected") {
 
 function getStoredTheme() {
   try {
-    const value = localStorage.getItem(THEME_KEY);
+    const value = normalizeThemeId(localStorage.getItem(THEME_KEY));
     return isKnownTheme(value) ? value : "dark";
   } catch {
     return "dark";
@@ -44,7 +50,7 @@ function getStoredTheme() {
 }
 
 function applyTheme(theme) {
-  const next = isKnownTheme(theme) ? theme : "dark";
+  const next = isKnownTheme(theme) ? normalizeThemeId(theme) : "dark";
   document.documentElement.setAttribute("data-theme", next);
   try {
     localStorage.setItem(THEME_KEY, next);

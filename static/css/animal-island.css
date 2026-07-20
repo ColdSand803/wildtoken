@@ -1,0 +1,1096 @@
+/* ── Animal Island / 动物岛 theme structure ──────────────────────────
+   Palette lives in base.css (html[data-theme="animal-island"]); this file
+   trades glass and glow for warm parchment, mint accent, and soft
+   game-style elevation (rounded, creamy, tactile 3D buttons).
+
+   Button elevation recipe:
+   raised  — cream fill + warm border + box-shadow 0 5px 0 #bdaea0
+   hover   — translateY(-1px) + shadow 6px
+   pressed — translateY(2px) + shadow 1px
+*/
+
+html[data-theme="animal-island"] {
+  scrollbar-color: #c4b89e #f7f3df;
+}
+
+html[data-theme="animal-island"] .aurora {
+  display: none;
+}
+
+html[data-theme="animal-island"] body {
+  background:
+    radial-gradient(ellipse 120% 80% at 10% -10%, rgb(25 200 185 / 8%), transparent 50%),
+    radial-gradient(ellipse 100% 60% at 90% 0%, rgb(245 195 28 / 7%), transparent 45%),
+    radial-gradient(ellipse 80% 50% at 50% 100%, rgb(111 186 44 / 5%), transparent 50%),
+    var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Chrome ──────────────────────────────────────────────── */
+
+html[data-theme="animal-island"] .topbar {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--topbar-bg);
+  border-bottom: 2px solid var(--line);
+  box-shadow: 0 2px 8px rgb(61 52 40 / 6%);
+  gap: 12px;
+  /* horizontal rhythm ~ content padding */
+  padding: 8px 18px;
+}
+
+html[data-theme="animal-island"] .topbar::after {
+  display: none;
+}
+
+html[data-theme="animal-island"] .topbar-nav {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  gap: 6px;
+  padding: 2px;
+}
+
+html[data-theme="animal-island"] .topbar-brand {
+  align-self: center;
+  background: transparent;
+  gap: 8px;
+  padding: 4px 6px;
+}
+
+html[data-theme="animal-island"] .brand-mark {
+  color: var(--accent);
+  filter: none;
+}
+
+html[data-theme="animal-island"] .topbar-brand h1 {
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+html[data-theme="animal-island"] .brand-label {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+html[data-theme="animal-island"] .nav-link {
+  background: transparent;
+  border: 2px solid transparent;
+  border-radius: var(--radius-full);
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-weight: 600;
+  padding: 6px 14px;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition),
+    box-shadow var(--transition),
+    transform var(--transition);
+}
+
+html[data-theme="animal-island"] .nav-link:hover {
+  background: var(--panel-muted);
+  border-color: var(--line-soft);
+  color: var(--text);
+}
+
+html[data-theme="animal-island"] .nav-link.active,
+html[data-theme="animal-island"] .nav-link.active:hover {
+  background: rgb(183 198 229 / 55%);
+  border-color: rgb(183 198 229 / 80%);
+  box-shadow: 0 2px 0 0 rgb(154 172 210 / 55%);
+  color: #4a5f8a;
+  font-weight: 800;
+}
+
+/* ── Buttons: soft 3D game push buttons ──────────────────── */
+
+html[data-theme="animal-island"] button {
+  background: var(--panel-solid);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-full);
+  box-shadow: 0 5px 0 0 #bdaea0;
+  color: var(--text);
+  font-weight: 700;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition),
+    box-shadow var(--transition),
+    transform var(--transition);
+}
+
+html[data-theme="animal-island"] button:hover {
+  background: var(--panel-elevated);
+  border-color: var(--line-strong);
+  box-shadow: 0 6px 0 0 #bdaea0;
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+html[data-theme="animal-island"] button:active:not(:disabled),
+html[data-theme="animal-island"] button[aria-expanded="true"] {
+  background: var(--panel-muted);
+  border-color: var(--line-strong);
+  box-shadow: 0 1px 0 0 #bdaea0;
+  transform: translateY(2px);
+}
+
+html[data-theme="animal-island"] button:disabled,
+html[data-theme="animal-island"] button:disabled:hover {
+  background: var(--panel-muted);
+  border-color: var(--line-soft);
+  box-shadow: 0 3px 0 0 #d4c9b4;
+  color: var(--muted);
+  opacity: 0.65;
+  transform: none;
+}
+
+html[data-theme="animal-island"] button.secondary {
+  background: var(--panel-elevated);
+  border-color: var(--line);
+  box-shadow: 0 2px 4px rgb(61 52 40 / 6%);
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+html[data-theme="animal-island"] button.secondary:hover {
+  background: var(--panel-elevated);
+  border-color: var(--accent);
+  box-shadow: 0 3px 8px rgb(25 200 185 / 14%);
+  color: var(--accent-strong);
+  transform: translateY(-1px);
+}
+
+html[data-theme="animal-island"] button.secondary:active:not(:disabled) {
+  box-shadow: 0 1px 2px rgb(61 52 40 / 8%);
+  transform: translateY(1px);
+}
+
+html[data-theme="animal-island"] button.secondary:disabled:hover {
+  background: var(--panel-elevated);
+  border-color: var(--line);
+  box-shadow: 0 2px 4px rgb(61 52 40 / 6%);
+  color: var(--text-secondary);
+  transform: none;
+}
+
+html[data-theme="animal-island"] button.ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+html[data-theme="animal-island"] button.ghost:hover {
+  background: var(--panel-muted);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text);
+  transform: none;
+}
+
+html[data-theme="animal-island"] button.ghost:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="animal-island"] button.ghost:disabled:hover {
+  background: transparent;
+  color: var(--muted);
+}
+
+html[data-theme="animal-island"] button.danger {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  box-shadow: 0 4px 0 0 rgb(201 68 68 / 35%);
+  color: var(--danger);
+}
+
+html[data-theme="animal-island"] button.danger:hover {
+  background: rgb(224 90 90 / 18%);
+  border-color: var(--danger);
+  box-shadow: 0 5px 0 0 rgb(201 68 68 / 40%);
+  color: var(--danger-strong);
+  transform: translateY(-1px);
+}
+
+html[data-theme="animal-island"] button.danger:active:not(:disabled) {
+  box-shadow: 0 1px 0 0 rgb(201 68 68 / 35%);
+  transform: translateY(2px);
+}
+
+/* Table affordances and tiny inline actions are not command buttons. */
+html[data-theme="animal-island"] .table-sort-button,
+html[data-theme="animal-island"] .url-action,
+html[data-theme="animal-island"] .priority-value,
+html[data-theme="animal-island"] .token-preview-button,
+html[data-theme="animal-island"] .model-selection-remove,
+html[data-theme="animal-island"] .toast-close {
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: inherit;
+  font-weight: inherit;
+  transform: none;
+}
+
+html[data-theme="animal-island"] .table-sort-button:hover,
+html[data-theme="animal-island"] .table-sort-button:focus-visible {
+  background: var(--accent-soft);
+  box-shadow: none;
+  color: var(--text);
+  outline: none;
+  transform: none;
+}
+
+html[data-theme="animal-island"] .table-sort-button:hover span,
+html[data-theme="animal-island"] .table-sort-button:focus-visible span {
+  color: var(--accent-strong);
+}
+
+html[data-theme="animal-island"] .url-action:hover,
+html[data-theme="animal-island"] .token-preview-button:hover,
+html[data-theme="animal-island"] .model-selection-remove:hover,
+html[data-theme="animal-island"] .toast-close:hover {
+  background: var(--panel-muted);
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="animal-island"] .status-switch,
+html[data-theme="animal-island"] .status-switch:hover,
+html[data-theme="animal-island"] .status-switch:focus-visible {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--text-secondary);
+  outline: none;
+  padding: 0;
+  transform: none;
+}
+
+html[data-theme="animal-island"] .status-switch-track,
+html[data-theme="animal-island"] .status-switch.on .status-switch-track {
+  background: var(--panel-muted);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 1px 3px rgb(61 52 40 / 10%);
+  height: 22px;
+  padding: 2px;
+  width: 40px;
+}
+
+html[data-theme="animal-island"] .status-switch.on .status-switch-track {
+  background: #86d67a;
+  border-color: #6fba2c;
+  box-shadow: inset 0 1px 2px rgb(90 160 32 / 18%);
+}
+
+html[data-theme="animal-island"] .status-switch-thumb {
+  background: var(--panel-elevated);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-full);
+  box-shadow: 0 2px 4px rgb(61 52 40 / 12%);
+  height: 14px;
+  width: 14px;
+}
+
+html[data-theme="animal-island"] .status-switch.on .status-switch-thumb {
+  background: #ffffff;
+  border-color: #5aa020;
+  transform: translateX(16px);
+}
+
+/* Soft mint focus for buttons; yellow reserved for inputs */
+html[data-theme="animal-island"] button:focus-visible {
+  outline: none;
+  box-shadow: 0 5px 0 0 #bdaea0, 0 0 0 3px rgb(25 200 185 / 35%);
+}
+
+html[data-theme="animal-island"] button.secondary:focus-visible {
+  box-shadow: 0 2px 4px rgb(61 52 40 / 6%), 0 0 0 3px rgb(25 200 185 / 35%);
+}
+
+html[data-theme="animal-island"] button.ghost:focus-visible {
+  box-shadow: 0 0 0 3px rgb(25 200 185 / 35%);
+}
+
+html[data-theme="animal-island"] button.danger:focus-visible {
+  box-shadow: 0 4px 0 0 rgb(201 68 68 / 35%), 0 0 0 3px rgb(224 90 90 / 30%);
+}
+
+/* Selected choice: soft mint pill */
+html[data-theme="animal-island"] .segmented-control button.is-selected,
+html[data-theme="animal-island"] .theme-menu button.is-selected {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  box-shadow: 0 2px 0 0 rgb(17 168 155 / 28%);
+  color: var(--accent-strong);
+  font-weight: 800;
+}
+
+html[data-theme="animal-island"] .segmented-control {
+  background: var(--panel-muted);
+  border: 2px solid var(--line-soft);
+  border-radius: var(--radius-full);
+  box-shadow: none;
+  gap: 4px;
+  padding: 4px;
+}
+
+html[data-theme="animal-island"] .segmented-control button {
+  border-radius: var(--radius-full);
+  box-shadow: none;
+  font-weight: 600;
+}
+
+html[data-theme="animal-island"] .segmented-control button:hover {
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="animal-island"] .segmented-control button:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="animal-island"] .segmented-control button.is-selected:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  box-shadow: 0 2px 0 0 rgb(17 168 155 / 28%);
+  color: var(--accent-strong);
+  transform: none;
+}
+
+/* ── Layout spacing (soft island rhythm) ───────────────────
+   Base ops shell is tighter (content 28/32/56, panel pad 0).
+   Island softens the page frame, cushions panels, and leaves
+   room for 3D button shadows without clipping. */
+
+html[data-theme="animal-island"] .content {
+  max-width: calc(var(--content-max) + 24px);
+  padding: 22px 22px 40px;
+}
+
+html[data-theme="animal-island"] .view > .panel {
+  background: var(--panel);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  /* soft cushion; overflow visible so 3D button shadows aren't clipped */
+  overflow: visible;
+  padding: 18px 20px 20px;
+}
+
+html[data-theme="animal-island"] .view > .panel > .panel-head {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--line-soft);
+  gap: 14px 16px;
+  margin: 0 0 16px;
+  padding: 0 0 14px;
+}
+
+html[data-theme="animal-island"] .view > .panel > .panel-head h2 {
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+html[data-theme="animal-island"] .view > .panel > .panel-head p {
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* Toolbars / action rows: gap + bottom slack for 3D shadows */
+html[data-theme="animal-island"] .view-toolbar,
+html[data-theme="animal-island"] .log-toolbar,
+html[data-theme="animal-island"] .toolbar-batch,
+html[data-theme="animal-island"] .panel-head .actions,
+html[data-theme="animal-island"] .actions,
+html[data-theme="animal-island"] .pager,
+html[data-theme="animal-island"] .modal-footer {
+  column-gap: 12px;
+  row-gap: 14px;
+}
+
+html[data-theme="animal-island"] .view-toolbar,
+html[data-theme="animal-island"] .log-toolbar {
+  margin-bottom: 16px;
+  padding-bottom: 6px;
+}
+
+html[data-theme="animal-island"] .toolbar-batch {
+  gap: 12px 14px;
+  padding-bottom: 4px;
+}
+
+html[data-theme="animal-island"] .panel-head .actions {
+  gap: 10px 12px;
+  padding-bottom: 4px;
+}
+
+html[data-theme="animal-island"] .actions {
+  gap: 10px 12px;
+}
+
+html[data-theme="animal-island"] .pager {
+  gap: 10px 12px;
+  margin-top: 16px;
+  padding-bottom: 4px;
+}
+
+/* Command buttons in toolbars: tiny bottom margin so 5px shadow breathes */
+html[data-theme="animal-island"] .view-toolbar > button,
+html[data-theme="animal-island"] .log-toolbar > button,
+html[data-theme="animal-island"] .toolbar-batch > button,
+html[data-theme="animal-island"] .panel-head .actions > button,
+html[data-theme="animal-island"] .actions > button,
+html[data-theme="animal-island"] .pager > button,
+html[data-theme="animal-island"] .modal-footer > button {
+  margin-bottom: 5px;
+}
+
+/* Status / summary sit between head and data with island air */
+html[data-theme="animal-island"] .status {
+  margin-bottom: 14px;
+  min-height: 36px;
+  padding: 10px 14px;
+}
+
+html[data-theme="animal-island"] .summary-strip {
+  margin-bottom: 14px;
+}
+
+html[data-theme="animal-island"] .summary-strip span {
+  padding: 12px 16px;
+}
+
+/* Cards / KPI wall — less dense than ops grid */
+html[data-theme="animal-island"] .dashboard-kpis,
+html[data-theme="animal-island"] .dashboard-window-kpis {
+  gap: 14px;
+}
+
+html[data-theme="animal-island"] .dashboard-grid {
+  gap: 14px;
+}
+
+html[data-theme="animal-island"] .dashboard-metric-section {
+  margin-bottom: 24px;
+}
+
+html[data-theme="animal-island"] .dashboard-metric-section + .dashboard-metric-section,
+html[data-theme="animal-island"] .dashboard-grid {
+  padding-top: 22px;
+}
+
+html[data-theme="animal-island"] .dashboard-kpi,
+html[data-theme="animal-island"] .kpi-card {
+  gap: 6px;
+  padding: 16px 18px;
+}
+
+html[data-theme="animal-island"] .dashboard-card {
+  padding: 16px 18px;
+}
+
+html[data-theme="animal-island"] .dashboard-card-head,
+html[data-theme="animal-island"] .dashboard-metric-head {
+  margin-bottom: 12px;
+}
+
+html[data-theme="animal-island"] .dashboard-card .panel-head.dashboard-card-head {
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+}
+
+html[data-theme="animal-island"] .settings-stack {
+  gap: 14px;
+}
+
+html[data-theme="animal-island"] .settings-card {
+  padding: 18px 20px;
+}
+
+html[data-theme="animal-island"] .settings-card-head {
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+html[data-theme="animal-island"] .settings-hero > .panel-head {
+  margin-bottom: 20px;
+}
+
+html[data-theme="animal-island"] .settings-save-row,
+html[data-theme="animal-island"] .settings-action-row {
+  gap: 14px 16px;
+  margin-top: 20px;
+  padding-bottom: 4px;
+}
+
+html[data-theme="animal-island"] .settings-preferences-grid,
+html[data-theme="animal-island"] .settings-fields-grid {
+  gap: 16px;
+}
+
+/* Table shell stays inset inside the cream panel — full border + radius.
+   Earlier horizontal bleed (-20px) broke the right edge on wide tables
+   (upstream/logs/tokens min-width > viewport) and clipped against panel. */
+html[data-theme="animal-island"] .view > .panel > .table-wrap {
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+  margin: 0;
+  max-width: 100%;
+  width: 100%;
+}
+
+/* Nested tables (dashboard/settings cards) same inset treatment */
+html[data-theme="animal-island"] .dashboard-card .table-wrap,
+html[data-theme="animal-island"] .settings-card .table-wrap {
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  margin: 0;
+  max-width: 100%;
+  width: 100%;
+}
+
+/* Cells: slightly airier parchment rows */
+html[data-theme="animal-island"] th,
+html[data-theme="animal-island"] td {
+  padding: 12px 14px;
+}
+
+html[data-theme="animal-island"] .table-sort-button {
+  margin: -12px -14px;
+  min-height: 42px;
+  padding: 12px 14px;
+}
+
+/* compact density still owns cell padding (beats theme-only rules) */
+html[data-theme="animal-island"][data-density="compact"] th,
+html[data-theme="animal-island"][data-density="compact"] td {
+  padding: 6px 8px;
+}
+
+html[data-theme="animal-island"][data-density="compact"] .table-sort-button {
+  margin: -6px -8px;
+  min-height: 28px;
+  padding: 6px 8px;
+}
+
+html[data-theme="animal-island"][data-density="compact"] .summary-strip span {
+  padding: 7px 10px;
+}
+
+/* Dialogs: roomier cream interiors
+   upstream keeps gap:0 (head/body/footer self-pad); others get soft stack gap */
+html[data-theme="animal-island"] .model-dialog-panel,
+html[data-theme="animal-island"] .log-detail-panel,
+html[data-theme="animal-island"] .quick-import-panel,
+html[data-theme="animal-island"] .admin-token-panel,
+html[data-theme="animal-island"] .balance-panel,
+html[data-theme="animal-island"] .confirm-panel {
+  gap: 16px;
+}
+
+html[data-theme="animal-island"] .model-dialog-panel,
+html[data-theme="animal-island"] .log-detail-panel,
+html[data-theme="animal-island"] .quick-import-panel {
+  padding: 20px 22px;
+}
+
+html[data-theme="animal-island"] .admin-token-panel {
+  padding: 28px 26px 24px;
+}
+
+/* upstream body/footer regions when present */
+html[data-theme="animal-island"] .upstream-dialog-body,
+html[data-theme="animal-island"] .upstream-modal-body {
+  padding: 16px 20px;
+}
+
+html[data-theme="animal-island"] .modal-footer {
+  gap: 12px;
+  padding: 14px 20px 16px;
+}
+
+html[data-theme="animal-island"] .grid-form {
+  gap: 16px;
+}
+
+html[data-theme="animal-island"] .command-palette-list {
+  gap: 4px;
+  padding: 8px;
+}
+
+html[data-theme="animal-island"] .command-palette-item {
+  min-height: 44px;
+  padding: 10px 14px;
+}
+
+/* Modal heads: mint wash + roomier padding */
+html[data-theme="animal-island"] .upstream-modal-head,
+html[data-theme="animal-island"] .upstream-dialog-panel > .modal-head,
+html[data-theme="animal-island"] .model-dialog-panel > .modal-head,
+html[data-theme="animal-island"] .quick-import-panel > .modal-head,
+html[data-theme="animal-island"] .admin-token-panel > .modal-head,
+html[data-theme="animal-island"] .balance-panel > .modal-head,
+html[data-theme="animal-island"] .confirm-panel > .modal-head,
+html[data-theme="animal-island"] .log-detail-head {
+  background:
+    linear-gradient(180deg, rgb(25 200 185 / 8%), transparent 70%),
+    var(--panel-muted);
+  border-bottom: 2px solid var(--line-soft);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  color: var(--text);
+  padding: 16px 20px;
+}
+
+html[data-theme="animal-island"] .upstream-dialog-panel > .modal-head h2,
+html[data-theme="animal-island"] .model-dialog-panel > .modal-head h2,
+html[data-theme="animal-island"] .quick-import-panel > .modal-head h2,
+html[data-theme="animal-island"] .admin-token-panel > .modal-head h2,
+html[data-theme="animal-island"] .balance-panel > .modal-head h2,
+html[data-theme="animal-island"] .confirm-panel > .modal-head h2,
+html[data-theme="animal-island"] .log-detail-head h2 {
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+html[data-theme="animal-island"] .upstream-dialog-panel > .modal-head p,
+html[data-theme="animal-island"] .model-dialog-panel > .modal-head p,
+html[data-theme="animal-island"] .quick-import-panel > .modal-head p,
+html[data-theme="animal-island"] .admin-token-panel > .modal-head p,
+html[data-theme="animal-island"] .balance-panel > .modal-head p,
+html[data-theme="animal-island"] .confirm-panel > .modal-head p,
+html[data-theme="animal-island"] .log-detail-head p {
+  color: var(--muted);
+}
+
+html[data-theme="animal-island"] .command-palette-head {
+  background: var(--panel-muted);
+  border-bottom: 2px solid var(--line-soft);
+  padding: 10px 12px;
+}
+
+html[data-theme="animal-island"] .command-palette-head input {
+  background: var(--panel-elevated);
+  border: 2.5px solid var(--line);
+  border-radius: var(--radius-full);
+  box-shadow: none !important;
+  color: var(--text);
+}
+
+html[data-theme="animal-island"] .command-palette-head input:focus-visible {
+  border-color: var(--focus);
+  box-shadow: var(--focus-ring) !important;
+}
+
+html[data-theme="animal-island"] .command-palette-hint {
+  background: var(--panel-muted);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+}
+
+/* ── Fields: creamy rounded wells ────────────────────────── */
+
+html[data-theme="animal-island"] input,
+html[data-theme="animal-island"] select,
+html[data-theme="animal-island"] textarea {
+  background: var(--panel-elevated);
+  border: 2.5px solid var(--line);
+  border-radius: var(--radius-full);
+  box-shadow: none;
+  color: var(--text);
+  transition:
+    border-color var(--transition),
+    background-color var(--transition),
+    box-shadow var(--transition);
+}
+
+html[data-theme="animal-island"] textarea {
+  border-radius: var(--radius);
+}
+
+html[data-theme="animal-island"] input:hover,
+html[data-theme="animal-island"] select:hover,
+html[data-theme="animal-island"] textarea:hover {
+  border-color: var(--line-strong);
+}
+
+html[data-theme="animal-island"] input:focus-visible,
+html[data-theme="animal-island"] select:focus-visible,
+html[data-theme="animal-island"] textarea:focus-visible {
+  background: #fffef8;
+  border-color: var(--focus);
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* ── Raised surfaces: cards, strips, chips ───────────────── */
+
+html[data-theme="animal-island"] .dashboard-kpi,
+html[data-theme="animal-island"] .kpi-card,
+html[data-theme="animal-island"] .dashboard-card,
+html[data-theme="animal-island"] .settings-card,
+html[data-theme="animal-island"] .summary-strip,
+html[data-theme="animal-island"] .status {
+  background: var(--panel-solid);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+}
+
+/* padding/gap for these surfaces lives in Layout spacing above */
+
+html[data-theme="animal-island"] .kpi-card::before,
+html[data-theme="animal-island"] .dashboard-kpi::before {
+  border-radius: var(--radius) 0 0 var(--radius);
+  box-shadow: none;
+}
+
+html[data-theme="animal-island"] .dashboard-rank-track,
+html[data-theme="animal-island"] .ops-bar-track {
+  background: var(--panel-muted);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 1px 2px rgb(61 52 40 / 6%);
+}
+
+html[data-theme="animal-island"] .dashboard-rank-fill {
+  background: linear-gradient(90deg, var(--accent), #3dd4c6);
+  border-radius: var(--radius-full);
+}
+
+html[data-theme="animal-island"] .live-dot,
+html[data-theme="animal-island"] .stream-state-dot {
+  border-radius: var(--radius-full);
+  box-shadow: 0 0 0 2px rgb(111 186 44 / 25%);
+}
+
+html[data-theme="animal-island"] .badge,
+html[data-theme="animal-island"] .model-chip,
+html[data-theme="animal-island"] .model-selection-chip,
+html[data-theme="animal-island"] .model-selection-more,
+html[data-theme="animal-island"] .token-preview-code,
+html[data-theme="animal-island"] .effective-zero-note {
+  border-radius: var(--radius-full);
+}
+
+/* ── Data surfaces: cream tables ─────────────────────────── */
+
+html[data-theme="animal-island"] .table-wrap {
+  background: var(--panel-elevated);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+}
+
+html[data-theme="animal-island"] .table-wrap table,
+html[data-theme="animal-island"] .table-wrap tbody,
+html[data-theme="animal-island"] .table-wrap td {
+  background-color: var(--panel-elevated);
+}
+
+html[data-theme="animal-island"] th {
+  background: var(--panel-muted);
+  border-bottom: 2px solid var(--line);
+  color: var(--text);
+  font-weight: 800;
+}
+
+html[data-theme="animal-island"] td {
+  border-bottom-color: var(--line-soft);
+  color: var(--text-secondary);
+}
+
+html[data-theme="animal-island"] .table-wrap tbody tr:hover td {
+  background-color: var(--row-hover);
+}
+
+html[data-theme="animal-island"] .url-cell-inner {
+  background: var(--panel-subtle);
+  border-color: var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+
+html[data-theme="animal-island"] .model-picker,
+html[data-theme="animal-island"] .model-manual-entry,
+html[data-theme="animal-island"] .model-options,
+html[data-theme="animal-island"] .token-value-box,
+html[data-theme="animal-island"] .test-model-result,
+html[data-theme="animal-island"] .test-model-prompt,
+html[data-theme="animal-island"] .test-model-response,
+html[data-theme="animal-island"] .log-detail-meta-card,
+html[data-theme="animal-island"] .log-detail-section {
+  background: var(--panel-elevated);
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+}
+
+html[data-theme="animal-island"] .log-detail-section summary {
+  background: var(--panel-muted);
+  border-bottom-color: var(--line-soft);
+  border-radius: var(--radius) var(--radius) 0 0;
+  color: var(--text);
+  font-weight: 700;
+}
+
+html[data-theme="animal-island"] .log-detail-section[open] summary {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+html[data-theme="animal-island"] .log-detail-section[open] .log-detail-section-copy {
+  color: var(--text-secondary);
+}
+
+/* ── Floating layers: menus, toasts, dialogs ─────────────── */
+
+html[data-theme="animal-island"] .upstream-action-menu,
+html[data-theme="animal-island"] .col-menu,
+html[data-theme="animal-island"] .theme-menu,
+html[data-theme="animal-island"] .toast,
+html[data-theme="animal-island"] .upstream-dialog,
+html[data-theme="animal-island"] .model-dialog,
+html[data-theme="animal-island"] .log-detail-dialog,
+html[data-theme="animal-island"] .quick-import-dialog,
+html[data-theme="animal-island"] .admin-token-dialog,
+html[data-theme="animal-island"] .balance-dialog,
+html[data-theme="animal-island"] .confirm-dialog,
+html[data-theme="animal-island"] .command-palette-panel {
+  background: var(--panel-solid);
+  border: 2px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+/* dialog elements often wrap panels — keep panel itself creamy */
+html[data-theme="animal-island"] .upstream-dialog-panel,
+html[data-theme="animal-island"] .model-dialog-panel,
+html[data-theme="animal-island"] .log-detail-panel,
+html[data-theme="animal-island"] .quick-import-panel,
+html[data-theme="animal-island"] .admin-token-panel,
+html[data-theme="animal-island"] .balance-panel,
+html[data-theme="animal-island"] .confirm-panel {
+  background: var(--panel-solid);
+  border-radius: var(--radius-md);
+}
+
+html[data-theme="animal-island"] .upstream-dialog::backdrop,
+html[data-theme="animal-island"] .model-dialog::backdrop,
+html[data-theme="animal-island"] .log-detail-dialog::backdrop,
+html[data-theme="animal-island"] .quick-import-dialog::backdrop,
+html[data-theme="animal-island"] .admin-token-dialog::backdrop,
+html[data-theme="animal-island"] .balance-dialog::backdrop,
+html[data-theme="animal-island"] .confirm-dialog::backdrop,
+html[data-theme="animal-island"] .command-palette-dialog::backdrop {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--backdrop);
+}
+
+/* Menu rows stay flat until hovered */
+html[data-theme="animal-island"] .theme-menu button,
+html[data-theme="animal-island"] .col-menu label,
+html[data-theme="animal-island"] .upstream-action-menu button {
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  font-weight: 600;
+}
+
+html[data-theme="animal-island"] .theme-menu button:hover,
+html[data-theme="animal-island"] .col-menu label:hover,
+html[data-theme="animal-island"] .upstream-action-menu button:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--accent-strong);
+  transform: none;
+}
+
+html[data-theme="animal-island"] .theme-menu button.is-selected:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  box-shadow: 0 2px 0 0 rgb(17 168 155 / 28%);
+  color: var(--accent-strong);
+}
+
+html[data-theme="animal-island"] .theme-menu button:hover .theme-swatch {
+  border-color: var(--accent);
+}
+
+html[data-theme="animal-island"] .upstream-action-menu button.danger:hover,
+html[data-theme="animal-island"] .upstream-action-menu button.danger:focus-visible {
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+}
+
+/* ── Focus-visible polish ────────────────────────────────── */
+
+html[data-theme="animal-island"] a:focus-visible,
+html[data-theme="animal-island"] [tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Warm scrollbars ─────────────────────────────────────── */
+
+html[data-theme="animal-island"] ::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+html[data-theme="animal-island"] ::-webkit-scrollbar-track {
+  background: var(--panel-muted);
+  border-radius: var(--radius-full);
+}
+
+html[data-theme="animal-island"] ::-webkit-scrollbar-thumb {
+  background: #c4b89e;
+  border: 2px solid var(--panel-muted);
+  border-radius: var(--radius-full);
+}
+
+html[data-theme="animal-island"] ::-webkit-scrollbar-thumb:hover {
+  background: #9f927d;
+}
+
+html[data-theme="animal-island"] ::-webkit-scrollbar-corner {
+  background: var(--panel-muted);
+}
+
+/* ── Mobile ──────────────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  html[data-theme="animal-island"] .topbar {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 0;
+    padding: 8px 12px;
+  }
+
+  html[data-theme="animal-island"] .topbar-brand {
+    min-height: 32px;
+    padding: 4px 6px;
+  }
+
+  html[data-theme="animal-island"] .brand-mark {
+    display: none;
+  }
+
+  html[data-theme="animal-island"] .topbar-nav {
+    flex: 1 0 100%;
+    order: 3;
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  html[data-theme="animal-island"] .nav-link {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 6px 8px;
+    text-align: center;
+  }
+
+  html[data-theme="animal-island"] .content {
+    padding: 12px 12px 28px;
+  }
+
+  html[data-theme="animal-island"] .view > .panel {
+    border-radius: var(--radius);
+    padding: 14px 14px 16px;
+  }
+
+  html[data-theme="animal-island"] .view > .panel > .panel-head {
+    gap: 10px 12px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+  }
+
+  html[data-theme="animal-island"] .view-toolbar,
+  html[data-theme="animal-island"] .log-toolbar {
+    column-gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    row-gap: 12px;
+  }
+
+  html[data-theme="animal-island"] .panel-head .actions,
+  html[data-theme="animal-island"] .actions,
+  html[data-theme="animal-island"] .toolbar-batch {
+    column-gap: 10px;
+    row-gap: 12px;
+  }
+
+  html[data-theme="animal-island"] th,
+  html[data-theme="animal-island"] td {
+    padding: 10px 12px;
+  }
+
+  html[data-theme="animal-island"] .table-sort-button {
+    margin: -10px -12px;
+    min-height: 38px;
+    padding: 10px 12px;
+  }
+
+  html[data-theme="animal-island"] .dashboard-kpis,
+  html[data-theme="animal-island"] .dashboard-window-kpis,
+  html[data-theme="animal-island"] .dashboard-grid {
+    gap: 10px;
+  }
+
+  html[data-theme="animal-island"] .dashboard-kpi,
+  html[data-theme="animal-island"] .kpi-card,
+  html[data-theme="animal-island"] .dashboard-card {
+    padding: 12px 14px;
+  }
+
+  html[data-theme="animal-island"] .settings-card {
+    padding: 14px 16px;
+  }
+
+  html[data-theme="animal-island"] .settings-stack {
+    gap: 12px;
+  }
+
+  html[data-theme="animal-island"] .model-dialog-panel,
+  html[data-theme="animal-island"] .log-detail-panel,
+  html[data-theme="animal-island"] .quick-import-panel {
+    padding: 14px 16px;
+  }
+
+  html[data-theme="animal-island"] .modal-footer {
+    padding: 12px 14px 14px;
+  }
+
+  html[data-theme="animal-island"] .status {
+    margin-bottom: 12px;
+    padding: 8px 12px;
+  }
+
+  html[data-theme="animal-island"] button {
+    box-shadow: 0 4px 0 0 #bdaea0;
+  }
+
+  html[data-theme="animal-island"] button:hover {
+    box-shadow: 0 5px 0 0 #bdaea0;
+  }
+
+  html[data-theme="animal-island"] button:active:not(:disabled) {
+    box-shadow: 0 1px 0 0 #bdaea0;
+  }
+}

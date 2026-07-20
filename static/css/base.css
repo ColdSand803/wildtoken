@@ -275,6 +275,92 @@ html[data-theme="win95"] {
   --blur: 0px;
 }
 
+/* Animal Island / 动物岛 — warm parchment, mint accent, soft game-UI elevation.
+   Structural rounding and 3D buttons live in animal-island.css; variables carry the palette. */
+html[data-theme="animal-island"] {
+  color-scheme: light;
+
+  --bg: #f8f8f0;
+  --bg-elevated: rgb(247 243 223);
+  --panel: rgb(247 243 223);
+  --panel-solid: #f7f3df;
+  --panel-subtle: #faf6e8;
+  --panel-muted: #efe8d4;
+  --panel-elevated: #fffdf5;
+  --glass: rgb(247 243 223 / 92%);
+  --glass-strong: rgb(255 253 245 / 96%);
+
+  --text: #794f27;
+  --text-secondary: #725d42;
+  --muted: #9f927d;
+  --muted-strong: #8a7b66;
+
+  --line: #c4b89e;
+  --line-strong: #9f927d;
+  --line-soft: #d9d0b8;
+
+  --accent: #19c8b9;
+  --accent-strong: #11a89b;
+  --accent-soft: rgb(25 200 185 / 14%);
+  --accent-border: rgb(25 200 185 / 42%);
+  --accent-glow: rgb(25 200 185 / 22%);
+  --accent-on: #ffffff;
+  --brand-ink: #ffffff;
+
+  --danger: #e05a5a;
+  --danger-soft: rgb(224 90 90 / 12%);
+  --danger-border: rgb(224 90 90 / 38%);
+  --danger-strong: #c94444;
+  --ok: #6fba2c;
+  --ok-soft: rgb(111 186 44 / 14%);
+  --ok-border: rgb(111 186 44 / 40%);
+  --ok-strong: #5aa020;
+  --warning: #f5c31c;
+  --warning-soft: rgb(245 195 28 / 16%);
+  --warning-border: rgb(245 195 28 / 45%);
+  --warning-strong: #d4a80f;
+  --warning-text: #8a6a08;
+
+  --focus: #ffcc00;
+  --focus-ring: 0 0 0 3px rgb(255 204 0 / 42%);
+  --shadow-xs: 0 1px 2px rgb(61 52 40 / 6%);
+  --shadow-sm: 0 2px 6px rgb(61 52 40 / 8%), 0 1px 2px rgb(61 52 40 / 5%);
+  --shadow-md: 0 8px 24px rgb(61 52 40 / 12%);
+  --shadow-lg: 0 16px 40px rgb(61 52 40 / 16%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px rgb(25 200 185 / 22%), 0 4px 16px rgb(25 200 185 / 14%);
+
+  /* Code frames — deep warm wood, always dark for readability */
+  --code-frame-bg: #2b2118;
+  --code-bg: #33281e;
+  --code-text: #f3ead8;
+  --code-muted: #a89880;
+  --code-border: rgb(196 184 158 / 22%);
+
+  --row-hover: rgb(25 200 185 / 8%);
+  --row-disabled: rgb(247 243 223 / 70%);
+  --topbar-bg: rgb(248 248 240 / 94%);
+  --backdrop: rgb(61 52 40 / 32%);
+  --neutral-chip: #efe8d4;
+  --toast-neutral: #9f927d;
+
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  --radius-sm: 12px;
+  --radius: 18px;
+  --radius-md: 20px;
+  --radius-lg: 24px;
+  --radius-full: 999px;
+
+  --font-sans: "Nunito", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "Fira Code", "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
+
+  --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --blur: 0px;
+}
+
 * {
   box-sizing: border-box;
 }
