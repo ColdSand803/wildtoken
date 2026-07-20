@@ -210,10 +210,10 @@ fn normalize_model_match(value: &str) -> String {
 
 /// Return a match score 0–4.
 ///
-/// - 4: exact match in `model_mappings`
+/// - 4: exact match in `model_mappings` or `model_names`
 /// - 3: prefix match in `model_prefixes`
-/// - 2: any candidate in `model_names` starts with the requested model
-/// - 1: any candidate in `model_names` ends with the requested model
+/// - 2: any non-exact candidate in `model_names` starts with the requested model
+/// - 1: any non-exact candidate in `model_names` ends with the requested model
 /// - 0: no match
 pub fn model_match_score(upstream: &UpstreamRow, model: Option<&str>) -> i32 {
     let model = match model {
@@ -223,7 +223,7 @@ pub fn model_match_score(upstream: &UpstreamRow, model: Option<&str>) -> i32 {
 
     let req = normalize_model_match(model);
 
-    // 4: exact match in model_mappings
+    // 4: exact match in model_mappings or model_names
     if let Ok(map) =
         serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&upstream.model_mappings)
     {
@@ -232,6 +232,11 @@ pub fn model_match_score(upstream: &UpstreamRow, model: Option<&str>) -> i32 {
                 return 4;
             }
         }
+    }
+
+    let names = serde_json::from_str::<Vec<String>>(&upstream.model_names).unwrap_or_default();
+    if names.iter().any(|name| normalize_model_match(name) == req) {
+        return 4;
     }
 
     // 3: prefix match in model_prefixes
@@ -245,23 +250,16 @@ pub fn model_match_score(upstream: &UpstreamRow, model: Option<&str>) -> i32 {
 
     // 2: candidate starts with request
     // 1: candidate ends with request
-    if let Ok(names) = serde_json::from_str::<Vec<String>>(&upstream.model_names) {
-        let mut best = 0i32;
-        for name in &names {
-            let n = normalize_model_match(name);
-            if n == req {
-                // exact name match → score 2 (falls under starts-with)
-                best = best.max(2);
-            } else if n.starts_with(&req) {
-                best = best.max(2);
-            } else if n.ends_with(&req) {
-                best = best.max(1);
-            }
+    let mut best = 0i32;
+    for name in &names {
+        let n = normalize_model_match(name);
+        if n.starts_with(&req) {
+            best = best.max(2);
+        } else if n.ends_with(&req) {
+            best = best.max(1);
         }
-        return best;
     }
-
-    0
+    best
 }
 
 /// Check whether the upstream supports the given model.
@@ -429,7 +427,7 @@ pub async fn select_upstream(
 
 #[cfg(test)]
 mod tests {
-    use super::{select_upstream, AutoWeightManager, AutoWeightPolicy};
+    use super::{model_match_score, select_upstream, AutoWeightManager, AutoWeightPolicy};
     use crate::models::settings::RuntimeSettings;
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
     use std::time::{Duration, Instant};
@@ -635,6 +633,44 @@ mod tests {
 
         assert_eq!(selected.0.name, "mapping");
         assert_eq!(selected.1.as_deref(), Some("provider-model"));
+    }
+
+    #[tokio::test]
+    async fn exact_model_name_and_mapping_tie_before_priority() {
+        let pool = test_pool().await;
+        insert_upstream(&pool, "native", &["gpt-test"], 999, 100, true).await;
+        insert_upstream(&pool, "mapping", &[], 100, 100, true).await;
+        sqlx::query(
+            "UPDATE upstreams SET model_mappings = '{\"gpt-test\":\"provider-model\"}' WHERE name = 'mapping'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let native = crate::db::upstream::get_upstream_by_name(&pool, "native")
+            .await
+            .unwrap()
+            .unwrap();
+        let mapping = crate::db::upstream::get_upstream_by_name(&pool, "mapping")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(model_match_score(&native, Some("gpt-test")), 4);
+        assert_eq!(model_match_score(&mapping, Some("gpt-test")), 4);
+
+        let selected = select_upstream(
+            &pool,
+            &AutoWeightManager::new(),
+            policy(),
+            None,
+            Some("gpt-test"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(selected.0.name, "native");
+        assert_eq!(selected.1.as_deref(), Some("gpt-test"));
     }
 
     #[tokio::test]

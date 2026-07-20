@@ -71,7 +71,7 @@ TOKIO_WORKER_THREADS=4 APP__SERVER__PORT=3100 APP__DATABASE__MAX_CONNECTIONS=3 A
 请求会按以下顺序选择渠道：
 
 1. `X-WildToken-Upstream` 请求头或 `?upstream=` 查询参数指定渠道名称/ID。
-2. JSON 请求体里的 `model` 优先匹配渠道的模型映射。
+2. JSON 请求体里的 `model` 精确匹配渠道的模型映射 key 或模型全名，两者匹配强度相同。
 3. 其次匹配模型前缀、模型名前缀、模型名后缀。
 4. 使用已启用渠道中 `priority` 最大的一组，同优先级随机选择。
 
