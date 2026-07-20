@@ -165,29 +165,33 @@ pub(crate) fn prepare_upstream_body(
 
 // ── Main proxy function ─────────────────────────────────────────────────────
 
-/// Proxy a request to the upstream, streaming SSE bodies as they arrive.
+/// Everything derived from one attempt's request (URL, headers, upstream
+/// body, and their log snapshots), computed once and shared by the caller's
+/// abort-log fallback and the real upstream call — instead of each redoing
+/// the same JSON parsing/truncation work.
+pub(crate) struct PreparedRequest {
+    pub(crate) url: String,
+    pub(crate) fwd_headers: HashMap<String, String>,
+    pub(crate) upstream_body: Vec<u8>,
+    pub(crate) reasoning_effort: Option<String>,
+    pub(crate) downstream_snap: serde_json::Value,
+    pub(crate) upstream_snap: serde_json::Value,
+}
+
 #[allow(clippy::too_many_arguments)]
-pub async fn proxy_request(
-    state: &AppState,
-    auto_weight_policy: AutoWeightPolicy,
+pub(crate) fn prepare_request(
+    downstream_headers: &axum::http::HeaderMap,
     upstream: &UpstreamRow,
-    downstream_token_id: i64,
-    downstream_token_name: &str,
-    client_type: &str,
-    request_model: Option<&str>,
-    forward_model: Option<&str>,
     method: &str,
     path: &str,
     query_params: Option<&str>,
-    downstream_headers: &axum::http::HeaderMap,
+    forward_model: Option<&str>,
     body: &[u8],
-) -> Result<ProxyResponse, AppError> {
-    let start = std::time::Instant::now();
-    let reasoning_effort = extract_reasoning_effort(body);
-
+    log_body_max_bytes: usize,
+) -> Result<PreparedRequest, AppError> {
     let url = build_upstream_url(upstream, path, query_params);
     let fwd_headers = build_forward_headers(downstream_headers, upstream, path)?;
-    let log_body_max_bytes = state.runtime_settings.read().await.log_body_max_bytes as usize;
+    let reasoning_effort = extract_reasoning_effort(body);
 
     let downstream_snap =
         logging::snapshot_request(method, &url, &fwd_headers, Some(body), log_body_max_bytes);
@@ -201,6 +205,42 @@ pub async fn proxy_request(
         Some(&upstream_body),
         log_body_max_bytes,
     );
+
+    Ok(PreparedRequest {
+        url,
+        fwd_headers,
+        upstream_body,
+        reasoning_effort,
+        downstream_snap,
+        upstream_snap,
+    })
+}
+
+/// Proxy a request to the upstream, streaming SSE bodies as they arrive.
+#[allow(clippy::too_many_arguments)]
+pub async fn proxy_request(
+    state: &AppState,
+    auto_weight_policy: AutoWeightPolicy,
+    upstream: &UpstreamRow,
+    downstream_token_id: i64,
+    downstream_token_name: &str,
+    client_type: &str,
+    request_model: Option<&str>,
+    forward_model: Option<&str>,
+    method: &str,
+    path: &str,
+    prepared: PreparedRequest,
+) -> Result<ProxyResponse, AppError> {
+    let PreparedRequest {
+        url,
+        fwd_headers,
+        upstream_body,
+        reasoning_effort,
+        downstream_snap,
+        upstream_snap,
+    } = prepared;
+    let start = std::time::Instant::now();
+    let log_body_max_bytes = state.runtime_settings.read().await.log_body_max_bytes as usize;
 
     let mut req_builder = state.http_client.request(
         reqwest::Method::from_bytes(method.as_bytes()).unwrap_or(reqwest::Method::POST),
@@ -216,7 +256,7 @@ pub async fn proxy_request(
     }
 
     if !upstream_body.is_empty() {
-        req_builder = req_builder.body(upstream_body.clone());
+        req_builder = req_builder.body(upstream_body);
     }
 
     req_builder = req_builder.timeout(std::time::Duration::from_secs_f64(

@@ -1,6 +1,7 @@
 use super::{
     build_forward_headers, extract_first_token_ms, extract_reasoning_effort, extract_usage,
-    prepare_upstream_body, proxy_request, sse_bytes_line_is_terminal, validate_header_overrides,
+    prepare_request, prepare_upstream_body, proxy_request, sse_bytes_line_is_terminal,
+    validate_header_overrides,
 };
 use crate::{
     config::Settings,
@@ -423,6 +424,17 @@ async fn anthropic_channel_overrides_reach_the_upstream_on_the_wire() {
     downstream.insert("user-agent", HeaderValue::from_static("downstream-agent"));
     downstream.insert("x-request-id", HeaderValue::from_static("request-456"));
 
+    let prepared = prepare_request(
+        &downstream,
+        &upstream,
+        "POST",
+        "messages",
+        None,
+        None,
+        br#"{"model":"test"}"#,
+        RuntimeSettings::default().log_body_max_bytes as usize,
+    )
+    .unwrap();
     let result = proxy_request(
         &state,
         AutoWeightPolicy::from(&RuntimeSettings::default()),
@@ -434,9 +446,7 @@ async fn anthropic_channel_overrides_reach_the_upstream_on_the_wire() {
         None,
         "POST",
         "messages",
-        None,
-        &downstream,
-        br#"{"model":"test"}"#,
+        prepared,
     )
     .await
     .unwrap();
@@ -504,6 +514,17 @@ async fn authentication_and_payment_responses_do_not_disable_the_channel() {
             downstream.insert("x-test-sse", HeaderValue::from_static("1"));
         }
 
+        let prepared = prepare_request(
+            &downstream,
+            &upstream,
+            "POST",
+            "responses",
+            None,
+            None,
+            br#"{"model":"test"}"#,
+            RuntimeSettings::default().log_body_max_bytes as usize,
+        )
+        .unwrap();
         let result = proxy_request(
             &state,
             AutoWeightPolicy::from(&RuntimeSettings::default()),
@@ -515,9 +536,7 @@ async fn authentication_and_payment_responses_do_not_disable_the_channel() {
             None,
             "POST",
             "responses",
-            None,
-            &downstream,
-            br#"{"model":"test"}"#,
+            prepared,
         )
         .await
         .unwrap();

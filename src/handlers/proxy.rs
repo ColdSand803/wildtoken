@@ -300,31 +300,26 @@ pub async fn proxy_handler(
         drop(last_failure.take());
         abort_log.set_upstream(upstream.id, &upstream.name, forward_model.as_deref());
         let log_body_max_bytes = runtime_settings.log_body_max_bytes as usize;
-        let upstream_url = client::build_upstream_url(&upstream, path, query);
-        let fwd_headers = match client::build_forward_headers(&headers, &upstream, path) {
-            Ok(headers) => headers,
+        let prepared = match client::prepare_request(
+            &headers,
+            &upstream,
+            &method,
+            path,
+            query,
+            forward_model.as_deref(),
+            &body_bytes,
+            log_body_max_bytes,
+        ) {
+            Ok(prepared) => prepared,
             Err(error) => {
                 abort_log.log_and_disarm(502, error.to_string());
                 return Err(error);
             }
         };
-        let downstream_snap = logging::snapshot_request(
-            &method,
-            &upstream_url,
-            &fwd_headers,
-            Some(&body_bytes),
-            log_body_max_bytes,
+        abort_log.set_request_snapshots(
+            prepared.downstream_snap.clone(),
+            prepared.upstream_snap.clone(),
         );
-        let upstream_body =
-            client::prepare_upstream_body(&body_bytes, forward_model.as_deref(), path);
-        let upstream_snap = logging::snapshot_request(
-            &method,
-            &upstream_url,
-            &fwd_headers,
-            Some(&upstream_body),
-            log_body_max_bytes,
-        );
-        abort_log.set_request_snapshots(downstream_snap, upstream_snap);
 
         let result = client::proxy_request(
             &state,
@@ -337,9 +332,7 @@ pub async fn proxy_handler(
             forward_model.as_deref(),
             &method,
             path,
-            query,
-            &headers,
-            &body_bytes,
+            prepared,
         )
         .await;
         let failed = match &result {
