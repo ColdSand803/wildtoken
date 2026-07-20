@@ -1,5 +1,17 @@
 // Request log list, performance formatting, snapshots, and detail dialog.
 const LOG_SENSITIVE_MASK = "******";
+const LOG_RATE_ANIMATION_MS = 520;
+const logRateReducedMotion = typeof window.matchMedia === "function"
+  ? window.matchMedia("(prefers-reduced-motion: reduce)")
+  : null;
+const logRateElements = {
+  rpm: logRpm?.querySelector('[data-log-rate="rpm"]') || null,
+  tpm: logRpm?.querySelector('[data-log-rate="tpm"]') || null,
+};
+const logRateValues = { rpm: null, tpm: null };
+const logRateDisplayedValues = { rpm: null, tpm: null };
+const logRateAnimationFrames = { rpm: null, tpm: null };
+const logRateAnimations = new WeakMap();
 let logPageItems = [];
 let logPageFiltersActive = false;
 
@@ -325,31 +337,115 @@ function formatThroughput(log) {
   `;
 }
 
+function normalizeLogRate(value) {
+  if (value === null || value === undefined) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? Math.trunc(number) : null;
+}
+
+function updateLogRateValue(kind, value) {
+  const element = logRateElements[kind];
+  if (!element) return;
+
+  if (value !== null && value === logRateValues[kind] && logRateAnimationFrames[kind] !== null) {
+    return;
+  }
+
+  const previousTarget = logRateValues[kind];
+  const previousDisplayed = logRateDisplayedValues[kind];
+  if (logRateAnimationFrames[kind] !== null) {
+    window.cancelAnimationFrame(logRateAnimationFrames[kind]);
+    logRateAnimationFrames[kind] = null;
+  }
+  const existingAnimation = logRateAnimations.get(element);
+  if (existingAnimation) {
+    existingAnimation.cancel();
+    logRateAnimations.delete(element);
+  }
+
+  logRateValues[kind] = value;
+  const viewHidden = Boolean(element.closest("[hidden]"));
+  const shouldAnimate = previousTarget !== null
+    && previousDisplayed !== null
+    && value !== null
+    && previousTarget !== value
+    && !viewHidden
+    && !document.hidden
+    && !logRateReducedMotion?.matches
+    && typeof window.requestAnimationFrame === "function";
+
+  if (!shouldAnimate) {
+    element.textContent = value === null ? "—" : value.toLocaleString("zh-CN");
+    logRateDisplayedValues[kind] = value;
+    return;
+  }
+
+  if (typeof element.animate === "function") {
+    const offset = value > previousDisplayed ? "0.2em" : "-0.2em";
+    const emphasis = element.animate(
+      [
+        { opacity: 0.55, transform: `translateY(${offset}) scale(0.97)` },
+        { opacity: 1, transform: "translateY(0) scale(1)" },
+      ],
+      {
+        duration: LOG_RATE_ANIMATION_MS,
+        easing: "cubic-bezier(0.2, 0.8, 0.2, 1)",
+      },
+    );
+    logRateAnimations.set(element, emphasis);
+    const clearAnimation = () => {
+      if (logRateAnimations.get(element) === emphasis) {
+        logRateAnimations.delete(element);
+      }
+    };
+    emphasis.addEventListener("finish", clearAnimation, { once: true });
+    emphasis.addEventListener("cancel", clearAnimation, { once: true });
+  }
+
+  const startedAt = performance.now();
+  const delta = value - previousDisplayed;
+  const renderFrame = (now) => {
+    const progress = Math.min((now - startedAt) / LOG_RATE_ANIMATION_MS, 1);
+    const eased = 1 - ((1 - progress) ** 3);
+    const displayed = Math.round(previousDisplayed + (delta * eased));
+    if (displayed !== logRateDisplayedValues[kind]) {
+      element.textContent = displayed.toLocaleString("zh-CN");
+      logRateDisplayedValues[kind] = displayed;
+    }
+
+    if (progress < 1 && logRateValues[kind] === value) {
+      logRateAnimationFrames[kind] = window.requestAnimationFrame(renderFrame);
+      return;
+    }
+
+    logRateAnimationFrames[kind] = null;
+    if (logRateValues[kind] === value) {
+      element.textContent = value.toLocaleString("zh-CN");
+      logRateDisplayedValues[kind] = value;
+    }
+  };
+  logRateAnimationFrames[kind] = window.requestAnimationFrame(renderFrame);
+}
+
 /** Render server-side request and token totals during the trailing minute. */
 function updateLogRates(recentRpm, recentTpm) {
-  if (logRpm) {
-    const rpm = recentRpm === null || recentRpm === undefined ? Number.NaN : Number(recentRpm);
-    const tpm = recentTpm === null || recentTpm === undefined ? Number.NaN : Number(recentTpm);
-    const displayRpm = Number.isFinite(rpm) && rpm >= 0
-      ? rpm.toLocaleString("zh-CN")
-      : "—";
-    const displayTpm = Number.isFinite(tpm) && tpm >= 0
-      ? tpm.toLocaleString("zh-CN")
-      : "—";
-    logRpm.innerHTML = `
-      <span class="log-rpm-window">近 60 秒</span>
-      <span class="log-rpm-value">${displayRpm}</span>
-      <span class="log-rpm-unit">RPM</span>
-      <span class="log-rpm-divider" aria-hidden="true">·</span>
-      <span class="log-rpm-value">${displayTpm}</span>
-      <span class="log-rpm-unit">TPM</span>
-    `;
-    const label = displayRpm === "—" || displayTpm === "—"
-      ? "最近 60 秒全局请求数或 Token 数暂不可用"
-      : `最近 60 秒全局请求数 ${displayRpm} RPM；全局 Token 总数 ${displayTpm} TPM`;
-    logRpm.title = `${label}；不受当前筛选和分页影响`;
+  if (!logRpm) return;
+
+  const rpm = normalizeLogRate(recentRpm);
+  const tpm = normalizeLogRate(recentTpm);
+  const displayRpm = rpm === null ? "—" : rpm.toLocaleString("zh-CN");
+  const displayTpm = tpm === null ? "—" : tpm.toLocaleString("zh-CN");
+  const label = rpm === null || tpm === null
+    ? "最近 60 秒全局请求数或 Token 数暂不可用"
+    : `最近 60 秒全局请求数 ${displayRpm} RPM；全局 Token 总数 ${displayTpm} TPM`;
+  const title = `${label}；不受当前筛选和分页影响`;
+  if (logRpm.title !== title) logRpm.title = title;
+  if (logRpm.getAttribute("aria-label") !== label) {
     logRpm.setAttribute("aria-label", label);
   }
+
+  updateLogRateValue("rpm", rpm);
+  updateLogRateValue("tpm", tpm);
 }
 
 function normalizeLogCursor(cursor) {

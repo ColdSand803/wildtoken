@@ -741,10 +741,17 @@ html[data-theme="light"] .theme-toggle-icon::before {
 
 .log-rpm-value {
   color: var(--accent);
+  display: inline-block;
   font-family: var(--font-mono);
   font-size: var(--text-lg);
   font-weight: 800;
   line-height: 0.95;
+  transform-origin: center;
+}
+
+.log-rpm-value[data-log-rate="tpm"] {
+  min-inline-size: 9ch;
+  text-align: right;
 }
 
 .panel-head {
