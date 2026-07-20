@@ -1,18 +1,50 @@
-// ── Theme toggle (dark default / light) ───────────────────
+// ── Themes (registry-driven; switching saves immediately) ──
 const THEME_KEY = "wildtoken_theme";
 const themeToggle = document.querySelector("#theme-toggle");
+const themeMenu = document.querySelector("#theme-menu");
+
+// 新增主题时同步三处：此注册表、admin.html 头部内联白名单、base.css 变量块
+const THEMES = [
+  { id: "dark", label: "深色", swatch: ["#020617", "#22d3ee"] },
+  { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"] },
+  { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"] },
+];
+
+function isKnownTheme(value) {
+  return THEMES.some((theme) => theme.id === value);
+}
+
+function themeLabel(id) {
+  return THEMES.find((theme) => theme.id === id)?.label || id;
+}
+
+function themeMenuChoices() {
+  return Array.from(themeMenu?.querySelectorAll("[data-theme-choice]") || []);
+}
+
+function focusThemeMenuChoice(position = "selected") {
+  const choices = themeMenuChoices();
+  if (!choices.length) return;
+  const selectedIndex = Math.max(0, choices.findIndex((button) => button.classList.contains("is-selected")));
+  const index = position === "first"
+    ? 0
+    : position === "last"
+      ? choices.length - 1
+      : selectedIndex;
+  choices[index]?.focus();
+}
 
 function getStoredTheme() {
   try {
     const value = localStorage.getItem(THEME_KEY);
-    return value === "light" || value === "dark" ? value : "dark";
+    return isKnownTheme(value) ? value : "dark";
   } catch {
     return "dark";
   }
 }
 
 function applyTheme(theme) {
-  const next = theme === "light" ? "light" : "dark";
+  const next = isKnownTheme(theme) ? theme : "dark";
   document.documentElement.setAttribute("data-theme", next);
   try {
     localStorage.setItem(THEME_KEY, next);
@@ -20,22 +52,102 @@ function applyTheme(theme) {
     /* ignore quota / private mode */
   }
   if (themeToggle) {
-    const toLight = next === "dark";
-    themeToggle.setAttribute("aria-label", toLight ? "切换到浅色主题" : "切换到深色主题");
-    themeToggle.title = toLight ? "切换到浅色" : "切换到深色";
+    const label = `选择主题（当前：${themeLabel(next)}）`;
+    themeToggle.setAttribute("aria-label", label);
+    themeToggle.title = label;
   }
+  themeMenuChoices().forEach((button) => {
+    const selected = button.dataset.themeChoice === next;
+    button.classList.toggle("is-selected", selected);
+    button.setAttribute("aria-checked", String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
   if (typeof updatePreferenceControls === "function") updatePreferenceControls();
 }
 
 function cycleTheme() {
   const current = document.documentElement.getAttribute("data-theme") || getStoredTheme();
-  applyTheme(current === "dark" ? "light" : "dark");
+  const index = THEMES.findIndex((theme) => theme.id === current);
+  applyTheme(THEMES[(index + 1) % THEMES.length].id);
 }
 
+function renderThemeChoices() {
+  if (themeMenu) {
+    themeMenu.innerHTML = THEMES.map(
+      (theme) => `
+      <button type="button" role="menuitemradio" aria-checked="false" data-theme-choice="${theme.id}">
+        <span class="theme-swatch" style="--swatch-bg:${theme.swatch[0]};--swatch-accent:${theme.swatch[1]}" aria-hidden="true"></span>
+        <span>${theme.label}</span>
+      </button>`,
+    ).join("");
+  }
+  if (settingsTheme) {
+    settingsTheme.innerHTML = THEMES.map(
+      (theme) => `<button type="button" data-theme-choice="${theme.id}">${theme.label}</button>`,
+    ).join("");
+  }
+}
+
+function setThemeMenuOpen(open, { focus = false, position = "selected" } = {}) {
+  if (!themeMenu || !themeToggle) return;
+  themeMenu.hidden = !open;
+  themeToggle.setAttribute("aria-expanded", String(open));
+  if (open && focus) focusThemeMenuChoice(position);
+}
+
+renderThemeChoices();
 applyTheme(getStoredTheme());
 if (themeToggle) {
-  themeToggle.addEventListener("click", cycleTheme);
+  themeToggle.addEventListener("click", () => setThemeMenuOpen(Boolean(themeMenu?.hidden), { focus: true }));
+  themeToggle.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    setThemeMenuOpen(true, { focus: true, position: event.key === "ArrowUp" ? "last" : "first" });
+  });
 }
+themeMenu?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-theme-choice]");
+  if (!button) return;
+  applyTheme(button.dataset.themeChoice);
+  setThemeMenuOpen(false);
+  themeToggle?.focus();
+});
+themeMenu?.addEventListener("keydown", (event) => {
+  const choices = themeMenuChoices();
+  if (!choices.length) return;
+  const currentIndex = Math.max(0, choices.indexOf(document.activeElement));
+  let nextIndex = null;
+  if (event.key === "ArrowDown") nextIndex = (currentIndex + 1) % choices.length;
+  if (event.key === "ArrowUp") nextIndex = (currentIndex - 1 + choices.length) % choices.length;
+  if (event.key === "Home") nextIndex = 0;
+  if (event.key === "End") nextIndex = choices.length - 1;
+  if (nextIndex !== null) {
+    event.preventDefault();
+    choices[nextIndex].focus();
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    setThemeMenuOpen(false);
+    themeToggle?.focus();
+  }
+});
+themeMenu?.addEventListener("focusout", () => {
+  window.setTimeout(() => {
+    const active = document.activeElement;
+    if (!themeMenu?.contains(active) && !themeToggle?.contains(active)) setThemeMenuOpen(false);
+  }, 0);
+});
+document.addEventListener("click", (event) => {
+  if (
+    themeMenu && !themeMenu.hidden
+    && !themeMenu.contains(event.target)
+    && !themeToggle?.contains(event.target)
+  ) {
+    setThemeMenuOpen(false);
+  }
+});
 
 // ── Density toggle ───────────────────────────────────────
 applyDensity(getDensity());
@@ -359,7 +471,7 @@ function commandDefinitions() {
     {
       id: "theme",
       title: "切换主题",
-      subtitle: "深色 / 浅色",
+      subtitle: THEMES.map((theme) => theme.label).join(" / "),
       keys: "",
       run: () => cycleTheme(),
     },
@@ -502,6 +614,15 @@ document.addEventListener("keydown", (event) => {
   const key = event.key;
   const meta = event.metaKey || event.ctrlKey;
   const target = event.target;
+
+  if (themeMenu && !themeMenu.hidden) {
+    if (key === "Escape") {
+      event.preventDefault();
+      setThemeMenuOpen(false);
+      themeToggle?.focus();
+    }
+    return;
+  }
 
   if (meta && (key === "k" || key === "K")) {
     event.preventDefault();

@@ -71,6 +71,37 @@ async fn initialization_does_not_overwrite_existing_runtime_settings() {
 }
 
 #[tokio::test]
+async fn initialization_seeds_extended_model_test_prompt_templates() {
+    let pool = test_pool().await;
+    init_db(&pool).await.unwrap();
+
+    let templates: Vec<(String, String)> = sqlx::query_as(
+        "SELECT name, prompt FROM model_test_prompt_templates WHERE name IN ('工单信息抽取', '用户向改写', '指标计算', '发布风险评估', 'JSON结构化输出')",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    assert_eq!(templates.len(), 5);
+    for (name, prompt) in templates {
+        let length = prompt.chars().count();
+        assert!(
+            (80..=120).contains(&length),
+            "{name} should contain 80-120 characters, got {length}",
+        );
+    }
+
+    init_db(&pool).await.unwrap();
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM model_test_prompt_templates WHERE name IN ('工单信息抽取', '用户向改写', '指标计算', '发布风险评估', 'JSON结构化输出')",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count, 5);
+}
+
+#[tokio::test]
 async fn initialization_migrates_legacy_routing_columns_with_current_defaults() {
     let pool = test_pool().await;
     sqlx::query(

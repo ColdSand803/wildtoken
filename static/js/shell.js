@@ -553,7 +553,7 @@ function setRoutingSettingsStatus(message = "", tone = "") {
 }
 
 function updatePreferenceControls() {
-  const theme = getStoredTheme();
+  const theme = document.documentElement.getAttribute("data-theme") || getStoredTheme();
   const density = getDensity();
   settingsTheme?.querySelectorAll("button").forEach((button) => {
     button.classList.toggle("is-selected", button.dataset.themeChoice === theme);
@@ -744,6 +744,12 @@ function renderModelTestTemplateOptions() {
   updateModelTestTemplateHint();
 }
 
+function renderModelTestPromptTemplateOptions() {
+  const randomTemplate = modelTestPromptTemplates[Math.floor(Math.random() * modelTestPromptTemplates.length)];
+  modelTestPromptTemplate.innerHTML = modelTestPromptTemplates.map((template) => `<option value="${template.id}">${escapeHtml(template.name)}</option>`).join("");
+  if (randomTemplate) modelTestPromptTemplate.value = String(randomTemplate.id);
+}
+
 function updateModelTestTemplateHint() {
   const template = modelTestTemplates.find((item) => item.id === Number(modelTestTemplate.value));
   modelTestTemplateHint.textContent = template ? `${templateKindLabel(template.request_kind)} 请求格式与头部。` : "请选择请求包装。";
@@ -797,7 +803,7 @@ async function openModelTestDialog(upstream) {
   try {
     [modelTestTemplates, modelTestPromptTemplates] = await Promise.all([api("/api/admin/settings/model-test-templates"), api("/api/admin/settings/model-test-prompts")]);
     renderModelTestTemplateOptions();
-    modelTestPromptTemplate.innerHTML = modelTestPromptTemplates.map((item) => `<option value="${item.id}">${escapeHtml(item.name)}</option>`).join("");
+    renderModelTestPromptTemplateOptions();
     updateModelTestTemplateHint();
     renderModelTestModelOptions(configuredModels(upstream));
     if (typeof modelTestDialog.showModal === "function") modelTestDialog.showModal();

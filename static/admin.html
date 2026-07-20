@@ -8,8 +8,10 @@
     <script>
       (function () {
         try {
+          /* 与 js/events.js 中的 THEMES 注册表保持一致 */
+          var themes = ["dark", "light", "win95"];
           var t = localStorage.getItem("wildtoken_theme");
-          if (t !== "light" && t !== "dark") t = "dark";
+          if (themes.indexOf(t) === -1) t = "dark";
           document.documentElement.setAttribute("data-theme", t);
         } catch (e) {
           document.documentElement.setAttribute("data-theme", "dark");
@@ -77,15 +79,21 @@
           >
             <span class="density-toggle-label">密度</span>
           </button>
-          <button
-            type="button"
-            id="theme-toggle"
-            class="secondary ghost theme-toggle"
-            aria-label="切换到浅色主题"
-            title="切换主题"
-          >
-            <span class="theme-toggle-icon" aria-hidden="true"></span>
-          </button>
+          <div class="theme-menu-wrap">
+            <button
+              type="button"
+              id="theme-toggle"
+              class="secondary ghost theme-toggle"
+              aria-label="选择主题"
+              title="选择主题"
+              aria-haspopup="menu"
+              aria-controls="theme-menu"
+              aria-expanded="false"
+            >
+              <span class="theme-toggle-icon" aria-hidden="true"></span>
+            </button>
+            <div id="theme-menu" class="theme-menu" role="menu" aria-label="主题列表" hidden></div>
+          </div>
           <button type="button" id="admin-logout" class="secondary ghost nav-logout">退出</button>
         </div>
       </nav>
@@ -458,7 +466,7 @@
                   <span class="settings-local-tag">本地</span>
                 </div>
                 <div class="settings-preferences-grid">
-                  <fieldset class="settings-choice-group"><legend>主题</legend><div class="segmented-control" id="settings-theme" aria-label="主题"><button type="button" data-theme-choice="dark">深色</button><button type="button" data-theme-choice="light">浅色</button></div></fieldset>
+                  <fieldset class="settings-choice-group"><legend>主题</legend><div class="segmented-control segmented-control-auto" id="settings-theme" aria-label="主题"></div></fieldset>
                   <fieldset class="settings-choice-group"><legend>显示密度</legend><div class="segmented-control" id="settings-density" aria-label="显示密度"><button type="button" data-density-choice="comfortable">舒适</button><button type="button" data-density-choice="compact">紧凑</button></div></fieldset>
                   <label class="field"><span class="field-label">日志自动刷新</span><select id="settings-log-refresh" aria-label="日志自动刷新间隔"><option value="0">关闭</option><option value="5">每 5 秒</option><option value="10">每 10 秒</option><option value="30">每 30 秒</option></select><span class="field-hint">仅影响日志页；手动刷新始终可用。</span></label>
                   <label class="field"><span class="field-label">默认首页</span><select id="settings-default-home" aria-label="默认首页"><option value="dashboard">看板</option><option value="upstreams">渠道</option><option value="logs">日志</option><option value="tokens">令牌</option><option value="settings">设置</option></select><span class="field-hint">直接打开带有效地址片段的页面时，仍会优先进入该页面。</span></label>

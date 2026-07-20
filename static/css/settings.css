@@ -39,6 +39,8 @@
 .settings-choice-group { border: 0; margin: 0; min-width: 0; padding: 0; }
 .settings-choice-group legend { color: var(--muted-strong); font-size: var(--text-sm); font-weight: 600; margin-bottom: 5px; padding: 0; }
 .segmented-control { background: var(--panel-muted); border: 1px solid var(--line); border-radius: var(--radius); display: grid; gap: 3px; grid-template-columns: repeat(2, 1fr); padding: 3px; }
+/* 由 JS 渲染、列数随主题数量自适应 */
+.segmented-control-auto { grid-auto-columns: 1fr; grid-auto-flow: column; grid-template-columns: none; }
 .segmented-control button { background: transparent; box-shadow: none; color: var(--muted); min-height: 32px; padding: 0 8px; }
 .segmented-control button:hover { background: var(--panel-subtle); box-shadow: none; color: var(--text); }
 .segmented-control button.is-selected { background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent-border); color: var(--accent); }

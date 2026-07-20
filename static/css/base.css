@@ -189,6 +189,92 @@ html[data-theme="light"] {
   --aurora-c: rgb(99 102 241 / 7%);
 }
 
+/* Win95 — silver chrome on a teal desktop, hard edges everywhere.
+   Structural bevels live in win95.css; variables carry the palette. */
+html[data-theme="win95"] {
+  color-scheme: light;
+
+  --bg: #008080;
+  --bg-elevated: #c0c0c0;
+  --panel: #c0c0c0;
+  --panel-solid: #c0c0c0;
+  --panel-subtle: #cacaca;
+  --panel-muted: #b4b4b4;
+  --panel-elevated: #d4d0c8;
+  --glass: #c0c0c0;
+  --glass-strong: #c0c0c0;
+
+  --text: #000000;
+  --text-secondary: #1c1c1c;
+  --muted: #424242;
+  --muted-strong: #1f1f1f;
+
+  --line: #808080;
+  --line-strong: #404040;
+  --line-soft: #9e9e9e;
+
+  --accent: #000080;
+  --accent-strong: #000060;
+  --accent-soft: rgb(0 0 128 / 10%);
+  --accent-border: rgb(0 0 128 / 55%);
+  --accent-glow: rgb(0 0 128 / 20%);
+  --accent-on: #ffffff;
+  --brand-ink: #ffffff;
+
+  --danger: #a40000;
+  --danger-soft: rgb(164 0 0 / 10%);
+  --danger-border: rgb(164 0 0 / 45%);
+  --danger-strong: #7c0000;
+  --ok: #007a00;
+  --ok-soft: rgb(0 122 0 / 10%);
+  --ok-border: rgb(0 122 0 / 45%);
+  --ok-strong: #005c00;
+  --warning: #7a6000;
+  --warning-soft: rgb(122 96 0 / 12%);
+  --warning-border: rgb(122 96 0 / 45%);
+  --warning-strong: #5c4800;
+  --warning-text: #4d3d00;
+
+  --focus: #000080;
+  --focus-ring: 0 0 0 1px #ffffff, 0 0 0 3px #000080;
+  --shadow-xs: 1px 1px 0 rgb(0 0 0 / 30%);
+  --shadow-sm: 2px 2px 0 rgb(0 0 0 / 30%);
+  --shadow-md: 3px 3px 0 rgb(0 0 0 / 32%);
+  --shadow-lg: 5px 5px 0 rgb(0 0 0 / 36%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px #000080;
+
+  /* Code frames — MS-DOS EDIT blue */
+  --code-frame-bg: #000080;
+  --code-bg: #000080;
+  --code-text: #ffffff;
+  --code-muted: #8f8fd4;
+  --code-border: #404040;
+
+  --row-hover: rgb(0 0 128 / 8%);
+  --row-disabled: rgb(192 192 192 / 65%);
+  --topbar-bg: #c0c0c0;
+  --backdrop: rgb(0 0 0 / 45%);
+  --neutral-chip: #d4d0c8;
+  --toast-neutral: #5c5c5c;
+
+  /* No aurora on the teal desktop */
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  --radius-sm: 0px;
+  --radius: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 0px;
+
+  --font-sans: Tahoma, "MS Sans Serif", "Microsoft Sans Serif", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Courier New", "Fira Code", ui-monospace, monospace;
+
+  --blur: 0px;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -641,36 +727,82 @@ html[data-theme="light"] .nav-link:hover {
   width: 16px;
 }
 
-/* Sun / moon via CSS */
+/* Split swatch disc — shows the active theme's accent, works for any theme */
 .theme-toggle-icon::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 0 0 transparent;
-  transition: transform var(--transition), box-shadow var(--transition), background var(--transition);
+  border: 1px solid var(--line-strong);
+  background: conic-gradient(from 210deg, var(--accent) 0 50%, var(--bg-elevated) 50% 100%);
+  transition: transform var(--transition);
 }
 
-html[data-theme="dark"] .theme-toggle-icon::before {
-  /* moon: circle + cutout */
+.theme-toggle:hover .theme-toggle-icon::before {
+  transform: rotate(24deg);
+}
+
+/* ── Theme dropdown (topbar) ─────────────────────────────── */
+
+.theme-menu-wrap {
+  position: relative;
+}
+
+.theme-menu {
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  display: grid;
+  gap: 2px;
+  min-width: 156px;
+  padding: 6px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+}
+
+.theme-menu[hidden] {
+  display: none;
+}
+
+.theme-menu button {
   background: transparent;
-  box-shadow: inset -4px -1px 0 0 currentColor;
-  transform: rotate(-20deg);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 4px 10px;
+  text-align: left;
+  width: 100%;
 }
 
-html[data-theme="light"] .theme-toggle-icon::before {
-  /* sun disc */
-  background: currentColor;
-  box-shadow:
-    0 -7px 0 -5px currentColor,
-    0 7px 0 -5px currentColor,
-    7px 0 0 -5px currentColor,
-    -7px 0 0 -5px currentColor,
-    5px 5px 0 -5px currentColor,
-    -5px 5px 0 -5px currentColor,
-    5px -5px 0 -5px currentColor,
-    -5px -5px 0 -5px currentColor;
+.theme-menu button:hover {
+  background: var(--panel-muted);
+  color: var(--text);
+}
+
+.theme-menu button.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+  color: var(--accent);
+}
+
+.theme-swatch {
+  background: linear-gradient(135deg, var(--swatch-bg, var(--bg)) 50%, var(--swatch-accent, var(--accent)) 50%);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 14px;
+  width: 14px;
 }
 
 /* ── Content / Panels ────────────────────────────────────── */
