@@ -720,6 +720,13 @@ html[data-theme="nes"] .ops-bar-track {
   box-shadow: inset 3px 3px 0 #000000;
 }
 
+/* The default track is only 6px tall — the 3px+3px chunky border alone
+   would swallow the whole box-sizing: border-box height, leaving zero
+   room for the fill to render. Give it enough height to actually show. */
+html[data-theme="nes"] .dashboard-rank-track {
+  height: 14px;
+}
+
 html[data-theme="nes"] .dashboard-rank-fill {
   background: #209cee;
   border-radius: 0;
