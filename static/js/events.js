@@ -12,6 +12,7 @@ const THEMES = [
   { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"] },
   { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"] },
   { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"] },
+  { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"] },
 ];
 
 // 旧 id "animal" 迁移为 "animal-island"

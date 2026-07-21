@@ -617,6 +617,92 @@ html[data-theme="crt"] {
   --blur: 0px;
 }
 
+/* Minecraft / 我的世界 — deepslate GUI chrome: dark cave backdrop, stone-gray
+   beveled panels, grass/redstone/emerald/gold/diamond accents, zero radius.
+   Structural block chrome lives in minecraft.css; variables carry the palette. */
+html[data-theme="minecraft"] {
+  color-scheme: dark;
+
+  --bg: #121212;
+  --bg-elevated: #1a1a1a;
+  --panel: #38373f;
+  --panel-solid: #38373f;
+  --panel-subtle: #2c2b32;
+  --panel-muted: #242329;
+  --panel-elevated: #46454e;
+  --glass: rgb(56 55 63 / 94%);
+  --glass-strong: rgb(56 55 63 / 98%);
+
+  --text: #f5f0e6;
+  --text-secondary: #d4cdb8;
+  --muted: #8a8578;
+  --muted-strong: #a8a290;
+
+  --line: #000000;
+  --line-strong: #000000;
+  --line-soft: rgb(0 0 0 / 45%);
+
+  --accent: #5ec639;
+  --accent-strong: #7ee352;
+  --accent-soft: rgb(94 198 57 / 20%);
+  --accent-border: rgb(94 198 57 / 65%);
+  --accent-glow: rgb(94 198 57 / 0%); /* no bloom — flat block color only */
+  --accent-on: #f5f0e6;
+  --brand-ink: #1a1a1a;
+
+  --danger: #d02b2b;
+  --danger-soft: rgb(208 43 43 / 16%);
+  --danger-border: rgb(208 43 43 / 55%);
+  --danger-strong: #ff5a5a;
+  --ok: #17dd62;
+  --ok-soft: rgb(23 221 98 / 16%);
+  --ok-border: rgb(23 221 98 / 50%);
+  --ok-strong: #4dffa0;
+  --warning: #e2b93b;
+  --warning-soft: rgb(226 185 59 / 16%);
+  --warning-border: rgb(226 185 59 / 48%);
+  --warning-strong: #ffd966;
+  --warning-text: #e2b93b;
+
+  --focus: #35b0e0;
+  --focus-ring: 0 0 0 2px #121212, 0 0 0 4px #35b0e0;
+  --shadow-xs: 2px 2px 0 #000000;
+  --shadow-sm: 3px 3px 0 #000000;
+  --shadow-md: 5px 5px 0 #000000;
+  --shadow-lg: 7px 7px 0 #000000;
+  --shadow: var(--shadow-sm);
+  --glow-accent: 4px 4px 0 #000000;
+
+  --code-frame-bg: #0c0c0e;
+  --code-bg: #1e1d22;
+  --code-text: #f5f0e6;
+  --code-muted: #8a8578;
+  --code-border: #000000;
+
+  --row-hover: rgb(94 198 57 / 16%);
+  --row-disabled: rgb(18 18 18 / 55%);
+  --topbar-bg: rgb(44 43 50 / 96%);
+  --backdrop: rgb(0 0 0 / 78%);
+  --neutral-chip: #242329;
+  --toast-neutral: #8a8578;
+
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  --radius-sm: 0px;
+  --radius: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 0px;
+
+  --font-sans: "Pixelify Sans", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "Fira Code", "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
+
+  --transition: 0ms steps(1, end);
+  --blur: 0px;
+}
+
 * {
   box-sizing: border-box;
 }

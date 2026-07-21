@@ -1,0 +1,961 @@
+/* ── Minecraft / 我的世界 theme structure ───────────────────
+   Palette lives in base.css (html[data-theme="minecraft"]); this file
+   pushes deepslate GUI chrome: pure-black pixel outlines, beveled stone
+   panels, grass/redstone/emerald/gold/diamond block accents, zero radius.
+
+   Bevel recipe:
+   raised (buttons)    — 2px black outer border + inset light top-left / dark bottom-right
+   sunken (item slots) — 2px black outer border + inset dark top-left / light bottom-right (inverted)
+   signature           — cream button text with a hard 2px black drop shadow,
+                          turning pale yellow (#ffffa0) on hover — the one detail
+                          every Minecraft player recognizes instantly
+*/
+
+html[data-theme="minecraft"] {
+  scrollbar-color: #5ec639 #1a1a1a;
+}
+
+/* ── Atmosphere ──────────────────────────────────────────── */
+
+html[data-theme="minecraft"] .aurora {
+  display: none;
+}
+
+html[data-theme="minecraft"] body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(rgb(255 255 255 / 3%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 3%) 1px, transparent 1px);
+  background-size: 16px 16px, 16px 16px;
+  -webkit-font-smoothing: auto;
+  text-rendering: auto;
+}
+
+html[data-theme="minecraft"] .app-shell {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── Chrome ──────────────────────────────────────────────── */
+
+html[data-theme="minecraft"] .topbar {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--topbar-bg);
+  border-bottom: 3px solid #000000;
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / 8%), 0 3px 0 #000000;
+  gap: 10px;
+  padding: 0 14px;
+}
+
+html[data-theme="minecraft"] .topbar::after {
+  display: none;
+}
+
+html[data-theme="minecraft"] .topbar-nav {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  gap: 4px;
+  padding: 2px;
+}
+
+html[data-theme="minecraft"] .topbar-brand {
+  gap: 8px;
+  padding: 4px 2px;
+}
+
+html[data-theme="minecraft"] .brand-mark {
+  color: #5ec639;
+  filter: none;
+}
+
+html[data-theme="minecraft"] .topbar-brand h1 {
+  color: #f5f0e6;
+  font-family: "Pixelify Sans", var(--font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-shadow: 2px 2px 0 #000000;
+}
+
+html[data-theme="minecraft"] .brand-label {
+  color: #7ee352;
+  font-family: "Pixelify Sans", var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  text-shadow: 1px 1px 0 #000000;
+}
+
+html[data-theme="minecraft"] .nav-link {
+  background: #2c2b32;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 10%), inset -1px -1px 0 rgb(0 0 0 / 40%);
+  color: #d4cdb8;
+  font-weight: 600;
+  padding: 5px 12px;
+  text-shadow: 1px 1px 0 #000000;
+}
+
+html[data-theme="minecraft"] .nav-link:hover {
+  background: #3c3b44;
+  color: #ffffa0;
+}
+
+/* Selected nav-link reads as the highlighted slot in a hotbar: black outer
+   ring, white inner border, replacing the normal black-only slot outline. */
+html[data-theme="minecraft"] .nav-link.active,
+html[data-theme="minecraft"] .nav-link.active:hover {
+  background: #46454e;
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px #000000;
+  color: #ffffff;
+  font-weight: 700;
+  text-shadow: 1px 1px 0 #000000;
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+
+html[data-theme="minecraft"] button {
+  background: #5ec639;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow:
+    inset 1px 1px 0 rgb(255 255 255 / 35%),
+    inset -1px -1px 0 rgb(0 0 0 / 30%),
+    3px 3px 0 #000000;
+  color: #f5f0e6;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  text-shadow: 2px 2px 0 #000000;
+  transition: none;
+}
+
+html[data-theme="minecraft"] button:hover {
+  background: #7ee352;
+  box-shadow:
+    inset 1px 1px 0 rgb(255 255 255 / 45%),
+    inset -1px -1px 0 rgb(0 0 0 / 25%),
+    3px 3px 0 #000000;
+  color: #ffffa0;
+}
+
+html[data-theme="minecraft"] button:active:not(:disabled),
+html[data-theme="minecraft"] button[aria-expanded="true"] {
+  background: #3f8f26;
+  box-shadow:
+    inset 1px 1px 0 rgb(0 0 0 / 35%),
+    inset -1px -1px 0 rgb(255 255 255 / 15%),
+    0 0 0 #000000;
+  color: #ffffa0;
+  transform: translate(3px, 3px);
+}
+
+html[data-theme="minecraft"] button:disabled,
+html[data-theme="minecraft"] button:disabled:hover {
+  background: #4a4950;
+  box-shadow:
+    inset 1px 1px 0 rgb(255 255 255 / 10%),
+    inset -1px -1px 0 rgb(0 0 0 / 35%),
+    2px 2px 0 #000000;
+  color: #837f74;
+  text-shadow: none;
+  transform: none;
+}
+
+html[data-theme="minecraft"] button.secondary {
+  background: #2c6d8c;
+  color: #f5f0e6;
+}
+
+html[data-theme="minecraft"] button.secondary:hover {
+  background: #35b0e0;
+  color: #ffffa0;
+}
+
+html[data-theme="minecraft"] button.secondary:active:not(:disabled) {
+  background: #1f4a5e;
+  color: #ffffa0;
+}
+
+html[data-theme="minecraft"] button.secondary:disabled:hover {
+  background: #2c6d8c;
+  color: #f5f0e6;
+}
+
+html[data-theme="minecraft"] button.ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: #a8a290;
+  text-shadow: none;
+}
+
+html[data-theme="minecraft"] button.ghost:hover {
+  background: rgb(255 255 255 / 8%);
+  border-color: #000000;
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 15%);
+  color: #ffffa0;
+}
+
+html[data-theme="minecraft"] button.ghost:active:not(:disabled) {
+  background: rgb(0 0 0 / 25%);
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="minecraft"] button.ghost:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  color: #706f66;
+}
+
+html[data-theme="minecraft"] button.danger {
+  background: #d02b2b;
+  color: #fce8e8;
+}
+
+html[data-theme="minecraft"] button.danger:hover {
+  background: #ff5a5a;
+  color: #ffffa0;
+}
+
+html[data-theme="minecraft"] button.danger:active:not(:disabled) {
+  background: #8f1c1c;
+  color: #ffffa0;
+}
+
+/* Tiny controls: no chunky block chrome */
+html[data-theme="minecraft"] .table-sort-button,
+html[data-theme="minecraft"] .url-action,
+html[data-theme="minecraft"] .priority-value,
+html[data-theme="minecraft"] .token-preview-button,
+html[data-theme="minecraft"] .model-selection-remove,
+html[data-theme="minecraft"] .toast-close,
+html[data-theme="minecraft"] .icon-close,
+html[data-theme="minecraft"] .icon-maximize,
+html[data-theme="minecraft"] .action-menu-trigger {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-shadow: none;
+  text-transform: none;
+  transform: none;
+}
+
+html[data-theme="minecraft"] .table-sort-button:hover,
+html[data-theme="minecraft"] .table-sort-button:focus-visible {
+  background: rgb(94 198 57 / 16%);
+  box-shadow: none;
+  color: #f5f0e6;
+  outline: none;
+}
+
+html[data-theme="minecraft"] .table-sort-button:hover span,
+html[data-theme="minecraft"] .table-sort-button:focus-visible span {
+  color: #7ee352;
+}
+
+html[data-theme="minecraft"] .url-action:hover,
+html[data-theme="minecraft"] .token-preview-button:hover,
+html[data-theme="minecraft"] .model-selection-remove:hover,
+html[data-theme="minecraft"] .toast-close:hover,
+html[data-theme="minecraft"] .icon-close:hover,
+html[data-theme="minecraft"] .icon-maximize:hover,
+html[data-theme="minecraft"] .action-menu-trigger:hover {
+  background: rgb(255 255 255 / 10%);
+  box-shadow: none;
+  color: #f5f0e6;
+}
+
+html[data-theme="minecraft"] .status-switch,
+html[data-theme="minecraft"] .status-switch:hover,
+html[data-theme="minecraft"] .status-switch:focus-visible {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--text-secondary);
+  outline: none;
+  padding: 0;
+  text-transform: none;
+}
+
+html[data-theme="minecraft"] .status-switch-track,
+html[data-theme="minecraft"] .status-switch.on .status-switch-track {
+  background: #1a1a1a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 rgb(0 0 0 / 60%);
+  height: 20px;
+  padding: 2px;
+  width: 36px;
+}
+
+html[data-theme="minecraft"] .status-switch.on .status-switch-track {
+  background: #2f5e1e;
+  box-shadow: inset 2px 2px 0 rgb(0 0 0 / 30%), inset -1px -1px 0 rgb(255 255 255 / 15%);
+}
+
+html[data-theme="minecraft"] .status-switch-thumb {
+  background: #8a8578;
+  border: 1px solid #000000;
+  border-radius: 0;
+  box-shadow: 1px 1px 0 rgb(0 0 0 / 50%);
+  height: 14px;
+  width: 14px;
+}
+
+html[data-theme="minecraft"] .status-switch.on .status-switch-thumb {
+  background: #5ec639;
+  transform: translateX(16px);
+}
+
+html[data-theme="minecraft"] button:focus-visible {
+  outline: 2px solid #35b0e0;
+  outline-offset: 2px;
+}
+
+html[data-theme="minecraft"] button.ghost:focus-visible {
+  outline-offset: 1px;
+}
+
+html[data-theme="minecraft"] .segmented-control button.is-selected,
+html[data-theme="minecraft"] .theme-menu button.is-selected {
+  background: #5ec639;
+  border-color: #000000;
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 30%);
+  color: #f5f0e6;
+  font-weight: 700;
+  text-shadow: 1px 1px 0 #000000;
+}
+
+html[data-theme="minecraft"] .segmented-control {
+  background: #1a1a1a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 rgb(0 0 0 / 50%);
+  gap: 3px;
+  padding: 3px;
+}
+
+html[data-theme="minecraft"] .segmented-control button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: #a8a290;
+  font-weight: 600;
+  text-shadow: none;
+  text-transform: none;
+}
+
+html[data-theme="minecraft"] .segmented-control button:hover {
+  background: rgb(255 255 255 / 8%);
+  box-shadow: none;
+  color: #f5f0e6;
+  transform: none;
+}
+
+html[data-theme="minecraft"] .segmented-control button:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="minecraft"] .segmented-control button.is-selected:hover {
+  background: #7ee352;
+  color: #ffffa0;
+}
+
+/* ── Content / panels ────────────────────────────────────── */
+
+html[data-theme="minecraft"] .content {
+  max-width: calc(var(--content-max) + 16px);
+  padding: 20px 22px 44px;
+}
+
+/* Inventory-window bevel: black outer frame + inset highlight/shadow lines */
+html[data-theme="minecraft"] .view > .panel {
+  background: #38373f;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow:
+    inset 2px 2px 0 rgb(255 255 255 / 10%),
+    inset -2px -2px 0 rgb(0 0 0 / 40%),
+    5px 5px 0 #000000;
+  overflow: visible;
+  padding: 16px 18px 18px;
+}
+
+html[data-theme="minecraft"] .view > .panel > .panel-head {
+  border-bottom: 2px solid #000000;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 0 0 12px;
+}
+
+html[data-theme="minecraft"] .view > .panel > .panel-head h2 {
+  color: #f5f0e6;
+  font-family: "Pixelify Sans", var(--font-sans);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-shadow: 2px 2px 0 #000000;
+}
+
+html[data-theme="minecraft"] .view > .panel > .panel-head p {
+  color: #a8a290;
+  font-size: 13px;
+}
+
+html[data-theme="minecraft"] .view-toolbar,
+html[data-theme="minecraft"] .log-toolbar {
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+html[data-theme="minecraft"] .actions,
+html[data-theme="minecraft"] .toolbar-batch,
+html[data-theme="minecraft"] .panel-head .actions,
+html[data-theme="minecraft"] .pager {
+  gap: 8px 10px;
+}
+
+/* room for the hard offset drop shadow on buttons */
+html[data-theme="minecraft"] .view-toolbar > button,
+html[data-theme="minecraft"] .log-toolbar > button,
+html[data-theme="minecraft"] .toolbar-batch > button,
+html[data-theme="minecraft"] .panel-head .actions > button,
+html[data-theme="minecraft"] .actions > button,
+html[data-theme="minecraft"] .pager > button,
+html[data-theme="minecraft"] .modal-footer > button {
+  margin-bottom: 5px;
+  margin-right: 3px;
+}
+
+/* ── Modal heads ─────────────────────────────────────────── */
+
+html[data-theme="minecraft"] .upstream-modal-head,
+html[data-theme="minecraft"] .upstream-dialog-panel > .modal-head,
+html[data-theme="minecraft"] .model-dialog-panel > .modal-head,
+html[data-theme="minecraft"] .quick-import-panel > .modal-head,
+html[data-theme="minecraft"] .admin-token-panel > .modal-head,
+html[data-theme="minecraft"] .balance-panel > .modal-head,
+html[data-theme="minecraft"] .confirm-panel > .modal-head,
+html[data-theme="minecraft"] .log-detail-head {
+  background: #2c2b32;
+  border-bottom: 3px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / 8%);
+  color: #f5f0e6;
+  padding: 12px 16px;
+}
+
+html[data-theme="minecraft"] .upstream-dialog-panel > .modal-head h2,
+html[data-theme="minecraft"] .model-dialog-panel > .modal-head h2,
+html[data-theme="minecraft"] .quick-import-panel > .modal-head h2,
+html[data-theme="minecraft"] .admin-token-panel > .modal-head h2,
+html[data-theme="minecraft"] .balance-panel > .modal-head h2,
+html[data-theme="minecraft"] .confirm-panel > .modal-head h2,
+html[data-theme="minecraft"] .log-detail-head h2 {
+  color: #f5f0e6;
+  font-family: "Pixelify Sans", var(--font-sans);
+  font-size: 14px;
+  font-weight: 700;
+  text-shadow: 2px 2px 0 #000000;
+}
+
+html[data-theme="minecraft"] .upstream-dialog-panel > .modal-head p,
+html[data-theme="minecraft"] .model-dialog-panel > .modal-head p,
+html[data-theme="minecraft"] .quick-import-panel > .modal-head p,
+html[data-theme="minecraft"] .admin-token-panel > .modal-head p,
+html[data-theme="minecraft"] .balance-panel > .modal-head p,
+html[data-theme="minecraft"] .confirm-panel > .modal-head p,
+html[data-theme="minecraft"] .log-detail-head p {
+  color: #a8a290;
+}
+
+html[data-theme="minecraft"] .command-palette-head {
+  background: #2c2b32;
+  border-bottom: 2px solid #000000;
+  padding: 10px 12px;
+}
+
+html[data-theme="minecraft"] .command-palette-head input {
+  background: transparent;
+  border: 0;
+  box-shadow: none !important;
+  color: #f5f0e6;
+  font-family: var(--font-sans);
+}
+
+html[data-theme="minecraft"] .command-palette-head input:focus-visible {
+  box-shadow: none !important;
+}
+
+html[data-theme="minecraft"] .command-palette-hint {
+  background: #1a1a1a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  color: #7ee352;
+  font-family: var(--font-mono);
+}
+
+/* ── Fields: sunken item-slot wells ──────────────────────── */
+
+html[data-theme="minecraft"] input,
+html[data-theme="minecraft"] select,
+html[data-theme="minecraft"] textarea {
+  background: #1a1a1a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%), inset -1px -1px 0 rgb(255 255 255 / 6%);
+  color: #f5f0e6;
+}
+
+html[data-theme="minecraft"] input::placeholder,
+html[data-theme="minecraft"] textarea::placeholder {
+  color: #5a584f;
+  opacity: 1;
+}
+
+html[data-theme="minecraft"] input:hover,
+html[data-theme="minecraft"] select:hover,
+html[data-theme="minecraft"] textarea:hover {
+  border-color: #35b0e0;
+}
+
+html[data-theme="minecraft"] input:focus-visible,
+html[data-theme="minecraft"] select:focus-visible,
+html[data-theme="minecraft"] textarea:focus-visible {
+  background: #121212;
+  border-color: #35b0e0;
+  box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%), 0 0 0 2px rgb(53 176 224 / 45%);
+  outline: none;
+}
+
+/* ── Cards / KPI / status ────────────────────────────────── */
+
+html[data-theme="minecraft"] .dashboard-kpi,
+html[data-theme="minecraft"] .kpi-card,
+html[data-theme="minecraft"] .dashboard-card,
+html[data-theme="minecraft"] .settings-card,
+html[data-theme="minecraft"] .summary-strip,
+html[data-theme="minecraft"] .status {
+  background: #2c2b32;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 8%), 3px 3px 0 #000000;
+}
+
+html[data-theme="minecraft"] .dashboard-kpi,
+html[data-theme="minecraft"] .kpi-card {
+  padding: 12px 14px;
+}
+
+html[data-theme="minecraft"] .dashboard-card,
+html[data-theme="minecraft"] .settings-card {
+  padding: 14px 16px;
+}
+
+html[data-theme="minecraft"] .status {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+html[data-theme="minecraft"] .kpi-card::before,
+html[data-theme="minecraft"] .dashboard-kpi::before {
+  background: #5ec639;
+  border-radius: 0;
+  box-shadow: none;
+  height: 100%;
+  top: 0;
+  width: 5px;
+}
+
+html[data-theme="minecraft"] .dashboard-kpi.tone-ok::before,
+html[data-theme="minecraft"] .kpi-card.tone-ok::before {
+  background: #17dd62;
+}
+
+html[data-theme="minecraft"] .dashboard-kpi.tone-warn::before,
+html[data-theme="minecraft"] .kpi-card.tone-warn::before {
+  background: #e2b93b;
+}
+
+html[data-theme="minecraft"] .dashboard-kpi.tone-danger::before,
+html[data-theme="minecraft"] .kpi-card.tone-danger::before {
+  background: #d02b2b;
+}
+
+html[data-theme="minecraft"] .dashboard-rank-track,
+html[data-theme="minecraft"] .ops-bar-track {
+  background: #1a1a1a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%);
+}
+
+/* Default track is only 6px tall — a 2px+2px border alone would leave just
+   2px of content under box-sizing: border-box. Bump the height so the
+   fill actually has room to render (the exact defect fixed in nes.css). */
+html[data-theme="minecraft"] .dashboard-rank-track {
+  height: 12px;
+}
+
+html[data-theme="minecraft"] .dashboard-rank-fill {
+  background: linear-gradient(90deg, #3f8f26, #5ec639);
+  border-radius: 0;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 20%);
+}
+
+html[data-theme="minecraft"] .live-dot,
+html[data-theme="minecraft"] .stream-state-dot {
+  animation: minecraft-live-pulse 1.6s steps(2, end) infinite;
+  border: 1px solid #000000;
+  border-radius: 0;
+  box-shadow: 1px 1px 0 rgb(0 0 0 / 50%);
+}
+
+@keyframes minecraft-live-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="minecraft"] .live-dot,
+  html[data-theme="minecraft"] .stream-state-dot {
+    animation: none !important;
+  }
+}
+
+html[data-theme="minecraft"] .badge,
+html[data-theme="minecraft"] .model-chip,
+html[data-theme="minecraft"] .model-selection-chip,
+html[data-theme="minecraft"] .model-selection-more,
+html[data-theme="minecraft"] .token-preview-code,
+html[data-theme="minecraft"] .effective-zero-note {
+  border: 1px solid #000000;
+  border-radius: 0;
+  font-weight: 600;
+}
+
+html[data-theme="minecraft"] .dashboard-kpis,
+html[data-theme="minecraft"] .dashboard-window-kpis,
+html[data-theme="minecraft"] .dashboard-grid,
+html[data-theme="minecraft"] .settings-stack {
+  gap: 12px;
+}
+
+/* ── Tables (no bleed) ───────────────────────────────────── */
+
+html[data-theme="minecraft"] .table-wrap {
+  background: #1a1a1a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 rgb(0 0 0 / 40%), 3px 3px 0 #000000;
+  margin: 0;
+}
+
+html[data-theme="minecraft"] .table-wrap table,
+html[data-theme="minecraft"] .table-wrap tbody,
+html[data-theme="minecraft"] .table-wrap td {
+  background-color: #1a1a1a;
+}
+
+html[data-theme="minecraft"] th {
+  background: #2c2b32;
+  border-bottom: 2px solid #000000;
+  color: #d4cdb8;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-shadow: 1px 1px 0 #000000;
+  text-transform: uppercase;
+}
+
+html[data-theme="minecraft"] td {
+  border-bottom-color: rgb(255 255 255 / 6%);
+  color: #d4cdb8;
+}
+
+html[data-theme="minecraft"] .table-wrap tbody tr:hover td {
+  background-color: rgb(94 198 57 / 12%);
+  color: #f5f0e6;
+}
+
+html[data-theme="minecraft"] .url-cell-inner {
+  background: #242329;
+  border-color: #000000;
+  color: #f5f0e6;
+}
+
+html[data-theme="minecraft"] .model-picker,
+html[data-theme="minecraft"] .model-manual-entry,
+html[data-theme="minecraft"] .model-options,
+html[data-theme="minecraft"] .token-value-box,
+html[data-theme="minecraft"] .test-model-result,
+html[data-theme="minecraft"] .test-model-prompt,
+html[data-theme="minecraft"] .test-model-response,
+html[data-theme="minecraft"] .log-detail-meta-card,
+html[data-theme="minecraft"] .log-detail-section {
+  background: #242329;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 6%);
+}
+
+html[data-theme="minecraft"] .log-detail-section summary {
+  background: #2c2b32;
+  border-bottom-color: #000000;
+  color: #f5f0e6;
+  font-weight: 700;
+}
+
+html[data-theme="minecraft"] .log-detail-section[open] summary {
+  background: rgb(94 198 57 / 18%);
+  color: #7ee352;
+}
+
+html[data-theme="minecraft"] .log-detail-section[open] .log-detail-section-copy {
+  color: #d4cdb8;
+}
+
+/* ── Floating layers ─────────────────────────────────────── */
+
+html[data-theme="minecraft"] .upstream-action-menu,
+html[data-theme="minecraft"] .col-menu,
+html[data-theme="minecraft"] .theme-menu,
+html[data-theme="minecraft"] .toast,
+html[data-theme="minecraft"] .upstream-dialog,
+html[data-theme="minecraft"] .model-dialog,
+html[data-theme="minecraft"] .log-detail-dialog,
+html[data-theme="minecraft"] .quick-import-dialog,
+html[data-theme="minecraft"] .admin-token-dialog,
+html[data-theme="minecraft"] .balance-dialog,
+html[data-theme="minecraft"] .confirm-dialog,
+html[data-theme="minecraft"] .command-palette-panel {
+  background: #38373f;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 rgb(255 255 255 / 10%), 6px 6px 0 rgb(0 0 0 / 55%);
+}
+
+html[data-theme="minecraft"] .upstream-dialog-panel,
+html[data-theme="minecraft"] .model-dialog-panel,
+html[data-theme="minecraft"] .log-detail-panel,
+html[data-theme="minecraft"] .quick-import-panel,
+html[data-theme="minecraft"] .admin-token-panel,
+html[data-theme="minecraft"] .balance-panel,
+html[data-theme="minecraft"] .confirm-panel {
+  background: #38373f;
+  border-radius: 0;
+}
+
+html[data-theme="minecraft"] .model-dialog-panel,
+html[data-theme="minecraft"] .log-detail-panel,
+html[data-theme="minecraft"] .quick-import-panel {
+  padding: 14px 16px;
+}
+
+html[data-theme="minecraft"] .modal-footer {
+  background: #2c2b32;
+  border-top: 2px solid #000000;
+  gap: 10px;
+  padding: 12px 16px 14px;
+}
+
+html[data-theme="minecraft"] .upstream-dialog::backdrop,
+html[data-theme="minecraft"] .model-dialog::backdrop,
+html[data-theme="minecraft"] .log-detail-dialog::backdrop,
+html[data-theme="minecraft"] .quick-import-dialog::backdrop,
+html[data-theme="minecraft"] .admin-token-dialog::backdrop,
+html[data-theme="minecraft"] .balance-dialog::backdrop,
+html[data-theme="minecraft"] .confirm-dialog::backdrop,
+html[data-theme="minecraft"] .command-palette-dialog::backdrop {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--backdrop);
+}
+
+html[data-theme="minecraft"] dialog.is-maximized {
+  border: 3px solid #000000;
+  box-shadow: inset 2px 2px 0 rgb(255 255 255 / 10%), 6px 6px 0 rgb(0 0 0 / 55%);
+}
+
+html[data-theme="minecraft"] .theme-menu button,
+html[data-theme="minecraft"] .col-menu label,
+html[data-theme="minecraft"] .upstream-action-menu button {
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  font-weight: 600;
+  text-shadow: none;
+  text-transform: none;
+}
+
+html[data-theme="minecraft"] .theme-menu button:hover,
+html[data-theme="minecraft"] .col-menu label:hover,
+html[data-theme="minecraft"] .upstream-action-menu button:hover {
+  background: rgb(94 198 57 / 16%);
+  border-color: transparent;
+  box-shadow: none;
+  color: #7ee352;
+}
+
+html[data-theme="minecraft"] .theme-menu button.is-selected:hover {
+  background: #7ee352;
+  color: #ffffa0;
+}
+
+html[data-theme="minecraft"] .theme-menu button:hover .theme-swatch {
+  border-color: #000000;
+  box-shadow: 0 0 0 2px #5ec639;
+}
+
+html[data-theme="minecraft"] .upstream-action-menu button.danger:hover,
+html[data-theme="minecraft"] .upstream-action-menu button.danger:focus-visible {
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+}
+
+/* ── Code ────────────────────────────────────────────────── */
+
+html[data-theme="minecraft"] code,
+html[data-theme="minecraft"] pre {
+  font-family: var(--font-mono);
+}
+
+/* ── Selection / native form accents ────────────────────────
+   Native browser widgets (text selection, checkboxes) default
+   to OS colors — recolor to the block palette. */
+
+html[data-theme="minecraft"] ::selection {
+  background: #35b0e0;
+  color: #ffffff;
+}
+
+html[data-theme="minecraft"] input[type="checkbox"] {
+  accent-color: #5ec639;
+}
+
+/* ── Focus polish ────────────────────────────────────────── */
+
+html[data-theme="minecraft"] a:focus-visible,
+html[data-theme="minecraft"] [tabindex]:focus-visible {
+  outline: 2px solid #35b0e0;
+  outline-offset: 2px;
+}
+
+/* ── Scrollbars ──────────────────────────────────────────── */
+
+html[data-theme="minecraft"] ::-webkit-scrollbar {
+  height: 14px;
+  width: 14px;
+}
+
+html[data-theme="minecraft"] ::-webkit-scrollbar-track {
+  background: #1a1a1a;
+  border: 1px solid #000000;
+}
+
+html[data-theme="minecraft"] ::-webkit-scrollbar-thumb {
+  background: #5ec639;
+  border: 2px solid #000000;
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 25%);
+}
+
+html[data-theme="minecraft"] ::-webkit-scrollbar-thumb:hover {
+  background: #7ee352;
+}
+
+html[data-theme="minecraft"] ::-webkit-scrollbar-corner {
+  background: #1a1a1a;
+  border: 1px solid #000000;
+}
+
+/* ── Mobile ──────────────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  html[data-theme="minecraft"] .topbar {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    min-height: 0;
+    padding: 6px 10px;
+  }
+
+  html[data-theme="minecraft"] .topbar-brand {
+    min-height: 32px;
+    padding: 4px 2px;
+  }
+
+  html[data-theme="minecraft"] .brand-mark {
+    display: none;
+  }
+
+  html[data-theme="minecraft"] .topbar-brand h1 {
+    font-size: 12px;
+  }
+
+  html[data-theme="minecraft"] .topbar-nav {
+    flex: 1 0 100%;
+    order: 3;
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  html[data-theme="minecraft"] .nav-link {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 5px 6px;
+    text-align: center;
+  }
+
+  html[data-theme="minecraft"] .content {
+    padding: 12px 12px 28px;
+  }
+
+  html[data-theme="minecraft"] .view > .panel {
+    border-width: 2px;
+    box-shadow:
+      inset 1px 1px 0 rgb(255 255 255 / 10%),
+      inset -1px -1px 0 rgb(0 0 0 / 40%),
+      3px 3px 0 #000000;
+    padding: 12px;
+  }
+
+  html[data-theme="minecraft"] .view > .panel > .panel-head h2 {
+    font-size: 13px;
+  }
+
+  html[data-theme="minecraft"] .view-toolbar,
+  html[data-theme="minecraft"] .log-toolbar {
+    gap: 8px;
+  }
+
+  html[data-theme="minecraft"] .model-dialog-panel,
+  html[data-theme="minecraft"] .log-detail-panel,
+  html[data-theme="minecraft"] .quick-import-panel {
+    padding: 10px 12px;
+  }
+
+  html[data-theme="minecraft"] button {
+    box-shadow:
+      inset 1px 1px 0 rgb(255 255 255 / 30%),
+      inset -1px -1px 0 rgb(0 0 0 / 30%),
+      2px 2px 0 #000000;
+  }
+
+  html[data-theme="minecraft"] th {
+    font-size: 10px;
+  }
+}
