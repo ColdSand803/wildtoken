@@ -525,7 +525,7 @@ html[data-theme="nes"] {
   --radius-lg: 0px;
   --radius-full: 0px;
 
-  --font-sans: "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: "DotGothic16", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "VT323", "Fira Code", ui-monospace, Consolas, monospace;
 
   --transition: 0ms steps(1, end);
