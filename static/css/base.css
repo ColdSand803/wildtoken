@@ -860,6 +860,20 @@ textarea::placeholder {
   opacity: 0.85;
 }
 
+/* Checkboxes/radios are not text fields — without this, the rules above wrap
+   the native control in a full-width padded/bordered box (every theme's
+   per-type input override repeats the same background/border, so this must
+   win regardless of cascade order). */
+input[type="checkbox"],
+input[type="radio"] {
+  background: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  width: auto !important;
+}
+
 code {
   font-family: var(--font-mono);
   font-size: 0.92em;
