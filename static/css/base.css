@@ -361,6 +361,262 @@ html[data-theme="animal-island"] {
   --blur: 0px;
 }
 
+/* Cyberpunk / 赛博朋克 — Night City HUD: void black-violet, hot magenta + electric cyan.
+   Structural neon chrome lives in cyberpunk.css; variables carry the palette. */
+html[data-theme="cyberpunk"] {
+  color-scheme: dark;
+
+  --bg: #03010a;
+  --bg-elevated: #0a0414;
+  --panel: rgb(16 8 28 / 94%);
+  --panel-solid: #10081c;
+  --panel-subtle: #160c26;
+  --panel-muted: #1c1030;
+  --panel-elevated: #24163c;
+  --glass: rgb(12 6 22 / 82%);
+  --glass-strong: rgb(12 6 22 / 94%);
+
+  --text: #f8f0ff;
+  --text-secondary: #d4c2ea;
+  --muted: #9a86b0;
+  --muted-strong: #b8a3ce;
+
+  --line: rgb(255 47 220 / 42%);
+  --line-strong: rgb(0 245 255 / 58%);
+  --line-soft: rgb(160 90 220 / 28%);
+
+  --accent: #ff2fdc;
+  --accent-strong: #ff6aec;
+  --accent-soft: rgb(255 47 220 / 18%);
+  --accent-border: rgb(255 47 220 / 62%);
+  --accent-glow: rgb(255 47 220 / 48%);
+  --accent-on: #120018;
+  --brand-ink: #120018;
+
+  --danger: #ff3d6e;
+  --danger-soft: rgb(255 61 110 / 16%);
+  --danger-border: rgb(255 61 110 / 50%);
+  --danger-strong: #ff7a9a;
+  --ok: #39ff14;
+  --ok-soft: rgb(57 255 20 / 14%);
+  --ok-border: rgb(57 255 20 / 42%);
+  --ok-strong: #6dff4d;
+  --warning: #ffd000;
+  --warning-soft: rgb(255 208 0 / 14%);
+  --warning-border: rgb(255 208 0 / 45%);
+  --warning-strong: #ffe566;
+  --warning-text: #ffe082;
+
+  --focus: #00f5ff;
+  --focus-ring: 0 0 0 2px rgb(0 245 255 / 70%), 0 0 20px rgb(0 245 255 / 40%);
+  --shadow-xs: 0 0 0 1px rgb(255 47 220 / 22%);
+  --shadow-sm: 0 0 0 1px rgb(255 47 220 / 28%), 0 0 18px rgb(255 47 220 / 12%), 0 6px 22px rgb(0 0 0 / 55%);
+  --shadow-md: 0 0 0 1px rgb(0 245 255 / 24%), 0 0 28px rgb(0 245 255 / 10%), 0 12px 36px rgb(0 0 0 / 60%);
+  --shadow-lg: 0 0 0 1px rgb(255 47 220 / 32%), 0 0 48px rgb(255 47 220 / 16%), 0 20px 52px rgb(0 0 0 / 68%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px rgb(255 47 220 / 55%), 0 0 28px rgb(255 47 220 / 42%), 0 0 48px rgb(255 47 220 / 18%);
+
+  /* Code — deep void with cyan/magenta contrast */
+  --code-frame-bg: #020008;
+  --code-bg: #080412;
+  --code-text: #f0e4ff;
+  --code-muted: #7a6a90;
+  --code-border: rgb(0 245 255 / 28%);
+
+  --row-hover: rgb(0 245 255 / 12%);
+  --row-disabled: rgb(3 1 10 / 58%);
+  --topbar-bg: rgb(6 2 14 / 92%);
+  --backdrop: rgb(2 0 8 / 82%);
+  --neutral-chip: #1c1030;
+  --toast-neutral: #9a86b0;
+
+  --aurora-a: rgb(255 47 220 / 28%);
+  --aurora-b: rgb(0 245 255 / 22%);
+  --aurora-c: rgb(140 40 255 / 24%);
+
+  --radius-sm: 2px;
+  --radius: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+
+  --font-sans: "Rajdhani", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "Fira Code", "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
+
+  --transition: 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --blur: 10px;
+}
+
+/* NES / 像素 — hard 8-bit console HUD: chunky shadows, NES palette, zero radius.
+   Structural pixel chrome lives in nes.css; variables carry the palette. */
+html[data-theme="nes"] {
+  color-scheme: dark;
+
+  --bg: #0a0a14;
+  --bg-elevated: #121222;
+  --panel: #181a2a;
+  --panel-solid: #181a2a;
+  --panel-subtle: #202238;
+  --panel-muted: #2c2e4a;
+  --panel-elevated: #383a58;
+  --glass: #181a2a;
+  --glass-strong: #181a2a;
+
+  --text: #fcfcfc;
+  --text-secondary: #d8d8e0;
+  --muted: #9898a8;
+  --muted-strong: #c8c8d0;
+
+  --line: #686888;
+  --line-strong: #fcfcfc;
+  --line-soft: #3c3c58;
+
+  --accent: #e52521;
+  --accent-strong: #ff4a40;
+  --accent-soft: rgb(229 37 33 / 20%);
+  --accent-border: #fcfcfc;
+  --accent-glow: rgb(229 37 33 / 0%); /* no blur glow — pixel only */
+  --accent-on: #ffffff;
+  --brand-ink: #ffffff;
+
+  --danger: #e52521;
+  --danger-soft: rgb(229 37 33 / 16%);
+  --danger-border: #e52521;
+  --danger-strong: #ff6b63;
+  --ok: #92cc41;
+  --ok-soft: rgb(146 204 65 / 16%);
+  --ok-border: #92cc41;
+  --ok-strong: #b4e06a;
+  --warning: #f7d51d;
+  --warning-soft: rgb(247 213 29 / 16%);
+  --warning-border: #f7d51d;
+  --warning-strong: #ffe566;
+  --warning-text: #f7d51d;
+
+  --focus: #f7d51d;
+  --focus-ring: 0 0 0 2px #0a0a14, 0 0 0 5px #f7d51d;
+  --shadow-xs: 2px 2px 0 #000000;
+  --shadow-sm: 4px 4px 0 #000000;
+  --shadow-md: 6px 6px 0 #000000;
+  --shadow-lg: 8px 8px 0 #000000;
+  --shadow: var(--shadow-sm);
+  --glow-accent: 4px 4px 0 #000000;
+
+  --code-frame-bg: #060610;
+  --code-bg: #0e0e1a;
+  --code-text: #fcfcfc;
+  --code-muted: #808098;
+  --code-border: #686888;
+
+  --row-hover: rgb(32 156 238 / 28%);
+  --row-disabled: rgb(10 10 20 / 55%);
+  --topbar-bg: #209cee;
+  --backdrop: rgb(0 0 0 / 72%);
+  --neutral-chip: #2c2e4a;
+  --toast-neutral: #9898a8;
+
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  --radius-sm: 0px;
+  --radius: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 0px;
+
+  --font-sans: "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "VT323", "Fira Code", ui-monospace, Consolas, monospace;
+
+  --transition: 0ms steps(1, end);
+  --blur: 0px;
+}
+
+/* CRT / 终端 — hard phosphor CRT: void black, hot green, scanlines, mono.
+   Structural phosphor chrome lives in crt.css; variables carry the palette. */
+html[data-theme="crt"] {
+  color-scheme: dark;
+
+  --bg: #000804;
+  --bg-elevated: #021008;
+  --panel: rgb(2 20 10 / 96%);
+  --panel-solid: #02140a;
+  --panel-subtle: #041c10;
+  --panel-muted: #062816;
+  --panel-elevated: #08341c;
+  --glass: rgb(2 16 8 / 92%);
+  --glass-strong: rgb(2 16 8 / 97%);
+
+  --text: #b8ffc8;
+  --text-secondary: #7dff9a;
+  --muted: #1a7a42;
+  --muted-strong: #2ec05a;
+
+  --line: rgb(57 255 20 / 48%);
+  --line-strong: rgb(57 255 20 / 75%);
+  --line-soft: rgb(26 122 66 / 40%);
+
+  --accent: #39ff14;
+  --accent-strong: #7dff5a;
+  --accent-soft: rgb(57 255 20 / 18%);
+  --accent-border: rgb(57 255 20 / 70%);
+  --accent-glow: rgb(57 255 20 / 45%);
+  --accent-on: #000804;
+  --brand-ink: #000804;
+
+  --danger: #ff5555;
+  --danger-soft: rgb(255 85 85 / 14%);
+  --danger-border: rgb(255 85 85 / 48%);
+  --danger-strong: #ff8888;
+  --ok: #39ff14;
+  --ok-soft: rgb(57 255 20 / 16%);
+  --ok-border: rgb(57 255 20 / 50%);
+  --ok-strong: #7dff5a;
+  --warning: #d4ff3a;
+  --warning-soft: rgb(212 255 58 / 14%);
+  --warning-border: rgb(212 255 58 / 48%);
+  --warning-strong: #e8ff70;
+  --warning-text: #d4ff3a;
+
+  --focus: #39ff14;
+  --focus-ring: 0 0 0 1px #39ff14, 0 0 0 3px rgb(57 255 20 / 35%), 0 0 18px rgb(57 255 20 / 45%);
+  --shadow-xs: 0 0 0 1px rgb(57 255 20 / 22%);
+  --shadow-sm: 0 0 0 1px rgb(57 255 20 / 32%), 0 0 20px rgb(57 255 20 / 14%);
+  --shadow-md: 0 0 0 1px rgb(57 255 20 / 40%), 0 0 32px rgb(57 255 20 / 18%);
+  --shadow-lg: 0 0 0 1px rgb(57 255 20 / 48%), 0 0 40px rgb(57 255 20 / 20%), 0 16px 48px rgb(0 0 0 / 70%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px rgb(57 255 20 / 55%), 0 0 22px rgb(57 255 20 / 40%), 0 0 40px rgb(57 255 20 / 18%);
+
+  --code-frame-bg: #000502;
+  --code-bg: #010a05;
+  --code-text: #b8ffc8;
+  --code-muted: #1a7a42;
+  --code-border: rgb(57 255 20 / 32%);
+
+  --row-hover: rgb(57 255 20 / 14%);
+  --row-disabled: rgb(0 8 4 / 58%);
+  --topbar-bg: rgb(0 12 6 / 96%);
+  --backdrop: rgb(0 4 2 / 88%);
+  --neutral-chip: #062816;
+  --toast-neutral: #1a7a42;
+
+  --aurora-a: rgb(57 255 20 / 14%);
+  --aurora-b: rgb(26 122 66 / 12%);
+  --aurora-c: rgb(0 40 18 / 16%);
+
+  --radius-sm: 0px;
+  --radius: 1px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-full: 999px;
+
+  --font-sans: "Fira Code", "Noto Sans SC", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --font-mono: "Fira Code", "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
+
+  --transition: 120ms linear;
+  --blur: 0px;
+}
+
 * {
   box-sizing: border-box;
 }

@@ -1,0 +1,1062 @@
+/* ── NES / 像素 theme structure ─────────────────────────────
+   Palette lives in base.css (html[data-theme="nes"]); this file
+   hard-pushes 8-bit console HUD: dual hard borders, chunky pixel
+   shadows (4–6px), NES red/blue/yellow blocks, Press Start titles.
+
+   Pixel recipe:
+   raised  — dual border (outer black / inner white) + Npx Npx 0 #000
+   hover   — translate(-2px,-2px) + larger hard shadow
+   pressed — translate(3px,3px) + shadow 0 0 0
+*/
+
+html[data-theme="nes"] {
+  scrollbar-color: #e52521 #181a2a;
+}
+
+/* ── Atmosphere ──────────────────────────────────────────── */
+
+html[data-theme="nes"] .aurora {
+  display: none;
+}
+
+html[data-theme="nes"] body {
+  background-color: var(--bg);
+  background-image:
+    /* 8px console grid */
+    linear-gradient(rgb(252 252 252 / 6%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(252 252 252 / 6%) 1px, transparent 1px),
+    /* 2-tone checker tile */
+    linear-gradient(45deg, rgb(32 156 238 / 4%) 25%, transparent 25%),
+    linear-gradient(-45deg, rgb(32 156 238 / 4%) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgb(229 37 33 / 3%) 75%),
+    linear-gradient(-45deg, transparent 75%, rgb(229 37 33 / 3%) 75%);
+  background-size:
+    8px 8px,
+    8px 8px,
+    16px 16px,
+    16px 16px,
+    16px 16px,
+    16px 16px;
+  background-position:
+    0 0,
+    0 0,
+    0 0,
+    0 8px,
+    8px -8px,
+    -8px 0;
+  -webkit-font-smoothing: none;
+  text-rendering: auto;
+}
+
+html[data-theme="nes"] body::before {
+  /* denser static pixel dust */
+  background-image: radial-gradient(rgb(252 252 252 / 8%) 1px, transparent 1px);
+  background-size: 3px 3px;
+  content: "";
+  inset: 0;
+  opacity: 0.55;
+  pointer-events: none;
+  position: fixed;
+  z-index: 0;
+}
+
+html[data-theme="nes"] .app-shell {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="nes"] *,
+  html[data-theme="nes"] *::before,
+  html[data-theme="nes"] *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ── Chrome: game title bar ──────────────────────────────── */
+
+html[data-theme="nes"] .topbar {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  /* classic blue window chrome */
+  background: #209cee;
+  border-bottom: 4px solid #000000;
+  border-top: 2px solid #7ec8f5;
+  box-shadow:
+    0 4px 0 #000000,
+    inset 0 2px 0 #b8e4ff,
+    inset 0 -2px 0 #0d6aa8;
+  gap: 10px;
+  min-height: 52px;
+  padding: 6px 12px;
+}
+
+html[data-theme="nes"] .topbar::after {
+  display: none;
+}
+
+html[data-theme="nes"] .topbar-nav {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  gap: 6px;
+  padding: 2px;
+}
+
+html[data-theme="nes"] .topbar-brand {
+  gap: 8px;
+  padding: 2px 4px;
+}
+
+html[data-theme="nes"] .brand-mark {
+  color: #f7d51d;
+  filter: none;
+  height: 18px;
+  width: 18px;
+}
+
+html[data-theme="nes"] .topbar-brand h1 {
+  color: #ffffff;
+  font-family: "Press Start 2P", var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  line-height: 1.4;
+  text-shadow: 2px 2px 0 #0d6aa8;
+}
+
+html[data-theme="nes"] .brand-label {
+  color: #f7d51d;
+  font-family: "Press Start 2P", var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-shadow: 1px 1px 0 #0d6aa8;
+}
+
+html[data-theme="nes"] .nav-link {
+  background: #181a2a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow:
+    inset 1px 1px 0 #686888,
+    3px 3px 0 #000000;
+  color: #fcfcfc;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 5px 12px;
+  text-transform: uppercase;
+}
+
+html[data-theme="nes"] .nav-link:hover {
+  background: #2c2e4a;
+  color: #f7d51d;
+}
+
+html[data-theme="nes"] .nav-link.active,
+html[data-theme="nes"] .nav-link.active:hover {
+  background: #e52521;
+  border-color: #000000;
+  box-shadow:
+    inset 2px 2px 0 #ff6b63,
+    inset -1px -1px 0 #8a100e,
+    2px 2px 0 #000000;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+
+html[data-theme="nes"] button {
+  background: #e52521;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow:
+    inset 2px 2px 0 #ff6b63,
+    inset -2px -2px 0 #8a100e,
+    5px 5px 0 #000000;
+  color: #ffffff;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  transition: none;
+}
+
+html[data-theme="nes"] button:hover {
+  background: #ff4a40;
+  box-shadow:
+    inset 2px 2px 0 #ff8a82,
+    inset -2px -2px 0 #a01814,
+    6px 6px 0 #000000;
+  color: #ffffff;
+  transform: translate(-2px, -2px);
+}
+
+html[data-theme="nes"] button:active:not(:disabled),
+html[data-theme="nes"] button[aria-expanded="true"] {
+  background: #c41e1a;
+  box-shadow:
+    inset 2px 2px 0 #8a100e,
+    inset -1px -1px 0 #ff6b63,
+    0 0 0 #000000;
+  transform: translate(3px, 3px);
+}
+
+html[data-theme="nes"] button:disabled,
+html[data-theme="nes"] button:disabled:hover {
+  background: #5a5a78;
+  border-color: #000000;
+  box-shadow:
+    inset 1px 1px 0 #8888a0,
+    3px 3px 0 #000000;
+  color: #a0a0b0;
+  opacity: 0.75;
+  transform: none;
+}
+
+html[data-theme="nes"] button.secondary {
+  background: #209cee;
+  border-color: #000000;
+  box-shadow:
+    inset 2px 2px 0 #7ec8f5,
+    inset -2px -2px 0 #0d6aa8,
+    5px 5px 0 #000000;
+  color: #ffffff;
+}
+
+html[data-theme="nes"] button.secondary:hover {
+  background: #3db1f5;
+  box-shadow:
+    inset 2px 2px 0 #a8dcff,
+    inset -2px -2px 0 #0d6aa8,
+    6px 6px 0 #000000;
+  color: #ffffff;
+  transform: translate(-2px, -2px);
+}
+
+html[data-theme="nes"] button.secondary:active:not(:disabled) {
+  box-shadow:
+    inset 2px 2px 0 #0d6aa8,
+    0 0 0 #000000;
+  transform: translate(3px, 3px);
+}
+
+html[data-theme="nes"] button.secondary:disabled:hover {
+  background: #209cee;
+  box-shadow:
+    inset 1px 1px 0 #7ec8f5,
+    3px 3px 0 #000000;
+  transform: none;
+}
+
+html[data-theme="nes"] button.ghost {
+  background: #181a2a;
+  border-color: #000000;
+  box-shadow:
+    inset 1px 1px 0 #686888,
+    3px 3px 0 #000000;
+  color: #c8c8d0;
+}
+
+html[data-theme="nes"] button.ghost:hover {
+  background: #2c2e4a;
+  border-color: #000000;
+  box-shadow:
+    inset 1px 1px 0 #9898a8,
+    4px 4px 0 #000000;
+  color: #fcfcfc;
+  transform: translate(-1px, -1px);
+}
+
+html[data-theme="nes"] button.ghost:active:not(:disabled) {
+  box-shadow: 0 0 0 #000000;
+  transform: translate(2px, 2px);
+}
+
+html[data-theme="nes"] button.ghost:disabled:hover {
+  background: #181a2a;
+  border-color: #000000;
+  color: #c8c8d0;
+  transform: none;
+}
+
+html[data-theme="nes"] button.danger {
+  background: #181a2a;
+  border-color: #e52521;
+  box-shadow:
+    inset 1px 1px 0 #686888,
+    5px 5px 0 #000000;
+  color: #ff6b63;
+}
+
+html[data-theme="nes"] button.danger:hover {
+  background: #e52521;
+  border-color: #000000;
+  box-shadow:
+    inset 2px 2px 0 #ff6b63,
+    inset -2px -2px 0 #8a100e,
+    6px 6px 0 #000000;
+  color: #ffffff;
+  transform: translate(-2px, -2px);
+}
+
+html[data-theme="nes"] button.danger:active:not(:disabled) {
+  box-shadow: 0 0 0 #000000;
+  transform: translate(3px, 3px);
+}
+
+/* Tiny controls: no chunky pixel chrome */
+html[data-theme="nes"] .table-sort-button,
+html[data-theme="nes"] .url-action,
+html[data-theme="nes"] .priority-value,
+html[data-theme="nes"] .token-preview-button,
+html[data-theme="nes"] .model-selection-remove,
+html[data-theme="nes"] .toast-close,
+html[data-theme="nes"] .icon-close,
+html[data-theme="nes"] .icon-maximize,
+html[data-theme="nes"] .action-menu-trigger {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: none;
+  transform: none;
+}
+
+html[data-theme="nes"] .table-sort-button:hover,
+html[data-theme="nes"] .table-sort-button:focus-visible {
+  background: #209cee;
+  box-shadow: none;
+  color: #ffffff;
+  outline: none;
+  transform: none;
+}
+
+html[data-theme="nes"] .table-sort-button:hover span,
+html[data-theme="nes"] .table-sort-button:focus-visible span {
+  color: #f7d51d;
+}
+
+html[data-theme="nes"] .url-action:hover,
+html[data-theme="nes"] .token-preview-button:hover,
+html[data-theme="nes"] .model-selection-remove:hover,
+html[data-theme="nes"] .toast-close:hover,
+html[data-theme="nes"] .icon-close:hover,
+html[data-theme="nes"] .icon-maximize:hover,
+html[data-theme="nes"] .action-menu-trigger:hover {
+  background: #2a2c44;
+  box-shadow: none;
+  color: #f8f8f8;
+  transform: none;
+}
+
+html[data-theme="nes"] .status-switch,
+html[data-theme="nes"] .status-switch:hover,
+html[data-theme="nes"] .status-switch:focus-visible {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--text-secondary);
+  outline: none;
+  padding: 0;
+  text-transform: none;
+  transform: none;
+}
+
+html[data-theme="nes"] .status-switch-track,
+html[data-theme="nes"] .status-switch.on .status-switch-track {
+  background: #0a0a14;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 #000000, inset -1px -1px 0 #686888;
+  height: 20px;
+  padding: 2px;
+  width: 38px;
+}
+
+html[data-theme="nes"] .status-switch.on .status-switch-track {
+  background: #92cc41;
+  border-color: #000000;
+  box-shadow: inset 2px 2px 0 #b4e06a, inset -1px -1px 0 #4a7a18;
+}
+
+html[data-theme="nes"] .status-switch-thumb {
+  background: #fcfcfc;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: 1px 1px 0 #000000;
+  height: 12px;
+  width: 12px;
+}
+
+html[data-theme="nes"] .status-switch.on .status-switch-thumb {
+  background: #f7d51d;
+  border-color: #000000;
+  transform: translateX(16px);
+}
+
+html[data-theme="nes"] button:focus-visible {
+  outline: 3px solid #f7d51d;
+  outline-offset: 2px;
+  box-shadow:
+    inset 2px 2px 0 #ff6b63,
+    5px 5px 0 #000000;
+}
+
+html[data-theme="nes"] button.ghost:focus-visible {
+  box-shadow:
+    inset 1px 1px 0 #686888,
+    3px 3px 0 #000000;
+}
+
+html[data-theme="nes"] .segmented-control button.is-selected,
+html[data-theme="nes"] .theme-menu button.is-selected {
+  background: #e52521;
+  border-color: #000000;
+  box-shadow: inset 2px 2px 0 #ff6b63, inset -1px -1px 0 #8a100e;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+html[data-theme="nes"] .segmented-control {
+  background: #0a0a14;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 #000000, 3px 3px 0 #000000;
+  gap: 4px;
+  padding: 4px;
+}
+
+html[data-theme="nes"] .segmented-control button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: #c8c8d0;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="nes"] .segmented-control button:hover {
+  background: #2c2e4a;
+  box-shadow: none;
+  color: #fcfcfc;
+  transform: none;
+}
+
+html[data-theme="nes"] .segmented-control button:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="nes"] .segmented-control button.is-selected:hover {
+  background: #e52521;
+  border-color: #000000;
+  box-shadow: inset 2px 2px 0 #ff6b63, inset -1px -1px 0 #8a100e;
+  color: #ffffff;
+  transform: none;
+}
+
+/* ── Content / panels ────────────────────────────────────── */
+
+html[data-theme="nes"] .content {
+  max-width: calc(var(--content-max) + 16px);
+  padding: 20px 20px 40px;
+}
+
+/* Dual hard frame: outer black + inner white (classic NES window) */
+html[data-theme="nes"] .view > .panel {
+  background: #181a2a;
+  border: 4px solid #000000;
+  border-radius: 0;
+  box-shadow:
+    inset 0 0 0 3px #fcfcfc,
+    6px 6px 0 #000000;
+  overflow: visible;
+  padding: 16px 18px 18px;
+}
+
+html[data-theme="nes"] .view > .panel > .panel-head {
+  border-bottom: 3px solid #000000;
+  box-shadow: 0 2px 0 #686888;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 0 0 12px;
+}
+
+html[data-theme="nes"] .view > .panel > .panel-head h2 {
+  color: #f7d51d;
+  font-family: "Press Start 2P", var(--font-mono);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1.55;
+  text-shadow: 2px 2px 0 #000000;
+}
+
+html[data-theme="nes"] .view > .panel > .panel-head p {
+  color: #9898a8;
+  font-size: 13px;
+}
+
+html[data-theme="nes"] .view-toolbar,
+html[data-theme="nes"] .log-toolbar {
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 6px;
+}
+
+html[data-theme="nes"] .actions,
+html[data-theme="nes"] .toolbar-batch,
+html[data-theme="nes"] .panel-head .actions,
+html[data-theme="nes"] .pager {
+  gap: 12px;
+}
+
+/* room for chunky pixel shadows */
+html[data-theme="nes"] .view-toolbar > button,
+html[data-theme="nes"] .log-toolbar > button,
+html[data-theme="nes"] .toolbar-batch > button,
+html[data-theme="nes"] .panel-head .actions > button,
+html[data-theme="nes"] .actions > button,
+html[data-theme="nes"] .pager > button,
+html[data-theme="nes"] .modal-footer > button {
+  margin-bottom: 6px;
+}
+
+/* ── Modal heads: blue title bar ─────────────────────────── */
+
+html[data-theme="nes"] .upstream-modal-head,
+html[data-theme="nes"] .upstream-dialog-panel > .modal-head,
+html[data-theme="nes"] .model-dialog-panel > .modal-head,
+html[data-theme="nes"] .quick-import-panel > .modal-head,
+html[data-theme="nes"] .admin-token-panel > .modal-head,
+html[data-theme="nes"] .balance-panel > .modal-head,
+html[data-theme="nes"] .confirm-panel > .modal-head,
+html[data-theme="nes"] .log-detail-head {
+  background: #209cee;
+  border-bottom: 4px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 0 2px 0 #7ec8f5, inset 0 -2px 0 #0d6aa8;
+  color: #ffffff;
+  padding: 12px 14px;
+}
+
+html[data-theme="nes"] .upstream-dialog-panel > .modal-head h2,
+html[data-theme="nes"] .model-dialog-panel > .modal-head h2,
+html[data-theme="nes"] .quick-import-panel > .modal-head h2,
+html[data-theme="nes"] .admin-token-panel > .modal-head h2,
+html[data-theme="nes"] .balance-panel > .modal-head h2,
+html[data-theme="nes"] .confirm-panel > .modal-head h2,
+html[data-theme="nes"] .log-detail-head h2 {
+  color: #ffffff;
+  font-family: "Press Start 2P", var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  line-height: 1.55;
+  text-shadow: 2px 2px 0 #0d6aa8;
+}
+
+html[data-theme="nes"] .upstream-dialog-panel > .modal-head p,
+html[data-theme="nes"] .model-dialog-panel > .modal-head p,
+html[data-theme="nes"] .quick-import-panel > .modal-head p,
+html[data-theme="nes"] .admin-token-panel > .modal-head p,
+html[data-theme="nes"] .balance-panel > .modal-head p,
+html[data-theme="nes"] .confirm-panel > .modal-head p,
+html[data-theme="nes"] .log-detail-head p {
+  color: #d0ecff;
+}
+
+html[data-theme="nes"] .command-palette-head {
+  background: #2c2e4a;
+  border-bottom: 3px solid #000000;
+  padding: 10px 12px;
+}
+
+html[data-theme="nes"] .command-palette-head input {
+  background: #0a0a14;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 3px 3px 0 #000000 !important;
+  color: #fcfcfc;
+  font-family: var(--font-mono);
+  font-size: 18px;
+}
+
+html[data-theme="nes"] .command-palette-hint {
+  background: #181a2a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: 2px 2px 0 #000000;
+  color: #f7d51d;
+  font-family: "Press Start 2P", var(--font-mono);
+  font-size: 8px;
+}
+
+/* ── Fields: hard wells ──────────────────────────────────── */
+
+html[data-theme="nes"] input,
+html[data-theme="nes"] select,
+html[data-theme="nes"] textarea {
+  background: #0a0a14;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 3px 3px 0 #000000, inset -1px -1px 0 #686888;
+  color: #fcfcfc;
+  font-family: var(--font-mono);
+  font-size: 16px;
+}
+
+html[data-theme="nes"] input::placeholder,
+html[data-theme="nes"] textarea::placeholder {
+  color: #707088;
+  opacity: 1;
+}
+
+html[data-theme="nes"] input:hover,
+html[data-theme="nes"] select:hover,
+html[data-theme="nes"] textarea:hover {
+  border-color: #209cee;
+}
+
+html[data-theme="nes"] input:focus-visible,
+html[data-theme="nes"] select:focus-visible,
+html[data-theme="nes"] textarea:focus-visible {
+  background: #121222;
+  border-color: #f7d51d;
+  box-shadow:
+    inset 3px 3px 0 #000000,
+    0 0 0 3px #f7d51d;
+  outline: none;
+}
+
+/* ── Cards / KPI / status ────────────────────────────────── */
+
+html[data-theme="nes"] .dashboard-kpi,
+html[data-theme="nes"] .kpi-card,
+html[data-theme="nes"] .dashboard-card,
+html[data-theme="nes"] .settings-card,
+html[data-theme="nes"] .summary-strip,
+html[data-theme="nes"] .status {
+  background: #202238;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow:
+    inset 0 0 0 2px #fcfcfc,
+    4px 4px 0 #000000;
+}
+
+html[data-theme="nes"] .dashboard-kpi,
+html[data-theme="nes"] .kpi-card {
+  padding: 12px 14px;
+}
+
+html[data-theme="nes"] .dashboard-card,
+html[data-theme="nes"] .settings-card {
+  padding: 14px;
+}
+
+html[data-theme="nes"] .status {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+html[data-theme="nes"] .kpi-card::before,
+html[data-theme="nes"] .dashboard-kpi::before {
+  background: #e52521;
+  border-radius: 0;
+  box-shadow: none;
+  height: 100%;
+  top: 0;
+  width: 6px;
+}
+
+html[data-theme="nes"] .dashboard-kpi.tone-ok::before,
+html[data-theme="nes"] .kpi-card.tone-ok::before {
+  background: #92cc41;
+}
+
+html[data-theme="nes"] .dashboard-kpi.tone-warn::before,
+html[data-theme="nes"] .kpi-card.tone-warn::before {
+  background: #f7d51d;
+}
+
+html[data-theme="nes"] .dashboard-kpi.tone-danger::before,
+html[data-theme="nes"] .kpi-card.tone-danger::before {
+  background: #e52521;
+}
+
+html[data-theme="nes"] .dashboard-rank-track,
+html[data-theme="nes"] .ops-bar-track {
+  background: #0a0a14;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 3px 3px 0 #000000;
+}
+
+html[data-theme="nes"] .dashboard-rank-fill {
+  background: #209cee;
+  border-radius: 0;
+  box-shadow: inset 0 2px 0 #7ec8f5;
+}
+
+html[data-theme="nes"] .live-dot,
+html[data-theme="nes"] .stream-state-dot {
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: 1px 1px 0 #000000;
+}
+
+html[data-theme="nes"] .badge,
+html[data-theme="nes"] .model-chip,
+html[data-theme="nes"] .model-selection-chip,
+html[data-theme="nes"] .model-selection-more,
+html[data-theme="nes"] .token-preview-code,
+html[data-theme="nes"] .effective-zero-note {
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: 2px 2px 0 #000000;
+  font-weight: 700;
+}
+
+html[data-theme="nes"] .dashboard-kpis,
+html[data-theme="nes"] .dashboard-window-kpis,
+html[data-theme="nes"] .dashboard-grid,
+html[data-theme="nes"] .settings-stack {
+  gap: 14px;
+}
+
+/* ── Tables (no bleed) ───────────────────────────────────── */
+
+html[data-theme="nes"] .table-wrap {
+  background: #0a0a14;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 2px #fcfcfc, 4px 4px 0 #000000;
+  margin: 0;
+}
+
+html[data-theme="nes"] .table-wrap table,
+html[data-theme="nes"] .table-wrap tbody,
+html[data-theme="nes"] .table-wrap td {
+  background-color: #0a0a14;
+}
+
+html[data-theme="nes"] th {
+  background: #209cee;
+  border-bottom: 3px solid #000000;
+  border-right: 2px solid #000000;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-shadow: 1px 1px 0 #0d6aa8;
+  text-transform: uppercase;
+}
+
+html[data-theme="nes"] td {
+  border-bottom: 2px solid #3c3c58;
+  color: #d8d8e0;
+  font-family: var(--font-mono);
+  font-size: 15px;
+}
+
+html[data-theme="nes"] .table-wrap tbody tr:hover td {
+  background-color: #209cee;
+  color: #ffffff;
+}
+
+html[data-theme="nes"] .url-cell-inner {
+  background: #181a2a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 1px 1px 0 #686888;
+  color: #fcfcfc;
+}
+
+html[data-theme="nes"] .model-picker,
+html[data-theme="nes"] .model-manual-entry,
+html[data-theme="nes"] .model-options,
+html[data-theme="nes"] .token-value-box,
+html[data-theme="nes"] .test-model-result,
+html[data-theme="nes"] .test-model-prompt,
+html[data-theme="nes"] .test-model-response,
+html[data-theme="nes"] .log-detail-meta-card,
+html[data-theme="nes"] .log-detail-section {
+  background: #0a0a14;
+  border: 3px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 2px #fcfcfc, 3px 3px 0 #000000;
+}
+
+html[data-theme="nes"] .log-detail-section summary {
+  background: #2c2e4a;
+  border-bottom: 2px solid #000000;
+  color: #fcfcfc;
+  font-weight: 700;
+}
+
+html[data-theme="nes"] .log-detail-section[open] summary {
+  background: #209cee;
+  color: #ffffff;
+}
+
+html[data-theme="nes"] .log-detail-section[open] .log-detail-section-copy {
+  color: #d8d8e0;
+}
+
+/* ── Floating layers ─────────────────────────────────────── */
+
+html[data-theme="nes"] .upstream-action-menu,
+html[data-theme="nes"] .col-menu,
+html[data-theme="nes"] .theme-menu,
+html[data-theme="nes"] .toast,
+html[data-theme="nes"] .upstream-dialog,
+html[data-theme="nes"] .model-dialog,
+html[data-theme="nes"] .log-detail-dialog,
+html[data-theme="nes"] .quick-import-dialog,
+html[data-theme="nes"] .admin-token-dialog,
+html[data-theme="nes"] .balance-dialog,
+html[data-theme="nes"] .confirm-dialog,
+html[data-theme="nes"] .command-palette-panel {
+  background: #181a2a;
+  border: 4px solid #000000;
+  border-radius: 0;
+  box-shadow:
+    inset 0 0 0 3px #fcfcfc,
+    8px 8px 0 #000000;
+}
+
+html[data-theme="nes"] .upstream-dialog-panel,
+html[data-theme="nes"] .model-dialog-panel,
+html[data-theme="nes"] .log-detail-panel,
+html[data-theme="nes"] .quick-import-panel,
+html[data-theme="nes"] .admin-token-panel,
+html[data-theme="nes"] .balance-panel,
+html[data-theme="nes"] .confirm-panel {
+  background: #181a2a;
+  border-radius: 0;
+}
+
+html[data-theme="nes"] .model-dialog-panel,
+html[data-theme="nes"] .log-detail-panel,
+html[data-theme="nes"] .quick-import-panel {
+  padding: 14px 16px;
+}
+
+html[data-theme="nes"] .modal-footer {
+  background: #202238;
+  border-top: 3px solid #000000;
+  gap: 12px;
+  padding: 14px 16px;
+}
+
+html[data-theme="nes"] .upstream-dialog::backdrop,
+html[data-theme="nes"] .model-dialog::backdrop,
+html[data-theme="nes"] .log-detail-dialog::backdrop,
+html[data-theme="nes"] .quick-import-dialog::backdrop,
+html[data-theme="nes"] .admin-token-dialog::backdrop,
+html[data-theme="nes"] .balance-dialog::backdrop,
+html[data-theme="nes"] .confirm-dialog::backdrop,
+html[data-theme="nes"] .command-palette-dialog::backdrop {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--backdrop);
+}
+
+html[data-theme="nes"] dialog.is-maximized {
+  border: 4px solid #000000;
+  box-shadow:
+    inset 0 0 0 3px #fcfcfc,
+    8px 8px 0 #000000;
+}
+
+html[data-theme="nes"] .theme-menu button,
+html[data-theme="nes"] .col-menu label,
+html[data-theme="nes"] .upstream-action-menu button {
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html[data-theme="nes"] .theme-menu button:hover,
+html[data-theme="nes"] .col-menu label:hover,
+html[data-theme="nes"] .upstream-action-menu button:hover {
+  background: #209cee;
+  border-color: transparent;
+  box-shadow: none;
+  color: #ffffff;
+  transform: none;
+}
+
+html[data-theme="nes"] .theme-menu button.is-selected:hover {
+  background: #e52521;
+  color: #ffffff;
+}
+
+html[data-theme="nes"] .theme-menu button:hover .theme-swatch {
+  border-color: #000000;
+  box-shadow: 2px 2px 0 #000000;
+}
+
+html[data-theme="nes"] .upstream-action-menu button.danger:hover,
+html[data-theme="nes"] .upstream-action-menu button.danger:focus-visible {
+  background: #e52521;
+  color: #ffffff;
+}
+
+/* Pixel icon chrome (still not chunky command buttons) */
+html[data-theme="nes"] .icon-close,
+html[data-theme="nes"] .icon-maximize {
+  background: #e52521;
+  border: 2px solid #000000;
+  box-shadow: inset 1px 1px 0 #ff6b63, 2px 2px 0 #000000;
+  color: #ffffff;
+}
+
+html[data-theme="nes"] .icon-maximize {
+  background: #92cc41;
+  box-shadow: inset 1px 1px 0 #b4e06a, 2px 2px 0 #000000;
+}
+
+html[data-theme="nes"] .icon-close:hover,
+html[data-theme="nes"] .icon-maximize:hover {
+  background: #f7d51d;
+  box-shadow: inset 1px 1px 0 #ffe566, 2px 2px 0 #000000;
+  color: #000000;
+  transform: none;
+}
+
+/* ── Focus / scrollbars ──────────────────────────────────── */
+
+html[data-theme="nes"] a:focus-visible,
+html[data-theme="nes"] [tabindex]:focus-visible {
+  outline: 3px solid #f7d51d;
+  outline-offset: 2px;
+}
+
+html[data-theme="nes"] ::-webkit-scrollbar {
+  height: 14px;
+  width: 14px;
+}
+
+html[data-theme="nes"] ::-webkit-scrollbar-track {
+  background: #0a0a14;
+  border: 2px solid #000000;
+}
+
+html[data-theme="nes"] ::-webkit-scrollbar-thumb {
+  background: #e52521;
+  border: 2px solid #000000;
+  box-shadow: inset 2px 2px 0 #ff6b63, inset -1px -1px 0 #8a100e;
+}
+
+html[data-theme="nes"] ::-webkit-scrollbar-thumb:hover {
+  background: #ff4a40;
+}
+
+html[data-theme="nes"] ::-webkit-scrollbar-corner {
+  background: #181a2a;
+  border: 2px solid #000000;
+}
+
+/* ── Mobile ──────────────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  html[data-theme="nes"] .topbar {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 0;
+    padding: 6px 8px;
+  }
+
+  html[data-theme="nes"] .topbar-brand {
+    min-height: 28px;
+    padding: 2px 4px;
+  }
+
+  html[data-theme="nes"] .brand-mark {
+    display: none;
+  }
+
+  html[data-theme="nes"] .topbar-brand h1 {
+    font-size: 8px;
+  }
+
+  html[data-theme="nes"] .brand-label {
+    font-size: 6px;
+  }
+
+  html[data-theme="nes"] .topbar-nav {
+    flex: 1 0 100%;
+    order: 3;
+    overflow-x: auto;
+    width: 100%;
+  }
+
+  html[data-theme="nes"] .nav-link {
+    flex: 1 1 0;
+    font-size: 11px;
+    min-width: 0;
+    padding: 4px 6px;
+    text-align: center;
+  }
+
+  html[data-theme="nes"] .content {
+    padding: 10px 10px 24px;
+  }
+
+  html[data-theme="nes"] .view > .panel {
+    border-width: 3px;
+    box-shadow:
+      inset 0 0 0 2px #fcfcfc,
+      4px 4px 0 #000000;
+    padding: 12px;
+  }
+
+  html[data-theme="nes"] .view > .panel > .panel-head h2 {
+    font-size: 9px;
+  }
+
+  html[data-theme="nes"] .view-toolbar,
+  html[data-theme="nes"] .log-toolbar {
+    gap: 10px;
+  }
+
+  html[data-theme="nes"] .model-dialog-panel,
+  html[data-theme="nes"] .log-detail-panel,
+  html[data-theme="nes"] .quick-import-panel {
+    padding: 10px 12px;
+  }
+
+  html[data-theme="nes"] button {
+    box-shadow:
+      inset 1px 1px 0 #ff6b63,
+      inset -1px -1px 0 #8a100e,
+      3px 3px 0 #000000;
+  }
+
+  html[data-theme="nes"] button:hover {
+    box-shadow:
+      inset 1px 1px 0 #ff8a82,
+      4px 4px 0 #000000;
+  }
+
+  html[data-theme="nes"] th {
+    font-size: 10px;
+  }
+
+  html[data-theme="nes"] td {
+    font-size: 13px;
+  }
+}

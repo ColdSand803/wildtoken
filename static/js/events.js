@@ -9,6 +9,9 @@ const THEMES = [
   { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"] },
   { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"] },
   { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"] },
+  { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"] },
+  { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"] },
+  { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"] },
 ];
 
 // 旧 id "animal" 迁移为 "animal-island"
