@@ -709,7 +709,7 @@ html[data-theme="animal-island"] .command-palette-hint {
 html[data-theme="animal-island"] input,
 html[data-theme="animal-island"] select,
 html[data-theme="animal-island"] textarea {
-  background: var(--panel-elevated);
+  background-color: var(--panel-elevated);
   border: 2.5px solid var(--line);
   border-radius: var(--radius-full);
   box-shadow: none;
@@ -733,7 +733,7 @@ html[data-theme="animal-island"] textarea:hover {
 html[data-theme="animal-island"] input:focus-visible,
 html[data-theme="animal-island"] select:focus-visible,
 html[data-theme="animal-island"] textarea:focus-visible {
-  background: #fffef8;
+  background-color: #fffef8;
   border-color: var(--focus);
   box-shadow: var(--focus-ring);
   outline: none;
@@ -863,6 +863,7 @@ html[data-theme="animal-island"] .log-detail-section[open] .log-detail-section-c
 
 html[data-theme="animal-island"] .upstream-action-menu,
 html[data-theme="animal-island"] .col-menu,
+html[data-theme="animal-island"] .select-panel,
 html[data-theme="animal-island"] .theme-menu,
 html[data-theme="animal-island"] .toast,
 html[data-theme="animal-island"] .upstream-dialog,
@@ -907,6 +908,7 @@ html[data-theme="animal-island"] .command-palette-dialog::backdrop {
 /* Menu rows stay flat until hovered */
 html[data-theme="animal-island"] .theme-menu button,
 html[data-theme="animal-island"] .col-menu label,
+html[data-theme="animal-island"] .select-panel button,
 html[data-theme="animal-island"] .upstream-action-menu button {
   border-color: transparent;
   border-radius: var(--radius-sm);
@@ -916,6 +918,8 @@ html[data-theme="animal-island"] .upstream-action-menu button {
 
 html[data-theme="animal-island"] .theme-menu button:hover,
 html[data-theme="animal-island"] .col-menu label:hover,
+html[data-theme="animal-island"] .select-panel button:hover,
+html[data-theme="animal-island"] .select-panel button.is-active,
 html[data-theme="animal-island"] .upstream-action-menu button:hover {
   background: var(--accent-soft);
   border-color: transparent;

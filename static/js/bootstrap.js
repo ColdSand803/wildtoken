@@ -32,6 +32,7 @@ const balanceBody = document.querySelector("#balance-body");
 const balanceClose = document.querySelector("#balance-close");
 
 const toastRegion = document.querySelector("#toast-region");
+const selectPanel = document.querySelector("#select-panel");
 const upstreamActionMenu = document.querySelector("#upstream-action-menu");
 const rows = document.querySelector("#upstream-rows");
 const upstreamSummary = document.querySelector("#upstream-summary");
@@ -546,6 +547,251 @@ function hidePopoverLayer(element) {
   }
   element.hidden = true;
 }
+
+// Native <select> listboxes ignore CSS (border-radius especially). Intercept
+// opens and render options into #select-panel so the popup follows the theme.
+let activeSelect = null;
+let selectActiveIndex = -1;
+let selectOptionButtons = [];
+
+function isNativeSelect(element) {
+  return element instanceof HTMLSelectElement
+    && !element.disabled
+    && !element.multiple
+    && !element.size;
+}
+
+function selectOptionEntries(select) {
+  return Array.from(select.options || []).map((option, index) => ({
+    option,
+    index,
+    value: option.value,
+    label: option.label || option.textContent || "",
+    disabled: option.disabled,
+    selected: option.selected || select.selectedIndex === index,
+  }));
+}
+
+function closeCustomSelect(restoreFocus = false) {
+  if (!selectPanel || selectPanel.hidden) {
+    activeSelect = null;
+    selectActiveIndex = -1;
+    selectOptionButtons = [];
+    return;
+  }
+  const select = activeSelect;
+  activeSelect = null;
+  selectActiveIndex = -1;
+  selectOptionButtons = [];
+  selectPanel.innerHTML = "";
+  selectPanel.style.visibility = "";
+  selectPanel.style.width = "";
+  selectPanel.style.left = "";
+  selectPanel.style.top = "";
+  selectPanel.removeAttribute("aria-activedescendant");
+  hidePopoverLayer(selectPanel);
+  if (restoreFocus && select?.isConnected) {
+    select.focus();
+  }
+}
+
+function setSelectActiveIndex(nextIndex) {
+  if (!selectOptionButtons.length) {
+    selectActiveIndex = -1;
+    return;
+  }
+  const clamped = Math.max(0, Math.min(selectOptionButtons.length - 1, nextIndex));
+  selectActiveIndex = clamped;
+  selectOptionButtons.forEach((button, index) => {
+    const active = index === clamped;
+    button.classList.toggle("is-active", active);
+    button.tabIndex = active ? 0 : -1;
+    if (active) {
+      selectPanel?.setAttribute("aria-activedescendant", button.id);
+      button.scrollIntoView({ block: "nearest" });
+    }
+  });
+}
+
+function chooseCustomSelectOption(index) {
+  if (!activeSelect || !Number.isInteger(index)) return;
+  const option = activeSelect.options[index];
+  if (!option || option.disabled) return;
+  if (activeSelect.selectedIndex !== index || activeSelect.value !== option.value) {
+    activeSelect.selectedIndex = index;
+    activeSelect.dispatchEvent(new Event("input", { bubbles: true }));
+    activeSelect.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+  closeCustomSelect(true);
+}
+
+function positionCustomSelect() {
+  if (!activeSelect || !selectPanel || selectPanel.hidden) return;
+  const triggerRect = activeSelect.getBoundingClientRect();
+  const menuRect = selectPanel.getBoundingClientRect();
+  const gap = 6;
+  const viewportGap = 8;
+  let left = triggerRect.left;
+  let top = triggerRect.bottom + gap;
+  const width = Math.max(triggerRect.width, menuRect.width);
+
+  if (left + width > window.innerWidth - viewportGap) {
+    left = Math.max(viewportGap, window.innerWidth - width - viewportGap);
+  }
+  left = Math.max(viewportGap, left);
+
+  if (top + menuRect.height > window.innerHeight - viewportGap) {
+    top = triggerRect.top - menuRect.height - gap;
+  }
+  if (top < viewportGap) {
+    top = viewportGap;
+  }
+
+  selectPanel.style.left = `${Math.round(left)}px`;
+  selectPanel.style.top = `${Math.round(top)}px`;
+  selectPanel.style.width = `${Math.round(width)}px`;
+}
+
+function openCustomSelect(select) {
+  if (!selectPanel || !isNativeSelect(select)) return;
+  if (activeSelect === select && !selectPanel.hidden) {
+    closeCustomSelect(true);
+    return;
+  }
+
+  if (typeof closeUpstreamActionMenu === "function") closeUpstreamActionMenu();
+  if (typeof closeColMenus === "function") closeColMenus();
+  if (typeof setThemeMenuOpen === "function") setThemeMenuOpen(false);
+
+  closeCustomSelect();
+  activeSelect = select;
+  select.focus({ preventScroll: true });
+  const entries = selectOptionEntries(select);
+  selectPanel.innerHTML = "";
+  selectOptionButtons = [];
+
+  if (!entries.length) {
+    const empty = document.createElement("div");
+    empty.className = "select-panel-empty";
+    empty.textContent = "无可选项";
+    selectPanel.append(empty);
+  } else {
+    const fragment = document.createDocumentFragment();
+    entries.forEach((entry) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.id = `select-option-${entry.index}`;
+      button.setAttribute("role", "option");
+      button.dataset.optionIndex = String(entry.index);
+      button.textContent = entry.label;
+      button.disabled = entry.disabled;
+      button.classList.toggle("is-selected", entry.selected);
+      button.setAttribute("aria-selected", String(entry.selected));
+      button.tabIndex = -1;
+      button.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        chooseCustomSelectOption(entry.index);
+      });
+      fragment.append(button);
+      if (!entry.disabled) selectOptionButtons.push(button);
+    });
+    selectPanel.append(fragment);
+  }
+
+  selectPanel.style.visibility = "hidden";
+  showPopoverLayer(selectPanel, true);
+  window.requestAnimationFrame(() => {
+    if (activeSelect !== select) return;
+    positionCustomSelect();
+    selectPanel.style.visibility = "visible";
+    const selectedPos = selectOptionButtons.findIndex((button) => button.classList.contains("is-selected"));
+    setSelectActiveIndex(selectedPos >= 0 ? selectedPos : 0);
+  });
+}
+
+function handleSelectKeydown(event) {
+  if (!activeSelect || selectPanel?.hidden) return false;
+  const key = event.key;
+  if (key === "Escape") {
+    event.preventDefault();
+    closeCustomSelect(true);
+    return true;
+  }
+  if (key === "ArrowDown") {
+    event.preventDefault();
+    setSelectActiveIndex(selectActiveIndex < 0 ? 0 : selectActiveIndex + 1);
+    return true;
+  }
+  if (key === "ArrowUp") {
+    event.preventDefault();
+    setSelectActiveIndex(selectActiveIndex < 0 ? selectOptionButtons.length - 1 : selectActiveIndex - 1);
+    return true;
+  }
+  if (key === "Home") {
+    event.preventDefault();
+    setSelectActiveIndex(0);
+    return true;
+  }
+  if (key === "End") {
+    event.preventDefault();
+    setSelectActiveIndex(selectOptionButtons.length - 1);
+    return true;
+  }
+  if (key === "Enter" || key === " ") {
+    event.preventDefault();
+    if (selectActiveIndex >= 0) {
+      const button = selectOptionButtons[selectActiveIndex];
+      const index = Number(button?.dataset.optionIndex);
+      chooseCustomSelectOption(index);
+    }
+    return true;
+  }
+  if (key === "Tab") {
+    closeCustomSelect();
+    return false;
+  }
+  return false;
+}
+
+document.addEventListener("mousedown", (event) => {
+  const select = event.target?.closest?.("select");
+  if (isNativeSelect(select)) {
+    // Block the native listbox; we render a themed panel instead.
+    event.preventDefault();
+    openCustomSelect(select);
+    return;
+  }
+  if (
+    activeSelect
+    && selectPanel
+    && !selectPanel.hidden
+    && !selectPanel.contains(event.target)
+    && event.target !== activeSelect
+  ) {
+    closeCustomSelect();
+  }
+}, true);
+
+// Some browsers still open the native list on click even after mousedown preventDefault.
+document.addEventListener("click", (event) => {
+  if (isNativeSelect(event.target?.closest?.("select"))) {
+    event.preventDefault();
+  }
+}, true);
+
+document.addEventListener("keydown", (event) => {
+  if (handleSelectKeydown(event)) return;
+  const select = event.target;
+  if (!isNativeSelect(select) || !selectPanel?.hidden) return;
+  if (event.key === " " || event.key === "Enter" || event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    openCustomSelect(select);
+  }
+});
+
+window.addEventListener("resize", () => closeCustomSelect());
+window.addEventListener("scroll", () => closeCustomSelect(), true);
 
 function splitList(value) {
   return value

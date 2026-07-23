@@ -624,7 +624,7 @@ html[data-theme="nes"] .command-palette-hint {
 html[data-theme="nes"] input,
 html[data-theme="nes"] select,
 html[data-theme="nes"] textarea {
-  background: #0a0a14;
+  background-color: #0a0a14;
   border: 3px solid #000000;
   border-radius: 0;
   box-shadow: inset 3px 3px 0 #000000, inset -1px -1px 0 #686888;
@@ -648,7 +648,7 @@ html[data-theme="nes"] textarea:hover {
 html[data-theme="nes"] input:focus-visible,
 html[data-theme="nes"] select:focus-visible,
 html[data-theme="nes"] textarea:focus-visible {
-  background: #121222;
+  background-color: #121222;
   border-color: #f7d51d;
   box-shadow:
     inset 3px 3px 0 #000000,
@@ -853,6 +853,7 @@ html[data-theme="nes"] .log-detail-section[open] .log-detail-section-copy {
 
 html[data-theme="nes"] .upstream-action-menu,
 html[data-theme="nes"] .col-menu,
+html[data-theme="nes"] .select-panel,
 html[data-theme="nes"] .theme-menu,
 html[data-theme="nes"] .toast,
 html[data-theme="nes"] .upstream-dialog,
@@ -917,6 +918,7 @@ html[data-theme="nes"] dialog.is-maximized {
 
 html[data-theme="nes"] .theme-menu button,
 html[data-theme="nes"] .col-menu label,
+html[data-theme="nes"] .select-panel button,
 html[data-theme="nes"] .upstream-action-menu button {
   border-color: transparent;
   border-radius: 0;
@@ -928,6 +930,8 @@ html[data-theme="nes"] .upstream-action-menu button {
 
 html[data-theme="nes"] .theme-menu button:hover,
 html[data-theme="nes"] .col-menu label:hover,
+html[data-theme="nes"] .select-panel button:hover,
+html[data-theme="nes"] .select-panel button.is-active,
 html[data-theme="nes"] .upstream-action-menu button:hover {
   background: #209cee;
   border-color: transparent;

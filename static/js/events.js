@@ -634,6 +634,11 @@ document.addEventListener("keydown", (event) => {
     return;
   }
 
+  if (selectPanel && !selectPanel.hidden) {
+    // Keyboard navigation for the custom select popup lives in bootstrap.js.
+    return;
+  }
+
   if (meta && (key === "k" || key === "K")) {
     event.preventDefault();
     if (commandPalette?.open) {
