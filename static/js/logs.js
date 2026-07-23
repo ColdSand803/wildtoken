@@ -454,8 +454,8 @@ function updateLogRates(recentRpm, recentTpm) {
   const displayRpm = rpm === null ? "—" : rpm.toLocaleString("zh-CN");
   const displayTpm = tpm === null ? "—" : tpm.toLocaleString("zh-CN");
   const label = rpm === null || tpm === null
-    ? "最近 60 秒全局请求数或 Token 数暂不可用"
-    : `最近 60 秒全局请求数 ${displayRpm} RPM；全局 Token 总数 ${displayTpm} TPM`;
+    ? "最近 60 秒成功请求数或 Token 数暂不可用"
+    : `最近 60 秒成功请求数 ${displayRpm} RPM；成功请求 Token 总数 ${displayTpm} TPM`;
   const title = `${label}；不受当前筛选和分页影响`;
   if (logRpm.title !== title) logRpm.title = title;
   if (logRpm.getAttribute("aria-label") !== label) {
