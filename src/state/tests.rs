@@ -120,11 +120,12 @@ async fn initialization_migrates_legacy_codex_template_and_seeds_claude_cli() {
     .unwrap();
     assert_eq!(old_name_count, 0);
 
-    let claude_cli_kind: String =
-        sqlx::query_scalar("SELECT request_kind FROM model_test_templates WHERE name = 'claude-cli'")
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    let claude_cli_kind: String = sqlx::query_scalar(
+        "SELECT request_kind FROM model_test_templates WHERE name = 'claude-cli'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(claude_cli_kind, "messages");
 
     // The widened CHECK constraint accepts further 'messages' rows.
