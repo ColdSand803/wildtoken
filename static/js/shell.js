@@ -703,7 +703,7 @@ function renderSystemInfo(system) {
     ["日志总数", Number(system.total_log_count || 0).toLocaleString("zh-CN")],
     ["近 24 小时日志", Number(system.log_count_24h || 0).toLocaleString("zh-CN")],
     ["启用渠道", `${system.enabled_upstream_count || 0} / ${system.total_upstream_count || 0}`],
-    ["近 1 分钟请求", Number(system.recent_one_minute_log_count || 0).toLocaleString("zh-CN")],
+    ["近 1 分钟成功请求", Number(system.recent_one_minute_log_count || 0).toLocaleString("zh-CN")],
     ["活跃 SSE", Number(metrics.active_sse_streams || 0).toLocaleString("zh-CN")],
     ["10 分钟 SSE 断连", Number(metrics.sse_recent_disconnects_10m || 0).toLocaleString("zh-CN")],
     ["SSE 断连总数", Number(metrics.sse_client_disconnects_total || 0).toLocaleString("zh-CN")],

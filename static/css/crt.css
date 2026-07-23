@@ -705,7 +705,7 @@ html[data-theme="crt"] .command-palette-hint {
 html[data-theme="crt"] input,
 html[data-theme="crt"] select,
 html[data-theme="crt"] textarea {
-  background: #000502;
+  background-color: #000502;
   border: 1px solid rgb(26 122 66 / 55%);
   border-radius: 0;
   box-shadow: inset 0 0 12px rgb(0 0 0 / 55%);
@@ -733,7 +733,7 @@ html[data-theme="crt"] textarea:hover {
 html[data-theme="crt"] input:focus-visible,
 html[data-theme="crt"] select:focus-visible,
 html[data-theme="crt"] textarea:focus-visible {
-  background: #010a05;
+  background-color: #010a05;
   border-color: #39ff14;
   box-shadow:
     0 0 0 1px rgb(57 255 20 / 40%),
@@ -948,6 +948,7 @@ html[data-theme="crt"] .log-detail-section[open] .log-detail-section-copy {
 
 html[data-theme="crt"] .upstream-action-menu,
 html[data-theme="crt"] .col-menu,
+html[data-theme="crt"] .select-panel,
 html[data-theme="crt"] .theme-menu,
 html[data-theme="crt"] .toast,
 html[data-theme="crt"] .upstream-dialog,
@@ -1013,6 +1014,7 @@ html[data-theme="crt"] dialog.is-maximized {
 
 html[data-theme="crt"] .theme-menu button,
 html[data-theme="crt"] .col-menu label,
+html[data-theme="crt"] .select-panel button,
 html[data-theme="crt"] .upstream-action-menu button {
   border-color: transparent;
   border-radius: 0;
@@ -1026,6 +1028,8 @@ html[data-theme="crt"] .upstream-action-menu button {
 
 html[data-theme="crt"] .theme-menu button:hover,
 html[data-theme="crt"] .col-menu label:hover,
+html[data-theme="crt"] .select-panel button:hover,
+html[data-theme="crt"] .select-panel button.is-active,
 html[data-theme="crt"] .upstream-action-menu button:hover {
   background: rgb(57 255 20 / 14%);
   border-color: transparent;

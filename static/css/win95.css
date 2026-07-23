@@ -355,7 +355,7 @@ html[data-theme="win95"] .command-palette-hint {
 html[data-theme="win95"] input,
 html[data-theme="win95"] select,
 html[data-theme="win95"] textarea {
-  background: #ffffff;
+  background-color: #ffffff;
   border: 1px solid;
   border-color: #404040 #ffffff #ffffff #404040;
   box-shadow: inset 1px 1px 0 #808080, inset -1px -1px 0 #dfdfdf;
@@ -491,6 +491,7 @@ html[data-theme="win95"] .log-detail-section[open] .log-detail-section-copy {
 
 html[data-theme="win95"] .upstream-action-menu,
 html[data-theme="win95"] .col-menu,
+html[data-theme="win95"] .select-panel,
 html[data-theme="win95"] .theme-menu,
 html[data-theme="win95"] .toast,
 html[data-theme="win95"] .upstream-dialog,
@@ -522,6 +523,7 @@ html[data-theme="win95"] .command-palette-dialog::backdrop {
 /* Menu rows stay flat until hovered — classic menu highlight */
 html[data-theme="win95"] .theme-menu button,
 html[data-theme="win95"] .col-menu label,
+html[data-theme="win95"] .select-panel button,
 html[data-theme="win95"] .upstream-action-menu button {
   border-color: transparent;
   box-shadow: none;
@@ -529,6 +531,8 @@ html[data-theme="win95"] .upstream-action-menu button {
 
 html[data-theme="win95"] .theme-menu button:hover,
 html[data-theme="win95"] .col-menu label:hover,
+html[data-theme="win95"] .select-panel button:hover,
+html[data-theme="win95"] .select-panel button.is-active,
 html[data-theme="win95"] .upstream-action-menu button:hover {
   background: #000080;
   color: #ffffff;

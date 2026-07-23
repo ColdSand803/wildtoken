@@ -32,7 +32,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Orbitron:wght@500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&family=Rajdhani:wght@400;500;600;700&family=VT323&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Orbitron:wght@500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&family=Rajdhani:wght@400;500;600;700&family=VT323&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css" />
@@ -408,9 +408,24 @@
               <p id="log-new-entries-copy" role="status" aria-live="polite">有新的请求日志。</p>
               <button id="log-return-latest" type="button" class="secondary">返回最新</button>
             </div>
-            <div class="pager">
-              <button id="log-prev" type="button" class="secondary">上一页</button>
-              <button id="log-next" type="button" class="secondary">下一页</button>
+            <div class="pager log-pager">
+              <div class="pager-meta">
+                <span id="log-page-meta" class="pager-meta-text">第 1 页</span>
+                <label class="pager-size-field">
+                  <span class="pager-size-label">每页</span>
+                  <select id="log-page-size" aria-label="日志每页条数">
+                    <option value="20">20</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                    <option value="200">200</option>
+                  </select>
+                </label>
+              </div>
+              <div class="pager-actions">
+                <button id="log-first" type="button" class="secondary">首页</button>
+                <button id="log-prev" type="button" class="secondary">上一页</button>
+                <button id="log-next" type="button" class="secondary">下一页</button>
+              </div>
             </div>
           </section>
         </section>
@@ -1019,6 +1034,14 @@
       class="toast-region"
       aria-live="polite"
       aria-relevant="additions"
+      popover="manual"
+    ></div>
+    <div
+      id="select-panel"
+      class="select-panel"
+      role="listbox"
+      aria-label="选项列表"
+      hidden
       popover="manual"
     ></div>
     <script src="/static/js/bootstrap.js"></script>

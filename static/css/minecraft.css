@@ -432,6 +432,7 @@ html[data-theme="minecraft"] .toolbar-batch > button,
 html[data-theme="minecraft"] .panel-head .actions > button,
 html[data-theme="minecraft"] .actions > button,
 html[data-theme="minecraft"] .pager > button,
+html[data-theme="minecraft"] .log-pager .pager-actions > button,
 html[data-theme="minecraft"] .modal-footer > button {
   margin-bottom: 5px;
   margin-right: 3px;
@@ -510,7 +511,7 @@ html[data-theme="minecraft"] .command-palette-hint {
 html[data-theme="minecraft"] input,
 html[data-theme="minecraft"] select,
 html[data-theme="minecraft"] textarea {
-  background: #1a1a1a;
+  background-color: #1a1a1a;
   border: 2px solid #000000;
   border-radius: 0;
   box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%), inset -1px -1px 0 rgb(255 255 255 / 6%);
@@ -532,7 +533,7 @@ html[data-theme="minecraft"] textarea:hover {
 html[data-theme="minecraft"] input:focus-visible,
 html[data-theme="minecraft"] select:focus-visible,
 html[data-theme="minecraft"] textarea:focus-visible {
-  background: #121212;
+  background-color: #121212;
   border-color: #35b0e0;
   box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%), 0 0 0 2px rgb(53 176 224 / 45%);
   outline: none;
@@ -733,6 +734,7 @@ html[data-theme="minecraft"] .log-detail-section[open] .log-detail-section-copy 
 
 html[data-theme="minecraft"] .upstream-action-menu,
 html[data-theme="minecraft"] .col-menu,
+html[data-theme="minecraft"] .select-panel,
 html[data-theme="minecraft"] .theme-menu,
 html[data-theme="minecraft"] .toast,
 html[data-theme="minecraft"] .upstream-dialog,
@@ -793,6 +795,7 @@ html[data-theme="minecraft"] dialog.is-maximized {
 
 html[data-theme="minecraft"] .theme-menu button,
 html[data-theme="minecraft"] .col-menu label,
+html[data-theme="minecraft"] .select-panel button,
 html[data-theme="minecraft"] .upstream-action-menu button {
   border-color: transparent;
   border-radius: 0;
@@ -804,6 +807,8 @@ html[data-theme="minecraft"] .upstream-action-menu button {
 
 html[data-theme="minecraft"] .theme-menu button:hover,
 html[data-theme="minecraft"] .col-menu label:hover,
+html[data-theme="minecraft"] .select-panel button:hover,
+html[data-theme="minecraft"] .select-panel button.is-active,
 html[data-theme="minecraft"] .upstream-action-menu button:hover {
   background: rgb(94 198 57 / 16%);
   border-color: transparent;

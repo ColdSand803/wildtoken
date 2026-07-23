@@ -782,7 +782,7 @@ html[data-theme="cyberpunk"] .command-palette-hint {
 html[data-theme="cyberpunk"] input,
 html[data-theme="cyberpunk"] select,
 html[data-theme="cyberpunk"] textarea {
-  background: #060310;
+  background-color: #060310;
   border: 1px solid rgb(160 90 220 / 40%);
   border-radius: var(--radius-sm);
   box-shadow: inset 0 1px 4px rgb(0 0 0 / 45%);
@@ -808,7 +808,7 @@ html[data-theme="cyberpunk"] textarea:hover {
 html[data-theme="cyberpunk"] input:focus-visible,
 html[data-theme="cyberpunk"] select:focus-visible,
 html[data-theme="cyberpunk"] textarea:focus-visible {
-  background: #0c0618;
+  background-color: #0c0618;
   border-color: #00f5ff;
   box-shadow:
     0 0 0 2px rgb(0 245 255 / 35%),
@@ -1027,6 +1027,7 @@ html[data-theme="cyberpunk"] .log-detail-section[open] .log-detail-section-copy 
 
 html[data-theme="cyberpunk"] .upstream-action-menu,
 html[data-theme="cyberpunk"] .col-menu,
+html[data-theme="cyberpunk"] .select-panel,
 html[data-theme="cyberpunk"] .theme-menu,
 html[data-theme="cyberpunk"] .toast,
 html[data-theme="cyberpunk"] .upstream-dialog,
@@ -1095,6 +1096,7 @@ html[data-theme="cyberpunk"] dialog.is-maximized {
 
 html[data-theme="cyberpunk"] .theme-menu button,
 html[data-theme="cyberpunk"] .col-menu label,
+html[data-theme="cyberpunk"] .select-panel button,
 html[data-theme="cyberpunk"] .upstream-action-menu button {
   border-color: transparent;
   border-radius: var(--radius-sm);
@@ -1108,6 +1110,8 @@ html[data-theme="cyberpunk"] .upstream-action-menu button {
 
 html[data-theme="cyberpunk"] .theme-menu button:hover,
 html[data-theme="cyberpunk"] .col-menu label:hover,
+html[data-theme="cyberpunk"] .select-panel button:hover,
+html[data-theme="cyberpunk"] .select-panel button.is-active,
 html[data-theme="cyberpunk"] .upstream-action-menu button:hover {
   background: rgb(0 245 255 / 12%);
   border-color: transparent;

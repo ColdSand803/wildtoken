@@ -101,6 +101,7 @@ html[data-theme="dark"] {
   /* Type */
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "Fira Code", "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
+  --font-secret: "JetBrains Mono", "Cascadia Mono", "Cascadia Code", "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
   --text-xs: 11px;
   --text-sm: 12px;
   --text-base: 13px;
@@ -920,7 +921,7 @@ textarea:focus-visible {
 input,
 select,
 textarea {
-  background: var(--panel-subtle);
+  background-color: var(--panel-subtle);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   color: var(--text);
@@ -932,6 +933,109 @@ textarea {
 input,
 select {
   min-height: var(--control-h);
+}
+
+/* Native <select> keeps OS chrome (arrow + popup) unless restyled. Strip the
+   system arrow, paint a chevron with --muted so every theme stays consistent,
+   and give <option> the same surface/text tokens the closed field uses.
+   Theme overrides must set background-color (not the background shorthand)
+   so they don't wipe the chevron layers. */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+    linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 16px) calc(50% - 1.5px),
+    calc(100% - 11px) calc(50% - 1.5px);
+  background-repeat: no-repeat;
+  background-size: 5px 5px, 5px 5px;
+  cursor: pointer;
+  padding-right: 30px;
+}
+
+select option,
+select optgroup {
+  background-color: var(--panel-solid);
+  color: var(--text);
+}
+
+/* Custom select popup — native <select> listboxes ignore border-radius.
+   JS builds .select-panel from the same options; keep the control itself
+   native so forms/required/change handlers stay untouched. */
+.select-panel {
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  background: var(--glass-strong);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  box-sizing: border-box;
+  display: grid;
+  gap: 2px;
+  inset: auto;
+  margin: 0;
+  max-height: min(320px, calc(100vh - 16px));
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+  position: fixed;
+  z-index: 1000;
+}
+
+.select-panel[hidden] {
+  display: none;
+}
+
+.select-panel button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  gap: 8px;
+  justify-content: flex-start;
+  min-height: 32px;
+  padding: 4px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.select-panel button:hover,
+.select-panel button.is-active,
+.select-panel button:focus-visible {
+  background: var(--panel-muted);
+  box-shadow: none;
+  color: var(--text);
+}
+
+.select-panel button.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+  color: var(--accent);
+}
+
+.select-panel button.is-selected:hover,
+.select-panel button.is-selected.is-active,
+.select-panel button.is-selected:focus-visible {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.select-panel button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.select-panel .select-panel-empty {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  padding: 8px 10px;
 }
 
 textarea {
@@ -963,6 +1067,14 @@ input[type="radio"] {
 code {
   font-family: var(--font-mono);
   font-size: 0.92em;
+}
+
+#api-key,
+#quick-import-apikey,
+#token-custom {
+  font-family: var(--font-secret);
+  font-variant-ligatures: none;
+  letter-spacing: 0;
 }
 
 /* ── Shell / Topbar ──────────────────────────────────────── */

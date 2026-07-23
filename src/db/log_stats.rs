@@ -184,20 +184,23 @@ impl LogStatsCache {
     }
 }
 
-/// Count request logs in the strict trailing 60-second window.
+/// Count successful (2xx) request logs in the strict trailing 60-second window.
 ///
 /// Keep RPM separate from the minute-bucket cache: minute buckets are precise
 /// enough for multi-day usage summaries, but cannot represent a rolling
 /// second-level boundary without over-counting part of the previous minute.
+/// Only 2xx responses count toward RPM, matching the log-page rate display.
 pub async fn recent_one_minute_log_count(pool: &SqlitePool) -> Result<i64, AppError> {
     Ok(sqlx::query_scalar(
-        "SELECT COUNT(*) FROM request_logs WHERE created_at >= datetime('now', '-60 seconds')",
+        r#"SELECT COUNT(*) FROM request_logs
+           WHERE created_at >= datetime('now', '-60 seconds')
+             AND status_code >= 200 AND status_code < 300"#,
     )
     .fetch_one(pool)
     .await?)
 }
 
-/// Request and token totals in the strict trailing 60-second window.
+/// Successful request and token totals in the strict trailing 60-second window.
 #[derive(Debug, Clone, Copy, FromRow)]
 pub struct RecentLogRate {
     pub request_count: i64,
@@ -210,7 +213,8 @@ pub async fn recent_one_minute_log_rate(pool: &SqlitePool) -> Result<RecentLogRa
                COUNT(*) AS request_count,
                COALESCE(SUM(total_tokens), 0) AS total_tokens
            FROM request_logs
-           WHERE created_at >= datetime('now', '-60 seconds')"#,
+           WHERE created_at >= datetime('now', '-60 seconds')
+             AND status_code >= 200 AND status_code < 300"#,
     )
     .fetch_one(pool)
     .await?)
@@ -376,6 +380,7 @@ mod tests {
             r#"CREATE TABLE request_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                status_code INTEGER,
                 prompt_tokens INTEGER,
                 prompt_cached_tokens INTEGER,
                 total_tokens INTEGER
@@ -483,22 +488,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recent_one_minute_rate_uses_strict_sixty_second_window() {
+    async fn recent_one_minute_rate_counts_only_successful_requests() {
         let pool = test_pool().await;
         sqlx::query(
-            r#"INSERT INTO request_logs (id, created_at, total_tokens) VALUES
-               (1, datetime('now'), 10),
-               (2, datetime('now', '-30 seconds'), 20),
-               (3, datetime('now', '-5 seconds'), NULL),
-               (4, datetime('now', '-90 seconds'), 30)"#,
+            r#"INSERT INTO request_logs (id, created_at, status_code, total_tokens) VALUES
+               (1, datetime('now'), 200, 10),
+               (2, datetime('now', '-30 seconds'), 204, 20),
+               (3, datetime('now', '-5 seconds'), 500, 99),
+               (4, datetime('now', '-10 seconds'), 404, NULL),
+               (5, datetime('now', '-15 seconds'), NULL, 7),
+               (6, datetime('now', '-90 seconds'), 200, 30)"#,
         )
         .execute(&pool)
         .await
         .unwrap();
 
-        assert_eq!(recent_one_minute_log_count(&pool).await.unwrap(), 3);
+        assert_eq!(recent_one_minute_log_count(&pool).await.unwrap(), 2);
         let rate = recent_one_minute_log_rate(&pool).await.unwrap();
-        assert_eq!(rate.request_count, 3);
+        assert_eq!(rate.request_count, 2);
         assert_eq!(rate.total_tokens, 30);
     }
 
