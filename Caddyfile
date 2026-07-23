@@ -1,0 +1,5 @@
+{$APP_DOMAIN} {
+    reverse_proxy wildtoken:3100 {
+        flush_interval -1
+    }
+}

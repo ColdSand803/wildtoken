@@ -1,6 +1,7 @@
 services:
   wildtoken:
     build: .
+    restart: unless-stopped
     env_file:
       - .env
     environment:
@@ -10,7 +11,7 @@ services:
       APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS: "300"
       TOKIO_WORKER_THREADS: "4"
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     volumes:
       - wildtoken-data:/data
     healthcheck:
@@ -26,5 +27,23 @@ services:
       retries: 12
       start_period: 10s
 
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      wildtoken:
+        condition: service_healthy
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+
 volumes:
   wildtoken-data:
+  caddy-data:
+  caddy-config:

@@ -16,7 +16,19 @@ Docker：
 docker compose up -d --build
 ```
 
-管理界面：
+Docker 部署会通过 Caddy 对外提供 HTTPS。首次启动前从 `.env.example` 复制
+`.env`，并设置 `ADMIN_TOKEN` 和 `APP_DOMAIN`（例如 `api.example.com`）。在 DNS
+中为该域名添加指向服务器的 A 记录，放行 TCP `80` 与 `443` 后，访问
+`https://<APP_DOMAIN>/admin`。应用端口只绑定到 `127.0.0.1:3100`，不应公开暴露。
+Caddy 会自动申请和续期证书，并在转发流式响应时禁用缓冲。
+
+Docker 管理界面：
+
+```text
+https://<APP_DOMAIN>/admin
+```
+
+原生本地运行：
 
 ```text
 http://127.0.0.1:3100/admin
