@@ -3,10 +3,11 @@ const THEME_KEY = "wildtoken_theme";
 const themeToggle = document.querySelector("#theme-toggle");
 const themeMenu = document.querySelector("#theme-menu");
 
-// 新增主题时同步三处：此注册表、admin.html 头部内联白名单、base.css 变量块
+// 新增主题时同步三处：此注册表、admin.html 头部内联白名单、主题变量块
 const THEMES = [
   { id: "dark", label: "深色", swatch: ["#020617", "#22d3ee"] },
   { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"] },
+  { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"] },
   { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"] },
   { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"] },
   { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"] },
@@ -56,6 +57,13 @@ function getStoredTheme() {
 function applyTheme(theme) {
   const next = isKnownTheme(theme) ? normalizeThemeId(theme) : "dark";
   document.documentElement.setAttribute("data-theme", next);
+  if (next === "endfield") {
+    document.documentElement.setAttribute("data-ark-theme", "endfield");
+    document.documentElement.setAttribute("data-ark-depth", "complex");
+  } else {
+    document.documentElement.removeAttribute("data-ark-theme");
+    document.documentElement.removeAttribute("data-ark-depth");
+  }
   try {
     localStorage.setItem(THEME_KEY, next);
   } catch {
@@ -93,7 +101,7 @@ function renderThemeChoices() {
   }
   if (settingsTheme) {
     settingsTheme.innerHTML = THEMES.map(
-      (theme) => `<button type="button" data-theme-choice="${theme.id}">${theme.label}</button>`,
+      (theme) => `<option value="${theme.id}">${theme.label}${theme.id === "endfield" ? " · FIELD SYSTEM / 03" : ""}</option>`,
     ).join("");
   }
 }
@@ -165,11 +173,8 @@ if (densityToggle) {
   densityToggle.addEventListener("click", cycleDensity);
 }
 
-settingsTheme?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-theme-choice]");
-  if (!button) return;
-  applyTheme(button.dataset.themeChoice);
-  updatePreferenceControls();
+settingsTheme?.addEventListener("change", () => {
+  applyTheme(settingsTheme.value);
 });
 settingsDensity?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-density-choice]");
@@ -280,6 +285,13 @@ if (dashboardRefreshButton) {
     loadDashboardData();
   });
 }
+if (dashboardChannelNameToggle) {
+  updateDashboardChannelNameToggle();
+  dashboardChannelNameToggle.addEventListener("click", () => {
+    setDashboardChannelNameHidden(!dashboardChannelNameHidden);
+  });
+}
+
 if (dashboardTopWindowSelect) {
   dashboardTopWindowSelect.addEventListener("change", () => {
     const nextWindow = DASHBOARD_TOP_WINDOW_VALUES.has(dashboardTopWindowSelect.value)

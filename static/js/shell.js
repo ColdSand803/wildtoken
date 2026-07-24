@@ -31,8 +31,6 @@ function setDialogMaximized(dialog, maximized) {
     button.setAttribute("aria-pressed", String(next));
     button.setAttribute("aria-label", next ? "还原" : "最大化");
     button.title = next ? "还原" : "最大化";
-    const glyph = button.querySelector("span");
-    if (glyph) glyph.textContent = next ? "❐" : "▢";
   }
   return next;
 }
@@ -332,6 +330,9 @@ function switchView(name) {
   for (const link of navLinks) {
     link.classList.toggle("active", link.dataset.view === name);
   }
+  if (document.documentElement.dataset.theme === "endfield" && window.matchMedia("(min-width: 761px)").matches) {
+    document.querySelector(".content")?.scrollTo({ top: 0, behavior: "auto" });
+  }
   if (location.hash !== `#${name}`) {
     location.hash = name;
   }
@@ -585,10 +586,7 @@ function setRoutingSettingsStatus(message = "", tone = "") {
 function updatePreferenceControls() {
   const theme = document.documentElement.getAttribute("data-theme") || getStoredTheme();
   const density = getDensity();
-  settingsTheme?.querySelectorAll("button").forEach((button) => {
-    button.classList.toggle("is-selected", button.dataset.themeChoice === theme);
-    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === theme));
-  });
+  if (settingsTheme) settingsTheme.value = theme;
   settingsDensity?.querySelectorAll("button").forEach((button) => {
     button.classList.toggle("is-selected", button.dataset.densityChoice === density);
     button.setAttribute("aria-pressed", String(button.dataset.densityChoice === density));

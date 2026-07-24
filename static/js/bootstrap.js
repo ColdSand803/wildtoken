@@ -129,6 +129,7 @@ const DASHBOARD_LOG_LIMIT = 200;
 const DASHBOARD_TOP_LIMIT = 10;
 const DASHBOARD_TOP_WINDOW_KEY = "wildtoken_dashboard_top_window";
 const DASHBOARD_TOP_WINDOW_VALUES = new Set(["today", "1d", "3d", "7d", "30d"]);
+const DASHBOARD_CHANNEL_NAME_HIDDEN_KEY = "wildtoken_dashboard_channel_name_hidden";
 const DENSITY_KEY = "wildtoken_density";
 const LOG_COLUMNS_KEY = "wildtoken_log_columns";
 const UPSTREAM_COLUMNS_KEY = "wildtoken_upstream_columns";
@@ -197,11 +198,20 @@ const dashboardChannelsMeta = document.querySelector("#dashboard-channels-meta")
 const dashboardTopChannelTokens = document.querySelector("#dashboard-top-channel-tokens");
 const dashboardChannelTokensMeta = document.querySelector("#dashboard-channel-tokens-meta");
 const dashboardTopWindowSelect = document.querySelector("#dashboard-top-window");
+const dashboardChannelNameToggle = document.querySelector("#dashboard-channel-name-toggle");
 const dashboardErrorRows = document.querySelector("#dashboard-error-rows");
 
 if (dashboardTopWindowSelect) {
   dashboardTopWindowSelect.value = dashboardTopWindow;
 }
+
+let dashboardChannelNameHidden = (() => {
+  try {
+    return localStorage.getItem(DASHBOARD_CHANNEL_NAME_HIDDEN_KEY) === "true";
+  } catch {
+    return false;
+  }
+})();
 
 let upstreamRefreshTimer = null;
 let upstreamsLoadedOnce = false;
@@ -567,9 +577,15 @@ function hidePopoverLayer(element) {
 
 // Native <select> listboxes ignore CSS (border-radius especially). Intercept
 // opens and render options into #select-panel so the popup follows the theme.
+//
+// Modal <dialog> makes the rest of the document inert. A popover that is only a
+// sibling of the dialog can paint above it in the top layer but still receive no
+// pointer events (clicks pass through). Host the panel inside the open modal
+// when the trigger lives there so it escapes inertness.
 let activeSelect = null;
 let selectActiveIndex = -1;
 let selectOptionButtons = [];
+const selectPanelHome = selectPanel?.parentElement || null;
 
 function isNativeSelect(element) {
   return element instanceof HTMLSelectElement
@@ -589,24 +605,50 @@ function selectOptionEntries(select) {
   }));
 }
 
-function closeCustomSelect(restoreFocus = false) {
-  if (!selectPanel || selectPanel.hidden) {
-    activeSelect = null;
-    selectActiveIndex = -1;
-    selectOptionButtons = [];
-    return;
+function modalDialogForSelect(select) {
+  const dialog = select?.closest?.("dialog");
+  if (!(dialog instanceof HTMLDialogElement) || !dialog.open) return null;
+  try {
+    if (dialog.matches(":modal")) return dialog;
+  } catch {
+    // :modal may be unsupported; treat any open dialog as the host.
   }
+  return dialog;
+}
+
+function placeSelectPanelFor(select) {
+  if (!selectPanel) return;
+  const host = modalDialogForSelect(select) || selectPanelHome;
+  if (!host || selectPanel.parentElement === host) return;
+  if (popoverIsOpen(selectPanel)) {
+    selectPanel.hidePopover();
+  }
+  host.append(selectPanel);
+}
+
+function restoreSelectPanelHost() {
+  if (!selectPanel || !selectPanelHome || selectPanel.parentElement === selectPanelHome) return;
+  if (popoverIsOpen(selectPanel)) {
+    selectPanel.hidePopover();
+  }
+  selectPanelHome.append(selectPanel);
+}
+
+function closeCustomSelect(restoreFocus = false) {
   const select = activeSelect;
   activeSelect = null;
   selectActiveIndex = -1;
   selectOptionButtons = [];
-  selectPanel.innerHTML = "";
-  selectPanel.style.visibility = "";
-  selectPanel.style.width = "";
-  selectPanel.style.left = "";
-  selectPanel.style.top = "";
-  selectPanel.removeAttribute("aria-activedescendant");
-  hidePopoverLayer(selectPanel);
+  if (selectPanel && !selectPanel.hidden) {
+    selectPanel.innerHTML = "";
+    selectPanel.style.visibility = "";
+    selectPanel.style.width = "";
+    selectPanel.style.left = "";
+    selectPanel.style.top = "";
+    selectPanel.removeAttribute("aria-activedescendant");
+    hidePopoverLayer(selectPanel);
+  }
+  restoreSelectPanelHost();
   if (restoreFocus && select?.isConnected) {
     select.focus();
   }
@@ -717,6 +759,7 @@ function openCustomSelect(select) {
   }
 
   selectPanel.style.visibility = "hidden";
+  placeSelectPanelFor(select);
   showPopoverLayer(selectPanel, true);
   window.requestAnimationFrame(() => {
     if (activeSelect !== select) return;
@@ -808,7 +851,16 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("resize", () => closeCustomSelect());
-window.addEventListener("scroll", () => closeCustomSelect(), true);
+window.addEventListener("scroll", (event) => {
+  // Scroll events capture from the listbox too. Its own scrollbar must not
+  // be treated as a page scroll, otherwise a long option list closes at once.
+  if (selectPanel?.contains(event.target)) return;
+  closeCustomSelect();
+}, true);
+// Dialog close leaves the select trigger gone; drop the panel and restore its home node.
+document.addEventListener("close", (event) => {
+  if (event.target instanceof HTMLDialogElement) closeCustomSelect();
+}, true);
 
 function splitList(value) {
   return value

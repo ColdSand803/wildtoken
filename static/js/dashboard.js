@@ -141,6 +141,39 @@ function countStatusBuckets(items) {
   return { c2, c4, c5, cOther };
 }
 
+function updateDashboardChannelNameToggle() {
+  if (!dashboardChannelNameToggle) return;
+  const hidden = dashboardChannelNameHidden;
+  const label = hidden
+    ? "渠道名已隐藏，点击显示"
+    : "渠道名显示中，点击隐藏";
+  dashboardChannelNameToggle.setAttribute("aria-pressed", String(hidden));
+  dashboardChannelNameToggle.setAttribute("aria-label", label);
+  dashboardChannelNameToggle.title = label;
+  dashboardChannelNameToggle.classList.toggle("is-active", hidden);
+}
+
+function setDashboardChannelNameHidden(hidden) {
+  dashboardChannelNameHidden = Boolean(hidden);
+  try {
+    localStorage.setItem(DASHBOARD_CHANNEL_NAME_HIDDEN_KEY, String(dashboardChannelNameHidden));
+  } catch {
+    // Preference still applies for the current page when storage is unavailable.
+  }
+  updateDashboardChannelNameToggle();
+  if (!dashboardTopStats) return;
+  // Re-render only ranking rows from cached top stats without a full refetch.
+  const topChannelRequests = Array.isArray(dashboardTopStats.channels) ? dashboardTopStats.channels : [];
+  const topChannelTokens = Array.isArray(dashboardTopStats.channel_tokens) ? dashboardTopStats.channel_tokens : [];
+  renderDashboardRankList(dashboardTopChannels, topChannelRequests, "暂无渠道请求数据", {
+    hideNames: dashboardChannelNameHidden,
+  });
+  renderDashboardRankList(dashboardTopChannelTokens, topChannelTokens, "暂无渠道 token 数据", {
+    formatValue: formatCompactNumber,
+    hideNames: dashboardChannelNameHidden,
+  });
+}
+
 function renderDashboardRankList(container, rows, emptyText, options = {}) {
   if (!container) return;
   if (!rows.length) {
@@ -150,15 +183,32 @@ function renderDashboardRankList(container, rows, emptyText, options = {}) {
   const formatValue = typeof options.formatValue === "function"
     ? options.formatValue
     : (value) => String(Math.round(value));
+  const hideNames = Boolean(options.hideNames);
   const max = Math.max(...rows.map((row) => Number(row.count) || 0), 1);
   container.innerHTML = rows.map((row) => {
     const count = Number(row.count) || 0;
     const displayCount = formatValue(count);
     const width = Math.max(4, (count / max) * 100);
+    const channelId = (() => {
+      if (row.id == null || row.id === "") return null;
+      const n = Number(row.id);
+      return Number.isFinite(n) ? n : null;
+    })();
+    const idLabel = channelId == null ? "" : `#${channelId}`;
+    const displayName = hideNames ? "******" : String(row.name || "");
+    const titleParts = [
+      idLabel || null,
+      hideNames ? null : (row.name || null),
+      displayCount,
+    ].filter(Boolean);
+    const idHtml = channelId == null
+      ? ""
+      : `<span class="dashboard-rank-index" title="渠道 #${channelId}">${escapeHtml(idLabel)}</span>`;
     return `
-      <div class="dashboard-rank-row" title="${escapeHtml(row.name)} · ${escapeHtml(displayCount)}">
+      <div class="dashboard-rank-row" title="${escapeHtml(titleParts.join(" · "))}">
         <div class="dashboard-rank-head">
-          <span class="dashboard-rank-name">${escapeHtml(row.name)}</span>
+          ${idHtml}
+          <span class="dashboard-rank-name${hideNames ? " is-masked" : ""}">${escapeHtml(displayName)}</span>
           <span class="dashboard-rank-count">${escapeHtml(displayCount)}</span>
         </div>
         <div class="dashboard-rank-track" aria-hidden="true">
@@ -381,9 +431,12 @@ function renderDashboard() {
   if (dashboardChannelTokensMeta) {
     dashboardChannelTokensMeta.textContent = `${topWindowLabel} · Tokens Top ${topChannelTokens.length || 0}`;
   }
-  renderDashboardRankList(dashboardTopChannels, topChannelRequests, "暂无渠道请求数据");
+  renderDashboardRankList(dashboardTopChannels, topChannelRequests, "暂无渠道请求数据", {
+    hideNames: dashboardChannelNameHidden,
+  });
   renderDashboardRankList(dashboardTopChannelTokens, topChannelTokens, "暂无渠道 token 数据", {
     formatValue: formatCompactNumber,
+    hideNames: dashboardChannelNameHidden,
   });
   renderDashboardRankList(dashboardTopModels, topModelRequests, "暂无模型请求数据");
   renderDashboardRankList(dashboardTopModelTokens, topModelTokens, "暂无模型 token 数据", {

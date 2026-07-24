@@ -97,6 +97,8 @@ struct LogBodyCleanupRow {
 struct TopCountRow {
     name: String,
     count: i64,
+    /// Numeric group key when ranking by channel id; null for model name groups.
+    id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -373,6 +375,7 @@ pub async fn top_log_stats(
                 "COALESCE(NULLIF(TRIM(upstream_model), ''), NULLIF(TRIM(model), '')) IS NOT NULL",
             metric_expression: "1",
             metric_filter: None,
+            expose_group_id: false,
         },
         limit,
     )
@@ -392,6 +395,7 @@ pub async fn top_log_stats(
             source_filter: "upstream_id IS NOT NULL",
             metric_expression: "1",
             metric_filter: None,
+            expose_group_id: true,
         },
         limit,
     )
@@ -406,6 +410,7 @@ pub async fn top_log_stats(
                 "COALESCE(NULLIF(TRIM(upstream_model), ''), NULLIF(TRIM(model), '')) IS NOT NULL",
             metric_expression: "COALESCE(total_tokens, 0)",
             metric_filter: Some("total_tokens IS NOT NULL AND total_tokens > 0"),
+            expose_group_id: false,
         },
         limit,
     )
@@ -419,6 +424,7 @@ pub async fn top_log_stats(
             source_filter: "upstream_id IS NOT NULL",
             metric_expression: "COALESCE(total_tokens, 0)",
             metric_filter: Some("total_tokens IS NOT NULL AND total_tokens > 0"),
+            expose_group_id: true,
         },
         limit,
     )
@@ -439,6 +445,8 @@ struct TopLogCountSpec<'a> {
     source_filter: &'a str,
     metric_expression: &'a str,
     metric_filter: Option<&'a str>,
+    /// When true, expose the numeric group key as `id` (channel rankings).
+    expose_group_id: bool,
 }
 
 async fn top_log_counts(
@@ -449,8 +457,13 @@ async fn top_log_counts(
 ) -> Result<Vec<RequestLogTopItemOut>, AppError> {
     // Group by `group_expression` (e.g. upstream_id), but surface a display `name`.
     // When multiple names share one group key, MAX(name) picks a stable non-null label.
-    let mut query =
-        QueryBuilder::<Sqlite>::new("SELECT MAX(name) AS name, SUM(value) AS count FROM (SELECT ");
+    let id_select = if spec.expose_group_id {
+        "CAST(group_key AS INTEGER) AS id"
+    } else {
+        "CAST(NULL AS INTEGER) AS id"
+    };
+    let mut query = QueryBuilder::<Sqlite>::new("SELECT MAX(name) AS name, SUM(value) AS count, ");
+    query.push(id_select).push(" FROM (SELECT ");
     query
         .push(spec.group_expression)
         .push(" AS group_key, ")
@@ -479,6 +492,7 @@ async fn top_log_counts(
         .map(|row| RequestLogTopItemOut {
             name: row.name,
             count: row.count,
+            id: if spec.expose_group_id { row.id } else { None },
         })
         .collect())
 }
@@ -1201,18 +1215,28 @@ mod tests {
             stats
                 .channels
                 .iter()
-                .map(|item| (item.name.as_str(), item.count))
+                .map(|item| (item.id, item.name.as_str(), item.count))
                 .collect::<Vec<_>>(),
-            [("zeta", 2), ("#4", 1), ("shared", 1), ("shared", 1)]
+            [
+                (Some(3), "zeta", 2),
+                (Some(4), "#4", 1),
+                (Some(1), "shared", 1),
+                (Some(2), "shared", 1)
+            ]
         );
         // Token totals: id2=200, id3=200, id1=100, id4=80.
         assert_eq!(
             stats
                 .channel_tokens
                 .iter()
-                .map(|item| (item.name.as_str(), item.count))
+                .map(|item| (item.id, item.name.as_str(), item.count))
                 .collect::<Vec<_>>(),
-            [("shared", 200), ("zeta", 200), ("shared", 100), ("#4", 80)]
+            [
+                (Some(2), "shared", 200),
+                (Some(3), "zeta", 200),
+                (Some(1), "shared", 100),
+                (Some(4), "#4", 80)
+            ]
         );
     }
 
