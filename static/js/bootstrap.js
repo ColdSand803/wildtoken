@@ -851,7 +851,12 @@ document.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("resize", () => closeCustomSelect());
-window.addEventListener("scroll", () => closeCustomSelect(), true);
+window.addEventListener("scroll", (event) => {
+  // Scroll events capture from the listbox too. Its own scrollbar must not
+  // be treated as a page scroll, otherwise a long option list closes at once.
+  if (selectPanel?.contains(event.target)) return;
+  closeCustomSelect();
+}, true);
 // Dialog close leaves the select trigger gone; drop the panel and restore its home node.
 document.addEventListener("close", (event) => {
   if (event.target instanceof HTMLDialogElement) closeCustomSelect();

@@ -1,0 +1,1142 @@
+/*
+ * Endfield / field-engineering theme
+ * Original implementation: neutral work surfaces, a single signal color,
+ * edge instrumentation, and real console state. No game art or source assets.
+ */
+
+html[data-theme="endfield"] {
+  color-scheme: light;
+
+  --ark-ink: #191919;
+  --ark-paper: #f2f2f0;
+  --ark-signal: #fffa00;
+  --ark-state: #007a54;
+  --ef-ink: var(--ark-ink);
+  --ef-paper: var(--ark-paper);
+  --ef-surface: #e8e8e3;
+  --ef-signal: var(--ark-signal);
+  --ef-signal-ink: #6b6600;
+  --ef-state: var(--ark-state);
+
+  --bg: #e3e3de;
+  --bg-elevated: var(--ef-paper);
+  --panel: rgb(242 242 240 / 94%);
+  --panel-solid: var(--ef-paper);
+  --panel-subtle: #f8f8f4;
+  --panel-muted: #d9d9d2;
+  --panel-elevated: #ffffff;
+  --glass: rgb(242 242 240 / 92%);
+  --glass-strong: rgb(242 242 240 / 98%);
+
+  --text: var(--ef-ink);
+  --text-secondary: #383836;
+  --muted: #676762;
+  --muted-strong: #4b4b47;
+
+  --line: #bdbdb5;
+  --line-strong: var(--ef-ink);
+  --line-soft: #d5d5ce;
+
+  /* --accent remains text-safe; --ef-signal is reserved for signal surfaces. */
+  --accent: var(--ef-signal-ink);
+  --accent-strong: #484500;
+  --accent-soft: rgb(255 250 0 / 26%);
+  --accent-border: #908a00;
+  --accent-glow: rgb(255 250 0 / 40%);
+  --accent-on: var(--ef-ink);
+  --brand-ink: var(--ef-paper);
+
+  --danger: #a32626;
+  --danger-soft: rgb(163 38 38 / 9%);
+  --danger-border: rgb(163 38 38 / 46%);
+  --danger-strong: #7a1414;
+  --ok: var(--ef-state);
+  --ok-soft: rgb(0 122 84 / 10%);
+  --ok-border: rgb(0 122 84 / 46%);
+  --ok-strong: #005e40;
+  --warning: #786f00;
+  --warning-soft: rgb(255 250 0 / 27%);
+  --warning-border: #aba200;
+  --warning-strong: #4f4a00;
+  --warning-text: #4f4a00;
+
+  --focus: var(--ef-ink);
+  --focus-ring: 0 0 0 2px var(--ef-ink), 0 0 0 5px var(--ef-signal);
+  --shadow-xs: none;
+  --shadow-sm: 3px 3px 0 rgb(25 25 25 / 18%);
+  --shadow-md: 6px 6px 0 rgb(25 25 25 / 20%);
+  --shadow-lg: 10px 10px 0 rgb(25 25 25 / 24%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: none;
+
+  --code-frame-bg: #191919;
+  --code-bg: #20201e;
+  --code-text: #f3f3ed;
+  --code-muted: #afafa5;
+  --code-border: #5a5a54;
+
+  --row-hover: rgb(255 250 0 / 24%);
+  --row-disabled: rgb(217 217 210 / 60%);
+  --topbar-bg: var(--ef-paper);
+  --backdrop: rgb(25 25 25 / 58%);
+  --neutral-chip: #dbdbd4;
+  --toast-neutral: #5e5e58;
+
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  --radius-sm: 0;
+  --radius: 0;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-full: 2px;
+
+  --font-sans: "Space Grotesk", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --font-secret: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+  --topbar-height: 72px;
+  --control-h: 38px;
+  --control-h-sm: 30px;
+  --transition: 220ms cubic-bezier(.22, .8, .2, 1);
+  --blur: 0px;
+}
+
+html[data-theme="endfield"][data-ark-theme="endfield"][data-ark-depth="complex"] {
+  --ef-rail-width: 84px;
+  --ef-stage-rule: rgb(25 25 25 / 9%);
+  --ef-stage-rule-strong: rgb(25 25 25 / 16%);
+}
+
+html[data-theme="endfield"] body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--ef-stage-rule) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ef-stage-rule) 1px, transparent 1px),
+    linear-gradient(90deg, transparent 0 24%, rgb(25 25 25 / 4%) 24% 24.15%, transparent 24.15% 100%);
+  background-size: 40px 40px, 40px 40px, 100% 100%;
+  color: var(--text);
+}
+
+html[data-theme="endfield"] .aurora {
+  display: none;
+}
+
+/* Desktop shell: a pale operational rail holds navigation while the work stage
+   remains wide and unframed. */
+html[data-theme="endfield"] .app-shell {
+  display: grid;
+  grid-template-columns: var(--ef-rail-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+@media (min-width: 761px) {
+  html[data-theme="endfield"],
+  html[data-theme="endfield"] body {
+    height: 100%;
+    overflow: hidden;
+  }
+}
+
+html[data-theme="endfield"] .topbar {
+  align-items: stretch;
+  background: var(--ef-paper);
+  border: 0;
+  border-right: 1px solid var(--ef-ink);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 14px 12px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
+}
+
+html[data-theme="endfield"] .topbar::after {
+  background: var(--ef-signal);
+  bottom: auto;
+  height: 66px;
+  left: auto;
+  opacity: 1;
+  right: -2px;
+  top: 0;
+  width: 3px;
+}
+
+html[data-theme="endfield"] .topbar-brand {
+  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+html[data-theme="endfield"] .brand-mark {
+  color: var(--ef-ink);
+  filter: none;
+  height: 30px;
+  width: 30px;
+}
+
+html[data-theme="endfield"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
+}
+
+html[data-theme="endfield"] .topbar-brand h1 {
+  font-family: "Arial Narrow", "Roboto Condensed", "DIN Condensed", var(--font-sans);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .1em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+  white-space: normal;
+}
+
+html[data-theme="endfield"] .brand-label {
+  color: var(--muted);
+  display: block;
+  font-size: 8px;
+  letter-spacing: .12em;
+  margin-top: 4px;
+}
+
+html[data-theme="endfield"] .topbar-nav {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  overflow: visible;
+  padding: 0;
+  width: 100%;
+}
+
+html[data-theme="endfield"] .nav-link {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--muted-strong);
+  counter-increment: endfield-nav;
+  font-size: 12px;
+  font-weight: 700;
+  min-height: 52px;
+  min-width: 0;
+  padding: 3px 2px 13px;
+  position: relative;
+  text-align: center;
+  white-space: normal;
+  width: 100%;
+}
+
+html[data-theme="endfield"] .topbar-nav {
+  counter-reset: endfield-nav;
+}
+
+html[data-theme="endfield"] .nav-link::after {
+  bottom: 3px;
+  color: var(--muted);
+  content: counter(endfield-nav, decimal-leading-zero);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  left: 0;
+  letter-spacing: .08em;
+  position: absolute;
+  right: 0;
+}
+
+html[data-theme="endfield"] .nav-link:hover {
+  background: #deded7;
+  box-shadow: none;
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] .nav-link.active,
+html[data-theme="endfield"] .nav-link.active:hover {
+  background: var(--ef-ink);
+  border-color: var(--ef-ink);
+  box-shadow: inset 4px 0 0 var(--ef-signal);
+  color: var(--ef-paper);
+}
+
+html[data-theme="endfield"] .nav-link.active::after {
+  color: var(--ef-signal);
+}
+
+html[data-theme="endfield"] .topbar-actions {
+  align-items: stretch;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: auto;
+  width: 100%;
+}
+
+html[data-theme="endfield"] .topbar-actions > *,
+html[data-theme="endfield"] .topbar-actions button {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-theme="endfield"] .topbar-actions .live-indicator {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  color: var(--ef-state);
+  font-size: 9px;
+  justify-content: center;
+  min-height: 30px;
+  padding-top: 5px;
+}
+
+html[data-theme="endfield"] .live-label {
+  display: none;
+}
+
+html[data-theme="endfield"] .theme-toggle,
+html[data-theme="endfield"] .density-toggle,
+html[data-ark-theme] .nav-logout {
+  border-color: var(--line);
+  border-radius: 0;
+  color: var(--ef-ink);
+  min-height: 34px;
+  padding: 0 4px;
+}
+
+html[data-theme="endfield"] .theme-toggle:hover,
+html[data-theme="endfield"] .density-toggle:hover,
+html[data-ark-theme] .nav-logout:hover {
+  background: var(--ef-signal);
+  border-color: var(--ef-ink);
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] .theme-menu {
+  background: var(--ef-paper);
+  border: 1px solid var(--ef-ink);
+  border-radius: 0;
+  box-shadow: var(--shadow-md);
+  left: calc(100% + 12px);
+  max-height: calc(100dvh - 28px);
+  overflow: auto;
+  right: auto;
+  top: auto;
+  bottom: 0;
+}
+
+html[data-theme="endfield"] .theme-menu button {
+  border-radius: 0;
+  color: var(--text-secondary);
+}
+
+html[data-theme="endfield"] .theme-menu button.is-selected {
+  background: var(--ef-ink);
+  box-shadow: inset 3px 0 0 var(--ef-signal);
+  color: var(--ef-paper);
+}
+
+html[data-theme="endfield"] .content {
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  isolation: isolate;
+  margin: 0;
+  max-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: clamp(28px, 4vw, 64px) clamp(24px, 5vw, 88px) 72px;
+  position: relative;
+  scrollbar-gutter: stable;
+  width: 100%;
+}
+
+html[data-theme="endfield"] .content::before,
+html[data-theme="endfield"] .content::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+html[data-theme="endfield"] .content::before {
+  background-image:
+    linear-gradient(var(--ef-stage-rule-strong) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ef-stage-rule-strong) 1px, transparent 1px);
+  background-size: 160px 160px;
+  inset: 0 0 auto;
+  height: min(48vw, 560px);
+  mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 55%) 60%, transparent 100%);
+}
+
+html[data-theme="endfield"] .content::after {
+  border-left: 1px solid var(--ef-stage-rule-strong);
+  bottom: 56px;
+  left: clamp(16px, 2.1vw, 38px);
+  top: 92px;
+}
+
+html[data-theme="endfield"] .view > .panel {
+  animation: endfield-stage-reveal 640ms cubic-bezier(.22, .8, .2, 1) both;
+  isolation: isolate;
+  min-height: min(580px, calc(100dvh - 128px));
+  position: relative;
+}
+
+html[data-theme="endfield"] .view > .panel::before {
+  color: var(--ef-ink);
+  font-family: "Arial Narrow", "Roboto Condensed", "DIN Condensed", var(--font-sans);
+  font-size: clamp(88px, 14vw, 220px);
+  font-weight: 800;
+  line-height: .78;
+  opacity: .055;
+  pointer-events: none;
+  position: absolute;
+  right: clamp(0px, 2vw, 32px);
+  top: 0;
+  z-index: -1;
+}
+
+html[data-theme="endfield"] .view[data-view="dashboard"] > .panel::before { content: "01"; }
+html[data-theme="endfield"] .view[data-view="upstreams"] > .panel::before { content: "02"; }
+html[data-theme="endfield"] .view[data-view="logs"] > .panel::before { content: "03"; }
+html[data-theme="endfield"] .view[data-view="tokens"] > .panel::before { content: "04"; }
+html[data-theme="endfield"] .view[data-view="settings"] > .panel::before { content: "05"; }
+
+html[data-theme="endfield"] .view > .panel > .panel-head {
+  align-items: end;
+  border-bottom: 2px solid var(--ef-ink);
+  gap: 24px;
+  margin-bottom: 28px;
+  min-height: 116px;
+  padding: 0 0 18px;
+  position: relative;
+}
+
+html[data-theme="endfield"] .view > .panel > .panel-head::before {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+html[data-theme="endfield"] .view[data-view="dashboard"] > .panel > .panel-head::before { content: "01 / OPERATIONS MONITOR"; }
+html[data-theme="endfield"] .view[data-view="upstreams"] > .panel > .panel-head::before { content: "02 / ROUTE MATRIX"; }
+html[data-theme="endfield"] .view[data-view="logs"] > .panel > .panel-head::before { content: "03 / REQUEST ARCHIVE"; }
+html[data-theme="endfield"] .view[data-view="tokens"] > .panel > .panel-head::before { content: "04 / ACCESS CONTROL"; }
+html[data-theme="endfield"] .view[data-view="settings"] > .panel > .panel-head::before { content: "05 / CONSOLE CONFIG"; }
+
+html[data-theme="endfield"] .view > .panel > .panel-head > div:first-child {
+  min-width: 0;
+}
+
+html[data-theme="endfield"] .view > .panel > .panel-head h2 {
+  font-family: "Arial Narrow", "Roboto Condensed", "DIN Condensed", var(--font-sans);
+  font-size: clamp(34px, 5vw, 68px);
+  font-weight: 800;
+  letter-spacing: -.035em;
+  line-height: .9;
+  text-transform: uppercase;
+}
+
+html[data-theme="endfield"] .view > .panel > .panel-head p {
+  color: var(--muted-strong);
+  font-size: 13px;
+  max-width: 62ch;
+}
+
+/* Shared controls and data surfaces. */
+html[data-theme="endfield"] button {
+  border-radius: 0;
+  box-shadow: none;
+  font-weight: 700;
+  letter-spacing: .015em;
+  min-height: var(--control-h);
+}
+
+html[data-theme="endfield"] button:not(.secondary):not(.danger):not(.ghost):not(.status-switch):not([role="option"]):not([role="menuitem"]):not([role="menuitemradio"]) {
+  background: var(--ef-signal);
+  border-color: var(--ef-ink);
+  box-shadow: 3px 3px 0 var(--ef-ink);
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] button:not(.secondary):not(.danger):not(.ghost):not(.status-switch):not([role="option"]):not([role="menuitem"]):not([role="menuitemradio"]):hover {
+  background: var(--ef-paper);
+  box-shadow: 3px 3px 0 var(--ef-ink), inset 4px 0 0 var(--ef-signal);
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] button.secondary {
+  background: var(--ef-paper);
+  border-color: var(--ef-ink);
+  border-radius: 0;
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] button.secondary:hover {
+  background: var(--ef-ink);
+  border-color: var(--ef-ink);
+  color: var(--ef-paper);
+}
+
+html[data-theme="endfield"] button.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+html[data-theme="endfield"] button.danger:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+html[data-theme="endfield"] button.ghost {
+  border-radius: 0;
+}
+
+/* Base URL utilities remain compact, but need a square target beside the URL. */
+html[data-theme="endfield"] .url-cell-actions {
+  gap: 3px;
+}
+
+html[data-theme="endfield"] .url-action {
+  align-items: center;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0;
+  width: 30px;
+}
+
+html[data-theme="endfield"] .url-action svg {
+  height: 14px;
+  width: 14px;
+}
+
+html[data-theme="endfield"] button:focus-visible,
+html[data-theme="endfield"] input:focus-visible,
+html[data-theme="endfield"] select:focus-visible,
+html[data-theme="endfield"] textarea:focus-visible,
+html[data-theme="endfield"] summary:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: 0;
+}
+
+html[data-theme="endfield"] .upstream-toolbar,
+html[data-theme="endfield"] .upstream-toolbar .filter-field {
+  overflow: visible;
+}
+
+html[data-theme="endfield"] #upstream-search:focus-visible {
+  box-shadow: 0 0 0 1px var(--ef-ink);
+  outline: 2px solid var(--ef-signal);
+  outline-offset: 3px;
+}
+
+html[data-theme="endfield"] input,
+html[data-theme="endfield"] select,
+html[data-theme="endfield"] textarea {
+  background-color: #fbfbf7;
+  border-color: var(--line-strong);
+  border-radius: 0;
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] input:hover,
+html[data-theme="endfield"] select:hover,
+html[data-theme="endfield"] textarea:hover {
+  border-color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] input:focus,
+html[data-theme="endfield"] select:focus,
+html[data-theme="endfield"] textarea:focus {
+  background-color: #fff;
+  border-color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] .select-panel {
+  backdrop-filter: none;
+  background: var(--ef-paper);
+  border-color: var(--ef-ink);
+  border-radius: 0;
+  box-shadow: var(--shadow-md);
+}
+
+html[data-theme="endfield"] .select-panel button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--text-secondary);
+}
+
+html[data-theme="endfield"] .select-panel button:hover,
+html[data-theme="endfield"] .select-panel button.is-active,
+html[data-theme="endfield"] .select-panel button:focus-visible {
+  background: #e3e3de;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] .select-panel button.is-selected,
+html[data-theme="endfield"] .select-panel button.is-selected:hover,
+html[data-theme="endfield"] .select-panel button.is-selected.is-active,
+html[data-theme="endfield"] .select-panel button.is-selected:focus-visible {
+  background: var(--ef-ink);
+  box-shadow: inset 3px 0 0 var(--ef-signal);
+  color: var(--ef-paper);
+}
+
+html[data-theme="endfield"] .status,
+html[data-theme="endfield"] .summary-strip,
+html[data-theme="endfield"] .settings-card,
+html[data-theme="endfield"] .dashboard-card,
+html[data-theme="endfield"] .table-wrap,
+html[data-theme="endfield"] .system-info-grid,
+html[data-theme="endfield"] .test-model-result,
+html[data-theme="endfield"] .test-model-prompt,
+html[data-theme="endfield"] .test-model-response {
+  background: var(--panel-solid);
+  border-color: var(--line-strong);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html[data-theme="endfield"] .dashboard-card,
+html[data-theme="endfield"] .settings-card {
+  border-top: 3px solid var(--ef-ink);
+}
+
+html[data-theme="endfield"] .dashboard-card:hover {
+  border-top-color: var(--ef-signal-ink);
+}
+
+html[data-theme="endfield"] .summary-strip span,
+html[data-theme="endfield"] .system-info-grid,
+html[data-theme="endfield"] .system-info-item {
+  border-color: var(--line);
+}
+
+html[data-theme="endfield"] .dashboard-card-head,
+html[data-theme="endfield"] .settings-card-head,
+html[data-theme="endfield"] .panel-head,
+html[data-theme="endfield"] .form-section-head {
+  border-color: var(--line-strong);
+}
+
+html[data-theme="endfield"] .eyebrow,
+html[data-theme="endfield"] .dashboard-card-meta,
+html[data-theme="endfield"] .settings-local-tag {
+  color: var(--ef-signal-ink);
+}
+
+html[data-theme="endfield"] .settings-local-tag,
+html[data-theme="endfield"] .settings-readonly-tag,
+html[data-theme="endfield"] .settings-security-mark,
+html[data-theme="endfield"] .settings-revision {
+  border-color: var(--line-strong);
+  border-radius: 0;
+}
+
+html[data-theme="endfield"] .settings-theme-choice-group {
+  grid-column: 1 / -1;
+}
+
+html[data-theme="endfield"] .settings-theme-choice-group .field-hint {
+  display: block;
+  margin-top: 8px;
+}
+
+html[data-theme="endfield"] #settings-theme {
+  background-color: var(--panel-solid);
+  border-color: var(--ef-ink);
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  min-height: 42px;
+}
+
+html[data-theme="endfield"] .segmented-control {
+  border-color: var(--line-strong);
+  border-radius: 0;
+}
+
+html[data-theme="endfield"] .segmented-control button {
+  border-radius: 0;
+}
+
+html[data-theme="endfield"] .segmented-control button.is-selected {
+  background: var(--ef-ink);
+  box-shadow: inset 3px 0 0 var(--ef-signal);
+  color: var(--ef-paper);
+}
+
+html[data-theme="endfield"] .admin-table {
+  background: var(--panel-solid);
+}
+
+html[data-theme="endfield"] .admin-table th {
+  background: var(--ef-ink);
+  border-color: #55554f;
+  color: var(--ef-paper);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+html[data-theme="endfield"] .admin-table td {
+  border-color: var(--line);
+}
+
+html[data-theme="endfield"] .admin-table tbody tr:hover td {
+  background: #e8e8e2;
+}
+
+html[data-theme="endfield"] .admin-table tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--ef-signal);
+}
+
+html[data-theme="endfield"] .status-switch {
+  background: var(--panel-solid);
+  border: 1px solid var(--ef-ink);
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--muted-strong);
+  display: inline-flex;
+  height: 28px;
+  justify-content: flex-start;
+  min-height: 28px;
+  padding: 0;
+  position: relative;
+  width: 60px;
+}
+
+html[data-theme="endfield"] .status-switch::after {
+  color: currentColor;
+  content: "OFF";
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  line-height: 1;
+  position: absolute;
+  right: 6px;
+}
+
+html[data-theme="endfield"] .status-switch-track {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  height: 100%;
+  padding: 3px;
+  width: 100%;
+}
+
+html[data-theme="endfield"] .status-switch-thumb {
+  background: var(--ef-ink);
+  border-radius: 0;
+  box-shadow: none;
+  height: 20px;
+  width: 18px;
+}
+
+html[data-theme="endfield"] .status-switch.on {
+  background: var(--ef-signal);
+  border-color: var(--ef-ink);
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] .status-switch.on::after {
+  content: "ON";
+  left: 7px;
+  right: auto;
+}
+
+html[data-theme="endfield"] .status-switch.on .status-switch-track {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html[data-theme="endfield"] .status-switch.on .status-switch-thumb {
+  background: var(--ef-ink);
+  transform: translateX(36px);
+}
+
+html[data-theme="endfield"] .status-switch.off:hover .status-switch-track,
+html[data-theme="endfield"] .status-switch.on:hover .status-switch-track {
+  background: transparent;
+  border-color: transparent;
+}
+
+html[data-theme="endfield"] .status-switch:hover {
+  background: #deded7;
+  border-color: var(--ef-ink);
+  box-shadow: none;
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] .status-switch.on:hover {
+  background: var(--ef-signal);
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] .status-switch:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+/* The upstream table and column chooser use native checkboxes. Give them the
+   same square, signal-led control language as the rest of the field system. */
+html[data-theme="endfield"] input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: var(--ef-paper) !important;
+  border: 1px solid var(--ef-ink) !important;
+  border-radius: 0;
+  box-shadow: none !important;
+  cursor: pointer;
+  display: inline-grid;
+  height: 16px;
+  margin: 0;
+  place-content: center;
+  position: relative;
+  transition: background-color var(--transition), border-color var(--transition), box-shadow var(--transition);
+  width: 16px !important;
+}
+
+html[data-theme="endfield"] input[type="checkbox"]::after {
+  border-bottom: 2px solid var(--ef-ink);
+  border-right: 2px solid var(--ef-ink);
+  content: "";
+  height: 7px;
+  opacity: 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+  width: 3px;
+}
+
+html[data-theme="endfield"] input[type="checkbox"]:checked,
+html[data-theme="endfield"] input[type="checkbox"]:indeterminate {
+  background: var(--ef-signal) !important;
+  border-color: var(--ef-ink) !important;
+}
+
+html[data-theme="endfield"] input[type="checkbox"]:checked::after {
+  opacity: 1;
+}
+
+html[data-theme="endfield"] input[type="checkbox"]:indeterminate::after {
+  background: var(--ef-ink);
+  border: 0;
+  height: 2px;
+  opacity: 1;
+  transform: none;
+  width: 8px;
+}
+
+html[data-theme="endfield"] input[type="checkbox"]:hover:not(:disabled) {
+  background: #fff !important;
+}
+
+html[data-theme="endfield"] input[type="checkbox"]:checked:hover:not(:disabled),
+html[data-theme="endfield"] input[type="checkbox"]:indeterminate:hover:not(:disabled) {
+  background: var(--ef-signal) !important;
+}
+
+html[data-theme="endfield"] input[type="checkbox"]:focus-visible {
+  box-shadow: 0 0 0 2px var(--ef-signal) !important;
+  outline: 2px solid var(--ef-ink);
+  outline-offset: 2px;
+}
+
+html[data-theme="endfield"] input[type="checkbox"]:disabled {
+  background: var(--panel-muted) !important;
+  border-color: var(--line) !important;
+  cursor: not-allowed;
+  opacity: .7;
+}
+
+html[data-theme="endfield"][data-density="compact"] .status-switch {
+  height: 24px;
+  min-height: 24px;
+  width: 52px;
+}
+
+html[data-theme="endfield"][data-density="compact"] .status-switch-thumb {
+  height: 16px;
+  width: 16px;
+}
+
+html[data-theme="endfield"][data-density="compact"] .status-switch.on .status-switch-thumb {
+  transform: translateX(30px);
+}
+
+html[data-theme="endfield"] .model-chip,
+html[data-theme="endfield"] .status-chip,
+html[data-theme="endfield"] .token-chip {
+  border-radius: 0;
+}
+
+html[data-theme="endfield"] dialog {
+  background: var(--ef-paper);
+  border: 1px solid var(--ef-ink);
+  border-radius: 0;
+  box-shadow: var(--shadow-lg);
+  color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] dialog::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: grayscale(.25);
+}
+
+html[data-theme="endfield"] dialog .modal-head,
+html[data-theme="endfield"] dialog .upstream-modal-head,
+html[data-theme="endfield"] dialog .modal-footer {
+  border-color: var(--ef-ink);
+}
+
+html[data-theme="endfield"] pre,
+html[data-theme="endfield"] .token-value-box,
+html[data-theme="endfield"] .code-frame {
+  border-radius: 0;
+}
+
+html[data-theme="endfield"] .live-dot {
+  background: var(--ef-state);
+  box-shadow: 0 0 0 2px rgb(0 122 84 / 16%);
+}
+
+@keyframes endfield-stage-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+    transform: translateX(-12px);
+  }
+  to {
+    clip-path: inset(0);
+    transform: translateX(0);
+  }
+}
+
+/* The rail becomes a true mobile navigation dock instead of a compressed
+   desktop column. Theme and density remain available from Settings. */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme="endfield"] .app-shell {
+    display: flex;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  html[data-theme="endfield"] .topbar {
+    align-items: center;
+    border-bottom: 1px solid var(--ef-ink);
+    border-right: 0;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    height: auto;
+    justify-content: space-between;
+    min-height: 58px;
+    padding: 8px 12px;
+    position: sticky;
+    width: 100%;
+  }
+
+  html[data-theme="endfield"] .topbar::after {
+    bottom: -2px;
+    height: 3px;
+    left: 0;
+    right: auto;
+    top: auto;
+    width: 72px;
+  }
+
+  html[data-theme="endfield"] .topbar-brand {
+    align-items: center;
+    flex-direction: row;
+    gap: 8px;
+    width: auto;
+  }
+
+  html[data-theme="endfield"] .brand-mark {
+    height: 25px;
+    width: 25px;
+  }
+
+  html[data-theme="endfield"] .brand-text {
+    text-align: left;
+    width: auto;
+  }
+
+  html[data-theme="endfield"] .topbar-brand h1 {
+    font-size: 12px;
+    letter-spacing: .08em;
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  html[data-theme="endfield"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="endfield"] .topbar-actions {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="endfield"] .topbar-actions .live-indicator,
+  html[data-theme="endfield"] .density-toggle,
+  html[data-theme="endfield"] .theme-menu-wrap {
+    display: none;
+  }
+
+  html[data-ark-theme] .nav-logout {
+    min-height: 36px;
+    padding: 0 9px;
+    width: auto;
+  }
+
+  html[data-theme="endfield"] .topbar-nav {
+    background: var(--ef-ink);
+    border: 1px solid var(--ef-ink);
+    bottom: max(8px, env(safe-area-inset-bottom));
+    box-shadow: 0 5px 0 rgb(25 25 25 / 22%);
+    display: grid;
+    gap: 1px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 8px;
+    padding: 3px;
+    position: fixed;
+    right: 8px;
+    width: auto;
+    z-index: 40;
+  }
+
+  html[data-theme="endfield"] .nav-link {
+    color: #c8c8c0;
+    min-height: 54px;
+    padding: 4px 1px 14px;
+  }
+
+  html[data-theme="endfield"] .nav-link:hover {
+    background: #353531;
+    color: var(--ef-paper);
+  }
+
+  html[data-theme="endfield"] .nav-link.active,
+  html[data-theme="endfield"] .nav-link.active:hover {
+    background: var(--ef-paper);
+    border-color: var(--ef-paper);
+    box-shadow: inset 0 3px 0 var(--ef-signal);
+    color: var(--ef-ink);
+  }
+
+  html[data-theme="endfield"] .nav-link::after {
+    color: #96968f;
+  }
+
+  html[data-theme="endfield"] .nav-link.active::after {
+    color: var(--ef-signal-ink);
+  }
+
+  html[data-theme="endfield"] .content {
+    display: block;
+    height: auto;
+    overflow: visible;
+    padding: 28px 16px 38px;
+    width: 100%;
+  }
+
+  html[data-theme="endfield"] .content::after {
+    display: none;
+  }
+
+  html[data-theme="endfield"] .content::before {
+    background-size: 96px 96px;
+    height: 380px;
+  }
+
+  html[data-theme="endfield"] .view > .panel {
+    min-height: 0;
+  }
+
+  html[data-theme="endfield"] .view > .panel > .panel-head {
+    align-items: start;
+    display: grid;
+    gap: 10px;
+    margin-bottom: 20px;
+    min-height: 0;
+    padding-bottom: 14px;
+  }
+
+  html[data-theme="endfield"] .view > .panel > .panel-head::before {
+    margin-bottom: 0;
+  }
+
+  html[data-theme="endfield"] .view > .panel > .panel-head h2 {
+    font-size: clamp(32px, 12vw, 48px);
+  }
+
+  html[data-theme="endfield"] .view > .panel::before {
+    font-size: 96px;
+    right: 0;
+    top: 2px;
+  }
+
+  html[data-theme="endfield"] .settings-theme-choice-group {
+    grid-column: auto;
+  }
+
+  html[data-theme="endfield"] .dashboard-card,
+  html[data-theme="endfield"] .settings-card {
+    border-top-width: 2px;
+  }
+}
+
+@media (max-width: 400px) {
+  html[data-theme="endfield"] .topbar-brand h1 {
+    font-size: 10px;
+  }
+
+  html[data-theme="endfield"] .nav-link {
+    font-size: 11px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="endfield"] .view > .panel {
+    animation: none;
+  }
+}

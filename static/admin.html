@@ -9,11 +9,15 @@
       (function () {
         try {
           /* 与 js/events.js 中的 THEMES 注册表保持一致 */
-          var themes = ["dark", "light", "win95", "animal-island", "cyberpunk", "nes", "crt", "minecraft"];
+          var themes = ["dark", "light", "endfield", "win95", "animal-island", "cyberpunk", "nes", "crt", "minecraft"];
           var t = localStorage.getItem("wildtoken_theme");
           if (t === "animal") t = "animal-island";
           if (themes.indexOf(t) === -1) t = "dark";
           document.documentElement.setAttribute("data-theme", t);
+          if (t === "endfield") {
+            document.documentElement.setAttribute("data-ark-theme", "endfield");
+            document.documentElement.setAttribute("data-ark-depth", "complex");
+          }
           if (t === "animal-island") {
             try { localStorage.setItem("wildtoken_theme", t); } catch (e) {}
           }
@@ -32,7 +36,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Orbitron:wght@500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&family=Rajdhani:wght@400;500;600;700&family=VT323&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Orbitron:wght@500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&family=Rajdhani:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css" />
@@ -501,7 +505,7 @@
                   <span class="settings-local-tag">本地</span>
                 </div>
                 <div class="settings-preferences-grid">
-                  <fieldset class="settings-choice-group"><legend>主题</legend><div class="segmented-control segmented-control-auto" id="settings-theme" aria-label="主题"></div></fieldset>
+                  <fieldset class="settings-choice-group settings-theme-choice-group"><legend>主题</legend><select id="settings-theme" aria-label="主题"></select><span class="field-hint">Endfield 为原创建筑与调度界面风格，采用第 3 档工程系统布局。</span></fieldset>
                   <fieldset class="settings-choice-group"><legend>显示密度</legend><div class="segmented-control" id="settings-density" aria-label="显示密度"><button type="button" data-density-choice="comfortable">舒适</button><button type="button" data-density-choice="compact">紧凑</button></div></fieldset>
                   <label class="field"><span class="field-label">日志自动刷新</span><select id="settings-log-refresh" aria-label="日志自动刷新间隔"><option value="0">关闭</option><option value="5">每 5 秒</option><option value="10">每 10 秒</option><option value="30">每 30 秒</option></select><span class="field-hint">仅影响日志页；手动刷新始终可用。</span></label>
                   <label class="field"><span class="field-label">默认首页</span><select id="settings-default-home" aria-label="默认首页"><option value="dashboard">看板</option><option value="upstreams">渠道</option><option value="logs">日志</option><option value="tokens">令牌</option><option value="settings">设置</option></select><span class="field-hint">直接打开带有效地址片段的页面时，仍会优先进入该页面。</span></label>
