@@ -280,6 +280,13 @@ if (dashboardRefreshButton) {
     loadDashboardData();
   });
 }
+if (dashboardChannelNameToggle) {
+  updateDashboardChannelNameToggle();
+  dashboardChannelNameToggle.addEventListener("click", () => {
+    setDashboardChannelNameHidden(!dashboardChannelNameHidden);
+  });
+}
+
 if (dashboardTopWindowSelect) {
   dashboardTopWindowSelect.addEventListener("change", () => {
     const nextWindow = DASHBOARD_TOP_WINDOW_VALUES.has(dashboardTopWindowSelect.value)

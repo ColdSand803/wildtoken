@@ -129,6 +129,7 @@ const DASHBOARD_LOG_LIMIT = 200;
 const DASHBOARD_TOP_LIMIT = 10;
 const DASHBOARD_TOP_WINDOW_KEY = "wildtoken_dashboard_top_window";
 const DASHBOARD_TOP_WINDOW_VALUES = new Set(["today", "1d", "3d", "7d", "30d"]);
+const DASHBOARD_CHANNEL_NAME_HIDDEN_KEY = "wildtoken_dashboard_channel_name_hidden";
 const DENSITY_KEY = "wildtoken_density";
 const LOG_COLUMNS_KEY = "wildtoken_log_columns";
 const UPSTREAM_COLUMNS_KEY = "wildtoken_upstream_columns";
@@ -197,11 +198,20 @@ const dashboardChannelsMeta = document.querySelector("#dashboard-channels-meta")
 const dashboardTopChannelTokens = document.querySelector("#dashboard-top-channel-tokens");
 const dashboardChannelTokensMeta = document.querySelector("#dashboard-channel-tokens-meta");
 const dashboardTopWindowSelect = document.querySelector("#dashboard-top-window");
+const dashboardChannelNameToggle = document.querySelector("#dashboard-channel-name-toggle");
 const dashboardErrorRows = document.querySelector("#dashboard-error-rows");
 
 if (dashboardTopWindowSelect) {
   dashboardTopWindowSelect.value = dashboardTopWindow;
 }
+
+let dashboardChannelNameHidden = (() => {
+  try {
+    return localStorage.getItem(DASHBOARD_CHANNEL_NAME_HIDDEN_KEY) === "true";
+  } catch {
+    return false;
+  }
+})();
 
 let upstreamRefreshTimer = null;
 let upstreamsLoadedOnce = false;

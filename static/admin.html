@@ -179,16 +179,32 @@
                   <h3>Top 排行</h3>
                   <p class="dashboard-card-sub">渠道请求、渠道 Tokens、模型请求、模型 Tokens 按所选周期统计；模型按实际转发给上游的名称归类</p>
                 </div>
-                <label class="dashboard-top-window-field" for="dashboard-top-window">
-                  <span>排行周期</span>
-                  <select id="dashboard-top-window" aria-label="Top 模型和 Top 渠道统计周期">
-                    <option value="today">今日</option>
-                    <option value="1d">1d</option>
-                    <option value="3d">3d</option>
-                    <option value="7d">7d</option>
-                    <option value="30d">30d</option>
-                  </select>
-                </label>
+                <div class="dashboard-ranking-controls">
+                  <button
+                    id="dashboard-channel-name-toggle"
+                    type="button"
+                    class="secondary ghost log-sensitive-toggle"
+                    aria-pressed="false"
+                    aria-label="渠道名显示中，点击隐藏"
+                    title="渠道名显示中，点击隐藏"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path class="log-sensitive-eye" d="M2.5 12s3.4-5.5 9.5-5.5S21.5 12 21.5 12 18.1 17.5 12 17.5 2.5 12 2.5 12Z"></path>
+                      <circle class="log-sensitive-eye" cx="12" cy="12" r="2.5"></circle>
+                      <path class="log-sensitive-slash" d="m4 4 16 16"></path>
+                    </svg>
+                  </button>
+                  <label class="dashboard-top-window-field" for="dashboard-top-window">
+                    <span>排行周期</span>
+                    <select id="dashboard-top-window" aria-label="Top 模型和 Top 渠道统计周期">
+                      <option value="today">今日</option>
+                      <option value="1d">1d</option>
+                      <option value="3d">3d</option>
+                      <option value="7d">7d</option>
+                      <option value="30d">30d</option>
+                    </select>
+                  </label>
+                </div>
               </div>
               <div class="dashboard-card">
                 <div class="dashboard-card-head">
