@@ -1,0 +1,8 @@
+{
+  "id": "win95",
+  "label": "Win95",
+  "css": "theme.css",
+  "swatch": ["#c0c0c0", "#000080"],
+  "version": "1.0.0",
+  "description": "Classic desktop chrome theme with teal workspace, hard bevels, and MS-DOS-style code surfaces."
+}

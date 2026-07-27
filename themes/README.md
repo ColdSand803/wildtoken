@@ -3,8 +3,9 @@
 Put CSS-only admin themes in this directory. Docker Compose mounts this folder
 into the container at `/app/themes`.
 
-`themes/bleach` is the bundled Bleach theme pack and follows the same format as
-third-party packs.
+Bundled theme packs follow the same format as third-party packs. The default
+dark and light themes stay in `static/css`; every other shipped theme lives in
+this directory.
 
 Each theme pack is one child directory:
 

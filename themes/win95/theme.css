@@ -1,5 +1,91 @@
+/* Win95 — silver chrome on a teal desktop, hard edges everywhere.
+   Variables and structural bevels live together in this theme pack. */
+html[data-theme="win95"] {
+  color-scheme: light;
+
+  --bg: #008080;
+  --bg-elevated: #c0c0c0;
+  --panel: #c0c0c0;
+  --panel-solid: #c0c0c0;
+  --panel-subtle: #cacaca;
+  --panel-muted: #b4b4b4;
+  --panel-elevated: #d4d0c8;
+  --glass: #c0c0c0;
+  --glass-strong: #c0c0c0;
+
+  --text: #000000;
+  --text-secondary: #1c1c1c;
+  --muted: #424242;
+  --muted-strong: #1f1f1f;
+
+  --line: #808080;
+  --line-strong: #404040;
+  --line-soft: #9e9e9e;
+
+  --accent: #000080;
+  --accent-strong: #000060;
+  --accent-soft: rgb(0 0 128 / 10%);
+  --accent-border: rgb(0 0 128 / 55%);
+  --accent-glow: rgb(0 0 128 / 20%);
+  --accent-on: #ffffff;
+  --brand-ink: #ffffff;
+
+  --danger: #a40000;
+  --danger-soft: rgb(164 0 0 / 10%);
+  --danger-border: rgb(164 0 0 / 45%);
+  --danger-strong: #7c0000;
+  --ok: #007a00;
+  --ok-soft: rgb(0 122 0 / 10%);
+  --ok-border: rgb(0 122 0 / 45%);
+  --ok-strong: #005c00;
+  --warning: #7a6000;
+  --warning-soft: rgb(122 96 0 / 12%);
+  --warning-border: rgb(122 96 0 / 45%);
+  --warning-strong: #5c4800;
+  --warning-text: #4d3d00;
+
+  --focus: #000080;
+  --focus-ring: 0 0 0 1px #ffffff, 0 0 0 3px #000080;
+  --shadow-xs: 1px 1px 0 rgb(0 0 0 / 30%);
+  --shadow-sm: 2px 2px 0 rgb(0 0 0 / 30%);
+  --shadow-md: 3px 3px 0 rgb(0 0 0 / 32%);
+  --shadow-lg: 5px 5px 0 rgb(0 0 0 / 36%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px #000080;
+
+  /* Code frames — MS-DOS EDIT blue */
+  --code-frame-bg: #000080;
+  --code-bg: #000080;
+  --code-text: #ffffff;
+  --code-muted: #8f8fd4;
+  --code-border: #404040;
+
+  --row-hover: rgb(0 0 128 / 8%);
+  --row-disabled: rgb(192 192 192 / 65%);
+  --topbar-bg: #c0c0c0;
+  --backdrop: rgb(0 0 0 / 45%);
+  --neutral-chip: #d4d0c8;
+  --toast-neutral: #5c5c5c;
+
+  /* No aurora on the teal desktop */
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  --radius-sm: 0px;
+  --radius: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 0px;
+
+  --font-sans: Tahoma, "MS Sans Serif", "Microsoft Sans Serif", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Courier New", "Fira Code", ui-monospace, monospace;
+
+  --blur: 0px;
+}
+
 /* ── Win95 theme structure ──────────────────────────────────
-   Palette lives in base.css (html[data-theme="win95"]); this file
+   The variable palette above sets the colors; this file
    trades glass and glow for silver chrome and hard bevels.
 
    Bevel recipe:

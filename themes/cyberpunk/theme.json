@@ -1,0 +1,8 @@
+{
+  "id": "cyberpunk",
+  "label": "赛博朋克",
+  "css": "theme.css",
+  "swatch": ["#0a0612", "#ff2bd6"],
+  "version": "1.0.0",
+  "description": "Neon HUD theme with black-violet surfaces, magenta accents, and cyan focus states."
+}

@@ -1,0 +1,8 @@
+{
+  "id": "animal-island",
+  "label": "动物岛",
+  "css": "theme.css",
+  "swatch": ["#f8f8f0", "#19c8b9"],
+  "version": "1.0.0",
+  "description": "Pastel island theme with parchment surfaces, mint accents, and rounded game-UI controls."
+}

@@ -11,7 +11,14 @@
           var safeThemeId = /^[a-z][a-z0-9-]{0,47}$/;
           var safeThemeCss = /^\/theme-packs\/[a-z][a-z0-9-]{0,47}\/[A-Za-z0-9._/-]+\.css$/;
           var bundledThemeCss = {
+            win95: "/theme-packs/win95/theme.css",
+            "animal-island": "/theme-packs/animal-island/theme.css",
+            cyberpunk: "/theme-packs/cyberpunk/theme.css",
+            nes: "/theme-packs/nes/theme.css",
+            crt: "/theme-packs/crt/theme.css",
+            minecraft: "/theme-packs/minecraft/theme.css",
             bleach: "/theme-packs/bleach/theme.css",
+            endfield: "/theme-packs/endfield/theme.css",
           };
           var t = localStorage.getItem("wildtoken_theme");
           if (t === "animal") t = "animal-island";

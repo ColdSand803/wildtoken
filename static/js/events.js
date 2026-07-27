@@ -9,15 +9,19 @@ const themeMenu = document.querySelector("#theme-menu");
 const BUILT_IN_THEMES = Object.freeze([
   { id: "dark", label: "深色", swatch: ["#020617", "#22d3ee"] },
   { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"] },
-  { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"] },
-  { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"] },
-  { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"] },
-  { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"] },
-  { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"] },
-  { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"] },
-  { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"] },
 ]);
-let THEMES = [...BUILT_IN_THEMES];
+
+const BUNDLED_THEME_PACKS = Object.freeze([
+  { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"], css: "/theme-packs/win95/theme.css" },
+  { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"], css: "/theme-packs/animal-island/theme.css" },
+  { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"], css: "/theme-packs/cyberpunk/theme.css" },
+  { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"], css: "/theme-packs/nes/theme.css" },
+  { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"], css: "/theme-packs/crt/theme.css" },
+  { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"], css: "/theme-packs/minecraft/theme.css" },
+  { id: "bleach", label: "Bleach", swatch: ["#fff7ed", "#f97316"], css: "/theme-packs/bleach/theme.css" },
+  { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"], css: "/theme-packs/endfield/theme.css" },
+]);
+let THEMES = [...BUILT_IN_THEMES, ...BUNDLED_THEME_PACKS];
 
 // 旧 id "animal" 迁移为 "animal-island"
 function normalizeThemeId(value) {
@@ -207,8 +211,34 @@ function normalizeExternalTheme(theme) {
   };
 }
 
+function mergeThemePacks(rawThemes) {
+  const knownIds = new Set(BUILT_IN_THEMES.map((theme) => theme.id));
+  const rawThemeById = new Map();
+  rawThemes
+    .map(normalizeExternalTheme)
+    .forEach((theme) => {
+      if (!theme || knownIds.has(theme.id) || rawThemeById.has(theme.id)) return;
+      rawThemeById.set(theme.id, theme);
+    });
+
+  const externalThemes = [];
+  BUNDLED_THEME_PACKS.forEach((theme) => {
+    if (knownIds.has(theme.id)) return;
+    knownIds.add(theme.id);
+    externalThemes.push(rawThemeById.get(theme.id) || theme);
+    rawThemeById.delete(theme.id);
+  });
+
+  rawThemeById.forEach((theme) => {
+    if (knownIds.has(theme.id)) return;
+    knownIds.add(theme.id);
+    externalThemes.push(theme);
+  });
+  return externalThemes;
+}
+
 async function loadExternalThemes() {
-  let externalThemes = [];
+  let rawThemes = [];
   try {
     const response = await fetch("/api/themes", {
       cache: "no-store",
@@ -216,19 +246,12 @@ async function loadExternalThemes() {
     });
     if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
     const payload = await response.json();
-    const rawThemes = Array.isArray(payload) ? payload : Array.isArray(payload?.themes) ? payload.themes : [];
-    const knownIds = new Set(BUILT_IN_THEMES.map((theme) => theme.id));
-    externalThemes = rawThemes
-      .map(normalizeExternalTheme)
-      .filter((theme) => {
-        if (!theme || knownIds.has(theme.id)) return false;
-        knownIds.add(theme.id);
-        return true;
-      });
+    rawThemes = Array.isArray(payload) ? payload : Array.isArray(payload?.themes) ? payload.themes : [];
   } catch (error) {
     console.warn("Unable to load theme packs", error);
   }
 
+  const externalThemes = mergeThemePacks(rawThemes);
   THEMES = [...BUILT_IN_THEMES, ...externalThemes];
 }
 
