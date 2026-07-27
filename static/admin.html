@@ -10,6 +10,9 @@
         try {
           var safeThemeId = /^[a-z][a-z0-9-]{0,47}$/;
           var safeThemeCss = /^\/theme-packs\/[a-z][a-z0-9-]{0,47}\/[A-Za-z0-9._/-]+\.css$/;
+          var bundledThemeCss = {
+            bleach: "/theme-packs/bleach/theme.css",
+          };
           var t = localStorage.getItem("wildtoken_theme");
           if (t === "animal") t = "animal-island";
           if (!safeThemeId.test(t || "")) t = "dark";
@@ -22,6 +25,12 @@
           var themeCss = localStorage.getItem("wildtoken_theme_css");
           if (themeCssId === t && themeCss && themeCss.indexOf("..") === -1 && safeThemeCss.test(themeCss)) {
             document.documentElement.setAttribute("data-theme-pack-css", themeCss);
+          } else if (bundledThemeCss[t] && safeThemeCss.test(bundledThemeCss[t])) {
+            document.documentElement.setAttribute("data-theme-pack-css", bundledThemeCss[t]);
+            try {
+              localStorage.setItem("wildtoken_theme_css_id", t);
+              localStorage.setItem("wildtoken_theme_css", bundledThemeCss[t]);
+            } catch (e) {}
           }
           if (t === "animal-island") {
             try { localStorage.setItem("wildtoken_theme", t); } catch (e) {}
@@ -49,11 +58,7 @@
       (function () {
         var href = document.documentElement.getAttribute("data-theme-pack-css");
         if (!href) return;
-        var link = document.createElement("link");
-        link.id = "theme-pack-css";
-        link.rel = "stylesheet";
-        link.href = href;
-        document.head.appendChild(link);
+        document.write('<link id="theme-pack-css" rel="stylesheet" href="' + href + '" />');
       })();
     </script>
   </head>
