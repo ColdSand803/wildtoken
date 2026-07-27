@@ -79,29 +79,9 @@ TOKIO_WORKER_THREADS=4 APP__SERVER__PORT=3100 APP__DATABASE__MAX_CONNECTIONS=3 A
 
 管理界面的默认深色/浅色主题仍从 `static/css/*.css` 加载；其他主题都作为 CSS-only 主题包放在 `themes/` 下。随仓库提供的 Win95、动物岛、赛博朋克、像素、CRT、我的世界、Bleach 和 Endfield 都不再内嵌到主样式表，但会随发布压缩包和 Docker 镜像一起分发。Docker Compose 另外把宿主机 `./themes` 只读挂载到容器的 `/app/themes`，该挂载会覆盖镜像内自带的同名目录。
 
-每个主题包使用一个子目录：
+每个主题包是 `themes/` 下的一个子目录，含一份 `theme.json` 清单和它指向的 `.css` 文件；主题 CSS 以 `html[data-theme="<id>"]` 为顶层选择器，通过覆盖 CSS 变量改变外观。WildToken 只读取清单并按同源静态文件加载 CSS，不执行主题包里的 JavaScript。
 
-```text
-themes/
-  soul-society/
-    theme.json
-    theme.css
-```
-
-`theme.json`：
-
-```json
-{
-  "id": "soul-society",
-  "label": "Soul Society",
-  "css": "theme.css",
-  "swatch": ["#111827", "#f97316"],
-  "version": "1.0.0",
-  "description": "Optional short note"
-}
-```
-
-`id` 必须与目录名一致，只能使用小写字母、数字和连字符；`css` 必须指向主题目录内的相对 `.css` 文件。主题 CSS 应使用 `html[data-theme="soul-society"]` 作为顶层选择器。WildToken 只读取清单并按同源静态文件加载 CSS，不执行主题包里的 JavaScript。
+清单字段、可用的 CSS 变量清单和调试方式见 [`themes/README.md`](themes/README.md)。
 
 ## 路由规则
 
