@@ -14,6 +14,7 @@
 @import url("./css/crt.css");
 @import url("./css/minecraft.css");
 @import url("./css/endfield.css");
+@import url("./css/bleach.css");
 
 html[data-theme] .token-preview-code,
 html[data-theme] .token-value-box code,

@@ -8,6 +8,7 @@ const THEMES = [
   { id: "dark", label: "深色", swatch: ["#020617", "#22d3ee"] },
   { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"] },
   { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"] },
+  { id: "bleach", label: "Bleach", swatch: ["#fff7ed", "#f97316"] },
   { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"] },
   { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"] },
   { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"] },
