@@ -262,6 +262,10 @@ pub async fn run_server(
             "/api/admin/upstreams/{id}/balance",
             post(handlers::admin::admin_fetch_upstream_balance),
         )
+        .route(
+            "/api/admin/upstreams/{id}/balance/sub2api",
+            post(handlers::admin::admin_fetch_upstream_sub2api_balance),
+        )
         // Tokens
         .route(
             "/api/admin/tokens",
