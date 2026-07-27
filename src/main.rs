@@ -15,6 +15,7 @@ mod middleware;
 mod models;
 mod proxy;
 mod state;
+mod themes;
 
 #[cfg(windows)]
 mod tray;

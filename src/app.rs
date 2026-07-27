@@ -302,6 +302,12 @@ pub async fn run_server(
             HeaderValue::from_static("no-store, no-cache, must-revalidate, max-age=0"),
         ))
         .service(ServeDir::new("static"));
+    let theme_pack_service = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store, no-cache, must-revalidate, max-age=0"),
+        ))
+        .service(ServeDir::new(settings.themes.dir.clone()));
 
     // Only the downstream compatibility API is intentionally cross-origin.
     // The browser admin console is same-origin, so exposing its credentialed
@@ -323,7 +329,9 @@ pub async fn run_server(
             get(|| async { axum::response::Redirect::to("/admin") }),
         )
         .route("/admin", get(serve_admin_html))
+        .route("/api/themes", get(handlers::admin::list_public_theme_packs))
         .nest_service("/static", static_service)
+        .nest_service("/theme-packs", theme_pack_service)
         .merge(admin_routes)
         .merge(proxy_routes)
         .layer(TraceLayer::new_for_http())
