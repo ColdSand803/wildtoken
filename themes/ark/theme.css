@@ -103,7 +103,7 @@ html[data-theme="ark"] {
 
 html[data-theme="ark"][data-ark-theme="ark"][data-ark-depth="complex"] {
   --ark-rail-width: 88px;
-  --ark-nav-active-overhang: 16px;
+  --ark-nav-active-overhang: 4px;
   --ark-stage-grid: rgb(235 248 249 / 7%);
   --ark-stage-grid-strong: rgb(24 209 255 / 16%);
   --ark-sector: rgb(24 209 255 / 7%);
@@ -226,6 +226,7 @@ html[data-theme="ark"] .topbar-nav {
   flex: 0 0 auto;
   flex-direction: column;
   gap: 4px;
+  overflow-x: visible;
   padding: 0;
   width: 100%;
 }

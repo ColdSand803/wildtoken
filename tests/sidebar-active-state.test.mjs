@@ -17,10 +17,13 @@ function activeRule(css, theme, startAt = 0) {
 }
 
 test("Ark and Endfield active desktop tabs extend but reset in the mobile dock", () => {
-  for (const [theme, token] of [["ark", "--ark-nav-active-overhang"], ["endfield", "--ef-nav-active-overhang"]]) {
+  for (const [theme, token, overhang] of [
+    ["ark", "--ark-nav-active-overhang", "4px"],
+    ["endfield", "--ef-nav-active-overhang", "16px"],
+  ]) {
     const css = read(themeCssPath[theme]);
     const desktop = activeRule(css, theme);
-    assert.match(css, new RegExp(`${token}:\\s*16px`));
+    assert.match(css, new RegExp(`${token}:\\s*${overhang}`));
     assert.match(desktop, new RegExp(`margin-inline-end:\\s*calc\\(var\\(${token}\\) \\* -1\\)`));
     assert.match(desktop, new RegExp(`width:\\s*calc\\(100% \\+ var\\(${token}\\)\\)`));
 
@@ -30,4 +33,11 @@ test("Ark and Endfield active desktop tabs extend but reset in the mobile dock",
     assert.match(mobile, /margin-inline-end:\s*0/);
     assert.match(mobile, /width:\s*100%/);
   }
+
+  const ark = read(themeCssPath.ark);
+  assert.match(
+    ark,
+    /html\[data-theme="ark"\] \.topbar-nav \{[^}]*overflow-x:\s*visible/s,
+    "Ark navigation must keep the active item's right-side signal visible without scrolling",
+  );
 });
