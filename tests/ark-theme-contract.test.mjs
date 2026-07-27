@@ -4,20 +4,44 @@ import test from "node:test";
 import vm from "node:vm";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+const ARK_CSS = "themes/ark/theme.css";
 
 function createThemeContext(storedTheme) {
   const attributes = new Map();
   const storedValues = new Map([["wildtoken_theme", storedTheme]]);
+  const elements = new Map();
+  const createElement = () => {
+    const elementAttributes = new Map();
+    const element = {
+      getAttribute: (name) => elementAttributes.get(name) ?? null,
+      setAttribute: (name, value) => elementAttributes.set(name, String(value)),
+      parentNode: null,
+      remove: () => {
+        if (element.id) elements.delete(element.id);
+        element.parentNode = null;
+      },
+    };
+    return element;
+  };
   const document = {
     documentElement: {
       getAttribute: (name) => attributes.get(name) ?? null,
       removeAttribute: (name) => attributes.delete(name),
       setAttribute: (name, value) => attributes.set(name, String(value)),
     },
+    createElement,
+    getElementById: (id) => elements.get(id) ?? null,
+    head: {
+      appendChild: (element) => {
+        element.parentNode = document.head;
+        if (element.id) elements.set(element.id, element);
+      },
+    },
     querySelector: () => null,
   };
   const localStorage = {
     getItem: (name) => storedValues.get(name) ?? null,
+    removeItem: (name) => storedValues.delete(name),
     setItem: (name, value) => storedValues.set(name, String(value)),
   };
 
@@ -44,7 +68,7 @@ test("pre-paint boot preserves a stored Ark selection", () => {
 test("runtime selection persists Ark's complex root contract", () => {
   const { attributes, storedValues, context } = createThemeContext("dark");
   const source = read("static/js/events.js");
-  const definitionsEnd = source.indexOf("renderThemeChoices();");
+  const definitionsEnd = source.indexOf("\ninitializeThemes();");
 
   assert.notEqual(definitionsEnd, -1, "events.js must retain its theme initialization marker");
   vm.runInContext(source.slice(0, definitionsEnd), context, { filename: "events-theme-definitions.js" });
@@ -59,7 +83,7 @@ test("runtime selection persists Ark's complex root contract", () => {
 test("Endfield selection retains its existing complex family contract", () => {
   const { attributes, context } = createThemeContext("dark");
   const source = read("static/js/events.js");
-  const definitionsEnd = source.indexOf("renderThemeChoices();");
+  const definitionsEnd = source.indexOf("\ninitializeThemes();");
 
   vm.runInContext(source.slice(0, definitionsEnd), context, { filename: "events-theme-definitions.js" });
   vm.runInContext('applyTheme("endfield");', context, { filename: "events-theme-endfield.js" });
@@ -72,7 +96,7 @@ test("Endfield selection retains its existing complex family contract", () => {
 test("selecting a non-Ark theme clears the Ark root contract", () => {
   const { attributes, context } = createThemeContext("dark");
   const source = read("static/js/events.js");
-  const definitionsEnd = source.indexOf("renderThemeChoices();");
+  const definitionsEnd = source.indexOf("\ninitializeThemes();");
 
   vm.runInContext(source.slice(0, definitionsEnd), context, { filename: "events-theme-definitions.js" });
   vm.runInContext('applyTheme("ark"); applyTheme("light");', context, { filename: "events-theme-cleanup.js" });
@@ -83,7 +107,7 @@ test("selecting a non-Ark theme clears the Ark root contract", () => {
 });
 
 test("Ark primary action rules leave navigation and utility controls to their own states", () => {
-  const css = read("static/css/ark.css");
+  const css = read(ARK_CSS);
   const selectors = [...css.matchAll(/(html\[data-theme="ark"\] button:not\(:where\([\s\S]*?\)\))(?::hover)?\s*\{/g)].map(
     ([, selector]) => selector,
   );
@@ -106,7 +130,7 @@ test("Ark primary action rules leave navigation and utility controls to their ow
 });
 
 test("Ark's shared button geometry does not override inline utility-control sizing or type", () => {
-  const css = read("static/css/ark.css");
+  const css = read(ARK_CSS);
   const sharedButtonRule = css.match(/html\[data-theme="ark"\] button\s*\{([\s\S]*?)\n\}/);
 
   assert.ok(sharedButtonRule, "Ark must define a shared button geometry rule");
@@ -114,7 +138,7 @@ test("Ark's shared button geometry does not override inline utility-control sizi
 });
 
 test("Ark keyboard focus remains visible when a control also owns an active-state shadow", () => {
-  const css = read("static/css/ark.css");
+  const css = read(ARK_CSS);
   const focusRule = css.match(/html\[data-theme="ark"\] button:focus-visible,[\s\S]*?html\[data-theme="ark"\] summary:focus-visible\s*\{([\s\S]*?)\n\}/);
 
   assert.ok(focusRule, "Ark must define a shared keyboard-focus rule");
@@ -123,7 +147,7 @@ test("Ark keyboard focus remains visible when a control also owns an active-stat
 });
 
 test("Ark desktop theme menu opens into the visible content stage from the bottom rail", () => {
-  const css = read("static/css/ark.css");
+  const css = read(ARK_CSS);
   const menuRule = css.match(/html\[data-theme="ark"\] \.theme-menu\s*\{([\s\S]*?)\n\}/);
 
   assert.ok(menuRule, "Ark must define the desktop theme-menu position");

@@ -1,22 +1,28 @@
 // ── Themes (registry-driven; switching saves immediately) ──
 const THEME_KEY = "wildtoken_theme";
+const THEME_CSS_KEY = "wildtoken_theme_css";
+const THEME_CSS_ID_KEY = "wildtoken_theme_css_id";
+const THEME_PACK_LINK_ID = "theme-pack-css";
 const themeToggle = document.querySelector("#theme-toggle");
 const themeMenu = document.querySelector("#theme-menu");
 
-// 新增主题时同步三处：此注册表、admin.html 头部内联白名单、主题变量块
-const THEMES = [
+const BUILT_IN_THEMES = Object.freeze([
   { id: "dark", label: "深色", swatch: ["#020617", "#22d3ee"] },
   { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"] },
-  { id: "ark", label: "Ark", swatch: ["#080a0b", "#18d1ff"] },
-  { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"] },
-  { id: "bleach", label: "Bleach", swatch: ["#fff7ed", "#f97316"] },
-  { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"] },
-  { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"] },
-  { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"] },
-  { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"] },
-  { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"] },
-  { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"] },
-];
+]);
+
+const BUNDLED_THEME_PACKS = Object.freeze([
+  { id: "ark", label: "Ark", swatch: ["#080a0b", "#18d1ff"], css: "/theme-packs/ark/theme.css" },
+  { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"], css: "/theme-packs/win95/theme.css" },
+  { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"], css: "/theme-packs/animal-island/theme.css" },
+  { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"], css: "/theme-packs/cyberpunk/theme.css" },
+  { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"], css: "/theme-packs/nes/theme.css" },
+  { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"], css: "/theme-packs/crt/theme.css" },
+  { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"], css: "/theme-packs/minecraft/theme.css" },
+  { id: "bleach", label: "Bleach", swatch: ["#fff7ed", "#f97316"], css: "/theme-packs/bleach/theme.css" },
+  { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"], css: "/theme-packs/endfield/theme.css" },
+]);
+let THEMES = [...BUILT_IN_THEMES, ...BUNDLED_THEME_PACKS];
 
 const ARK_THEME_CONFIG = {
   ark: { family: "ark", depth: "complex", optionLabel: "OPS SYSTEM / 03" },
@@ -28,12 +34,27 @@ function normalizeThemeId(value) {
   return value === "animal" ? "animal-island" : value;
 }
 
+function isSafeThemeId(value) {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,47}$/.test(value);
+}
+
+function isSafeThemeCssHref(value) {
+  return typeof value === "string"
+    && value.indexOf("..") === -1
+    && /^\/theme-packs\/[a-z][a-z0-9-]{0,47}\/[A-Za-z0-9._/-]+\.css$/.test(value);
+}
+
+function findTheme(value) {
+  const id = normalizeThemeId(value);
+  return THEMES.find((theme) => theme.id === id) || null;
+}
+
 function isKnownTheme(value) {
-  return THEMES.some((theme) => theme.id === normalizeThemeId(value));
+  return Boolean(findTheme(value));
 }
 
 function themeLabel(id) {
-  return THEMES.find((theme) => theme.id === id)?.label || id;
+  return findTheme(id)?.label || id;
 }
 
 function themeMenuChoices() {
@@ -61,9 +82,50 @@ function getStoredTheme() {
   }
 }
 
+function setThemePackStylesheet(theme) {
+  const css = theme?.css || "";
+  let link = document.getElementById(THEME_PACK_LINK_ID);
+  if (!isSafeThemeCssHref(css)) {
+    link?.remove();
+    return;
+  }
+
+  if (!link) {
+    link = document.createElement("link");
+    link.id = THEME_PACK_LINK_ID;
+    link.rel = "stylesheet";
+  }
+  const appStyles = document.querySelector('link[href="/static/styles.css"]');
+  if (appStyles && appStyles.nextSibling !== link && typeof appStyles.after === "function") {
+    appStyles.after(link);
+  } else if (!link.parentNode) {
+    document.head.appendChild(link);
+  }
+  if (link.getAttribute("href") !== css) {
+    link.setAttribute("href", css);
+  }
+}
+
+function rememberTheme(next, theme) {
+  try {
+    localStorage.setItem(THEME_KEY, next);
+    if (isSafeThemeCssHref(theme?.css || "")) {
+      localStorage.setItem(THEME_CSS_ID_KEY, next);
+      localStorage.setItem(THEME_CSS_KEY, theme.css);
+    } else {
+      localStorage.removeItem(THEME_CSS_ID_KEY);
+      localStorage.removeItem(THEME_CSS_KEY);
+    }
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
 function applyTheme(theme) {
-  const next = isKnownTheme(theme) ? normalizeThemeId(theme) : "dark";
+  const themeDef = findTheme(theme) || findTheme("dark");
+  const next = themeDef.id;
   const arkTheme = ARK_THEME_CONFIG[next];
+  setThemePackStylesheet(themeDef);
   document.documentElement.setAttribute("data-theme", next);
   if (arkTheme) {
     document.documentElement.setAttribute("data-ark-theme", arkTheme.family);
@@ -72,11 +134,7 @@ function applyTheme(theme) {
     document.documentElement.removeAttribute("data-ark-theme");
     document.documentElement.removeAttribute("data-ark-depth");
   }
-  try {
-    localStorage.setItem(THEME_KEY, next);
-  } catch {
-    /* ignore quota / private mode */
-  }
+  rememberTheme(next, themeDef);
   if (themeToggle) {
     const label = `选择主题（当前：${themeLabel(next)}）`;
     themeToggle.setAttribute("aria-label", label);
@@ -94,24 +152,131 @@ function applyTheme(theme) {
 function cycleTheme() {
   const current = document.documentElement.getAttribute("data-theme") || getStoredTheme();
   const index = THEMES.findIndex((theme) => theme.id === current);
-  applyTheme(THEMES[(index + 1) % THEMES.length].id);
+  const nextIndex = index >= 0 ? (index + 1) % THEMES.length : 0;
+  applyTheme(THEMES[nextIndex].id);
 }
 
 function renderThemeChoices() {
   if (themeMenu) {
-    themeMenu.innerHTML = THEMES.map(
-      (theme) => `
-      <button type="button" role="menuitemradio" aria-checked="false" data-theme-choice="${theme.id}">
-        <span class="theme-swatch" style="--swatch-bg:${theme.swatch[0]};--swatch-accent:${theme.swatch[1]}" aria-hidden="true"></span>
-        <span>${theme.label}</span>
-      </button>`,
-    ).join("");
+    const fragment = document.createDocumentFragment();
+    THEMES.forEach((theme) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.setAttribute("role", "menuitemradio");
+      button.setAttribute("aria-checked", "false");
+      button.dataset.themeChoice = theme.id;
+
+      const swatch = document.createElement("span");
+      swatch.className = "theme-swatch";
+      swatch.style.setProperty("--swatch-bg", theme.swatch[0]);
+      swatch.style.setProperty("--swatch-accent", theme.swatch[1]);
+      swatch.setAttribute("aria-hidden", "true");
+
+      const label = document.createElement("span");
+      label.textContent = theme.label;
+
+      button.append(swatch, label);
+      fragment.append(button);
+    });
+    themeMenu.replaceChildren(fragment);
   }
   if (settingsTheme) {
-    settingsTheme.innerHTML = THEMES.map(
-      (theme) => `<option value="${theme.id}">${theme.label}${ARK_THEME_CONFIG[theme.id] ? ` · ${ARK_THEME_CONFIG[theme.id].optionLabel}` : ""}</option>`,
-    ).join("");
+    const fragment = document.createDocumentFragment();
+    THEMES.forEach((theme) => {
+      const option = document.createElement("option");
+      option.value = theme.id;
+      option.textContent = `${theme.label}${ARK_THEME_CONFIG[theme.id] ? ` · ${ARK_THEME_CONFIG[theme.id].optionLabel}` : ""}`;
+      fragment.append(option);
+    });
+    settingsTheme.replaceChildren(fragment);
   }
+}
+
+function normalizeHexColor(value, fallback) {
+  return typeof value === "string" && /^#[0-9a-fA-F]{3,8}$/.test(value.trim())
+    ? value.trim()
+    : fallback;
+}
+
+function normalizeExternalTheme(theme) {
+  if (!theme || typeof theme !== "object") return null;
+  const id = normalizeThemeId(String(theme.id || "").trim());
+  const css = String(theme.css || "").trim();
+  if (!isSafeThemeId(id) || !isSafeThemeCssHref(css)) return null;
+
+  const rawLabel = String(theme.label || theme.name || id).replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  const swatch = Array.isArray(theme.swatch) ? theme.swatch : [];
+  return {
+    id,
+    label: rawLabel.slice(0, 64) || id,
+    swatch: [
+      normalizeHexColor(swatch[0], "#f8fafc"),
+      normalizeHexColor(swatch[1], "#f97316"),
+    ],
+    css,
+    external: true,
+  };
+}
+
+function mergeThemePacks(rawThemes) {
+  const knownIds = new Set(BUILT_IN_THEMES.map((theme) => theme.id));
+  const rawThemeById = new Map();
+  rawThemes
+    .map(normalizeExternalTheme)
+    .forEach((theme) => {
+      if (!theme || knownIds.has(theme.id) || rawThemeById.has(theme.id)) return;
+      rawThemeById.set(theme.id, theme);
+    });
+
+  const externalThemes = [];
+  BUNDLED_THEME_PACKS.forEach((theme) => {
+    if (knownIds.has(theme.id)) return;
+    knownIds.add(theme.id);
+    externalThemes.push(rawThemeById.get(theme.id) || theme);
+    rawThemeById.delete(theme.id);
+  });
+
+  rawThemeById.forEach((theme) => {
+    if (knownIds.has(theme.id)) return;
+    knownIds.add(theme.id);
+    externalThemes.push(theme);
+  });
+  return externalThemes;
+}
+
+async function loadExternalThemes() {
+  let rawThemes = [];
+  try {
+    const response = await fetch("/api/themes", {
+      cache: "no-store",
+      headers: { accept: "application/json" },
+    });
+    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+    const payload = await response.json();
+    rawThemes = Array.isArray(payload) ? payload : Array.isArray(payload?.themes) ? payload.themes : [];
+  } catch (error) {
+    console.warn("Unable to load theme packs", error);
+  }
+
+  const externalThemes = mergeThemePacks(rawThemes);
+  THEMES = [...BUILT_IN_THEMES, ...externalThemes];
+}
+
+function refreshThemeCommandSubtitle() {
+  try {
+    const command = COMMANDS.find((item) => item.id === "theme");
+    if (command) command.subtitle = THEMES.map((theme) => theme.label).join(" / ");
+  } catch {
+    // COMMANDS is declared later in this file; it will be available after startup yields.
+  }
+}
+
+async function initializeThemes() {
+  renderThemeChoices();
+  await loadExternalThemes();
+  refreshThemeCommandSubtitle();
+  renderThemeChoices();
+  applyTheme(getStoredTheme());
 }
 
 function setThemeMenuOpen(open, { focus = false, position = "selected" } = {}) {
@@ -121,8 +286,7 @@ function setThemeMenuOpen(open, { focus = false, position = "selected" } = {}) {
   if (open && focus) focusThemeMenuChoice(position);
 }
 
-renderThemeChoices();
-applyTheme(getStoredTheme());
+initializeThemes();
 if (themeToggle) {
   themeToggle.addEventListener("click", () => setThemeMenuOpen(Boolean(themeMenu?.hidden), { focus: true }));
   themeToggle.addEventListener("keydown", (event) => {

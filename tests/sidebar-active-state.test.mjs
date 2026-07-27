@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+const themeCssPath = {
+  ark: "themes/ark/theme.css",
+  endfield: "themes/endfield/theme.css",
+};
 
 function activeRule(css, theme, startAt = 0) {
   const selector = `html[data-theme="${theme}"] .nav-link.active,`;
@@ -14,7 +18,7 @@ function activeRule(css, theme, startAt = 0) {
 
 test("Ark and Endfield active desktop tabs extend but reset in the mobile dock", () => {
   for (const [theme, token] of [["ark", "--ark-nav-active-overhang"], ["endfield", "--ef-nav-active-overhang"]]) {
-    const css = read(`static/css/${theme}.css`);
+    const css = read(themeCssPath[theme]);
     const desktop = activeRule(css, theme);
     assert.match(css, new RegExp(`${token}:\\s*16px`));
     assert.match(desktop, new RegExp(`margin-inline-end:\\s*calc\\(var\\(${token}\\) \\* -1\\)`));

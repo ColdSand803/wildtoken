@@ -290,25 +290,53 @@ function closeBalanceDialog() {
   }
 }
 
-function formatUsd(value) {
-  return typeof value === "number" ? `$${value.toFixed(2)}` : "-";
+function formatBalanceAmount(value, unit = "USD") {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "-";
+  }
+  const fixed = Math.abs(value) >= 100 ? value.toFixed(2) : value.toFixed(4);
+  const formatted = fixed.replace(/\.?0+$/, "");
+  return unit === "USD" ? `$${formatted}` : `${formatted} ${unit}`;
 }
 
-async function showBalance(upstream) {
-  balanceTitle.textContent = `余额查询：${upstream.name}`;
+function renderBalanceRow(label, value) {
+  return `<div class="balance-row"><span class="label">${escapeHtml(label)}</span><span class="value">${escapeHtml(value)}</span></div>`;
+}
+
+function renderBalanceResult(result, provider) {
+  const unit = result.unit || "USD";
+  if (provider === "sub2api" || result.provider === "sub2api") {
+    const rows = [
+      renderBalanceRow("余额", formatBalanceAmount(result.remaining_usd, unit)),
+      renderBalanceRow("累计实耗", formatBalanceAmount(result.used_usd, unit)),
+    ];
+    if (result.plan_name) rows.push(renderBalanceRow("计划", result.plan_name));
+    if (typeof result.is_valid === "boolean") rows.push(renderBalanceRow("状态", result.is_valid ? "有效" : "无效"));
+    if (result.mode) rows.push(renderBalanceRow("模式", result.mode));
+    return rows.join("");
+  }
+  return [
+    renderBalanceRow("总额", formatBalanceAmount(result.total_usd, unit)),
+    renderBalanceRow("已用", formatBalanceAmount(result.used_usd, unit)),
+    renderBalanceRow("剩余", formatBalanceAmount(result.remaining_usd, unit)),
+  ].join("");
+}
+
+async function showBalance(upstream, provider = "new-api") {
+  const providerName = provider === "sub2api" ? "sub2api" : "New-API";
+  const endpoint = provider === "sub2api"
+    ? `/api/admin/upstreams/${upstream.id}/balance/sub2api`
+    : `/api/admin/upstreams/${upstream.id}/balance`;
+  balanceTitle.textContent = `${providerName} 余额：${upstream.name}`;
   balanceSummary.textContent = "正在查询...";
   balanceBody.innerHTML = "";
   openBalanceDialog();
 
   try {
-    const result = await api(`/api/admin/upstreams/${upstream.id}/balance`, { method: "POST" });
+    const result = await api(endpoint, { method: "POST" });
     if (result.ok) {
       balanceSummary.textContent = "查询成功";
-      balanceBody.innerHTML = `
-        <div class="balance-row"><span class="label">总额</span><span class="value">${formatUsd(result.total_usd)}</span></div>
-        <div class="balance-row"><span class="label">已用</span><span class="value">${formatUsd(result.used_usd)}</span></div>
-        <div class="balance-row"><span class="label">剩余</span><span class="value">${formatUsd(result.remaining_usd)}</span></div>
-      `;
+      balanceBody.innerHTML = renderBalanceResult(result, provider);
     } else {
       balanceSummary.textContent = "查询失败";
       balanceBody.innerHTML = `<p class="muted">${escapeHtml(result.message || "未知错误")}</p>`;
@@ -562,7 +590,8 @@ function actionMenuMarkup(upstreamId) {
   return `
     <button type="button" role="menuitem" data-action="test-model" data-id="${upstreamId}">测试模型</button>
     <button type="button" role="menuitem" data-action="test" data-id="${upstreamId}">测试连接</button>
-    <button type="button" role="menuitem" data-action="balance" data-id="${upstreamId}">查询余额</button>
+    <button type="button" role="menuitem" data-action="balance" data-id="${upstreamId}">查询 New-API 余额</button>
+    <button type="button" role="menuitem" data-action="balance-sub2api" data-id="${upstreamId}">查询 sub2api 余额</button>
     <button type="button" role="menuitem" data-action="models" data-id="${upstreamId}">拉取模型</button>
     <div class="action-menu-separator" role="separator"></div>
     <button type="button" role="menuitem" data-action="edit" data-id="${upstreamId}">编辑</button>

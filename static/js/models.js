@@ -467,7 +467,12 @@ async function handleUpstreamAction(button) {
   }
 
   if (button.dataset.action === "balance") {
-    await showBalance(upstream);
+    await showBalance(upstream, "new-api");
+    return;
+  }
+
+  if (button.dataset.action === "balance-sub2api") {
+    await showBalance(upstream, "sub2api");
   }
 }
 

@@ -1,5 +1,90 @@
+/* NES / 像素 — hard 8-bit console HUD: chunky shadows, NES palette, zero radius.
+   Variables and structural pixel chrome live together in this theme pack. */
+html[data-theme="nes"] {
+  color-scheme: dark;
+
+  --bg: #0a0a14;
+  --bg-elevated: #121222;
+  --panel: #181a2a;
+  --panel-solid: #181a2a;
+  --panel-subtle: #202238;
+  --panel-muted: #2c2e4a;
+  --panel-elevated: #383a58;
+  --glass: #181a2a;
+  --glass-strong: #181a2a;
+
+  --text: #fcfcfc;
+  --text-secondary: #d8d8e0;
+  --muted: #9898a8;
+  --muted-strong: #c8c8d0;
+
+  --line: #686888;
+  --line-strong: #fcfcfc;
+  --line-soft: #3c3c58;
+
+  --accent: #e52521;
+  --accent-strong: #ff4a40;
+  --accent-soft: rgb(229 37 33 / 20%);
+  --accent-border: #fcfcfc;
+  --accent-glow: rgb(229 37 33 / 0%); /* no blur glow — pixel only */
+  --accent-on: #ffffff;
+  --brand-ink: #ffffff;
+
+  --danger: #e52521;
+  --danger-soft: rgb(229 37 33 / 16%);
+  --danger-border: #e52521;
+  --danger-strong: #ff6b63;
+  --ok: #92cc41;
+  --ok-soft: rgb(146 204 65 / 16%);
+  --ok-border: #92cc41;
+  --ok-strong: #b4e06a;
+  --warning: #f7d51d;
+  --warning-soft: rgb(247 213 29 / 16%);
+  --warning-border: #f7d51d;
+  --warning-strong: #ffe566;
+  --warning-text: #f7d51d;
+
+  --focus: #f7d51d;
+  --focus-ring: 0 0 0 2px #0a0a14, 0 0 0 5px #f7d51d;
+  --shadow-xs: 2px 2px 0 #000000;
+  --shadow-sm: 4px 4px 0 #000000;
+  --shadow-md: 6px 6px 0 #000000;
+  --shadow-lg: 8px 8px 0 #000000;
+  --shadow: var(--shadow-sm);
+  --glow-accent: 4px 4px 0 #000000;
+
+  --code-frame-bg: #060610;
+  --code-bg: #0e0e1a;
+  --code-text: #fcfcfc;
+  --code-muted: #808098;
+  --code-border: #686888;
+
+  --row-hover: rgb(32 156 238 / 28%);
+  --row-disabled: rgb(10 10 20 / 55%);
+  --topbar-bg: #209cee;
+  --backdrop: rgb(0 0 0 / 72%);
+  --neutral-chip: #2c2e4a;
+  --toast-neutral: #9898a8;
+
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  --radius-sm: 0px;
+  --radius: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 0px;
+
+  --font-sans: "DotGothic16", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "VT323", "Fira Code", ui-monospace, Consolas, monospace;
+
+  --transition: 0ms steps(1, end);
+  --blur: 0px;
+}
+
 /* ── NES / 像素 theme structure ─────────────────────────────
-   Palette lives in base.css (html[data-theme="nes"]); this file
+   The variable palette above sets the colors; this file
    hard-pushes 8-bit console HUD: dual hard borders, chunky pixel
    shadows (4–6px), NES red/blue/yellow blocks, Press Start titles.
 

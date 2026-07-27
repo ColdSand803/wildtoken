@@ -8,16 +8,38 @@
     <script>
       (function () {
         try {
-          /* 与 js/events.js 中的 THEMES 注册表保持一致 */
-          var themes = ["dark", "light", "ark", "endfield", "bleach", "win95", "animal-island", "cyberpunk", "nes", "crt", "minecraft"];
+          var safeThemeId = /^[a-z][a-z0-9-]{0,47}$/;
+          var safeThemeCss = /^\/theme-packs\/[a-z][a-z0-9-]{0,47}\/[A-Za-z0-9._/-]+\.css$/;
+          var bundledThemeCss = {
+            ark: "/theme-packs/ark/theme.css",
+            win95: "/theme-packs/win95/theme.css",
+            "animal-island": "/theme-packs/animal-island/theme.css",
+            cyberpunk: "/theme-packs/cyberpunk/theme.css",
+            nes: "/theme-packs/nes/theme.css",
+            crt: "/theme-packs/crt/theme.css",
+            minecraft: "/theme-packs/minecraft/theme.css",
+            bleach: "/theme-packs/bleach/theme.css",
+            endfield: "/theme-packs/endfield/theme.css",
+          };
           var t = localStorage.getItem("wildtoken_theme");
           if (t === "animal") t = "animal-island";
-          if (themes.indexOf(t) === -1) t = "dark";
+          if (!safeThemeId.test(t || "")) t = "dark";
           document.documentElement.setAttribute("data-theme", t);
           var arkThemeFamilies = { ark: "ark", endfield: "endfield" };
           if (arkThemeFamilies[t]) {
             document.documentElement.setAttribute("data-ark-theme", arkThemeFamilies[t]);
             document.documentElement.setAttribute("data-ark-depth", "complex");
+          }
+          var themeCssId = localStorage.getItem("wildtoken_theme_css_id");
+          var themeCss = localStorage.getItem("wildtoken_theme_css");
+          if (themeCssId === t && themeCss && themeCss.indexOf("..") === -1 && safeThemeCss.test(themeCss)) {
+            document.documentElement.setAttribute("data-theme-pack-css", themeCss);
+          } else if (bundledThemeCss[t] && safeThemeCss.test(bundledThemeCss[t])) {
+            document.documentElement.setAttribute("data-theme-pack-css", bundledThemeCss[t]);
+            try {
+              localStorage.setItem("wildtoken_theme_css_id", t);
+              localStorage.setItem("wildtoken_theme_css", bundledThemeCss[t]);
+            } catch (e) {}
           }
           if (t === "animal-island") {
             try { localStorage.setItem("wildtoken_theme", t); } catch (e) {}
@@ -41,6 +63,13 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css" />
+    <script>
+      (function () {
+        var href = document.documentElement.getAttribute("data-theme-pack-css");
+        if (!href) return;
+        document.write('<link id="theme-pack-css" rel="stylesheet" href="' + href + '" />');
+      })();
+    </script>
   </head>
   <body>
     <div class="aurora" aria-hidden="true">

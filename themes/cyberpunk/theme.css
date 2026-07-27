@@ -1,5 +1,91 @@
+/* Cyberpunk / 赛博朋克 — Night City HUD: void black-violet, hot magenta + electric cyan.
+   Variables and structural neon chrome live together in this theme pack. */
+html[data-theme="cyberpunk"] {
+  color-scheme: dark;
+
+  --bg: #03010a;
+  --bg-elevated: #0a0414;
+  --panel: rgb(16 8 28 / 94%);
+  --panel-solid: #10081c;
+  --panel-subtle: #160c26;
+  --panel-muted: #1c1030;
+  --panel-elevated: #24163c;
+  --glass: rgb(12 6 22 / 82%);
+  --glass-strong: rgb(12 6 22 / 94%);
+
+  --text: #f8f0ff;
+  --text-secondary: #d4c2ea;
+  --muted: #9a86b0;
+  --muted-strong: #b8a3ce;
+
+  --line: rgb(255 47 220 / 42%);
+  --line-strong: rgb(0 245 255 / 58%);
+  --line-soft: rgb(160 90 220 / 28%);
+
+  --accent: #ff2fdc;
+  --accent-strong: #ff6aec;
+  --accent-soft: rgb(255 47 220 / 18%);
+  --accent-border: rgb(255 47 220 / 62%);
+  --accent-glow: rgb(255 47 220 / 48%);
+  --accent-on: #120018;
+  --brand-ink: #120018;
+
+  --danger: #ff3d6e;
+  --danger-soft: rgb(255 61 110 / 16%);
+  --danger-border: rgb(255 61 110 / 50%);
+  --danger-strong: #ff7a9a;
+  --ok: #39ff14;
+  --ok-soft: rgb(57 255 20 / 14%);
+  --ok-border: rgb(57 255 20 / 42%);
+  --ok-strong: #6dff4d;
+  --warning: #ffd000;
+  --warning-soft: rgb(255 208 0 / 14%);
+  --warning-border: rgb(255 208 0 / 45%);
+  --warning-strong: #ffe566;
+  --warning-text: #ffe082;
+
+  --focus: #00f5ff;
+  --focus-ring: 0 0 0 2px rgb(0 245 255 / 70%), 0 0 20px rgb(0 245 255 / 40%);
+  --shadow-xs: 0 0 0 1px rgb(255 47 220 / 22%);
+  --shadow-sm: 0 0 0 1px rgb(255 47 220 / 28%), 0 0 18px rgb(255 47 220 / 12%), 0 6px 22px rgb(0 0 0 / 55%);
+  --shadow-md: 0 0 0 1px rgb(0 245 255 / 24%), 0 0 28px rgb(0 245 255 / 10%), 0 12px 36px rgb(0 0 0 / 60%);
+  --shadow-lg: 0 0 0 1px rgb(255 47 220 / 32%), 0 0 48px rgb(255 47 220 / 16%), 0 20px 52px rgb(0 0 0 / 68%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px rgb(255 47 220 / 55%), 0 0 28px rgb(255 47 220 / 42%), 0 0 48px rgb(255 47 220 / 18%);
+
+  /* Code — deep void with cyan/magenta contrast */
+  --code-frame-bg: #020008;
+  --code-bg: #080412;
+  --code-text: #f0e4ff;
+  --code-muted: #7a6a90;
+  --code-border: rgb(0 245 255 / 28%);
+
+  --row-hover: rgb(0 245 255 / 12%);
+  --row-disabled: rgb(3 1 10 / 58%);
+  --topbar-bg: rgb(6 2 14 / 92%);
+  --backdrop: rgb(2 0 8 / 82%);
+  --neutral-chip: #1c1030;
+  --toast-neutral: #9a86b0;
+
+  --aurora-a: rgb(255 47 220 / 28%);
+  --aurora-b: rgb(0 245 255 / 22%);
+  --aurora-c: rgb(140 40 255 / 24%);
+
+  --radius-sm: 2px;
+  --radius: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+
+  --font-sans: "Rajdhani", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "Fira Code", "SFMono-Regular", ui-monospace, Consolas, "Liberation Mono", Menlo, monospace;
+
+  --transition: 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --blur: 10px;
+}
+
 /* ── Cyberpunk / 赛博朋克 theme structure ───────────────────
-   Palette lives in base.css (html[data-theme="cyberpunk"]); this file
+   The variable palette above sets the colors; this file
    pushes Night City HUD language hard: void black-violet, dual neon
    (hot magenta + electric cyan), hard HUD edges, layered glow.
 
