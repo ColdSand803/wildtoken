@@ -25,6 +25,7 @@ use crate::models::settings::{
 use crate::models::token::{ApiTokenIn, ApiTokenOut, ApiTokenUpdateIn};
 use crate::models::upstream::UpstreamEnabledIn;
 use crate::state::{hash_admin_token, AppState};
+use crate::themes::{self, ThemePack};
 
 mod upstreams;
 
@@ -40,6 +41,15 @@ pub async fn health_check(
         "status": "ok",
         "service": "WildToken"
     })))
+}
+
+pub async fn list_public_theme_packs(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<ThemePack>>, AppError> {
+    let packs = themes::list_theme_packs(&state.settings.themes.dir)
+        .await
+        .map_err(|error| AppError::Internal(format!("failed to read theme packs: {error}")))?;
+    Ok(Json(packs))
 }
 
 // ── Runtime settings ─────────────────────────────────────────────────────────

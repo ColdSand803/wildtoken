@@ -105,6 +105,7 @@ html[data-theme="endfield"] {
 
 html[data-theme="endfield"][data-ark-theme="endfield"][data-ark-depth="complex"] {
   --ef-rail-width: 84px;
+  --ef-nav-active-overhang: 16px;
   --ef-stage-rule: rgb(25 25 25 / 9%);
   --ef-stage-rule-strong: rgb(25 25 25 / 16%);
 }
@@ -274,6 +275,9 @@ html[data-theme="endfield"] .nav-link.active:hover {
   border-color: var(--ef-ink);
   box-shadow: inset 4px 0 0 var(--ef-signal);
   color: var(--ef-paper);
+  margin-inline-end: calc(var(--ef-nav-active-overhang) * -1);
+  width: calc(100% + var(--ef-nav-active-overhang));
+  z-index: 1;
 }
 
 html[data-theme="endfield"] .nav-link.active::after {
@@ -1061,6 +1065,8 @@ html[data-theme="endfield"] .live-dot {
     border-color: var(--ef-paper);
     box-shadow: inset 0 3px 0 var(--ef-signal);
     color: var(--ef-ink);
+    margin-inline-end: 0;
+    width: 100%;
   }
 
   html[data-theme="endfield"] .nav-link::after {

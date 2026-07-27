@@ -9,6 +9,7 @@ pub struct Settings {
     pub logging: LoggingSettings,
     pub upstream: UpstreamSettings,
     pub admin: AdminSettings,
+    pub themes: ThemeSettings,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -45,6 +46,12 @@ pub struct UpstreamSettings {
 #[serde(default)]
 pub struct AdminSettings {
     pub token: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct ThemeSettings {
+    pub dir: String,
 }
 
 impl Default for ServerSettings {
@@ -93,6 +100,14 @@ impl Default for AdminSettings {
     }
 }
 
+impl Default for ThemeSettings {
+    fn default() -> Self {
+        Self {
+            dir: "themes".into(),
+        }
+    }
+}
+
 impl Settings {
     pub fn load() -> Result<Self, ConfigError> {
         dotenvy::dotenv().ok();
@@ -115,6 +130,11 @@ impl Settings {
         if let Ok(url) = std::env::var("DATABASE_URL") {
             if !url.is_empty() {
                 settings.database.url = url;
+            }
+        }
+        if let Ok(dir) = std::env::var("WILDTOKEN_THEME_DIR") {
+            if !dir.is_empty() {
+                settings.themes.dir = dir;
             }
         }
 

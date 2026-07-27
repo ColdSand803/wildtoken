@@ -68,6 +68,15 @@ idle_timeout_seconds = 60
 
 [logging]
 log_queue_capacity = 512
+
+[upstream]
+default_timeout_seconds = 300.0
+
+[admin]
+token = "change-me"
+
+[themes]
+dir = "themes"
 ```
 
 也可以用环境变量覆盖，例如：
@@ -76,7 +85,35 @@ log_queue_capacity = 512
 TOKIO_WORKER_THREADS=4 APP__SERVER__PORT=3100 APP__DATABASE__MAX_CONNECTIONS=3 APP__LOGGING__LOG_QUEUE_CAPACITY=512 DATABASE_URL='sqlite:wildtoken.db?mode=rwc' cargo run
 ```
 
-原生运行默认只监听本机；Docker 会在容器内显式覆盖为 `0.0.0.0`。为兼容旧配置，`.env` 里的 `ADMIN_TOKEN`、`DATABASE_URL` 也会被读取。`ADMIN_TOKEN` 只用于首次初始化数据库中的管理员凭证，已初始化后的凭证以数据库记录为准，修改 `.env` 不会覆盖或重置已有凭证。
+原生运行默认只监听本机；Docker 会在容器内显式覆盖为 `0.0.0.0`。为兼容旧配置，`.env` 里的 `ADMIN_TOKEN`、`DATABASE_URL` 也会被读取。`ADMIN_TOKEN` 只用于首次初始化数据库中的管理员凭证，已初始化后的凭证以数据库记录为准，修改 `.env` 不会覆盖或重置已有凭证。`themes.dir` 可用 `APP__THEMES__DIR` 或 `WILDTOKEN_THEME_DIR` 覆盖。
+
+## 主题插件
+
+管理界面的默认深色/浅色主题仍从 `static/css/*.css` 加载；其他主题都作为 CSS-only 主题包放在 `themes/` 下，Docker Compose 会把宿主机 `./themes` 只读挂载到容器的 `/app/themes`。随仓库提供的 Win95、动物岛、赛博朋克、像素、CRT、我的世界、Bleach 和 Endfield 都不再内嵌到主样式表。
+
+每个主题包使用一个子目录：
+
+```text
+themes/
+  soul-society/
+    theme.json
+    theme.css
+```
+
+`theme.json`：
+
+```json
+{
+  "id": "soul-society",
+  "label": "Soul Society",
+  "css": "theme.css",
+  "swatch": ["#111827", "#f97316"],
+  "version": "1.0.0",
+  "description": "Optional short note"
+}
+```
+
+`id` 必须与目录名一致，只能使用小写字母、数字和连字符；`css` 必须指向主题目录内的相对 `.css` 文件。主题 CSS 应使用 `html[data-theme="soul-society"]` 作为顶层选择器。WildToken 只读取清单并按同源静态文件加载 CSS，不执行主题包里的 JavaScript。
 
 ## 路由规则
 

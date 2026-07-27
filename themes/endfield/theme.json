@@ -1,0 +1,8 @@
+{
+  "id": "endfield",
+  "label": "Endfield",
+  "css": "theme.css",
+  "swatch": ["#f2f2f0", "#fffa00"],
+  "version": "1.0.0",
+  "description": "Field-engineering admin theme with pale work surfaces, signal yellow, and left-rail operations layout."
+}

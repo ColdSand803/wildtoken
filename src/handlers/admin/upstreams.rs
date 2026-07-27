@@ -244,6 +244,78 @@ fn validate_overrides(overrides: &HashMap<String, String>) -> Result<(), AppErro
     validate_header_overrides(overrides).map_err(AppError::BadRequest)
 }
 
+fn json_number(value: Option<&serde_json::Value>) -> Option<f64> {
+    match value? {
+        serde_json::Value::Number(number) => number.as_f64(),
+        serde_json::Value::String(text) => text.trim().parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+fn json_number_at(payload: &serde_json::Value, pointers: &[&str]) -> Option<f64> {
+    pointers
+        .iter()
+        .find_map(|pointer| json_number(payload.pointer(pointer)))
+}
+
+fn json_string_at(payload: &serde_json::Value, pointers: &[&str]) -> Option<String> {
+    pointers.iter().find_map(|pointer| {
+        payload
+            .pointer(pointer)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_owned)
+    })
+}
+
+fn parse_sub2api_balance_payload(payload: &serde_json::Value) -> Option<serde_json::Value> {
+    let remaining_usd = json_number_at(
+        payload,
+        &[
+            "/remaining",
+            "/balance",
+            "/quota/remaining",
+            "/quota/balance",
+        ],
+    );
+    let used_usd = json_number_at(
+        payload,
+        &[
+            "/usage/total/actual_cost",
+            "/usage/total/cost",
+            "/total_actual_cost",
+            "/total_cost",
+            "/used",
+            "/usage",
+        ],
+    );
+    let total_usd = json_number_at(payload, &["/total", "/quota/total", "/limit"]);
+    let unit = json_string_at(payload, &["/unit", "/quota/unit"]).unwrap_or_else(|| "USD".into());
+    let plan_name = json_string_at(payload, &["/planName", "/plan_name", "/plan"]);
+    let is_valid = payload
+        .get("isValid")
+        .or_else(|| payload.get("is_active"))
+        .and_then(serde_json::Value::as_bool);
+    let mode = json_string_at(payload, &["/mode"]);
+
+    if remaining_usd.is_none() && used_usd.is_none() && total_usd.is_none() {
+        return None;
+    }
+
+    Some(serde_json::json!({
+        "ok": true,
+        "provider": "sub2api",
+        "total_usd": total_usd,
+        "used_usd": used_usd,
+        "remaining_usd": remaining_usd,
+        "unit": unit,
+        "plan_name": plan_name,
+        "is_valid": is_valid,
+        "mode": mode,
+    }))
+}
+
 fn redact_header_preview(headers: &HashMap<String, String>) -> HashMap<String, String> {
     headers
         .iter()
@@ -763,17 +835,97 @@ pub async fn admin_fetch_upstream_balance(
 
     Ok(Json(serde_json::json!({
         "ok": true,
+        "provider": "new-api",
         "total_usd": total_usd,
         "used_usd": used_usd,
         "remaining_usd": remaining_usd,
     })))
 }
 
+pub async fn admin_fetch_upstream_sub2api_balance(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Path(id): Path<i64>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let row = upstream_db::get_upstream(&state.db, id)
+        .await?
+        .ok_or_else(|| AppError::NotFound("upstream not found".into()))?;
+
+    let extra = parse_extra_headers(&row.extra_headers)?;
+    validate_overrides(&extra)?;
+    let timeout = std::time::Duration::from_secs_f64(row.timeout_seconds.max(1.0));
+    let usage_url = build_url(&row.base_url, "usage", "");
+    let request_headers =
+        build_channel_request_headers(HashMap::new(), row.api_key.as_deref(), &extra);
+
+    let mut request = state.http_client.get(&usage_url).timeout(timeout);
+    for (name, value) in &request_headers {
+        request = request.header(name.as_str(), value.as_str());
+    }
+
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            return Ok(Json(serde_json::json!({
+                "ok": false,
+                "provider": "sub2api",
+                "message": format!("请求失败: {error}")
+            })));
+        }
+    };
+
+    let status = response.status();
+    let text = match response.text().await {
+        Ok(text) => text,
+        Err(error) => {
+            return Ok(Json(serde_json::json!({
+                "ok": false,
+                "provider": "sub2api",
+                "message": format!("读取响应失败: {error}")
+            })));
+        }
+    };
+
+    if !status.is_success() {
+        let preview: String = text.chars().take(160).collect();
+        return Ok(Json(serde_json::json!({
+            "ok": false,
+            "provider": "sub2api",
+            "message": if preview.is_empty() {
+                format!("渠道返回 HTTP {}", status.as_u16())
+            } else {
+                format!("渠道返回 HTTP {}: {}", status.as_u16(), preview)
+            }
+        })));
+    }
+
+    let payload: serde_json::Value = match serde_json::from_str(&text) {
+        Ok(payload) => payload,
+        Err(_) => {
+            return Ok(Json(serde_json::json!({
+                "ok": false,
+                "provider": "sub2api",
+                "message": "渠道未返回 JSON"
+            })));
+        }
+    };
+
+    Ok(parse_sub2api_balance_payload(&payload)
+        .map(Json)
+        .unwrap_or_else(|| {
+            Json(serde_json::json!({
+                "ok": false,
+                "provider": "sub2api",
+                "message": "无法从 sub2api 响应中识别余额字段"
+            }))
+        }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_channel_request_headers, build_json_channel_request, extract_model_test_reply,
-        redact_header_preview,
+        parse_sub2api_balance_payload, redact_header_preview,
     };
     use std::collections::HashMap;
 
@@ -841,6 +993,44 @@ mod tests {
         assert_eq!(preview["X-API-Key"], "[redacted]");
         assert_eq!(preview["X-Custom-Token"], "[redacted]");
         assert_eq!(preview["x-trace-id"], "trace-123");
+    }
+
+    #[test]
+    fn sub2api_balance_parser_reads_usage_payload() {
+        let payload = serde_json::json!({
+            "balance": 2924.537349,
+            "remaining": "2924.537349",
+            "unit": "USD",
+            "planName": "钱包余额",
+            "isValid": true,
+            "mode": "unrestricted",
+            "usage": {
+                "total": {
+                    "actual_cost": 17.462651,
+                    "cost": 34.925302
+                }
+            }
+        });
+
+        let parsed = parse_sub2api_balance_payload(&payload).unwrap();
+
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["provider"], "sub2api");
+        assert_eq!(parsed["remaining_usd"], 2924.537349);
+        assert_eq!(parsed["used_usd"], 17.462651);
+        assert_eq!(parsed["unit"], "USD");
+        assert_eq!(parsed["plan_name"], "钱包余额");
+        assert_eq!(parsed["is_valid"], true);
+    }
+
+    #[test]
+    fn sub2api_balance_parser_rejects_unrecognized_payload() {
+        let payload = serde_json::json!({
+            "data": [],
+            "object": "list"
+        });
+
+        assert!(parse_sub2api_balance_payload(&payload).is_none());
     }
 
     #[test]

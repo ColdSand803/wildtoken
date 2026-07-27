@@ -10,10 +10,12 @@ services:
       APP__SERVER__PORT: "3100"
       APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS: "300"
       TOKIO_WORKER_THREADS: "4"
+      WILDTOKEN_THEME_DIR: /app/themes
     ports:
       - "127.0.0.1:3100:3100"
     volumes:
       - wildtoken-data:/data
+      - ./themes:/app/themes:ro
     healthcheck:
       test:
         [
