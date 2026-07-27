@@ -129,7 +129,7 @@ jobs:
           package="wildtoken-${RELEASE_TAG}-linux-x86_64"
           mkdir -p "$package"
           install -m 755 target/x86_64-unknown-linux-gnu/release/wildtoken "$package/wildtoken"
-          cp -R static config "$package/"
+          cp -R static config themes "$package/"
           cp .env.example "$package/"
           test ! -e "$package/README.md"
 
@@ -146,6 +146,7 @@ jobs:
           curl -fsS 'http://127.0.0.1:3110/health' >/dev/null
           curl -fsS 'http://127.0.0.1:3110/admin' -o "$RUNNER_TEMP/wildtoken-linux-admin.html"
           grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-linux-admin.html"
+          curl -fsS 'http://127.0.0.1:3110/theme-packs/bleach/theme.css' >/dev/null
           kill "$pid"
           wait "$pid" || true
           trap - EXIT
@@ -193,6 +194,7 @@ jobs:
           Copy-Item "target/x86_64-pc-windows-msvc/release/wildtoken.exe" "$package/wildtoken.exe"
           Copy-Item static "$package/static" -Recurse
           Copy-Item config "$package/config" -Recurse
+          Copy-Item themes "$package/themes" -Recurse
           Copy-Item .env.example $package
           if (Test-Path "$package/README.md") {
             throw "README.md must not be included in the release archive"
@@ -222,6 +224,11 @@ jobs:
             $admin = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:3110/admin"
             if ($admin.Content -notmatch "WildToken Admin") {
               throw "Admin page smoke test failed"
+            }
+            try {
+              Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:3110/theme-packs/bleach/theme.css" | Out-Null
+            } catch {
+              throw "Bundled theme pack CSS is missing from the archive"
             }
           } finally {
             if (-not $process.HasExited) {
@@ -342,7 +349,7 @@ jobs:
             -output "$package/wildtoken"
           chmod 755 "$package/wildtoken"
           lipo "$package/wildtoken" -verify_arch x86_64 arm64
-          cp -R static config "$package/"
+          cp -R static config themes "$package/"
           cp .env.example "$package/"
           test ! -e "$package/README.md"
 
@@ -359,6 +366,7 @@ jobs:
           curl -fsS 'http://127.0.0.1:3110/health' >/dev/null
           curl -fsS 'http://127.0.0.1:3110/admin' -o "$RUNNER_TEMP/wildtoken-macos-admin.html"
           grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-macos-admin.html"
+          curl -fsS 'http://127.0.0.1:3110/theme-packs/bleach/theme.css' >/dev/null
           kill "$pid"
           wait "$pid" || true
           trap - EXIT

@@ -47,6 +47,10 @@ COPY --from=builder /src/target/release/wildtoken /usr/local/bin/wildtoken
 COPY --from=builder /src/static ./static
 COPY --from=builder /src/config ./config
 
+# Themes are runtime-only, so copy them from the context instead of the builder
+# to keep theme edits from invalidating the compile cache.
+COPY themes ./themes
+
 ENV APP__SERVER__HOST=0.0.0.0 \
     APP__SERVER__PORT=3100 \
     DATABASE_URL=sqlite:/data/wildtoken.db?mode=rwc \
