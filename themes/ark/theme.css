@@ -1,0 +1,1197 @@
+/*
+ * Ark / industrial-information theme
+ * Original CSS-only reconstruction: real console data is kept in charge;
+ * cyan marks only selection, focus, progress, and primary action.
+ */
+
+html[data-theme="ark"] {
+  color-scheme: dark;
+
+  --ark-ink: #080a0b;
+  --ark-paper: #f4f6f6;
+  --ark-signal: #18d1ff;
+  --ark-state: #a7d840;
+  --ark-surface: #111719;
+  --ark-surface-raised: #172023;
+  --ark-rule: rgb(235 248 249 / 16%);
+  --ark-rule-strong: rgb(235 248 249 / 28%);
+  --ark-muted: #91a0a5;
+
+  --bg: var(--ark-ink);
+  --bg-elevated: #0d1214;
+  --panel: rgb(17 23 25 / 94%);
+  --panel-solid: var(--ark-surface);
+  --panel-subtle: #0e1416;
+  --panel-muted: #1a2427;
+  --panel-elevated: var(--ark-surface-raised);
+  --glass: rgb(11 16 18 / 84%);
+  --glass-strong: rgb(11 16 18 / 96%);
+
+  --text: var(--ark-paper);
+  --text-secondary: #d7e2e4;
+  --muted: var(--ark-muted);
+  --muted-strong: #b9c7cb;
+
+  --line: var(--ark-rule);
+  --line-strong: rgb(235 248 249 / 44%);
+  --line-soft: rgb(235 248 249 / 9%);
+
+  --accent: #76e7ff;
+  --accent-strong: var(--ark-signal);
+  --accent-soft: rgb(24 209 255 / 13%);
+  --accent-border: rgb(24 209 255 / 48%);
+  --accent-glow: rgb(24 209 255 / 22%);
+  --accent-on: #021116;
+  --brand-ink: var(--ark-ink);
+
+  --danger: #ff7777;
+  --danger-soft: rgb(255 119 119 / 12%);
+  --danger-border: rgb(255 119 119 / 48%);
+  --danger-strong: #ffadad;
+  --ok: var(--ark-state);
+  --ok-soft: rgb(167 216 64 / 11%);
+  --ok-border: rgb(167 216 64 / 45%);
+  --ok-strong: #c7f36d;
+  --warning: #ffc966;
+  --warning-soft: rgb(255 201 102 / 12%);
+  --warning-border: rgb(255 201 102 / 48%);
+  --warning-strong: #ffda91;
+  --warning-text: #ffe0a0;
+
+  --focus: var(--ark-signal);
+  --focus-ring: 0 0 0 2px var(--ark-ink), 0 0 0 4px var(--ark-signal);
+  --shadow-xs: none;
+  --shadow-sm: 4px 4px 0 rgb(0 0 0 / 38%);
+  --shadow-md: 8px 8px 0 rgb(0 0 0 / 42%);
+  --shadow-lg: 12px 12px 0 rgb(0 0 0 / 52%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: none;
+
+  --code-frame-bg: #050708;
+  --code-bg: #0b1012;
+  --code-text: #e7eff0;
+  --code-muted: #718087;
+  --code-border: rgb(235 248 249 / 18%);
+
+  --row-hover: rgb(24 209 255 / 8%);
+  --row-disabled: rgb(255 255 255 / 4%);
+  --topbar-bg: #060809;
+  --backdrop: rgb(1 4 5 / 78%);
+  --neutral-chip: #202b2e;
+  --toast-neutral: #75858a;
+
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  --radius-sm: 0;
+  --radius: 0;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-full: 2px;
+
+  --font-sans: "Space Grotesk", "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "Fira Code", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  --font-secret: "Fira Code", "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+  --topbar-height: 72px;
+  --control-h: 38px;
+  --control-h-sm: 30px;
+  --transition: 200ms cubic-bezier(.22, .8, .2, 1);
+  --blur: 0px;
+}
+
+html[data-theme="ark"][data-ark-theme="ark"][data-ark-depth="complex"] {
+  --ark-rail-width: 88px;
+  --ark-nav-active-overhang: 4px;
+  --ark-stage-grid: rgb(235 248 249 / 7%);
+  --ark-stage-grid-strong: rgb(24 209 255 / 16%);
+  --ark-sector: rgb(24 209 255 / 7%);
+}
+
+html[data-theme="ark"] body {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--ark-stage-grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ark-stage-grid) 1px, transparent 1px),
+    radial-gradient(circle at 78% 0%, rgb(24 209 255 / 10%), transparent 34%);
+  background-size: 48px 48px, 48px 48px, auto;
+  color: var(--text);
+}
+
+html[data-theme="ark"] .aurora {
+  display: none;
+}
+
+/* Desktop: an edge rail instruments the existing operations stage. */
+html[data-theme="ark"] .app-shell {
+  display: grid;
+  grid-template-columns: var(--ark-rail-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+@media (min-width: 761px) {
+  html[data-theme="ark"],
+  html[data-theme="ark"] body {
+    height: 100%;
+    overflow: hidden;
+  }
+}
+
+html[data-theme="ark"] .topbar {
+  align-items: stretch;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  background: var(--topbar-bg);
+  border: 0;
+  border-right: 1px solid var(--ark-rule-strong);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 14px 10px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
+}
+
+html[data-theme="ark"] .topbar::after {
+  background: var(--ark-signal);
+  bottom: auto;
+  height: 62px;
+  left: auto;
+  opacity: 1;
+  right: -2px;
+  top: 0;
+  width: 3px;
+}
+
+html[data-theme="ark"] .topbar-brand {
+  align-items: center;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+}
+
+html[data-theme="ark"] .brand-mark {
+  color: var(--ark-paper);
+  filter: none;
+  height: 30px;
+  width: 30px;
+}
+
+html[data-theme="ark"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
+}
+
+html[data-theme="ark"] .topbar-brand h1 {
+  font-family: "Arial Narrow", "Roboto Condensed", "DIN Condensed", var(--font-sans);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .12em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  text-transform: uppercase;
+  white-space: normal;
+}
+
+html[data-theme="ark"] .brand-label {
+  color: var(--muted);
+  display: block;
+  font-size: 8px;
+  letter-spacing: .14em;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+html[data-theme="ark"] .topbar-nav {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  counter-reset: ark-nav;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  overflow-x: visible;
+  padding: 0;
+  width: 100%;
+}
+
+html[data-theme="ark"] .nav-link {
+  align-items: center;
+  border: 1px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  counter-increment: ark-nav;
+  display: flex;
+  flex-direction: column;
+  font-size: 10px;
+  font-weight: 700;
+  gap: 4px;
+  justify-content: center;
+  line-height: 1.12;
+  min-height: 58px;
+  padding: 7px 3px 15px;
+  position: relative;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+html[data-theme="ark"] .nav-link::after {
+  bottom: 5px;
+  color: currentColor;
+  content: counter(ark-nav, decimal-leading-zero);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  position: absolute;
+}
+
+html[data-theme="ark"] .nav-link:hover {
+  background: rgb(255 255 255 / 5%);
+  border-color: var(--ark-rule);
+  color: var(--ark-paper);
+}
+
+html[data-theme="ark"] .nav-link.active,
+html[data-theme="ark"] .nav-link.active:hover {
+  background: rgb(24 209 255 / 11%);
+  border-color: rgb(24 209 255 / 38%);
+  box-shadow: inset 3px 0 0 var(--ark-signal);
+  color: var(--ark-paper);
+  margin-inline-end: calc(var(--ark-nav-active-overhang) * -1);
+  width: calc(100% + var(--ark-nav-active-overhang));
+  z-index: 1;
+}
+
+html[data-theme="ark"] .nav-link.active::after {
+  color: var(--ark-signal);
+}
+
+html[data-theme="ark"] .topbar-actions {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: auto;
+  width: 100%;
+}
+
+html[data-theme="ark"] .topbar-actions > *,
+html[data-theme="ark"] .topbar-actions button {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-theme="ark"] .topbar-actions .live-indicator {
+  align-items: center;
+  border-bottom: 1px solid var(--ark-rule);
+  border-radius: 0;
+  display: flex;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 2px 6px;
+}
+
+html[data-theme="ark"] .live-label {
+  display: none;
+}
+
+html[data-theme="ark"] .theme-toggle,
+html[data-theme="ark"] .density-toggle,
+html[data-theme="ark"] .nav-logout {
+  background: transparent;
+  border-color: var(--ark-rule-strong);
+  border-radius: 0;
+  color: var(--muted-strong);
+  min-height: 34px;
+}
+
+html[data-theme="ark"] .theme-toggle:hover,
+html[data-theme="ark"] .density-toggle:hover,
+html[data-theme="ark"] .nav-logout:hover {
+  background: var(--ark-paper);
+  border-color: var(--ark-paper);
+  color: var(--ark-ink);
+}
+
+html[data-theme="ark"] .theme-menu {
+  background: #0e1416;
+  border-color: var(--ark-rule-strong);
+  border-radius: 0;
+  box-shadow: var(--shadow-lg);
+  left: calc(var(--ark-rail-width) + 12px);
+  right: auto;
+  bottom: 0;
+  top: auto;
+}
+
+html[data-theme="ark"] .theme-menu button {
+  border-radius: 0;
+  color: var(--text-secondary);
+}
+
+html[data-theme="ark"] .theme-menu button.is-selected {
+  background: rgb(24 209 255 / 13%);
+  box-shadow: inset 3px 0 0 var(--ark-signal);
+  color: var(--ark-paper);
+}
+
+/* The content stays expansive; the grid and sector explain grouping only. */
+html[data-theme="ark"] .content {
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  isolation: isolate;
+  margin: 0;
+  max-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: clamp(28px, 4vw, 64px) clamp(24px, 5vw, 88px) 76px;
+  position: relative;
+  scrollbar-gutter: stable;
+  width: 100%;
+}
+
+html[data-theme="ark"] .content::before,
+html[data-theme="ark"] .content::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+html[data-theme="ark"] .content::before {
+  background-image:
+    linear-gradient(var(--ark-stage-grid-strong) 1px, transparent 1px),
+    linear-gradient(90deg, var(--ark-stage-grid-strong) 1px, transparent 1px);
+  background-size: 168px 168px;
+  height: min(50vw, 570px);
+  inset: 0 0 auto;
+  mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 58%) 58%, transparent 100%);
+}
+
+html[data-theme="ark"] .content::after {
+  background: linear-gradient(135deg, transparent 0 48%, var(--ark-sector) 48% 48.25%, transparent 48.25% 100%);
+  border-left: 1px solid var(--ark-stage-grid-strong);
+  bottom: 54px;
+  clip-path: polygon(0 0, 100% 0, 42% 100%, 0 100%);
+  left: clamp(15px, 2vw, 36px);
+  top: 86px;
+  width: min(38vw, 520px);
+}
+
+html[data-theme="ark"] .view > .panel {
+  animation: ark-stage-reveal 680ms cubic-bezier(.22, .8, .2, 1) both;
+  isolation: isolate;
+  min-height: min(580px, calc(100dvh - 136px));
+  position: relative;
+}
+
+html[data-theme="ark"] .view > .panel::before {
+  color: var(--ark-paper);
+  font-family: "Arial Narrow", "Roboto Condensed", "DIN Condensed", var(--font-sans);
+  font-size: clamp(92px, 14vw, 224px);
+  font-weight: 800;
+  letter-spacing: -.07em;
+  line-height: .76;
+  opacity: .045;
+  pointer-events: none;
+  position: absolute;
+  right: clamp(0px, 2vw, 34px);
+  top: 0;
+  z-index: -1;
+}
+
+html[data-theme="ark"] .view[data-view="dashboard"] > .panel::before { content: "01"; }
+html[data-theme="ark"] .view[data-view="upstreams"] > .panel::before { content: "02"; }
+html[data-theme="ark"] .view[data-view="logs"] > .panel::before { content: "03"; }
+html[data-theme="ark"] .view[data-view="tokens"] > .panel::before { content: "04"; }
+html[data-theme="ark"] .view[data-view="settings"] > .panel::before { content: "05"; }
+
+html[data-theme="ark"] .view > .panel > .panel-head {
+  align-items: end;
+  border-bottom: 1px solid var(--ark-paper);
+  gap: 24px;
+  margin-bottom: 28px;
+  min-height: 116px;
+  padding: 0 0 18px;
+  position: relative;
+}
+
+html[data-theme="ark"] .view > .panel > .panel-head::before {
+  color: var(--ark-signal);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .15em;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+html[data-theme="ark"] .view[data-view="dashboard"] > .panel > .panel-head::before { content: "01 / OPERATIONS MONITOR"; }
+html[data-theme="ark"] .view[data-view="upstreams"] > .panel > .panel-head::before { content: "02 / ROUTE MATRIX"; }
+html[data-theme="ark"] .view[data-view="logs"] > .panel > .panel-head::before { content: "03 / REQUEST ARCHIVE"; }
+html[data-theme="ark"] .view[data-view="tokens"] > .panel > .panel-head::before { content: "04 / ACCESS CONTROL"; }
+html[data-theme="ark"] .view[data-view="settings"] > .panel > .panel-head::before { content: "05 / CONSOLE CONFIG"; }
+
+html[data-theme="ark"] .view > .panel > .panel-head > div:first-child {
+  min-width: 0;
+}
+
+html[data-theme="ark"] .view > .panel > .panel-head h2 {
+  font-family: "Arial Narrow", "Roboto Condensed", "DIN Condensed", var(--font-sans);
+  font-size: clamp(34px, 5vw, 68px);
+  font-weight: 800;
+  letter-spacing: -.04em;
+  line-height: .88;
+  text-transform: uppercase;
+}
+
+html[data-theme="ark"] .view > .panel > .panel-head p {
+  color: var(--muted-strong);
+  font-size: 13px;
+  max-width: 62ch;
+}
+
+/* Shared controls and operational data surfaces. */
+html[data-theme="ark"] button {
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html[data-theme="ark"] button:not(:where(
+  .secondary,
+  .danger,
+  .ghost,
+  .status-switch,
+  .nav-link,
+  .table-sort-button,
+  .priority-value,
+  .token-preview-button,
+  .model-selection-remove,
+  .toast-close,
+  .url-action,
+  .icon-close,
+  .icon-maximize,
+  .action-menu-trigger,
+  .segmented-control > button,
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemradio"]
+)) {
+  background: var(--ark-signal);
+  border-color: var(--ark-signal);
+  box-shadow: 4px 4px 0 #030506;
+  color: var(--ark-ink);
+  font-weight: 700;
+  letter-spacing: .015em;
+  min-height: var(--control-h);
+}
+
+html[data-theme="ark"] button:not(:where(
+  .secondary,
+  .danger,
+  .ghost,
+  .status-switch,
+  .nav-link,
+  .table-sort-button,
+  .priority-value,
+  .token-preview-button,
+  .model-selection-remove,
+  .toast-close,
+  .url-action,
+  .icon-close,
+  .icon-maximize,
+  .action-menu-trigger,
+  .segmented-control > button,
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemradio"]
+)):hover {
+  background: var(--ark-paper);
+  border-color: var(--ark-paper);
+  box-shadow: 4px 4px 0 #030506, inset 4px 0 0 var(--ark-signal);
+  color: var(--ark-ink);
+}
+
+html[data-theme="ark"] button.secondary {
+  background: transparent;
+  border-color: var(--ark-rule-strong);
+  border-radius: 0;
+  color: var(--ark-paper);
+}
+
+html[data-theme="ark"] button.secondary:hover {
+  background: var(--ark-paper);
+  border-color: var(--ark-paper);
+  color: var(--ark-ink);
+}
+
+html[data-theme="ark"] button.danger {
+  background: transparent;
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+html[data-theme="ark"] button.danger:hover {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #170404;
+}
+
+html[data-theme="ark"] button.ghost {
+  border-radius: 0;
+}
+
+html[data-theme="ark"] .url-cell-actions {
+  gap: 3px;
+}
+
+html[data-theme="ark"] .url-action {
+  align-items: center;
+  display: inline-flex;
+  height: 30px;
+  justify-content: center;
+  min-height: 30px;
+  min-width: 30px;
+  padding: 0;
+  width: 30px;
+}
+
+html[data-theme="ark"] .url-action svg {
+  height: 14px;
+  width: 14px;
+}
+
+html[data-theme="ark"] button:focus-visible,
+html[data-theme="ark"] input:focus-visible,
+html[data-theme="ark"] select:focus-visible,
+html[data-theme="ark"] textarea:focus-visible,
+html[data-theme="ark"] summary:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ark-signal);
+  outline-offset: 2px;
+}
+
+html[data-theme="ark"] .upstream-toolbar,
+html[data-theme="ark"] .upstream-toolbar .filter-field {
+  overflow: visible;
+}
+
+html[data-theme="ark"] #upstream-search:focus-visible {
+  box-shadow: 0 0 0 1px var(--ark-ink);
+  outline: 2px solid var(--ark-signal);
+  outline-offset: 3px;
+}
+
+html[data-theme="ark"] input,
+html[data-theme="ark"] select,
+html[data-theme="ark"] textarea {
+  background-color: #0b1113;
+  border-color: var(--ark-rule-strong);
+  border-radius: 0;
+  color: var(--ark-paper);
+}
+
+html[data-theme="ark"] input:hover,
+html[data-theme="ark"] select:hover,
+html[data-theme="ark"] textarea:hover {
+  border-color: var(--ark-paper);
+}
+
+html[data-theme="ark"] input:focus,
+html[data-theme="ark"] select:focus,
+html[data-theme="ark"] textarea:focus {
+  background-color: #10181b;
+  border-color: var(--ark-signal);
+}
+
+html[data-theme="ark"] .select-panel {
+  backdrop-filter: none;
+  background: #11191c;
+  border-color: var(--ark-rule-strong);
+  border-radius: 0;
+  box-shadow: var(--shadow-md);
+}
+
+html[data-theme="ark"] .select-panel button {
+  background: transparent;
+  border-color: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--text-secondary);
+}
+
+html[data-theme="ark"] .select-panel button:hover,
+html[data-theme="ark"] .select-panel button.is-active,
+html[data-theme="ark"] .select-panel button:focus-visible {
+  background: rgb(255 255 255 / 6%);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--ark-paper);
+}
+
+html[data-theme="ark"] .select-panel button.is-selected,
+html[data-theme="ark"] .select-panel button.is-selected:hover,
+html[data-theme="ark"] .select-panel button.is-selected.is-active,
+html[data-theme="ark"] .select-panel button.is-selected:focus-visible {
+  background: rgb(24 209 255 / 14%);
+  box-shadow: inset 3px 0 0 var(--ark-signal);
+  color: var(--ark-paper);
+}
+
+html[data-theme="ark"] .status,
+html[data-theme="ark"] .summary-strip,
+html[data-theme="ark"] .settings-card,
+html[data-theme="ark"] .dashboard-card,
+html[data-theme="ark"] .table-wrap,
+html[data-theme="ark"] .system-info-grid,
+html[data-theme="ark"] .test-model-result,
+html[data-theme="ark"] .test-model-prompt,
+html[data-theme="ark"] .test-model-response {
+  background: var(--panel-solid);
+  border-color: var(--ark-rule-strong);
+  border-radius: 0;
+  box-shadow: none;
+}
+
+html[data-theme="ark"] .dashboard-card,
+html[data-theme="ark"] .settings-card {
+  border-top: 2px solid var(--ark-rule-strong);
+}
+
+html[data-theme="ark"] .dashboard-card:hover {
+  border-top-color: var(--ark-signal);
+}
+
+html[data-theme="ark"] .summary-strip span,
+html[data-theme="ark"] .system-info-grid,
+html[data-theme="ark"] .system-info-item {
+  border-color: var(--ark-rule);
+}
+
+html[data-theme="ark"] .dashboard-card-head,
+html[data-theme="ark"] .settings-card-head,
+html[data-theme="ark"] .panel-head,
+html[data-theme="ark"] .form-section-head {
+  border-color: var(--ark-rule-strong);
+}
+
+html[data-theme="ark"] .eyebrow,
+html[data-theme="ark"] .dashboard-card-meta,
+html[data-theme="ark"] .settings-local-tag {
+  color: var(--ark-signal);
+}
+
+html[data-theme="ark"] .settings-local-tag,
+html[data-theme="ark"] .settings-readonly-tag,
+html[data-theme="ark"] .settings-security-mark,
+html[data-theme="ark"] .settings-revision {
+  border-color: var(--ark-rule-strong);
+  border-radius: 0;
+}
+
+html[data-theme="ark"] .settings-theme-choice-group {
+  grid-column: 1 / -1;
+}
+
+html[data-theme="ark"] .settings-theme-choice-group .field-hint {
+  display: block;
+  margin-top: 8px;
+}
+
+html[data-theme="ark"] #settings-theme {
+  background-color: #0b1113;
+  border-color: var(--ark-paper);
+  border-radius: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  min-height: 42px;
+}
+
+html[data-theme="ark"] .segmented-control {
+  border-color: var(--ark-rule-strong);
+  border-radius: 0;
+}
+
+html[data-theme="ark"] .segmented-control button {
+  border-radius: 0;
+}
+
+html[data-theme="ark"] .segmented-control button.is-selected {
+  background: rgb(24 209 255 / 14%);
+  box-shadow: inset 3px 0 0 var(--ark-signal);
+  color: var(--ark-paper);
+}
+
+html[data-theme="ark"] .admin-table {
+  background: var(--panel-solid);
+}
+
+html[data-theme="ark"] .admin-table th {
+  background: #0a0f11;
+  border-color: var(--ark-rule-strong);
+  color: var(--ark-paper);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+html[data-theme="ark"] .admin-table td {
+  border-color: var(--ark-rule);
+}
+
+html[data-theme="ark"] .admin-table tbody tr:hover td {
+  background: rgb(24 209 255 / 7%);
+}
+
+html[data-theme="ark"] .admin-table tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--ark-signal);
+}
+
+html[data-theme="ark"] .status-switch {
+  background: #0b1113;
+  border: 1px solid var(--ark-rule-strong);
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--muted-strong);
+  display: inline-flex;
+  height: 28px;
+  justify-content: flex-start;
+  min-height: 28px;
+  padding: 0;
+  position: relative;
+  width: 60px;
+}
+
+html[data-theme="ark"] .status-switch::after {
+  color: currentColor;
+  content: "OFF";
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  line-height: 1;
+  position: absolute;
+  right: 6px;
+}
+
+html[data-theme="ark"] .status-switch-track {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  height: 100%;
+  padding: 3px;
+  width: 100%;
+}
+
+html[data-theme="ark"] .status-switch-thumb {
+  background: var(--ark-paper);
+  border-radius: 0;
+  box-shadow: none;
+  height: 20px;
+  width: 18px;
+}
+
+html[data-theme="ark"] .status-switch.on {
+  background: rgb(24 209 255 / 12%);
+  border-color: var(--ark-signal);
+  color: var(--ark-paper);
+}
+
+html[data-theme="ark"] .status-switch.on::after {
+  color: var(--ark-signal);
+  content: "ON";
+  left: 7px;
+  right: auto;
+}
+
+html[data-theme="ark"] .status-switch.on .status-switch-track {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html[data-theme="ark"] .status-switch.on .status-switch-thumb {
+  background: var(--ark-signal);
+  transform: translateX(36px);
+}
+
+html[data-theme="ark"] .status-switch.off:hover .status-switch-track,
+html[data-theme="ark"] .status-switch.on:hover .status-switch-track {
+  background: transparent;
+  border-color: transparent;
+}
+
+html[data-theme="ark"] .status-switch:hover {
+  background: #131e21;
+  border-color: var(--ark-paper);
+  box-shadow: none;
+  color: var(--ark-paper);
+}
+
+html[data-theme="ark"] .status-switch.on:hover {
+  background: rgb(24 209 255 / 18%);
+}
+
+html[data-theme="ark"] .status-switch:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+html[data-theme="ark"] input[type="checkbox"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: #0b1113 !important;
+  border: 1px solid var(--ark-rule-strong) !important;
+  border-radius: 0;
+  box-shadow: none !important;
+  cursor: pointer;
+  display: inline-grid;
+  height: 16px;
+  margin: 0;
+  place-content: center;
+  position: relative;
+  transition: background-color var(--transition), border-color var(--transition), box-shadow var(--transition);
+  width: 16px !important;
+}
+
+html[data-theme="ark"] input[type="checkbox"]::after {
+  border-bottom: 2px solid var(--ark-ink);
+  border-right: 2px solid var(--ark-ink);
+  content: "";
+  height: 7px;
+  opacity: 0;
+  transform: rotate(45deg) translate(-1px, -1px);
+  width: 3px;
+}
+
+html[data-theme="ark"] input[type="checkbox"]:checked,
+html[data-theme="ark"] input[type="checkbox"]:indeterminate {
+  background: var(--ark-signal) !important;
+  border-color: var(--ark-signal) !important;
+}
+
+html[data-theme="ark"] input[type="checkbox"]:checked::after {
+  opacity: 1;
+}
+
+html[data-theme="ark"] input[type="checkbox"]:indeterminate::after {
+  background: var(--ark-ink);
+  border: 0;
+  height: 2px;
+  opacity: 1;
+  transform: none;
+  width: 8px;
+}
+
+html[data-theme="ark"] input[type="checkbox"]:hover:not(:disabled) {
+  border-color: var(--ark-paper) !important;
+}
+
+html[data-theme="ark"] input[type="checkbox"]:focus-visible {
+  box-shadow: var(--focus-ring) !important;
+  outline: 0;
+}
+
+html[data-theme="ark"] input[type="checkbox"]:disabled {
+  background: var(--panel-muted) !important;
+  border-color: var(--line) !important;
+  cursor: not-allowed;
+  opacity: .7;
+}
+
+html[data-theme="ark"][data-density="compact"] .status-switch {
+  height: 24px;
+  min-height: 24px;
+  width: 52px;
+}
+
+html[data-theme="ark"][data-density="compact"] .status-switch-thumb {
+  height: 16px;
+  width: 16px;
+}
+
+html[data-theme="ark"][data-density="compact"] .status-switch.on .status-switch-thumb {
+  transform: translateX(30px);
+}
+
+html[data-theme="ark"] .model-chip,
+html[data-theme="ark"] .status-chip,
+html[data-theme="ark"] .token-chip {
+  border-radius: 0;
+}
+
+html[data-theme="ark"] dialog {
+  background: #11191c;
+  border: 1px solid var(--ark-rule-strong);
+  border-radius: 0;
+  box-shadow: var(--shadow-lg);
+  color: var(--ark-paper);
+}
+
+html[data-theme="ark"] dialog::backdrop {
+  background: var(--backdrop);
+  backdrop-filter: grayscale(.3);
+}
+
+html[data-theme="ark"] dialog .modal-head,
+html[data-theme="ark"] dialog .upstream-modal-head,
+html[data-theme="ark"] dialog .modal-footer {
+  border-color: var(--ark-rule-strong);
+}
+
+html[data-theme="ark"] pre,
+html[data-theme="ark"] .token-value-box,
+html[data-theme="ark"] .code-frame {
+  border-radius: 0;
+}
+
+html[data-theme="ark"] .live-dot {
+  background: var(--ark-state);
+  box-shadow: 0 0 0 2px rgb(167 216 64 / 16%);
+}
+
+html[data-theme="ark"] .live-indicator:not([hidden]) .live-dot {
+  animation: ark-live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes ark-stage-reveal {
+  from {
+    clip-path: inset(0 100% 0 0);
+    transform: translateX(-12px);
+  }
+
+  to {
+    clip-path: inset(0);
+    transform: translateX(0);
+  }
+}
+
+@keyframes ark-live-pulse {
+  0%,
+  100% { box-shadow: 0 0 0 2px rgb(167 216 64 / 16%); }
+  50% { box-shadow: 0 0 0 5px rgb(167 216 64 / 3%); }
+}
+
+/* Portrait is re-directed into a header plus a real five-destination dock. */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme="ark"] .app-shell {
+    display: flex;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  html[data-theme="ark"] .topbar {
+    align-items: center;
+    border-bottom: 1px solid var(--ark-rule-strong);
+    border-right: 0;
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    height: auto;
+    justify-content: space-between;
+    min-height: 58px;
+    padding: 8px 12px;
+    position: sticky;
+    width: 100%;
+  }
+
+  html[data-theme="ark"] .topbar::after {
+    bottom: -2px;
+    height: 3px;
+    left: 0;
+    right: auto;
+    top: auto;
+    width: 72px;
+  }
+
+  html[data-theme="ark"] .topbar-brand {
+    align-items: center;
+    flex-direction: row;
+    gap: 8px;
+    width: auto;
+  }
+
+  html[data-theme="ark"] .brand-mark {
+    height: 25px;
+    width: 25px;
+  }
+
+  html[data-theme="ark"] .brand-text {
+    text-align: left;
+    width: auto;
+  }
+
+  html[data-theme="ark"] .topbar-brand h1 {
+    font-size: 12px;
+    letter-spacing: .08em;
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  html[data-theme="ark"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="ark"] .topbar-actions {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="ark"] .topbar-actions > *,
+  html[data-theme="ark"] .topbar-actions button {
+    width: auto;
+  }
+
+  html[data-theme="ark"] .topbar-actions .live-indicator,
+  html[data-theme="ark"] .density-toggle,
+  html[data-theme="ark"] .theme-menu-wrap {
+    display: none;
+  }
+
+  html[data-theme="ark"] .nav-logout {
+    min-height: 36px;
+    padding: 0 9px;
+    width: auto;
+  }
+
+  html[data-theme="ark"] .topbar-nav {
+    background: #070a0b;
+    border: 1px solid var(--ark-rule-strong);
+    bottom: max(8px, env(safe-area-inset-bottom));
+    box-shadow: 0 6px 0 rgb(0 0 0 / 46%);
+    display: grid;
+    gap: 1px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 8px;
+    padding: 3px;
+    position: fixed;
+    right: 8px;
+    width: auto;
+    z-index: 40;
+  }
+
+  html[data-theme="ark"] .nav-link {
+    color: var(--muted);
+    min-height: 54px;
+    padding: 4px 1px 14px;
+  }
+
+  html[data-theme="ark"] .nav-link:hover {
+    background: rgb(255 255 255 / 8%);
+    color: var(--ark-paper);
+  }
+
+  html[data-theme="ark"] .nav-link.active,
+  html[data-theme="ark"] .nav-link.active:hover {
+    background: rgb(24 209 255 / 14%);
+    border-color: rgb(24 209 255 / 44%);
+    box-shadow: inset 0 -3px 0 var(--ark-signal);
+    color: var(--ark-paper);
+    margin-inline-end: 0;
+    width: 100%;
+  }
+
+  html[data-theme="ark"] .nav-link::after {
+    bottom: 5px;
+  }
+
+  html[data-theme="ark"] .content {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+    padding: 26px 14px 32px;
+  }
+
+  html[data-theme="ark"] .content::before {
+    background-size: 110px 110px;
+    height: 360px;
+  }
+
+  html[data-theme="ark"] .content::after {
+    display: none;
+  }
+
+  html[data-theme="ark"] .view > .panel {
+    min-height: 0;
+  }
+
+  html[data-theme="ark"] .view > .panel::before {
+    font-size: clamp(72px, 28vw, 128px);
+    right: 0;
+    top: 12px;
+  }
+
+  html[data-theme="ark"] .view > .panel > .panel-head {
+    align-items: start;
+    display: grid;
+    gap: 12px;
+    margin-bottom: 20px;
+    min-height: 0;
+    padding-bottom: 15px;
+  }
+
+  html[data-theme="ark"] .view > .panel > .panel-head h2 {
+    font-size: clamp(32px, 11vw, 52px);
+  }
+
+  html[data-theme="ark"] .view > .panel > .panel-head p {
+    max-width: 42ch;
+  }
+
+  html[data-theme="ark"] .view > .panel > .panel-head .actions,
+  html[data-theme="ark"] .view > .panel > .panel-head .actions button {
+    width: 100%;
+  }
+
+  html[data-theme="ark"] .dashboard-card,
+  html[data-theme="ark"] .settings-card {
+    border-top-width: 1px;
+  }
+
+  html[data-theme="ark"] .settings-theme-choice-group {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 400px) {
+  html[data-theme="ark"] .topbar-brand h1 {
+    font-size: 10px;
+  }
+
+  html[data-theme="ark"] .nav-link {
+    font-size: 9px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="ark"] .view > .panel,
+  html[data-theme="ark"] .live-indicator:not([hidden]) .live-dot {
+    animation: none;
+  }
+}

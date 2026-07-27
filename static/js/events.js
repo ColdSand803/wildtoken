@@ -12,6 +12,7 @@ const BUILT_IN_THEMES = Object.freeze([
 ]);
 
 const BUNDLED_THEME_PACKS = Object.freeze([
+  { id: "ark", label: "Ark", swatch: ["#080a0b", "#18d1ff"], css: "/theme-packs/ark/theme.css" },
   { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"], css: "/theme-packs/win95/theme.css" },
   { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"], css: "/theme-packs/animal-island/theme.css" },
   { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"], css: "/theme-packs/cyberpunk/theme.css" },
@@ -22,6 +23,11 @@ const BUNDLED_THEME_PACKS = Object.freeze([
   { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"], css: "/theme-packs/endfield/theme.css" },
 ]);
 let THEMES = [...BUILT_IN_THEMES, ...BUNDLED_THEME_PACKS];
+
+const ARK_THEME_CONFIG = {
+  ark: { family: "ark", depth: "complex", optionLabel: "OPS SYSTEM / 03" },
+  endfield: { family: "endfield", depth: "complex", optionLabel: "FIELD SYSTEM / 03" },
+};
 
 // 旧 id "animal" 迁移为 "animal-island"
 function normalizeThemeId(value) {
@@ -118,11 +124,12 @@ function rememberTheme(next, theme) {
 function applyTheme(theme) {
   const themeDef = findTheme(theme) || findTheme("dark");
   const next = themeDef.id;
+  const arkTheme = ARK_THEME_CONFIG[next];
   setThemePackStylesheet(themeDef);
   document.documentElement.setAttribute("data-theme", next);
-  if (next === "endfield") {
-    document.documentElement.setAttribute("data-ark-theme", "endfield");
-    document.documentElement.setAttribute("data-ark-depth", "complex");
+  if (arkTheme) {
+    document.documentElement.setAttribute("data-ark-theme", arkTheme.family);
+    document.documentElement.setAttribute("data-ark-depth", arkTheme.depth);
   } else {
     document.documentElement.removeAttribute("data-ark-theme");
     document.documentElement.removeAttribute("data-ark-depth");
@@ -178,7 +185,7 @@ function renderThemeChoices() {
     THEMES.forEach((theme) => {
       const option = document.createElement("option");
       option.value = theme.id;
-      option.textContent = `${theme.label}${theme.id === "endfield" ? " · FIELD SYSTEM / 03" : ""}`;
+      option.textContent = `${theme.label}${ARK_THEME_CONFIG[theme.id] ? ` · ${ARK_THEME_CONFIG[theme.id].optionLabel}` : ""}`;
       fragment.append(option);
     });
     settingsTheme.replaceChildren(fragment);
