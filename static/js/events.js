@@ -5,22 +5,23 @@ const THEME_CSS_ID_KEY = "wildtoken_theme_css_id";
 const THEME_PACK_LINK_ID = "theme-pack-css";
 const themeToggle = document.querySelector("#theme-toggle");
 const themeMenu = document.querySelector("#theme-menu");
+const settingsThemeHint = document.querySelector("#settings-theme-hint");
 
 const BUILT_IN_THEMES = Object.freeze([
-  { id: "dark", label: "深色", swatch: ["#020617", "#22d3ee"] },
-  { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"] },
+  { id: "dark", label: "深色", swatch: ["#020617", "#22d3ee"], description: "深色控制台主题，适合低光环境和长时间查看运行状态。" },
+  { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"], description: "浅色控制台主题，采用高对比工作界面和清晰的信息层级。" },
 ]);
 
 const BUNDLED_THEME_PACKS = Object.freeze([
-  { id: "ark", label: "Ark", swatch: ["#080a0b", "#18d1ff"], css: "/theme-packs/ark/theme.css" },
-  { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"], css: "/theme-packs/win95/theme.css" },
-  { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"], css: "/theme-packs/animal-island/theme.css" },
-  { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"], css: "/theme-packs/cyberpunk/theme.css" },
-  { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"], css: "/theme-packs/nes/theme.css" },
-  { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"], css: "/theme-packs/crt/theme.css" },
-  { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"], css: "/theme-packs/minecraft/theme.css" },
-  { id: "bleach", label: "Bleach", swatch: ["#fff7ed", "#f97316"], css: "/theme-packs/bleach/theme.css" },
-  { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"], css: "/theme-packs/endfield/theme.css" },
+  { id: "ark", label: "Ark", swatch: ["#080a0b", "#18d1ff"], css: "/theme-packs/ark/theme.css", description: "Industrial operations theme with a cyan signal rail and dense technical surfaces." },
+  { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"], css: "/theme-packs/win95/theme.css", description: "Classic desktop chrome theme with teal workspace, hard bevels, and MS-DOS-style code surfaces." },
+  { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"], css: "/theme-packs/animal-island/theme.css", description: "Pastel island theme with parchment surfaces, mint accents, and rounded game-UI controls." },
+  { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"], css: "/theme-packs/cyberpunk/theme.css", description: "Neon HUD theme with black-violet surfaces, magenta accents, and cyan focus states." },
+  { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"], css: "/theme-packs/nes/theme.css", description: "8-bit console theme with chunky shadows, hard borders, and NES red-blue-yellow accents." },
+  { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"], css: "/theme-packs/crt/theme.css", description: "Monochrome phosphor terminal theme with scanlines, green glow, and CRT bezel surfaces." },
+  { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"], css: "/theme-packs/minecraft/theme.css", description: "Blocky deepslate GUI theme with black pixel outlines, stone bevels, and grass accents." },
+  { id: "bleach", label: "Bleach", swatch: ["#fff7ed", "#f97316"], css: "/theme-packs/bleach/theme.css", description: "Manga-paper admin theme with ink rails and orange reiatsu accents." },
+  { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"], css: "/theme-packs/endfield/theme.css", description: "Field-engineering admin theme with pale work surfaces, signal yellow, and left-rail operations layout." },
 ]);
 let THEMES = [...BUILT_IN_THEMES, ...BUNDLED_THEME_PACKS];
 
@@ -55,6 +56,17 @@ function isKnownTheme(value) {
 
 function themeLabel(id) {
   return findTheme(id)?.label || id;
+}
+
+function themeDescription(id) {
+  return findTheme(id)?.description || "";
+}
+
+function updateThemeHint(id) {
+  if (!settingsThemeHint) return;
+  const description = themeDescription(id);
+  settingsThemeHint.textContent = description;
+  settingsThemeHint.hidden = !description;
 }
 
 function themeMenuChoices() {
@@ -146,6 +158,7 @@ function applyTheme(theme) {
     button.setAttribute("aria-checked", String(selected));
     button.tabIndex = selected ? 0 : -1;
   });
+  updateThemeHint(next);
   if (typeof updatePreferenceControls === "function") updatePreferenceControls();
 }
 
@@ -198,6 +211,10 @@ function normalizeHexColor(value, fallback) {
     : fallback;
 }
 
+function normalizeThemeDescription(value) {
+  return String(value || "").replace(/[\u0000-\u001f\u007f]/g, "").trim().slice(0, 220);
+}
+
 function normalizeExternalTheme(theme) {
   if (!theme || typeof theme !== "object") return null;
   const id = normalizeThemeId(String(theme.id || "").trim());
@@ -214,6 +231,7 @@ function normalizeExternalTheme(theme) {
       normalizeHexColor(swatch[1], "#f97316"),
     ],
     css,
+    description: normalizeThemeDescription(theme.description),
     external: true,
   };
 }
@@ -232,7 +250,12 @@ function mergeThemePacks(rawThemes) {
   BUNDLED_THEME_PACKS.forEach((theme) => {
     if (knownIds.has(theme.id)) return;
     knownIds.add(theme.id);
-    externalThemes.push(rawThemeById.get(theme.id) || theme);
+    const rawTheme = rawThemeById.get(theme.id);
+    externalThemes.push(
+      rawTheme
+        ? { ...theme, ...rawTheme, description: rawTheme.description || theme.description || "" }
+        : theme,
+    );
     rawThemeById.delete(theme.id);
   });
 
