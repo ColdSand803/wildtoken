@@ -7,6 +7,7 @@ const themeMenu = document.querySelector("#theme-menu");
 const THEMES = [
   { id: "dark", label: "深色", swatch: ["#020617", "#22d3ee"] },
   { id: "light", label: "浅色", swatch: ["#f4f6fb", "#0891b2"] },
+  { id: "ark", label: "Ark", swatch: ["#080a0b", "#18d1ff"] },
   { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"] },
   { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"] },
   { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"] },
@@ -15,6 +16,11 @@ const THEMES = [
   { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"] },
   { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"] },
 ];
+
+const ARK_THEME_CONFIG = {
+  ark: { family: "ark", depth: "complex", optionLabel: "OPS SYSTEM / 03" },
+  endfield: { family: "endfield", depth: "complex", optionLabel: "FIELD SYSTEM / 03" },
+};
 
 // 旧 id "animal" 迁移为 "animal-island"
 function normalizeThemeId(value) {
@@ -56,10 +62,11 @@ function getStoredTheme() {
 
 function applyTheme(theme) {
   const next = isKnownTheme(theme) ? normalizeThemeId(theme) : "dark";
+  const arkTheme = ARK_THEME_CONFIG[next];
   document.documentElement.setAttribute("data-theme", next);
-  if (next === "endfield") {
-    document.documentElement.setAttribute("data-ark-theme", "endfield");
-    document.documentElement.setAttribute("data-ark-depth", "complex");
+  if (arkTheme) {
+    document.documentElement.setAttribute("data-ark-theme", arkTheme.family);
+    document.documentElement.setAttribute("data-ark-depth", arkTheme.depth);
   } else {
     document.documentElement.removeAttribute("data-ark-theme");
     document.documentElement.removeAttribute("data-ark-depth");
@@ -101,7 +108,7 @@ function renderThemeChoices() {
   }
   if (settingsTheme) {
     settingsTheme.innerHTML = THEMES.map(
-      (theme) => `<option value="${theme.id}">${theme.label}${theme.id === "endfield" ? " · FIELD SYSTEM / 03" : ""}</option>`,
+      (theme) => `<option value="${theme.id}">${theme.label}${ARK_THEME_CONFIG[theme.id] ? ` · ${ARK_THEME_CONFIG[theme.id].optionLabel}` : ""}</option>`,
     ).join("");
   }
 }
