@@ -1088,12 +1088,18 @@ function formatStatusBadge(statusCode) {
     return '<span class="muted">无响应</span>';
   }
   if (statusCode >= 200 && statusCode < 300) {
-    return `<span class="badge on">${statusCode}</span>`;
+    return `<span class="badge on status-2xx">${statusCode}</span>`;
   }
-  if (statusCode >= 400) {
-    return `<span class="badge danger">${statusCode}</span>`;
+  if (statusCode >= 300 && statusCode < 400) {
+    return `<span class="badge neutral status-3xx">${statusCode}</span>`;
   }
-  return `<span class="badge neutral">${statusCode}</span>`;
+  if (statusCode >= 400 && statusCode < 500) {
+    return `<span class="badge danger status-4xx">${statusCode}</span>`;
+  }
+  if (statusCode >= 500) {
+    return `<span class="badge danger status-5xx">${statusCode}</span>`;
+  }
+  return `<span class="badge neutral status-other">${statusCode}</span>`;
 }
 
 function formatReasoningEffort(requestEffort, responseEffort, options = {}) {

@@ -1,6 +1,7 @@
 services:
   wildtoken:
     build: .
+    restart: unless-stopped
     env_file:
       - .env
     environment:

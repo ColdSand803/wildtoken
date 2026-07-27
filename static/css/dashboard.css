@@ -168,6 +168,42 @@
   margin: 0;
 }
 
+.dashboard-ranking-controls {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dashboard-ranking-controls > .log-sensitive-toggle {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 34px;
+  min-width: 34px;
+  padding: 0;
+  width: 34px;
+}
+
+.dashboard-rank-index {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  min-width: 1.5em;
+  text-align: right;
+}
+
+.dashboard-rank-name.is-masked {
+  color: var(--muted);
+  letter-spacing: 0.08em;
+}
+
 .dashboard-card-head,
 .dashboard-metric-head {
   align-items: baseline;
@@ -426,6 +462,10 @@ html[data-density="compact"] .dashboard-grid {
   .dashboard-ranking-toolbar {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .dashboard-ranking-controls {
+    width: 100%;
   }
 
   .dashboard-latency-summary {

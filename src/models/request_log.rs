@@ -81,6 +81,9 @@ pub struct TokenUsageStatsOut {
 pub struct RequestLogTopItemOut {
     pub name: String,
     pub count: i64,
+    /// Present for channel rankings grouped by `upstream_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
