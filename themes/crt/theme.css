@@ -13,14 +13,24 @@ html[data-theme="crt"] {
   --glass: rgb(2 16 8 / 92%);
   --glass-strong: rgb(2 16 8 / 97%);
 
+  /* Phosphor brightness tiers. A real tube only drives a few cells to full
+     beam current; everything else sits well down the curve. Keeping the tiers
+     far apart is what stops the screen reading as one flat sheet of green.
+       peak      — the number you came to read
+       text      — headings and primary labels
+       secondary — supporting labels
+       muted     — captions and hints
+     Rules (borders) sit below all of them: structure should be legible
+     without competing with content for beam. */
+  --crt-peak: #eaffef;
   --text: #b8ffc8;
-  --text-secondary: #7dff9a;
-  --muted: #1a7a42;
-  --muted-strong: #2ec05a;
+  --text-secondary: #6fe08a;
+  --muted: #2a7d4a;
+  --muted-strong: #48b06a;
 
-  --line: rgb(57 255 20 / 48%);
-  --line-strong: rgb(57 255 20 / 75%);
-  --line-soft: rgb(26 122 66 / 40%);
+  --line: rgb(57 255 20 / 20%);
+  --line-strong: rgb(57 255 20 / 42%);
+  --line-soft: rgb(26 122 66 / 26%);
 
   --accent: #39ff14;
   --accent-strong: #7dff5a;
@@ -81,6 +91,23 @@ html[data-theme="crt"] {
 
   --transition: 120ms linear;
   --blur: 0px;
+
+  /* Left rail: two CJK glyphs plus the letter-spacing the terminal type
+     carries, and room for the wordmark to stay on one line in a mono face. */
+  --crt-rail-width: 100px;
+
+  /* A tube's three electron guns never land perfectly on the same cell, so
+     edges carry a faint red/blue fringe. Two leading text-shadow layers,
+     sub-pixel offset — compose it ahead of the glow layers. Large type only:
+     at body size it just reads as blur. */
+  --crt-fringe:
+    -0.6px 0 0 rgb(255 60 90 / 24%),
+    0.6px 0 0 rgb(60 150 255 / 24%);
+
+  /* Phosphor keeps emitting after the beam moves on. Lighting is near
+     instant, decay is not — so transitions in run short and out run long. */
+  --crt-strike: 40ms;
+  --crt-decay: 400ms;
 }
 
 /* ── CRT / 终端 theme structure ─────────────────────────────
@@ -120,35 +147,59 @@ html[data-theme="crt"] .aurora-blob {
   filter: blur(110px);
 }
 
-/* Scanlines + horizontal phosphor residual (static, no flicker) */
-html[data-theme="crt"] body::before {
+/* ── The tube face ───────────────────────────────────────────
+   Everything a real screen puts BETWEEN the phosphor and the eye, in one
+   layer over the whole app: scanlines, aperture grille, glass sheen, and the
+   vignette of the bezel. Structure belongs in front of what it displays — a
+   grille behind the panels is just wallpaper you can see in the gaps.
+
+   Anchored on <html>, not <body>, so it escapes every stacking context the
+   app builds (.app-shell z-index 1, the rail at 30, menus at 1000, toasts at
+   1100) and lands on top of all of them. <dialog> lives in the browser's top
+   layer and stays above it, which is correct: a modal is the OS reaching
+   past the screen, and dimming it would only hurt legibility.
+
+   Everything here is deliberately faint. It sits over live text, so the
+   budget is roughly a 10% luminance tax and no more. */
+html[data-theme="crt"]::before {
   background:
+    /* off-axis sheen across the glass */
+    linear-gradient(
+      112deg,
+      transparent 0 14%,
+      rgb(200 255 220 / 1%) 32%,
+      rgb(214 255 230 / 2%) 47%,
+      rgb(200 255 220 / 0.8%) 62%,
+      transparent 84% 100%
+    ),
+    /* bezel vignette */
+    radial-gradient(ellipse 82% 74% at 50% 46%, transparent 42%, rgb(0 0 0 / 34%) 82%, rgb(0 0 0 / 52%) 100%),
+    /* horizontal scanlines */
     repeating-linear-gradient(
       0deg,
-      transparent,
-      transparent 1px,
-      rgb(0 0 0 / 22%) 1px,
-      rgb(0 0 0 / 22%) 3px
+      transparent 0 1px,
+      rgb(0 0 0 / 10%) 1px 3px
     ),
+    /* vertical aperture grille: RGB phosphor stripes on a 3px pitch, in real
+       R/G/B rather than a green tint — the screen carries colour at the pixel
+       level while still reading monochrome at arm's length */
     repeating-linear-gradient(
       90deg,
-      transparent,
-      transparent 3px,
-      rgb(57 255 20 / 1.8%) 3px,
-      rgb(57 255 20 / 1.8%) 4px
+      rgb(255 40 60 / 4.5%) 0 1px,
+      rgb(40 255 90 / 4.5%) 1px 2px,
+      rgb(60 90 255 / 4.5%) 2px 3px
     );
   content: "";
   inset: 0;
-  opacity: 0.72;
   pointer-events: none;
   position: fixed;
-  z-index: 0;
+  z-index: 2147483000;
 }
 
-html[data-theme="crt"] body::after {
-  /* stronger CRT vignette + soft edge falloff */
-  background:
-    radial-gradient(ellipse 78% 68% at 50% 46%, transparent 35%, rgb(0 0 0 / 55%) 78%, rgb(0 0 0 / 82%) 100%);
+/* Behind the app: the deep bloom of the tube's centre, visible in the gaps
+   between panels. The face layer above carries the structure. */
+html[data-theme="crt"] body::before {
+  background: radial-gradient(ellipse 70% 55% at 50% 42%, rgb(57 255 20 / 7%), transparent 62%);
   content: "";
   inset: 0;
   pointer-events: none;
@@ -156,9 +207,49 @@ html[data-theme="crt"] body::after {
   z-index: 0;
 }
 
+/* Modals render in the top layer, above the face entirely, so without this a
+   dialog floats off the screen it belongs to. Scanlines only — no grille, no
+   vignette — and lighter than the face: a form being filled in needs to stay
+   crisp. Sits under the z-index 1000 popovers a dialog can open. */
+html[data-theme="crt"] dialog::after {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent 0 1px,
+    rgb(0 0 0 / 7%) 1px 3px
+  );
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  z-index: 10;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="crt"] dialog::after {
+    display: none;
+  }
+}
+
+/* Desktop shell: navigation moves into a vertical rail, the work stage takes
+   the rest and scrolls on its own. The tube's scanlines and vignette stay
+   fixed to the viewport behind it, so the glass never scrolls with content. */
 html[data-theme="crt"] .app-shell {
+  display: grid;
+  grid-template-columns: var(--crt-rail-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
   position: relative;
   z-index: 1;
+}
+
+@media (min-width: 761px) {
+  html[data-theme="crt"],
+  html[data-theme="crt"] body {
+    height: 100%;
+    overflow: hidden;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -166,10 +257,11 @@ html[data-theme="crt"] .app-shell {
     animation: none !important;
   }
 
-  html[data-theme="crt"] body::before {
-    /* keep mild vignette feel only — drop dense scanlines */
-    background: none;
-    opacity: 0;
+  /* Drop the dense scanline/grille pattern but keep the bezel vignette, so
+     the tube still has edges without the strobing texture. */
+  html[data-theme="crt"]::before {
+    background:
+      radial-gradient(ellipse 82% 74% at 50% 46%, transparent 42%, rgb(0 0 0 / 34%) 82%, rgb(0 0 0 / 52%) 100%);
   }
 
   html[data-theme="crt"] .brand-label::after {
@@ -200,46 +292,81 @@ html[data-theme="crt"] input[type="checkbox"] {
 /* ── Chrome: terminal status bar ─────────────────────────── */
 
 html[data-theme="crt"] .topbar {
+  align-items: stretch;
+  /* Must stay none: any non-none backdrop-filter makes the rail a containing
+     block for fixed descendants, which would anchor the mobile dock to the
+     rail instead of the viewport. */
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   background:
     linear-gradient(180deg, rgb(57 255 20 / 10%) 0%, transparent 100%),
     #000c06;
-  border-bottom: 2px solid #39ff14;
+  border: 0;
+  border-right: 2px solid #39ff14;
   box-shadow:
     0 0 0 1px rgb(57 255 20 / 25%),
     0 0 24px rgb(57 255 20 / 18%),
-    0 8px 28px rgb(0 0 0 / 55%);
+    8px 0 28px rgb(0 0 0 / 55%);
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  padding: 0 14px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 12px 10px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
 }
 
+/* The lit phosphor edge turns with the rail. */
 html[data-theme="crt"] .topbar::after {
   background: #39ff14;
-  bottom: -2px;
+  bottom: 0;
   box-shadow:
     0 0 8px rgb(57 255 20 / 80%),
     0 0 18px rgb(57 255 20 / 45%);
   content: "";
-  height: 2px;
-  left: 0;
+  height: auto;
+  left: auto;
   opacity: 1;
   pointer-events: none;
   position: absolute;
-  right: 0;
+  right: -2px;
+  top: 0;
+  width: 2px;
 }
 
 html[data-theme="crt"] .topbar-nav {
   background: transparent;
   border: none;
   box-shadow: none;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
   gap: 4px;
-  padding: 2px;
+  overflow: visible;
+  padding: 0;
+  width: 100%;
 }
 
 html[data-theme="crt"] .topbar-brand {
-  gap: 8px;
-  padding: 4px 2px;
+  align-items: center;
+  border-bottom: 1px solid rgb(57 255 20 / 28%);
+  flex-direction: column;
+  gap: 7px;
+  padding: 2px 2px 11px;
+  width: 100%;
+}
+
+html[data-theme="crt"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
 }
 
 html[data-theme="crt"] .brand-mark {
@@ -249,25 +376,32 @@ html[data-theme="crt"] .brand-mark {
     drop-shadow(0 0 12px rgb(57 255 20 / 50%));
 }
 
+/* A mono face at 13px with 0.14em tracking needs ~86px for "WILDTOKEN" — more
+   than the rail's 80px of content width. Tightened so it stays on one line. */
 html[data-theme="crt"] .topbar-brand h1 {
-  color: #b8ffc8;
+  color: var(--crt-peak);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
   text-shadow:
+    var(--crt-fringe),
     0 0 6px rgb(57 255 20 / 55%),
     0 0 14px rgb(57 255 20 / 30%);
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 /* prompt-style brand label */
 html[data-theme="crt"] .brand-label {
   color: #39ff14;
+  display: block;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 9px;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.1em;
+  margin-top: 4px;
   text-shadow:
     0 0 6px rgb(57 255 20 / 70%),
     0 0 14px rgb(57 255 20 / 35%);
@@ -305,14 +439,46 @@ html[data-theme="crt"] .nav-link {
   font-family: var(--font-mono);
   font-weight: 500;
   letter-spacing: 0.08em;
-  padding: 5px 12px;
+  min-height: 36px;
+  min-width: 0;
+  padding: 5px 4px 5px 15px;
+  position: relative;
   text-transform: uppercase;
+  white-space: normal;
+  width: 100%;
+  /* Decay: this is the rule that applies on the way OUT of hover. */
   transition:
-    background-color var(--transition),
-    border-color var(--transition),
-    color var(--transition),
-    box-shadow var(--transition),
-    text-shadow var(--transition);
+    background-color var(--crt-decay) ease-out,
+    border-color var(--crt-decay) ease-out,
+    color var(--crt-decay) ease-out,
+    box-shadow var(--crt-decay) ease-out,
+    text-shadow var(--crt-decay) ease-out;
+}
+
+/* Strike: on the way IN the beam hits immediately. Splitting the duration
+   across the two rules is what makes a row bloom instantly and fade slowly,
+   instead of easing symmetrically like ordinary UI. */
+html[data-theme="crt"] .nav-link:hover,
+html[data-theme="crt"] .nav-link.active {
+  transition-duration: var(--crt-strike);
+}
+
+/* A shell menu points at the line under the cursor. Absolutely positioned so
+   it costs the label no width — the asymmetric padding above is its gutter —
+   and it inherits color, so it reads black once the row inverts. */
+html[data-theme="crt"] .nav-link::before {
+  content: ">";
+  left: 5px;
+  opacity: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  transition: opacity var(--transition);
+}
+
+html[data-theme="crt"] .nav-link:hover::before,
+html[data-theme="crt"] .nav-link.active::before {
+  opacity: 1;
 }
 
 html[data-theme="crt"] .nav-link:hover {
@@ -333,6 +499,69 @@ html[data-theme="crt"] .nav-link.active:hover {
   color: #000804;
   font-weight: 700;
   text-shadow: none;
+}
+
+/* ── Rail footer: utility controls stack at the bottom ───── */
+
+html[data-theme="crt"] .topbar-actions {
+  align-items: stretch;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+  width: 100%;
+}
+
+html[data-theme="crt"] .topbar-actions > *,
+html[data-theme="crt"] .topbar-actions button {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-theme="crt"] .topbar-actions .live-indicator {
+  border-top: 1px solid rgb(57 255 20 / 28%);
+  color: #39ff14;
+  font-size: 9px;
+  justify-content: center;
+  letter-spacing: 0.1em;
+  min-height: 26px;
+  padding: 7px 2px 0;
+}
+
+html[data-theme="crt"] .live-label {
+  display: none;
+}
+
+/* These are .ghost buttons — transparent with dim phosphor text. Alone at the
+   foot of the rail they read as unlit, so give them the secondary outline. */
+html[data-theme="crt"] .topbar-actions .theme-toggle,
+html[data-theme="crt"] .topbar-actions .density-toggle,
+html[data-theme="crt"] .topbar-actions .nav-logout {
+  border: 1px solid rgb(57 255 20 / 45%);
+  color: #7dff9a;
+  font-size: 11px;
+  min-height: 30px;
+  padding: 0 4px;
+}
+
+html[data-theme="crt"] .topbar-actions .theme-toggle:hover,
+html[data-theme="crt"] .topbar-actions .density-toggle:hover,
+html[data-theme="crt"] .topbar-actions .nav-logout:hover {
+  background: rgb(57 255 20 / 12%);
+  border-color: rgb(184 255 200 / 85%);
+  color: #b8ffc8;
+  text-shadow: 0 0 8px rgb(57 255 20 / 45%);
+}
+
+/* The rail is narrower than the menu, so it opens alongside instead of below.
+   The clearance clears the 2px phosphor edge and its glow. */
+html[data-theme="crt"] .theme-menu {
+  bottom: 0;
+  left: calc(100% + 14px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  right: auto;
+  top: auto;
 }
 
 /* ── Buttons ─────────────────────────────────────────────── */
@@ -592,7 +821,7 @@ html[data-theme="crt"] .theme-menu button.is-selected {
 
 html[data-theme="crt"] .segmented-control {
   background: #000804;
-  border: 1px solid rgb(57 255 20 / 40%);
+  border: 1px solid rgb(57 255 20 / 26%);
   border-radius: 0;
   box-shadow: inset 0 0 10px rgb(0 0 0 / 50%), 0 0 12px rgb(57 255 20 / 10%);
   gap: 3px;
@@ -630,8 +859,17 @@ html[data-theme="crt"] .segmented-control button.is-selected:hover {
 /* ── Content / panels ────────────────────────────────────── */
 
 html[data-theme="crt"] .content {
-  max-width: calc(var(--content-max) + 16px);
-  padding: 22px 22px 44px;
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  margin: 0;
+  max-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 22px 26px 44px;
+  scrollbar-gutter: stable;
+  width: 100%;
 }
 
 /* CRT window: top status rail + green bezel + outer glow */
@@ -640,7 +878,7 @@ html[data-theme="crt"] .view > .panel {
     linear-gradient(90deg, #39ff14, rgb(57 255 20 / 40%), #39ff14) top / 100% 2px no-repeat,
     linear-gradient(180deg, rgb(57 255 20 / 8%) 0%, transparent 28%),
     #02140a;
-  border: 1px solid rgb(57 255 20 / 50%);
+  border: 1px solid rgb(57 255 20 / 36%);
   border-radius: 0;
   box-shadow:
     0 0 0 1px rgb(57 255 20 / 18%),
@@ -660,12 +898,13 @@ html[data-theme="crt"] .view > .panel > .panel-head {
 }
 
 html[data-theme="crt"] .view > .panel > .panel-head h2 {
-  color: #b8ffc8;
+  color: var(--crt-peak);
   font-family: var(--font-mono);
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.12em;
   text-shadow:
+    var(--crt-fringe),
     0 0 8px rgb(57 255 20 / 45%),
     0 0 16px rgb(57 255 20 / 22%);
   text-transform: uppercase;
@@ -711,7 +950,7 @@ html[data-theme="crt"] .log-detail-head {
     linear-gradient(90deg, #39ff14, rgb(57 255 20 / 35%), transparent) bottom / 100% 2px no-repeat,
     linear-gradient(90deg, rgb(57 255 20 / 18%), transparent 75%),
     #062816;
-  border-bottom: 1px solid rgb(57 255 20 / 45%);
+  border-bottom: 1px solid rgb(57 255 20 / 22%);
   border-radius: 0;
   box-shadow: 0 0 16px rgb(57 255 20 / 12%);
   color: #b8ffc8;
@@ -757,7 +996,7 @@ html[data-theme="crt"] .log-detail-head p {
 
 html[data-theme="crt"] .command-palette-head {
   background: #062816;
-  border-bottom: 1px solid rgb(57 255 20 / 40%);
+  border-bottom: 1px solid rgb(57 255 20 / 18%);
   box-shadow: 0 0 14px rgb(57 255 20 / 10%);
   padding: 10px 12px;
 }
@@ -839,7 +1078,7 @@ html[data-theme="crt"] .status {
   background:
     linear-gradient(180deg, rgb(57 255 20 / 6%) 0%, transparent 40%),
     #041c10;
-  border: 1px solid rgb(57 255 20 / 38%);
+  border: 1px solid rgb(57 255 20 / 21%);
   border-radius: 0;
   box-shadow:
     0 0 0 1px rgb(57 255 20 / 10%),
@@ -850,6 +1089,30 @@ html[data-theme="crt"] .status {
 html[data-theme="crt"] .dashboard-kpi,
 html[data-theme="crt"] .kpi-card {
   padding: 12px 14px;
+}
+
+/* Peak beam: the figure itself is driven hardest and blooms into the glass.
+   Its label and hint sit two and three tiers down so the eye lands on the
+   number first. */
+html[data-theme="crt"] .kpi-value,
+html[data-theme="crt"] .dashboard-kpi-value {
+  color: var(--crt-peak);
+  text-shadow:
+    var(--crt-fringe),
+    0 0 7px rgb(57 255 20 / 60%),
+    0 0 18px rgb(57 255 20 / 32%),
+    0 0 34px rgb(57 255 20 / 14%);
+}
+
+html[data-theme="crt"] .kpi-label,
+html[data-theme="crt"] .dashboard-kpi-label {
+  color: var(--text-secondary);
+  text-shadow: 0 0 6px rgb(57 255 20 / 18%);
+}
+
+html[data-theme="crt"] .dashboard-kpi-hint {
+  color: var(--muted);
+  text-shadow: none;
 }
 
 html[data-theme="crt"] .dashboard-card,
@@ -931,7 +1194,7 @@ html[data-theme="crt"] .model-selection-chip,
 html[data-theme="crt"] .model-selection-more,
 html[data-theme="crt"] .token-preview-code,
 html[data-theme="crt"] .effective-zero-note {
-  border: 1px solid rgb(57 255 20 / 35%);
+  border: 1px solid rgb(57 255 20 / 24%);
   border-radius: 0;
   font-family: var(--font-mono);
 }
@@ -947,7 +1210,7 @@ html[data-theme="crt"] .settings-stack {
 
 html[data-theme="crt"] .table-wrap {
   background: #000502;
-  border: 1px solid rgb(57 255 20 / 42%);
+  border: 1px solid rgb(57 255 20 / 23%);
   border-radius: 0;
   box-shadow:
     0 0 0 1px rgb(57 255 20 / 12%),
@@ -981,15 +1244,25 @@ html[data-theme="crt"] td {
   font-size: 13px;
 }
 
+/* Same strike/decay split as the nav: the row under the cursor lights at
+   once and trails off after it leaves. */
+html[data-theme="crt"] .table-wrap tbody td {
+  transition:
+    background-color var(--crt-decay) ease-out,
+    color var(--crt-decay) ease-out,
+    text-shadow var(--crt-decay) ease-out;
+}
+
 html[data-theme="crt"] .table-wrap tbody tr:hover td {
   background-color: rgb(57 255 20 / 16%);
   color: #b8ffc8;
   text-shadow: 0 0 6px rgb(57 255 20 / 20%);
+  transition-duration: var(--crt-strike);
 }
 
 html[data-theme="crt"] .url-cell-inner {
   background: #02140a;
-  border-color: rgb(57 255 20 / 35%);
+  border-color: rgb(57 255 20 / 22%);
   border-radius: 0;
   color: #b8ffc8;
   font-family: var(--font-mono);
@@ -1005,14 +1278,14 @@ html[data-theme="crt"] .test-model-response,
 html[data-theme="crt"] .log-detail-meta-card,
 html[data-theme="crt"] .log-detail-section {
   background: #010a05;
-  border: 1px solid rgb(57 255 20 / 38%);
+  border: 1px solid rgb(57 255 20 / 20%);
   border-radius: 0;
   box-shadow: inset 0 0 12px rgb(0 0 0 / 35%), 0 0 10px rgb(57 255 20 / 6%);
 }
 
 html[data-theme="crt"] .log-detail-section summary {
   background: #062816;
-  border-bottom-color: rgb(57 255 20 / 28%);
+  border-bottom-color: rgb(57 255 20 / 15%);
   color: #b8ffc8;
   font-family: var(--font-mono);
   font-weight: 600;
@@ -1072,7 +1345,7 @@ html[data-theme="crt"] .quick-import-panel {
 
 html[data-theme="crt"] .modal-footer {
   background: #000c06;
-  border-top: 1px solid rgb(57 255 20 / 35%);
+  border-top: 1px solid rgb(57 255 20 / 18%);
   gap: 10px;
   padding: 12px 16px 14px;
 }
@@ -1097,13 +1370,19 @@ html[data-theme="crt"] dialog.is-maximized {
     0 0 48px rgb(57 255 20 / 22%);
 }
 
+/* Menu rows are buttons, so the inverted-phosphor fill above reaches them and
+   lights every row like the selected one. They are list items, not controls —
+   strip them back to bare rows and let hover/selection do the talking. */
 html[data-theme="crt"] .theme-menu button,
 html[data-theme="crt"] .col-menu label,
 html[data-theme="crt"] .select-panel button,
-html[data-theme="crt"] .upstream-action-menu button {
+html[data-theme="crt"] .upstream-action-menu button,
+html[data-theme="crt"] .command-palette-item {
+  background: transparent;
   border-color: transparent;
   border-radius: 0;
   box-shadow: none;
+  color: #7dff9a;
   font-family: var(--font-mono);
   font-weight: 500;
   letter-spacing: 0.03em;
@@ -1115,11 +1394,22 @@ html[data-theme="crt"] .theme-menu button:hover,
 html[data-theme="crt"] .col-menu label:hover,
 html[data-theme="crt"] .select-panel button:hover,
 html[data-theme="crt"] .select-panel button.is-active,
-html[data-theme="crt"] .upstream-action-menu button:hover {
+html[data-theme="crt"] .upstream-action-menu button:hover,
+html[data-theme="crt"] .command-palette-item:hover,
+html[data-theme="crt"] .command-palette-item.is-active {
   background: rgb(57 255 20 / 14%);
   border-color: transparent;
   box-shadow: none;
   color: #b8ffc8;
+}
+
+/* The press-flash belongs to command buttons, not list rows. */
+html[data-theme="crt"] .theme-menu button:active:not(:disabled),
+html[data-theme="crt"] .select-panel button:active:not(:disabled),
+html[data-theme="crt"] .upstream-action-menu button:active:not(:disabled),
+html[data-theme="crt"] .command-palette-item:active:not(:disabled) {
+  background: rgb(57 255 20 / 22%);
+  box-shadow: none;
 }
 
 html[data-theme="crt"] .theme-menu button.is-selected:hover {
@@ -1182,24 +1472,96 @@ html[data-theme="crt"] ::-webkit-scrollbar-corner {
   background: #000502;
 }
 
-/* ── Mobile ──────────────────────────────────────────────── */
-
-@media (max-width: 760px) {
+/* Landscape phones and short desktop windows keep the rail, but at full size
+   its footer controls fall past the fold — the rail never scrolls, because
+   that would clip the theme menu opening out of its right edge. */
+@media (min-width: 761px) and (max-height: 580px) {
   html[data-theme="crt"] .topbar {
-    align-items: center;
-    flex-wrap: wrap;
     gap: 8px;
-    min-height: 0;
-    padding: 6px 10px;
+    padding: 8px 10px;
   }
 
   html[data-theme="crt"] .topbar-brand {
-    min-height: 30px;
-    padding: 4px 2px;
+    gap: 3px;
+    padding: 0 2px 7px;
   }
 
   html[data-theme="crt"] .brand-mark {
     display: none;
+  }
+
+  html[data-theme="crt"] .nav-link {
+    min-height: 28px;
+    padding: 3px 4px 3px 15px;
+  }
+
+  html[data-theme="crt"] .topbar-actions .live-indicator {
+    display: none;
+  }
+
+  html[data-theme="crt"] .topbar-actions .theme-toggle,
+  html[data-theme="crt"] .topbar-actions .density-toggle,
+  html[data-theme="crt"] .topbar-actions .nav-logout {
+    min-height: 26px;
+  }
+}
+
+/* ── Mobile ──────────────────────────────────────────────────
+   The rail unfolds into a five-slot dock pinned to the bottom of the
+   viewport. Theme and density stay reachable from Settings. */
+
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme="crt"] .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(62px + env(safe-area-inset-bottom));
+  }
+
+  html[data-theme="crt"] .topbar {
+    align-items: center;
+    border-bottom: 2px solid #39ff14;
+    border-right: 0;
+    box-shadow:
+      0 0 0 1px rgb(57 255 20 / 25%),
+      0 0 24px rgb(57 255 20 / 18%),
+      0 8px 28px rgb(0 0 0 / 55%);
+    flex-direction: row;
+    gap: 8px;
+    height: auto;
+    justify-content: space-between;
+    min-height: 48px;
+    padding: 6px 10px;
+    width: 100%;
+  }
+
+  html[data-theme="crt"] .topbar::after {
+    bottom: -2px;
+    height: 2px;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: auto;
+  }
+
+  html[data-theme="crt"] .topbar-brand {
+    border-bottom: 0;
+    flex-direction: row;
+    gap: 8px;
+    min-height: 30px;
+    padding: 4px 2px;
+    width: auto;
+  }
+
+  html[data-theme="crt"] .brand-mark {
+    display: none;
+  }
+
+  html[data-theme="crt"] .brand-text {
+    text-align: left;
+    width: auto;
   }
 
   html[data-theme="crt"] .topbar-brand h1 {
@@ -1207,24 +1569,78 @@ html[data-theme="crt"] ::-webkit-scrollbar-corner {
     letter-spacing: 0.08em;
   }
 
+  html[data-theme="crt"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="crt"] .topbar-actions {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="crt"] .topbar-actions > *,
+  html[data-theme="crt"] .topbar-actions button {
+    width: auto;
+  }
+
+  html[data-theme="crt"] .topbar-actions .live-indicator,
+  html[data-theme="crt"] .density-toggle,
+  html[data-theme="crt"] .theme-menu-wrap {
+    display: none;
+  }
+
+  html[data-theme="crt"] .nav-logout {
+    min-height: 28px;
+    padding: 0 9px;
+  }
+
   html[data-theme="crt"] .topbar-nav {
-    flex: 1 0 100%;
-    order: 3;
-    overflow-x: auto;
-    width: 100%;
+    background:
+      linear-gradient(180deg, rgb(57 255 20 / 8%) 0%, transparent 100%),
+      #000c06;
+    border: 1px solid rgb(57 255 20 / 55%);
+    bottom: max(6px, env(safe-area-inset-bottom));
+    box-shadow:
+      0 0 0 1px rgb(57 255 20 / 22%),
+      0 0 24px rgb(57 255 20 / 22%),
+      0 8px 24px rgb(0 0 0 / 60%);
+    display: grid;
+    gap: 3px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 8px;
+    padding: 4px;
+    position: fixed;
+    right: 8px;
+    width: auto;
+    z-index: 40;
   }
 
   html[data-theme="crt"] .nav-link {
-    flex: 1 1 0;
     letter-spacing: 0.04em;
-    min-width: 0;
-    padding: 5px 6px;
+    min-height: 38px;
+    padding: 5px 2px;
     text-align: center;
   }
 
-  html[data-theme="crt"] .content {
-    padding: 12px 12px 28px;
+  /* No room for a cursor gutter across five columns; the inverted fill carries
+     the selection on its own. */
+  html[data-theme="crt"] .nav-link::before {
+    display: none;
   }
+
+  html[data-theme="crt"] .content {
+    display: block;
+    height: auto;
+    overflow: visible;
+    padding: 12px 12px 28px;
+    width: 100%;
+  }
+}
+
+@media (max-width: 760px) {
 
   html[data-theme="crt"] .view > .panel {
     padding: 12px;
@@ -1267,8 +1683,10 @@ html[data-theme="crt"] ::-webkit-scrollbar-corner {
     box-shadow: none;
   }
 
-  html[data-theme="crt"] body::before {
-    opacity: 0.45;
+  /* Small screens are held closer and are usually higher-DPI: ease the face
+     texture so it does not compete with body copy. */
+  html[data-theme="crt"]::before {
+    opacity: 0.6;
   }
 
   html[data-theme="crt"] th {

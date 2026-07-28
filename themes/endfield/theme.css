@@ -145,6 +145,11 @@ html[data-theme="endfield"] .app-shell {
 
 html[data-theme="endfield"] .topbar {
   align-items: stretch;
+  /* Must stay none (as in Ark / Bleach): any non-none backdrop-filter makes
+     the bar a containing block for fixed descendants, which would anchor the
+     mobile navigation dock to the bar instead of the viewport. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   background: var(--ef-paper);
   border: 0;
   border-right: 1px solid var(--ef-ink);
@@ -448,6 +453,15 @@ html[data-theme="endfield"] .view[data-view="upstreams"] > .panel > .panel-head:
 html[data-theme="endfield"] .view[data-view="logs"] > .panel > .panel-head::before { content: "03 / REQUEST ARCHIVE"; }
 html[data-theme="endfield"] .view[data-view="tokens"] > .panel > .panel-head::before { content: "04 / ACCESS CONTROL"; }
 html[data-theme="endfield"] .view[data-view="settings"] > .panel > .panel-head::before { content: "05 / CONSOLE CONFIG"; }
+
+/* The label above is this theme's own, numbered to line up with the rail and
+   the sector watermark. base.css gives every view header an .eyebrow saying
+   much the same thing in fewer words, which left the header labelled twice —
+   "01 / OPERATIONS MONITOR" beside "TRAFFIC OVERVIEW". The numbered one wins:
+   it carries the sector, so the generic one is what goes. */
+html[data-theme="endfield"] .view > .panel > .panel-head .eyebrow {
+  display: none;
+}
 
 html[data-theme="endfield"] .view > .panel > .panel-head > div:first-child {
   min-width: 0;
