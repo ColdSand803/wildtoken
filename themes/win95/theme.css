@@ -339,32 +339,71 @@ html[data-theme="win95"] .view > .panel {
   padding: 6px;
 }
 
+/* The window title bar. Every head in this theme was a grey bevelled strip,
+   which in Win95 is precisely what an *inactive* window looks like — the whole
+   console read as a stack of unfocused windows. #000080 was sitting in
+   --accent unused; here it does the job it was named for.
+
+   The bar is the h2 itself rather than a strip added above it. A Win95 title
+   bar carries the window's name, the h2 already is that name, and drawing a
+   separate bar would have meant printing the title twice. The wrapper div goes
+   display:contents so the kicker, title and description become siblings the
+   column can order: bar first, then the two lines of prose under it. */
 html[data-theme="win95"] .view > .panel > .panel-head {
-  align-items: center;
-  background: #c0c0c0;
-  border: 1px solid;
-  border-color: #ffffff #404040 #404040 #ffffff;
-  box-shadow: inset 1px 1px 0 #dfdfdf, inset -1px -1px 0 #808080;
-  gap: 10px;
+  /* base.css sets align-items: start, which on a column flex collapses the bar
+     to the width of its text — a title bar spans the window. */
+  align-items: stretch;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
   margin: 0 0 12px;
-  min-height: 26px;
-  padding: 4px 6px;
+  min-height: 0;
+  padding: 0;
 }
 
-html[data-theme="win95"] .view > .panel > .panel-head h2,
-html[data-theme="win95"] .view > .panel > .panel-head p {
-  color: #000000;
-  letter-spacing: 0;
+html[data-theme="win95"] .view > .panel > .panel-head > div {
+  display: contents;
 }
 
 html[data-theme="win95"] .view > .panel > .panel-head h2 {
+  background: linear-gradient(90deg, #000080 0%, #1084d0 100%);
+  color: #ffffff;
   font-size: var(--text-base);
+  font-weight: 700;
+  letter-spacing: 0;
+  order: 0;
+  padding: 3px 62px 3px 6px;
+  position: relative;
+}
+
+/* Minimise / maximise / close, drawn rather than typed so the bevels match the
+   buttons elsewhere in the theme. Decorative: they are not controls, and the
+   window cannot be closed. */
+html[data-theme="win95"] .view > .panel > .panel-head h2::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='52' height='14' viewBox='0 0 52 14'%3E%3Cg fill='%23c0c0c0'%3E%3Crect width='16' height='14'/%3E%3Crect x='18' width='16' height='14'/%3E%3Crect x='36' width='16' height='14'/%3E%3C/g%3E%3Cg stroke='%23ffffff' fill='none'%3E%3Cpath d='M0.5 13.5V0.5H15.5M18.5 13.5V0.5H33.5M36.5 13.5V0.5H51.5'/%3E%3C/g%3E%3Cg stroke='%23404040' fill='none'%3E%3Cpath d='M15.5 0.5V13.5H0.5M33.5 0.5V13.5H18.5M51.5 0.5V13.5H36.5'/%3E%3C/g%3E%3Cg stroke='%23000000' stroke-width='1.3' fill='none'%3E%3Cpath d='M4 10.5h7'/%3E%3Crect x='22.5' y='3.5' width='8' height='7'/%3E%3Cpath d='M22.5 5.5h8'/%3E%3Cpath d='M41 4.5l6 6M47 4.5l-6 6'/%3E%3C/g%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  content: "";
+  height: 14px;
+  position: absolute;
+  right: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 52px;
+}
+
+html[data-theme="win95"] .view > .panel > .panel-head .eyebrow {
+  order: 1;
+  padding: 6px 0 0;
 }
 
 html[data-theme="win95"] .view > .panel > .panel-head p {
   color: #424242;
   font-size: var(--text-sm);
   margin-top: 1px;
+  order: 2;
 }
 
 html[data-theme="win95"] .upstream-dialog-panel > .modal-head,
@@ -456,16 +495,28 @@ html[data-theme="win95"] textarea:focus-visible {
 
 /* ── Raised surfaces: cards, strips, chips ───────────────── */
 
-html[data-theme="win95"] .dashboard-kpi,
-html[data-theme="win95"] .kpi-card,
-html[data-theme="win95"] .dashboard-card,
-html[data-theme="win95"] .settings-card,
-html[data-theme="win95"] .summary-strip,
-html[data-theme="win95"] .status {
+/* Group boxes stay raised — they hold controls, not readings. */
+html[data-theme="win95"] .settings-card {
   background: #c0c0c0;
   border: 1px solid;
   border-color: #dfdfdf #404040 #404040 #dfdfdf;
   box-shadow: inset 1px 1px 0 #ffffff, inset -1px -1px 0 #808080;
+}
+
+/* Readings sit in a well. Win95 splits its chrome two ways — raised for things
+   you press or that contain, sunken for anything the machine is reporting back
+   — and every surface here was raised, so a figure had the same relief as the
+   frame around it. Flipping the bevel on the display surfaces is what puts the
+   numbers *in* the panel instead of on it. */
+html[data-theme="win95"] .dashboard-kpi,
+html[data-theme="win95"] .kpi-card,
+html[data-theme="win95"] .dashboard-card,
+html[data-theme="win95"] .summary-strip,
+html[data-theme="win95"] .status {
+  background: #c0c0c0;
+  border: 1px solid;
+  border-color: #808080 #ffffff #ffffff #808080;
+  box-shadow: inset 1px 1px 0 #404040, inset -1px -1px 0 #dfdfdf;
 }
 
 html[data-theme="win95"] .kpi-card::before,
