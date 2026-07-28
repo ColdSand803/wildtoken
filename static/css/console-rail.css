@@ -123,6 +123,24 @@ html[data-theme="light"] .nav-link.active::after {
   width: 3px;
 }
 
+/* base.css bumps the selected row from 500 to 600. In a horizontal bar that
+   is a light touch; in a vertical rail it is not. The label reflows to a new
+   width on every switch, and with CJK glyphs — dense enough that the extra
+   weight fills in their counters — the row visibly thickens as you move
+   between views.
+
+   Nothing is lost by pinning it: selection is already carried four other
+   ways — the gutter marker, the accent icon, the fill, and the brighter
+   label. Weight was the fifth signal and the only one that moved the text. */
+html[data-theme="dark"] .nav-link,
+html[data-theme="light"] .nav-link,
+html[data-theme="dark"] .nav-link.active,
+html[data-theme="light"] .nav-link.active,
+html[data-theme="dark"] .nav-link.active:hover,
+html[data-theme="light"] .nav-link.active:hover {
+  font-weight: 500;
+}
+
 /* ── Footer rows ───────────────────────────────────────────────
    Status, density, theme and logout are laid out on the same left edge as the
    navigation, so the rail reads as a single column top to bottom. */
@@ -212,11 +230,6 @@ html[data-theme="light"] .topbar-actions .live-label {
   display: inline;
 }
 
-/* base.css sizes this button as a 34px square holding nothing but the swatch.
-   Stretched across the rail that left the disc marooned in the middle, so it
-   gets a label — supplied here rather than in admin.html, which the theme
-   packs share and lay out differently. The button already carries
-   aria-label="选择主题", so this text is decoration and is not announced. */
 /* enhancements.css sets this to 600 for the horizontal bar, where it is the
    button's only content. In the rail it sits in a column with 主题 and 退出,
    and at 600 it was the one label that looked emphasised for no reason. */
@@ -225,9 +238,15 @@ html[data-theme="light"] .topbar-actions .density-toggle-label {
   font-weight: inherit;
 }
 
-/* base.css pins this to a 34px square. The flex child in the rail is the
-   wrapper, not the button, so the button needs the width restated or it
-   collapses to its 0-width intrinsic content. */
+/* base.css sizes this button as a 34px square holding nothing but the swatch.
+   Stretched across the rail that left the disc marooned in the middle, so it
+   gets a label below — supplied here rather than in admin.html, which the
+   theme packs share and lay out differently. The button already carries
+   aria-label="选择主题", so the text is decoration and is not announced.
+
+   The width also has to be restated: the flex child in the rail is the
+   wrapper, not the button, so without it the button collapses to its
+   0-width intrinsic content. */
 html[data-theme="dark"] .topbar-actions .theme-toggle,
 html[data-theme="light"] .topbar-actions .theme-toggle {
   min-width: 0;
