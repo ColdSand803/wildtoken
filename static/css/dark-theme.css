@@ -4,10 +4,12 @@
    packs. Scoped to [data-theme="dark"] throughout so nothing leaks into a
    theme pack that relies on the base layout.
 
-   --dk-rail-width fits "WildToken" on one line at the reduced brand size
-   below, plus the rail's padding. */
+   --dk-rail-width holds the widest row in the rail: 14px indent, a 16px icon,
+   the 9px gap, a two-glyph label at 13px, and 10px of trailing air. That is
+   75px, so 118px leaves the labels slack rather than sitting them against the
+   edge. It also clears "WildToken" at the reduced brand size below. */
 html[data-theme="dark"] {
-  --dk-rail-width: 104px;
+  --dk-rail-width: 118px;
 
   /* ── Type ramp ────────────────────────────────────────────
      Measured before this change, the whole console used exactly two text
@@ -242,24 +244,13 @@ html[data-theme="dark"] .nav-link:hover {
 
 /* Selection reads as a marker in the gutter rather than a filled capsule —
    the convention for vertical navigation, and it leaves the label sitting on
-   the same baseline whether or not it is active. */
+   the same baseline whether or not it is active. The marker itself is drawn in
+   console-rail.css, which owns ::before for the icon and ::after for this. */
 html[data-theme="dark"] .nav-link.active,
 html[data-theme="dark"] .nav-link.active:hover {
   background: var(--accent-soft);
   box-shadow: none;
   color: var(--dk-peak);
-}
-
-html[data-theme="dark"] .nav-link.active::before {
-  background: var(--accent);
-  border-radius: 0 2px 2px 0;
-  content: "";
-  height: 16px;
-  left: 0;
-  position: absolute;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 3px;
 }
 
 /* One control per line at the foot of the rail: status, density, theme, then
@@ -302,31 +293,38 @@ html[data-theme="dark"] .topbar-actions .nav-logout {
   width: 100%;
 }
 
-/* These are .ghost buttons — transparent with muted text. Alone at the foot of
-   the rail they read as disabled, so give them a quiet panel face. */
+/* Bordered and filled, these three read as a stack of cards wedged under the
+   navigation — the heaviest thing in the rail, for its least important
+   controls. As borderless rows they sit in the same column as the nav above
+   and only take a surface when pointed at. Their icons carry the weight the
+   borders were carrying. */
 html[data-theme="dark"] .topbar-actions .theme-toggle,
 html[data-theme="dark"] .topbar-actions .density-toggle,
 html[data-theme="dark"] .topbar-actions .nav-logout {
-  background: var(--panel-muted);
-  border: 1px solid var(--line);
-  color: var(--text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: none;
+  color: var(--muted-strong);
   font-size: 11px;
+  font-weight: 500;
   min-height: 30px;
   min-width: 0;
-  padding: 0 6px;
-}
-
-html[data-theme="dark"] .topbar-actions .theme-toggle {
-  padding: 0;
-  width: 100%;
 }
 
 html[data-theme="dark"] .topbar-actions .theme-toggle:hover,
-html[data-theme="dark"] .topbar-actions .density-toggle:hover,
-html[data-theme="dark"] .topbar-actions .nav-logout:hover {
-  background: var(--panel-elevated);
-  border-color: var(--line-strong);
+html[data-theme="dark"] .topbar-actions .density-toggle:hover {
+  background: var(--panel-muted);
+  border: 0;
   color: var(--text);
+}
+
+/* Logging out is the one destructive thing in the rail, so it is the one row
+   that answers in a different colour. */
+html[data-theme="dark"] .topbar-actions .nav-logout:hover {
+  background: var(--danger-soft);
+  border: 0;
+  color: var(--danger-strong);
 }
 
 /* The rail is narrower than the menu, so it opens alongside instead of below. */
@@ -504,8 +502,9 @@ html[data-theme="dark"] .content {
     text-align: center;
   }
 
-  /* No gutter to mark in a five-column dock; the fill carries the selection. */
-  html[data-theme="dark"] .nav-link.active::before {
+  /* No gutter to mark in a five-column dock; the fill and the accented icon
+     carry the selection. */
+  html[data-theme="dark"] .nav-link.active::after {
     display: none;
   }
 
