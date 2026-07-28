@@ -212,6 +212,16 @@ html[data-theme="light"] .content {
   width: 100%;
 }
 
+/* .content stays full-bleed so it can own the scrollbar, which then sits on
+   the edge of the stage rather than floating at the end of the text column.
+   The cap goes on the views inside it, so every one of them — settings
+   included — measures the same and centres in whatever is left over. */
+html[data-theme="light"] .content > .view {
+  margin-inline: auto;
+  max-width: var(--content-max);
+  width: 100%;
+}
+
 html[data-theme="light"] .brand-mark {
   filter: drop-shadow(0 3px 5px rgb(8 127 155 / 18%));
 }

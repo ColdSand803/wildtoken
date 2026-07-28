@@ -1,13 +1,11 @@
 /* ── Settings: deliberate control surface, not a generic form ─────────── */
-.settings-hero {
-  max-width: 1120px;
-  margin-left: auto;
-  margin-right: auto;
-}
 
-.settings-hero > .panel-head {
-  margin-bottom: 18px;
-}
+/* .settings-hero carried its own 1120px cap and an 18px header gap, which is
+   why this page sat narrower than the other four and its title had more air
+   under it. Both are gone: width now comes from the shared content cap, and
+   the header spacing from .panel-head, so all five views agree.
+
+   The class stays on the element — animal-island hooks its header off it. */
 
 /* .eyebrow now labels every view's header, not just this one — it lives in
    base.css next to .panel-head. */
@@ -81,7 +79,6 @@
 .rotate-confirm-check input { flex: 0 0 auto; margin: 0; width: auto; }
 
 @media (max-width: 760px) {
-  .settings-hero > .panel-head { margin-bottom: 16px; }
   .settings-card { padding: 14px; }
   .settings-preferences-grid, .settings-fields-grid { grid-template-columns: minmax(0, 1fr); }
   .routing-rule-steps { grid-template-columns: minmax(0, 1fr); }
