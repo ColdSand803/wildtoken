@@ -1073,6 +1073,17 @@ html[data-theme="light"] .nav-link:hover {
   margin-bottom: 12px;
 }
 
+/* A view's primary buttons sit at the far end of the filter row, not in the
+   header, so the filters keep the left edge and the actions the right. The
+   auto margin does the pushing, which means it survives filters being added
+   or hidden — the batch group appears only with a selection.
+
+   The toolbar aligns to flex-end, so the buttons land on the baseline of the
+   inputs rather than their labels. */
+.view-toolbar > .toolbar-actions {
+  margin-inline-start: auto;
+}
+
 .filter-field {
   color: var(--muted);
   display: flex;

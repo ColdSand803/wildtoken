@@ -189,6 +189,16 @@
     width: 100%;
   }
 
+  /* One control per row here, so there is no right edge to push against — drop
+     the auto margin and let the buttons share the row like the batch group. */
+  .view-toolbar > .toolbar-actions {
+    margin-inline-start: 0;
+  }
+
+  .view-toolbar > .toolbar-actions button {
+    flex: 1 1 0;
+  }
+
   .filter-field input,
   .filter-field select {
     min-width: 0;
