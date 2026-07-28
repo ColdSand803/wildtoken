@@ -155,6 +155,18 @@
     min-width: 72px;
   }
 
+  /* 刷新 used to be a direct child and got the rule above. Wrapped, the group
+     is the grid item, so it takes the full-width span and the auto margin
+     comes off — there is no right edge to push against in a grid. */
+  .log-toolbar > .toolbar-actions {
+    grid-column: 1 / -1;
+    margin-inline-start: 0;
+  }
+
+  .log-toolbar > .toolbar-actions > button {
+    flex: 1 1 0;
+  }
+
   .log-toolbar > .log-sensitive-toggle {
     grid-column: auto;
     justify-self: start;
@@ -187,6 +199,16 @@
     gap: 10px;
     grid-template-columns: minmax(0, 1fr);
     width: 100%;
+  }
+
+  /* One control per row here, so there is no right edge to push against — drop
+     the auto margin and let the buttons share the row like the batch group. */
+  .view-toolbar > .toolbar-actions {
+    margin-inline-start: 0;
+  }
+
+  .view-toolbar > .toolbar-actions button {
+    flex: 1 1 0;
   }
 
   .filter-field input,
@@ -572,6 +594,7 @@
   }
 
   .log-toolbar > button,
+  .log-toolbar > .toolbar-actions > button,
   .modal-footer button {
     width: 100%;
   }

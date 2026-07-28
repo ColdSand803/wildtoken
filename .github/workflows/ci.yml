@@ -129,6 +129,10 @@ jobs:
           grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-admin.html"
 
           curl --fail --silent --show-error \
+            http://127.0.0.1:3110/theme-packs/bleach/theme.css \
+            --output "$RUNNER_TEMP/wildtoken-theme.css"
+
+          curl --fail --silent --show-error \
             --request POST \
             --header "x-admin-token: $admin_token" \
             --header 'content-type: application/json' \
@@ -186,6 +190,7 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/wildtoken-health.json" \
             "$RUNNER_TEMP/wildtoken-admin.html" \
+            "$RUNNER_TEMP/wildtoken-theme.css" \
             "$RUNNER_TEMP/wildtoken-token-created.json" \
             "$RUNNER_TEMP/wildtoken-models-unauthenticated.json" \
             "$RUNNER_TEMP/wildtoken-models.json" \

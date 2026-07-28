@@ -1,0 +1,332 @@
+/* ── Left rail: shared plumbing for the two built-in consoles ──
+   dark-theme.css and light-theme.css each dress the rail in their own palette.
+   What lives here is the part that is identical between them: the geometry of
+   an icon + label row, and the icon set itself. Keeping it in one place avoids
+   carrying five data URIs twice.
+
+   Every selector names both built-in themes explicitly, so the theme packs —
+   which ship their own rails — are untouched. This file is imported after both
+   theme files, so where it and they set the same property, this one wins.
+
+   Icons are stroked 24x24 SVGs used as masks rather than backgrounds: a mask
+   takes its colour from background-color, so one asset follows the label
+   through rest, hover and active without a second copy per state. */
+
+html[data-theme="dark"],
+html[data-theme="light"] {
+  /* Navigation, one per view. Line weight is 1.8 at 24px, which lands just
+     under 1.2px once scaled into the 16px box — heavy enough not to dissolve
+     against a blurred rail, light enough to read as UI rather than clipart. */
+  --rail-icon-dashboard: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='7' height='7' rx='1.6'/%3E%3Crect x='13.5' y='3.5' width='7' height='7' rx='1.6'/%3E%3Crect x='3.5' y='13.5' width='7' height='7' rx='1.6'/%3E%3Crect x='13.5' y='13.5' width='7' height='7' rx='1.6'/%3E%3C/svg%3E");
+  --rail-icon-upstreams: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='5.5' cy='12' r='2.3'/%3E%3Ccircle cx='18.5' cy='6' r='2.3'/%3E%3Ccircle cx='18.5' cy='18' r='2.3'/%3E%3Cpath d='M7.6 11 16.4 6.9M7.6 13l8.8 4.1'/%3E%3C/svg%3E");
+  --rail-icon-logs: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 6.5h15M4.5 12h15M4.5 17.5h10'/%3E%3C/svg%3E");
+  --rail-icon-tokens: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7' cy='12' r='3.4'/%3E%3Cpath d='M10.4 12h10.1M17.6 12v3.4M14.2 12v2.8'/%3E%3C/svg%3E");
+  --rail-icon-settings: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7.5h9M17.5 7.5h2.5M4 16.5h3.5M12 16.5h8'/%3E%3Ccircle cx='15.2' cy='7.5' r='2.2'/%3E%3Ccircle cx='9.7' cy='16.5' r='2.2'/%3E%3C/svg%3E");
+
+  /* Rail footer. Density is two arrows closing on a centre rule; a plain
+     stack of lines would have been indistinguishable from the logs icon. */
+  --rail-icon-density: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h16M8 4.6 12 8.6l4-4M8 19.4 12 15.4l4 4'/%3E%3C/svg%3E");
+  --rail-icon-logout: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 20H5.6A1.6 1.6 0 0 1 4 18.4V5.6A1.6 1.6 0 0 1 5.6 4h3.9M14.8 8.2 18.6 12l-3.8 3.8M18.6 12H9.4'/%3E%3C/svg%3E");
+
+  /* One box size for every glyph in the rail. The footer draws its marks at
+     14px inside the same 16px box, so its icons read as quieter than the
+     navigation's without falling off the shared left edge. */
+  --rail-icon-box: 16px;
+  --rail-icon-foot: 14px;
+  --rail-gap: 9px;
+}
+
+/* ── Navigation rows ───────────────────────────────────────── */
+
+html[data-theme="dark"] .nav-link,
+html[data-theme="light"] .nav-link {
+  align-items: center;
+  display: flex;
+  gap: var(--rail-gap);
+  /* Two CJK glyphs never need to wrap, and a wrapped second line would break
+     the icon's vertical centring. */
+  white-space: nowrap;
+}
+
+html[data-theme="dark"] .nav-link::before,
+html[data-theme="light"] .nav-link::before {
+  background-color: currentColor;
+  content: "";
+  flex: 0 0 auto;
+  height: var(--rail-icon-box);
+  opacity: 0.6;
+  transition: opacity var(--transition), background-color var(--transition);
+  width: var(--rail-icon-box);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+html[data-theme="dark"] .nav-link[data-view="dashboard"]::before,
+html[data-theme="light"] .nav-link[data-view="dashboard"]::before {
+  mask-image: var(--rail-icon-dashboard);
+  -webkit-mask-image: var(--rail-icon-dashboard);
+}
+
+html[data-theme="dark"] .nav-link[data-view="upstreams"]::before,
+html[data-theme="light"] .nav-link[data-view="upstreams"]::before {
+  mask-image: var(--rail-icon-upstreams);
+  -webkit-mask-image: var(--rail-icon-upstreams);
+}
+
+html[data-theme="dark"] .nav-link[data-view="logs"]::before,
+html[data-theme="light"] .nav-link[data-view="logs"]::before {
+  mask-image: var(--rail-icon-logs);
+  -webkit-mask-image: var(--rail-icon-logs);
+}
+
+html[data-theme="dark"] .nav-link[data-view="tokens"]::before,
+html[data-theme="light"] .nav-link[data-view="tokens"]::before {
+  mask-image: var(--rail-icon-tokens);
+  -webkit-mask-image: var(--rail-icon-tokens);
+}
+
+html[data-theme="dark"] .nav-link[data-view="settings"]::before,
+html[data-theme="light"] .nav-link[data-view="settings"]::before {
+  mask-image: var(--rail-icon-settings);
+  -webkit-mask-image: var(--rail-icon-settings);
+}
+
+html[data-theme="dark"] .nav-link:hover::before,
+html[data-theme="light"] .nav-link:hover::before {
+  opacity: 0.85;
+}
+
+/* The selected row is the one place the accent appears in the navigation, so
+   it does the work the old bold-plus-fill treatment was doing. */
+html[data-theme="dark"] .nav-link.active::before,
+html[data-theme="light"] .nav-link.active::before {
+  background-color: var(--accent);
+  opacity: 1;
+}
+
+/* The gutter marker moved off ::before to make room for the icon. Absolute
+   positioning keeps it out of the flex row regardless of source order. */
+html[data-theme="dark"] .nav-link.active::after,
+html[data-theme="light"] .nav-link.active::after {
+  background: var(--accent);
+  border-radius: 0 3px 3px 0;
+  content: "";
+  height: 18px;
+  left: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+}
+
+/* base.css bumps the selected row from 500 to 600. In a horizontal bar that
+   is a light touch; in a vertical rail it is not. The label reflows to a new
+   width on every switch, and with CJK glyphs — dense enough that the extra
+   weight fills in their counters — the row visibly thickens as you move
+   between views.
+
+   Nothing is lost by pinning it: selection is already carried four other
+   ways — the gutter marker, the accent icon, the fill, and the brighter
+   label. Weight was the fifth signal and the only one that moved the text. */
+html[data-theme="dark"] .nav-link,
+html[data-theme="light"] .nav-link,
+html[data-theme="dark"] .nav-link.active,
+html[data-theme="light"] .nav-link.active,
+html[data-theme="dark"] .nav-link.active:hover,
+html[data-theme="light"] .nav-link.active:hover {
+  font-weight: 500;
+}
+
+/* ── Footer rows ───────────────────────────────────────────────
+   Status, density, theme and logout are laid out on the same left edge as the
+   navigation, so the rail reads as a single column top to bottom. */
+
+html[data-theme="dark"] .topbar-actions .density-toggle,
+html[data-theme="light"] .topbar-actions .density-toggle,
+html[data-theme="dark"] .topbar-actions .theme-toggle,
+html[data-theme="light"] .topbar-actions .theme-toggle,
+html[data-theme="dark"] .topbar-actions .nav-logout,
+html[data-theme="light"] .topbar-actions .nav-logout {
+  align-items: center;
+  display: flex;
+  gap: var(--rail-gap);
+  justify-content: flex-start;
+  padding: 0 10px 0 14px;
+  text-align: left;
+  white-space: nowrap;
+  width: 100%;
+}
+
+/* The status row joins the same left edge, but only its inline padding is set
+   here: both themes use its block padding to sit clear of the divider rule
+   they draw above it. */
+html[data-theme="dark"] .topbar-actions .live-indicator,
+html[data-theme="light"] .topbar-actions .live-indicator {
+  align-items: center;
+  display: flex;
+  gap: var(--rail-gap);
+  justify-content: flex-start;
+  white-space: nowrap;
+  width: 100%;
+  padding-inline: 14px 10px;
+}
+
+html[data-theme="dark"] .topbar-actions .density-toggle::before,
+html[data-theme="light"] .topbar-actions .density-toggle::before,
+html[data-theme="dark"] .topbar-actions .nav-logout::before,
+html[data-theme="light"] .topbar-actions .nav-logout::before {
+  background-color: currentColor;
+  content: "";
+  flex: 0 0 auto;
+  height: var(--rail-icon-box);
+  opacity: 0.62;
+  transition: opacity var(--transition);
+  width: var(--rail-icon-box);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: var(--rail-icon-foot) var(--rail-icon-foot);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: var(--rail-icon-foot) var(--rail-icon-foot);
+}
+
+html[data-theme="dark"] .topbar-actions .density-toggle::before,
+html[data-theme="light"] .topbar-actions .density-toggle::before {
+  mask-image: var(--rail-icon-density);
+  -webkit-mask-image: var(--rail-icon-density);
+}
+
+html[data-theme="dark"] .topbar-actions .nav-logout::before,
+html[data-theme="light"] .topbar-actions .nav-logout::before {
+  mask-image: var(--rail-icon-logout);
+  -webkit-mask-image: var(--rail-icon-logout);
+}
+
+html[data-theme="dark"] .topbar-actions .density-toggle:hover::before,
+html[data-theme="light"] .topbar-actions .density-toggle:hover::before,
+html[data-theme="dark"] .topbar-actions .nav-logout:hover::before,
+html[data-theme="light"] .topbar-actions .nav-logout:hover::before {
+  opacity: 0.9;
+}
+
+/* The dot stays 7px, but is centred in a 16px slot so its label starts on the
+   same text edge as every icon above it. Sizing the dot itself to 16px would
+   have inflated the circle; the margin pads the slot instead.
+   (16 - 7) / 2 = 4.5. */
+html[data-theme="dark"] .topbar-actions .live-dot,
+html[data-theme="light"] .topbar-actions .live-dot {
+  flex: 0 0 auto;
+  margin-inline: 4.5px;
+}
+
+/* The rail is wide enough for the word, and a bare pulsing dot on its own row
+   gave no clue what it was reporting. */
+html[data-theme="dark"] .topbar-actions .live-label,
+html[data-theme="light"] .topbar-actions .live-label {
+  display: inline;
+}
+
+/* enhancements.css sets this to 600 for the horizontal bar, where it is the
+   button's only content. In the rail it sits in a column with 主题 and 退出,
+   and at 600 it was the one label that looked emphasised for no reason. */
+html[data-theme="dark"] .topbar-actions .density-toggle-label,
+html[data-theme="light"] .topbar-actions .density-toggle-label {
+  font-weight: inherit;
+}
+
+/* base.css sizes this button as a 34px square holding nothing but the swatch.
+   Stretched across the rail that left the disc marooned in the middle, so it
+   gets a label below — supplied here rather than in admin.html, which the
+   theme packs share and lay out differently. The button already carries
+   aria-label="选择主题", so the text is decoration and is not announced.
+
+   The width also has to be restated: the flex child in the rail is the
+   wrapper, not the button, so without it the button collapses to its
+   0-width intrinsic content. */
+html[data-theme="dark"] .topbar-actions .theme-toggle,
+html[data-theme="light"] .topbar-actions .theme-toggle {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-theme="dark"] .topbar-actions .theme-toggle::after,
+html[data-theme="light"] .topbar-actions .theme-toggle::after {
+  content: "主题";
+}
+
+html[data-theme="dark"] .topbar-actions .theme-toggle-icon,
+html[data-theme="light"] .topbar-actions .theme-toggle-icon {
+  flex: 0 0 auto;
+  height: var(--rail-icon-box);
+  width: var(--rail-icon-box);
+}
+
+/* Inset by one so the disc measures 14px like the other footer marks while
+   its box stays on the 16px grid. */
+html[data-theme="dark"] .topbar-actions .theme-toggle-icon::before,
+html[data-theme="light"] .topbar-actions .theme-toggle-icon::before {
+  inset: 1px;
+}
+
+/* ── Short desktop windows ─────────────────────────────────────
+   Same specificity problem as the mobile block below: both theme files drop
+   the status row and tighten the controls under 580px of height, and the
+   footer rules above would otherwise override them. */
+@media (min-width: 761px) and (max-height: 580px) {
+  html[data-theme="dark"] .topbar-actions .live-indicator,
+  html[data-theme="light"] .topbar-actions .live-indicator {
+    display: none;
+  }
+}
+
+/* ── Mobile ────────────────────────────────────────────────────
+   The rail becomes a five-slot dock. Side by side, an icon and a label do not
+   fit in a fifth of a phone screen, so the icon goes above the label — and the
+   dock reads better for it. */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  /* Both theme files already hide these on mobile, but the footer rules above
+     are more specific than theirs and a media query adds no specificity, so
+     without this the dock would show them again. Density and theme stay
+     reachable from Settings. */
+  html[data-theme="dark"] .topbar-actions .live-indicator,
+  html[data-theme="light"] .topbar-actions .live-indicator,
+  html[data-theme="dark"] .topbar-actions .density-toggle,
+  html[data-theme="light"] .topbar-actions .density-toggle,
+  html[data-theme="dark"] .topbar-actions .theme-menu-wrap,
+  html[data-theme="light"] .topbar-actions .theme-menu-wrap,
+  html[data-theme="dark"] .topbar-actions .theme-toggle,
+  html[data-theme="light"] .topbar-actions .theme-toggle {
+    display: none;
+  }
+
+  html[data-theme="dark"] .nav-link,
+  html[data-theme="light"] .nav-link {
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  html[data-theme="dark"] .nav-link::before,
+  html[data-theme="light"] .nav-link::before {
+    height: 16px;
+    width: 16px;
+  }
+
+  /* Stacked, the row is icon + gap + label. Dropping the label a step keeps
+     the slot inside the dock height both themes already reserve space for. */
+  html[data-theme="dark"] .nav-link,
+  html[data-theme="light"] .nav-link {
+    font-size: var(--text-xs);
+    line-height: 1.2;
+  }
+
+  html[data-theme="dark"] .topbar-actions .nav-logout,
+  html[data-theme="light"] .topbar-actions .nav-logout {
+    gap: 6px;
+    padding: 0 10px;
+    width: auto;
+  }
+}

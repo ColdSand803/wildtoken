@@ -12,39 +12,266 @@ html[data-theme="light"] .aurora-blob {
   opacity: 0.72;
 }
 
+/* ── Shell: left rail ────────────────────────────────────────
+   Navigation lives in a vertical rail; the work stage takes the rest and
+   scrolls on its own. Matches the layout the theme packs use, in this
+   theme's own frosted-glass language.
+
+   --lt-rail-width holds the widest row in the rail: 14px indent, a 16px icon,
+   the 9px gap, a two-glyph label at 13px, and 10px of trailing air. That is
+   75px, so 118px leaves the labels slack rather than sitting them against the
+   edge. It also clears "WildToken" at the reduced brand size below. */
+html[data-theme="light"] {
+  --lt-rail-width: 118px;
+}
+
+html[data-theme="light"] .app-shell {
+  display: grid;
+  grid-template-columns: var(--lt-rail-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+@media (min-width: 761px) {
+  html[data-theme="light"],
+  html[data-theme="light"] body {
+    height: 100%;
+    overflow: hidden;
+  }
+}
+
 html[data-theme="light"] .topbar {
-  background: linear-gradient(112deg, rgb(255 255 255 / 78%), rgb(244 250 252 / 66%));
-  border-bottom-color: rgb(205 216 229 / 86%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 92%), 0 1px 0 rgb(255 255 255 / 76%), 0 7px 24px rgb(34 53 80 / 7%);
+  align-items: stretch;
+  background: linear-gradient(168deg, rgb(255 255 255 / 82%), rgb(244 250 252 / 70%));
+  border: 0;
+  border-right: 1px solid rgb(205 216 229 / 86%);
+  box-shadow: inset -1px 0 0 rgb(255 255 255 / 76%), 7px 0 24px rgb(34 53 80 / 7%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 14px 10px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
+  /* Safe on desktop: the rail has no fixed descendants. The mobile block
+     below must clear it, or the dock anchors to the bar, not the viewport. */
   backdrop-filter: saturate(1.2) blur(22px);
   -webkit-backdrop-filter: saturate(1.2) blur(22px);
 }
 
+/* The accent hairline turns with the rail. */
 html[data-theme="light"] .topbar::after {
-  background: linear-gradient(90deg, transparent 0%, rgb(8 127 155 / 0%) 14%, rgb(8 127 155 / 28%) 50%, rgb(8 127 155 / 0%) 86%, transparent 100%);
+  background: linear-gradient(180deg, transparent 0%, rgb(8 127 155 / 0%) 14%, rgb(8 127 155 / 28%) 50%, rgb(8 127 155 / 0%) 86%, transparent 100%);
+  bottom: 0;
+  height: auto;
+  left: auto;
   opacity: 0.8;
+  right: -1px;
+  top: 0;
+  width: 1px;
+}
+
+html[data-theme="light"] .topbar-brand {
+  align-items: center;
+  border-bottom: 1px solid rgb(205 216 229 / 70%);
+  flex-direction: column;
+  gap: 7px;
+  padding: 2px 2px 13px;
+  width: 100%;
+}
+
+html[data-theme="light"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
+}
+
+html[data-theme="light"] .topbar-brand h1 {
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+
+/* Stacked under the wordmark this sits on its own line and is read, not just
+   glanced at. The inherited accent measured 3.41:1 on the pale rail — below
+   AA for text this size — so it steps down to a darker teal at 5.09:1. */
+html[data-theme="light"] .brand-label {
+  color: #0e7590;
+  display: block;
+  font-size: 9px;
+  margin-top: 3px;
+}
+
+/* One control per line at the foot of the rail: status, density, theme, then
+   the destructive action last. */
+html[data-theme="light"] .topbar-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: auto;
+  width: 100%;
+}
+
+html[data-theme="light"] .topbar-actions .live-indicator {
+  border-top: 1px solid rgb(205 216 229 / 70%);
+  font-size: 10px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 8px 2px 0;
+  width: 100%;
+}
+
+html[data-theme="light"] .live-label {
+  display: none;
+}
+
+/* Density and theme toggle each get their own line — no more side-by-side
+   pairing. The status line is still on its own, and the destructive action
+   remains full-width at the foot. */
+html[data-theme="light"] .topbar-actions .density-toggle,
+html[data-theme="light"] .topbar-actions .theme-menu-wrap {
+  flex: 1 0 100%;
+  width: 100%;
+}
+
+html[data-theme="light"] .topbar-actions .nav-logout {
+  flex: 1 0 100%;
+  width: 100%;
+}
+
+/* Bordered and filled, these three read as a stack of cards wedged under the
+   navigation — the heaviest thing in the rail, for its least important
+   controls. As borderless rows they sit in the same column as the nav above
+   and only take a surface when pointed at. Their icons carry the weight the
+   borders were carrying.
+
+   #5d6d82 measures 5.2:1 on the rail, clearing AA for the 11px label. */
+html[data-theme="light"] .topbar-actions .theme-toggle,
+html[data-theme="light"] .topbar-actions .density-toggle,
+html[data-theme="light"] .topbar-actions .nav-logout {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: none;
+  color: #5d6d82;
+  font-size: 11px;
+  font-weight: 500;
+  min-height: 30px;
+  min-width: 0;
+}
+
+html[data-theme="light"] .topbar-actions .theme-toggle:hover,
+html[data-theme="light"] .topbar-actions .density-toggle:hover {
+  background: rgb(15 23 42 / 5%);
+  border: 0;
+  box-shadow: none;
+  color: #1b3242;
+}
+
+/* Logging out is the one destructive thing in the rail, so it is the one row
+   that answers in a different colour. #b42318 measures 6.7:1 on the tint. */
+html[data-theme="light"] .topbar-actions .nav-logout:hover {
+  background: rgb(220 38 38 / 8%);
+  border: 0;
+  box-shadow: none;
+  color: #b42318;
+}
+
+/* The rail is narrower than the menu, so it opens alongside instead of below. */
+html[data-theme="light"] .theme-menu {
+  bottom: 0;
+  left: calc(100% + 12px);
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  right: auto;
+  top: auto;
+}
+
+html[data-theme="light"] .content {
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  margin: 0;
+  max-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 26px 30px 56px;
+  scrollbar-gutter: stable;
+  width: 100%;
+}
+
+/* .content stays full-bleed so it can own the scrollbar, which then sits on
+   the edge of the stage rather than floating at the end of the text column.
+   The cap goes on the views inside it, so every one of them — settings
+   included — measures the same and centres in whatever is left over. */
+html[data-theme="light"] .content > .view {
+  margin-inline: auto;
+  max-width: var(--content-max);
+  width: 100%;
 }
 
 html[data-theme="light"] .brand-mark {
   filter: drop-shadow(0 3px 5px rgb(8 127 155 / 18%));
 }
 
+/* base.css styles this as a horizontal pill: a --radius-full track holding the
+   links. Stood on end that becomes a long lozenge with 41px half-circles at
+   each cap, which is why the rail read as clumsy. A vertical nav needs no
+   track at all — the items sit directly on the rail. */
 html[data-theme="light"] .topbar-nav {
-  background: rgb(229 237 245 / 66%);
-  border-color: rgb(207 218 231 / 88%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 85%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  overflow: visible;
+  padding: 0;
+  width: 100%;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 html[data-theme="light"] .nav-link {
+  border-radius: var(--radius);
   color: #526278;
+  justify-content: flex-start;
+  min-height: 34px;
+  min-width: 0;
+  padding: 6px 10px 6px 14px;
+  position: relative;
+  text-align: left;
+  white-space: normal;
+  width: 100%;
 }
 
-html[data-theme="light"] .nav-link.active {
-  background: rgb(255 255 255 / 78%);
-  box-shadow: 0 1px 3px rgb(29 48 75 / 9%), 0 0 0 1px rgb(8 127 155 / 20%);
-  color: #1b3242;
+html[data-theme="light"] .nav-link:hover {
+  background: rgb(15 23 42 / 5%);
+}
+
+/* Selection reads as a marker in the gutter rather than a filled capsule —
+   the convention for vertical navigation, and it leaves the label sitting on
+   the same baseline whether or not it is active. The marker itself is drawn in
+   console-rail.css, which owns ::before for the icon and ::after for this. */
+html[data-theme="light"] .nav-link.active,
+html[data-theme="light"] .nav-link.active:hover {
+  background: rgb(8 127 155 / 9%);
+  box-shadow: none;
+  color: #10333f;
 }
 
 html[data-theme="light"] button.secondary {
@@ -207,10 +434,163 @@ html[data-theme="light"] textarea {
   background-color: rgb(255 255 255 / 92%);
 }
 
-@media (max-width: 760px) {
+/* Landscape phones and short desktop windows keep the rail, but at full size
+   its footer controls fall past the fold — the rail never scrolls, because
+   that would clip the theme menu opening out of its right edge. */
+@media (min-width: 761px) and (max-height: 580px) {
   html[data-theme="light"] .topbar {
-    backdrop-filter: saturate(1.15) blur(16px);
-    -webkit-backdrop-filter: saturate(1.15) blur(16px);
+    gap: 8px;
+    padding: 10px 10px;
+  }
+
+  html[data-theme="light"] .topbar-brand {
+    gap: 3px;
+    padding: 0 2px 8px;
+  }
+
+  html[data-theme="light"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="light"] .nav-link {
+    min-height: 28px;
+    padding: 4px 10px;
+  }
+
+  html[data-theme="light"] .topbar-actions .live-indicator {
+    display: none;
+  }
+
+  html[data-theme="light"] .topbar-actions .theme-toggle,
+  html[data-theme="light"] .topbar-actions .density-toggle,
+  html[data-theme="light"] .topbar-actions .nav-logout {
+    min-height: 28px;
+  }
+}
+
+/* ── Mobile ──────────────────────────────────────────────────
+   The rail unfolds into a five-slot dock pinned to the bottom of the
+   viewport. Theme and density stay reachable from Settings. */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme="light"] .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
+  html[data-theme="light"] .topbar {
+    align-items: center;
+    background: linear-gradient(112deg, rgb(255 255 255 / 78%), rgb(244 250 252 / 66%));
+    border-bottom: 1px solid rgb(205 216 229 / 86%);
+    border-right: 0;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 92%), 0 7px 24px rgb(34 53 80 / 7%);
+    flex-direction: row;
+    gap: 8px;
+    height: auto;
+    justify-content: space-between;
+    min-height: 52px;
+    padding: 6px 12px;
+    width: 100%;
+    /* Must be none: a non-none backdrop-filter makes the bar a containing
+       block for fixed descendants, which would anchor the dock below to the
+       bar instead of the viewport. */
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html[data-theme="light"] .topbar::after {
+    bottom: -1px;
+    height: 1px;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: auto;
+    background: linear-gradient(90deg, transparent 0%, rgb(8 127 155 / 0%) 14%, rgb(8 127 155 / 28%) 50%, rgb(8 127 155 / 0%) 86%, transparent 100%);
+  }
+
+  html[data-theme="light"] .topbar-brand {
+    border-bottom: 0;
+    flex-direction: row;
+    gap: 10px;
+    padding: 4px 2px;
+    width: auto;
+  }
+
+  html[data-theme="light"] .brand-text {
+    text-align: left;
+    width: auto;
+  }
+
+  html[data-theme="light"] .topbar-brand h1 {
+    font-size: 15px;
+  }
+
+  html[data-theme="light"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="light"] .topbar-actions {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="light"] .topbar-actions > *,
+  html[data-theme="light"] .topbar-actions button {
+    width: auto;
+  }
+
+  html[data-theme="light"] .topbar-actions .live-indicator,
+  html[data-theme="light"] .density-toggle,
+  html[data-theme="light"] .theme-menu-wrap {
+    display: none;
+  }
+
+  html[data-theme="light"] .nav-logout {
+    min-height: 30px;
+    padding: 0 10px;
+  }
+
+  html[data-theme="light"] .topbar-nav {
+    background: rgb(255 255 255 / 92%);
+    border: 1px solid rgb(207 218 231 / 88%);
+    bottom: max(8px, env(safe-area-inset-bottom));
+    box-shadow: 0 6px 20px rgb(29 48 75 / 12%), inset 0 1px 0 rgb(255 255 255 / 85%);
+    display: grid;
+    gap: 3px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 10px;
+    padding: 4px;
+    position: fixed;
+    right: 10px;
+    width: auto;
+    z-index: 40;
+  }
+
+  html[data-theme="light"] .nav-link {
+    justify-content: center;
+    min-height: 38px;
+    padding: 5px 2px;
+    text-align: center;
+  }
+
+  /* No gutter to mark in a five-column dock; the fill and the accented icon
+     carry the selection. */
+  html[data-theme="light"] .nav-link.active::after {
+    display: none;
+  }
+
+  html[data-theme="light"] .content {
+    display: block;
+    height: auto;
+    overflow: visible;
+    padding: 14px 14px 30px;
+    width: 100%;
   }
 
   html[data-theme="light"] .upstream-dialog,

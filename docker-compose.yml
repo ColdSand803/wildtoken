@@ -15,6 +15,7 @@ services:
       - "127.0.0.1:3100:3100"
     volumes:
       - wildtoken-data:/data
+      # 镜像已自带 themes/；此挂载会覆盖它，便于本地改主题免重建镜像。
       - ./themes:/app/themes:ro
     healthcheck:
       test:

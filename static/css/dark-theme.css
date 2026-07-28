@@ -1,0 +1,528 @@
+/* ── Dark theme: left rail ──────────────────────────────────
+   The dark console keeps every colour it had; this file only moves its
+   navigation into a vertical rail, mirroring light-theme.css and the theme
+   packs. Scoped to [data-theme="dark"] throughout so nothing leaks into a
+   theme pack that relies on the base layout.
+
+   --dk-rail-width holds the widest row in the rail: 14px indent, a 16px icon,
+   the 9px gap, a two-glyph label at 13px, and 10px of trailing air. That is
+   75px, so 118px leaves the labels slack rather than sitting them against the
+   edge. It also clears "WildToken" at the reduced brand size below. */
+html[data-theme="dark"] {
+  --dk-rail-width: 118px;
+
+  /* ── Type ramp ────────────────────────────────────────────
+     Measured before this change, the whole console used exactly two text
+     luminances: 0.95 and 0.36. Key figures, panel titles and section
+     headings were all pinned at 0.95 and competed with each other, while
+     labels, hints and descriptions shared 0.36 and could not be told apart.
+
+     Four steps, roughly halving each time. Overriding the vars here rather
+     than in base.css keeps theme packs — which inherit whatever they do not
+     redefine — untouched.
+
+     The bottom step is set by contrast, not by taste: --muted carries hints
+     and captions — small text — so it has to clear WCAG AA at 4.5:1. It must
+     do so against the LIGHTEST surface it can land on, which is the table
+     header at surface-3, not the card. #6b7789 measured 3.83:1 (large-text
+     only) and #7d8a9d still only reached 4.43:1 on that header. #808da0 is
+     the darkest value that clears 4.5:1 everywhere.
+
+     Ratios below are against surface-2:
+       peak    L .95   16.6:1  the number you came to read
+       text    L .76   13.4:1  panel titles, table data
+       strong  L .53    9.6:1  section headings
+       muted+  L .35    6.6:1  primary labels
+       muted   L .26    5.2:1  captions, hints, descriptions  */
+  --dk-peak: #f8fafc;
+  --text: #dbe3ec;
+  --text-secondary: #b6c2d1;
+  --muted-strong: #93a1b3;
+  --muted: #808da0;
+
+  /* ── Elevation ────────────────────────────────────────────
+     A black drop shadow is invisible against a near-black page, so height
+     is carried by luminance instead: each surface sits about twice as light
+     as the one below, with a 1px top highlight standing in for a light
+     source above. Shadows stay only to detach big objects, and are wider
+     and softer than the light theme's. */
+  --dk-surface-1: #0a0f1c;
+  --dk-surface-2: #121a2b;
+  --dk-surface-3: #1a2438;
+  --dk-edge-light: inset 0 1px 0 rgb(255 255 255 / 6%);
+
+  --line: rgb(63 78 100 / 60%);
+  --line-soft: rgb(40 52 72 / 70%);
+}
+
+/* ── Type: assign the ramp ─────────────────────────────────── */
+
+html[data-theme="dark"] .kpi-value,
+html[data-theme="dark"] .dashboard-kpi-value {
+  color: var(--dk-peak);
+}
+
+/* Section headings sat at peak alongside the figures they label. Down one
+   step so a scan lands on the numbers first. */
+html[data-theme="dark"] .dashboard-metric-head h3,
+html[data-theme="dark"] .dashboard-card-head h3,
+html[data-theme="dark"] .settings-card-head h3 {
+  color: var(--text-secondary);
+}
+
+html[data-theme="dark"] .kpi-label,
+html[data-theme="dark"] .dashboard-kpi-label {
+  color: var(--muted-strong);
+}
+
+html[data-theme="dark"] .dashboard-kpi-hint,
+html[data-theme="dark"] .dashboard-card-sub,
+html[data-theme="dark"] .view > .panel > .panel-head p {
+  color: var(--muted);
+}
+
+/* ── Elevation: assign the surfaces ────────────────────────── */
+
+html[data-theme="dark"] .dashboard-kpi,
+html[data-theme="dark"] .kpi-card,
+html[data-theme="dark"] .dashboard-card,
+html[data-theme="dark"] .settings-card,
+html[data-theme="dark"] .summary-strip,
+html[data-theme="dark"] .status {
+  background: var(--dk-surface-2);
+  border-color: var(--line);
+  box-shadow: var(--dk-edge-light), 0 2px 4px rgb(2 6 23 / 40%);
+}
+
+html[data-theme="dark"] .table-wrap {
+  background: var(--dk-surface-1);
+  border-color: var(--line);
+  box-shadow: var(--dk-edge-light), 0 8px 28px rgb(2 6 23 / 45%);
+}
+
+/* The header row was the same colour as the cards below it. */
+html[data-theme="dark"] th {
+  background: var(--dk-surface-3);
+}
+
+html[data-theme="dark"] .table-wrap tbody td {
+  border-bottom-color: var(--line-soft);
+}
+
+/* Floating layers sit highest, so they are the lightest surface and carry
+   the only large shadow — that separation is what reads as "in front". */
+html[data-theme="dark"] .upstream-action-menu,
+html[data-theme="dark"] .col-menu,
+html[data-theme="dark"] .select-panel,
+html[data-theme="dark"] .theme-menu,
+html[data-theme="dark"] .command-palette-panel,
+html[data-theme="dark"] dialog {
+  background: var(--dk-surface-3);
+  border-color: var(--line);
+  box-shadow: var(--dk-edge-light), 0 16px 48px rgb(2 6 23 / 70%);
+}
+
+html[data-theme="dark"] .app-shell {
+  display: grid;
+  grid-template-columns: var(--dk-rail-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+@media (min-width: 761px) {
+  html[data-theme="dark"],
+  html[data-theme="dark"] body {
+    height: 100%;
+    overflow: hidden;
+  }
+}
+
+html[data-theme="dark"] .topbar {
+  align-items: stretch;
+  border: 0;
+  border-right: 1px solid var(--line);
+  box-shadow: 8px 0 28px rgb(2 6 23 / 55%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 14px 10px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
+  /* Safe on desktop: the rail has no fixed descendants. The mobile block at
+     the end must clear it, or the dock anchors to the bar, not the viewport. */
+  backdrop-filter: saturate(1.35) blur(var(--blur));
+  -webkit-backdrop-filter: saturate(1.35) blur(var(--blur));
+}
+
+/* The accent hairline turns with the rail. */
+html[data-theme="dark"] .topbar::after {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgb(34 211 238 / 0%) 10%,
+    rgb(34 211 238 / 35%) 50%,
+    rgb(34 211 238 / 0%) 90%,
+    transparent 100%
+  );
+  bottom: 0;
+  height: auto;
+  left: auto;
+  right: -1px;
+  top: 0;
+  width: 1px;
+}
+
+html[data-theme="dark"] .topbar-brand {
+  align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+  flex-direction: column;
+  gap: 7px;
+  padding: 2px 2px 13px;
+  width: 100%;
+}
+
+html[data-theme="dark"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
+}
+
+html[data-theme="dark"] .topbar-brand h1 {
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+
+html[data-theme="dark"] .brand-label {
+  display: block;
+  font-size: 9px;
+  margin-top: 3px;
+}
+
+/* base.css styles this as a horizontal pill: a --radius-full track holding the
+   links. Stood on end that becomes a long lozenge with 41px half-circles at
+   each cap, which is why the rail read as clumsy. A vertical nav needs no
+   track at all — the items sit directly on the rail. */
+html[data-theme="dark"] .topbar-nav {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  overflow: visible;
+  padding: 0;
+  width: 100%;
+}
+
+html[data-theme="dark"] .nav-link {
+  border-radius: var(--radius);
+  justify-content: flex-start;
+  min-height: 34px;
+  min-width: 0;
+  padding: 6px 10px 6px 14px;
+  position: relative;
+  text-align: left;
+  white-space: normal;
+  width: 100%;
+}
+
+html[data-theme="dark"] .nav-link:hover {
+  background: var(--panel-muted);
+}
+
+/* Selection reads as a marker in the gutter rather than a filled capsule —
+   the convention for vertical navigation, and it leaves the label sitting on
+   the same baseline whether or not it is active. The marker itself is drawn in
+   console-rail.css, which owns ::before for the icon and ::after for this. */
+html[data-theme="dark"] .nav-link.active,
+html[data-theme="dark"] .nav-link.active:hover {
+  background: var(--accent-soft);
+  box-shadow: none;
+  color: var(--dk-peak);
+}
+
+/* One control per line at the foot of the rail: status, density, theme, then
+   the destructive action last. */
+html[data-theme="dark"] .topbar-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: auto;
+  width: 100%;
+}
+
+html[data-theme="dark"] .topbar-actions .live-indicator {
+  border-top: 1px solid var(--line-soft);
+  font-size: 10px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 8px 2px 0;
+  width: 100%;
+}
+
+html[data-theme="dark"] .live-label {
+  display: none;
+}
+
+/* Density and theme toggle each get their own line — no more side-by-side
+   pairing. The status line is still on its own, and the destructive action
+   remains full-width at the foot. */
+html[data-theme="dark"] .topbar-actions .density-toggle,
+html[data-theme="dark"] .topbar-actions .theme-menu-wrap {
+  flex: 1 0 100%;
+  width: 100%;
+}
+
+html[data-theme="dark"] .topbar-actions .nav-logout {
+  flex: 1 0 100%;
+  width: 100%;
+}
+
+/* Bordered and filled, these three read as a stack of cards wedged under the
+   navigation — the heaviest thing in the rail, for its least important
+   controls. As borderless rows they sit in the same column as the nav above
+   and only take a surface when pointed at. Their icons carry the weight the
+   borders were carrying. */
+html[data-theme="dark"] .topbar-actions .theme-toggle,
+html[data-theme="dark"] .topbar-actions .density-toggle,
+html[data-theme="dark"] .topbar-actions .nav-logout {
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: none;
+  color: var(--muted-strong);
+  font-size: 11px;
+  font-weight: 500;
+  min-height: 30px;
+  min-width: 0;
+}
+
+html[data-theme="dark"] .topbar-actions .theme-toggle:hover,
+html[data-theme="dark"] .topbar-actions .density-toggle:hover {
+  background: var(--panel-muted);
+  border: 0;
+  color: var(--text);
+}
+
+/* Logging out is the one destructive thing in the rail, so it is the one row
+   that answers in a different colour. */
+html[data-theme="dark"] .topbar-actions .nav-logout:hover {
+  background: var(--danger-soft);
+  border: 0;
+  color: var(--danger-strong);
+}
+
+/* The rail is narrower than the menu, so it opens alongside instead of below. */
+html[data-theme="dark"] .theme-menu {
+  bottom: 0;
+  left: calc(100% + 12px);
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  right: auto;
+  top: auto;
+}
+
+html[data-theme="dark"] .content {
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  margin: 0;
+  max-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 26px 30px 56px;
+  scrollbar-gutter: stable;
+  width: 100%;
+}
+
+/* .content stays full-bleed so it can own the scrollbar, which then sits on
+   the edge of the stage rather than floating at the end of the text column.
+   The cap goes on the views inside it, so every one of them — settings
+   included — measures the same and centres in whatever is left over. */
+html[data-theme="dark"] .content > .view {
+  margin-inline: auto;
+  max-width: var(--content-max);
+  width: 100%;
+}
+
+/* Landscape phones and short desktop windows keep the rail, but at full size
+   its footer controls fall past the fold — the rail never scrolls, because
+   that would clip the theme menu opening out of its right edge. */
+@media (min-width: 761px) and (max-height: 580px) {
+  html[data-theme="dark"] .topbar {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  html[data-theme="dark"] .topbar-brand {
+    gap: 3px;
+    padding: 0 2px 8px;
+  }
+
+  html[data-theme="dark"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="dark"] .nav-link {
+    min-height: 28px;
+    padding: 4px 10px;
+  }
+
+  html[data-theme="dark"] .topbar-actions .live-indicator {
+    display: none;
+  }
+
+  html[data-theme="dark"] .topbar-actions .theme-toggle,
+  html[data-theme="dark"] .topbar-actions .density-toggle,
+  html[data-theme="dark"] .topbar-actions .nav-logout {
+    min-height: 28px;
+  }
+}
+
+/* ── Mobile ──────────────────────────────────────────────────
+   The rail unfolds into a five-slot dock pinned to the bottom of the
+   viewport. Theme and density stay reachable from Settings. */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme="dark"] .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
+  html[data-theme="dark"] .topbar {
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    border-right: 0;
+    box-shadow: none;
+    flex-direction: row;
+    gap: 8px;
+    height: auto;
+    justify-content: space-between;
+    min-height: 52px;
+    padding: 6px 12px;
+    width: 100%;
+    /* Must be none: a non-none backdrop-filter makes the bar a containing
+       block for fixed descendants, which would anchor the dock below to the
+       bar instead of the viewport. */
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  html[data-theme="dark"] .topbar::after {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(34 211 238 / 0%) 10%,
+      rgb(34 211 238 / 35%) 50%,
+      rgb(34 211 238 / 0%) 90%,
+      transparent 100%
+    );
+    bottom: -1px;
+    height: 1px;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: auto;
+  }
+
+  html[data-theme="dark"] .topbar-brand {
+    border-bottom: 0;
+    flex-direction: row;
+    gap: 10px;
+    padding: 4px 2px;
+    width: auto;
+  }
+
+  html[data-theme="dark"] .brand-text {
+    text-align: left;
+    width: auto;
+  }
+
+  html[data-theme="dark"] .topbar-brand h1 {
+    font-size: 15px;
+  }
+
+  html[data-theme="dark"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="dark"] .topbar-actions {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="dark"] .topbar-actions > *,
+  html[data-theme="dark"] .topbar-actions button {
+    width: auto;
+  }
+
+  html[data-theme="dark"] .topbar-actions .live-indicator,
+  html[data-theme="dark"] .density-toggle,
+  html[data-theme="dark"] .theme-menu-wrap {
+    display: none;
+  }
+
+  html[data-theme="dark"] .nav-logout {
+    min-height: 30px;
+    padding: 0 10px;
+  }
+
+  html[data-theme="dark"] .topbar-nav {
+    background: var(--glass-strong);
+    border: 1px solid var(--line);
+    bottom: max(8px, env(safe-area-inset-bottom));
+    box-shadow: 0 8px 24px rgb(2 6 23 / 65%);
+    display: grid;
+    gap: 3px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 10px;
+    padding: 4px;
+    position: fixed;
+    right: 10px;
+    width: auto;
+    z-index: 40;
+  }
+
+  html[data-theme="dark"] .nav-link {
+    justify-content: center;
+    min-height: 38px;
+    padding: 5px 2px;
+    text-align: center;
+  }
+
+  /* No gutter to mark in a five-column dock; the fill and the accented icon
+     carry the selection. */
+  html[data-theme="dark"] .nav-link.active::after {
+    display: none;
+  }
+
+  html[data-theme="dark"] .content {
+    display: block;
+    height: auto;
+    overflow: visible;
+    padding: 14px 14px 30px;
+    width: 100%;
+  }
+}

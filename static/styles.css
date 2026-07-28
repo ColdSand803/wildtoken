@@ -5,7 +5,10 @@
 @import url("./css/responsive.css");
 @import url("./css/dashboard.css");
 @import url("./css/enhancements.css");
+@import url("./css/dark-theme.css");
 @import url("./css/light-theme.css");
+/* After both, so the shared rail geometry wins where they overlap. */
+@import url("./css/console-rail.css");
 @import url("./css/settings.css");
 
 html[data-theme] .token-preview-code,

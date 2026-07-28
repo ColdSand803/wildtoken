@@ -39,7 +39,7 @@ test("Sakura Mist is available before and after theme registry initialization", 
   const cssHref = "/theme-packs/sakura-mist/theme.css";
   assert.match(
     events,
-    /\{ id: "sakura-mist", label: "樱雾灰紫", swatch: \["#ffe3ee", "#535369"\], css: "\/theme-packs\/sakura-mist\/theme\.css" \}/,
+    /\{ id: "sakura-mist", label: "樱雾灰紫", swatch: \["#ffe3ee", "#535369"\], css: "\/theme-packs\/sakura-mist\/theme\.css", description: "Soft pink surfaces with restrained gray-violet accents\." \}/,
   );
   assert.ok(adminHtml.includes(`"sakura-mist": "${cssHref}"`));
 });

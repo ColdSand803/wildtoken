@@ -89,31 +89,11 @@ TOKIO_WORKER_THREADS=4 APP__SERVER__PORT=3100 APP__DATABASE__MAX_CONNECTIONS=3 A
 
 ## 主题插件
 
-管理界面的默认深色/浅色主题仍从 `static/css/*.css` 加载；其他主题都作为 CSS-only 主题包放在 `themes/` 下，Docker Compose 会把宿主机 `./themes` 只读挂载到容器的 `/app/themes`。随仓库提供的 Win95、动物岛、赛博朋克、像素、CRT、我的世界、Bleach、Endfield 和樱雾灰紫都不再内嵌到主样式表。
+管理界面的默认深色/浅色主题仍从 `static/css/*.css` 加载；其他主题都作为 CSS-only 主题包放在 `themes/` 下。随仓库提供的 Win95、动物岛、赛博朋克、像素、CRT、我的世界、Bleach、Endfield 和樱雾灰紫都不再内嵌到主样式表，但会随发布压缩包和 Docker 镜像一起分发。Docker Compose 另外把宿主机 `./themes` 只读挂载到容器的 `/app/themes`，该挂载会覆盖镜像内自带的同名目录。
 
-每个主题包使用一个子目录：
+每个主题包是 `themes/` 下的一个子目录，含一份 `theme.json` 清单和它指向的 `.css` 文件；主题 CSS 以 `html[data-theme="<id>"]` 为顶层选择器，通过覆盖 CSS 变量改变外观。WildToken 只读取清单并按同源静态文件加载 CSS，不执行主题包里的 JavaScript。
 
-```text
-themes/
-  soul-society/
-    theme.json
-    theme.css
-```
-
-`theme.json`：
-
-```json
-{
-  "id": "soul-society",
-  "label": "Soul Society",
-  "css": "theme.css",
-  "swatch": ["#111827", "#f97316"],
-  "version": "1.0.0",
-  "description": "Optional short note"
-}
-```
-
-`id` 必须与目录名一致，只能使用小写字母、数字和连字符；`css` 必须指向主题目录内的相对 `.css` 文件。主题 CSS 应使用 `html[data-theme="soul-society"]` 作为顶层选择器。WildToken 只读取清单并按同源静态文件加载 CSS，不执行主题包里的 JavaScript。
+清单字段、可用的 CSS 变量清单和调试方式见 [`themes/README.md`](themes/README.md)。
 
 ## 路由规则
 
@@ -166,7 +146,7 @@ docker compose ps
 - Linux x86_64（GNU，基于 Ubuntu 22.04）
 - macOS Universal（Intel 与 Apple Silicon）
 
-也可以从 Actions 页面手动运行发布流程并填写一个已经存在的版本标签。压缩包包含运行所需的 `static/` 与 `config/`，解压后应在该目录中启动 WildToken。Windows 双击 `wildtoken.exe` 进入系统托盘；日志见同目录 `wildtoken.log`。Windows SmartScreen 或 macOS Gatekeeper 可能会提示未签名程序。
+也可以从 Actions 页面手动运行发布流程并填写一个已经存在的版本标签。压缩包包含运行所需的 `static/`、`config/` 与 `themes/`，解压后应在该目录中启动 WildToken。Windows 双击 `wildtoken.exe` 进入系统托盘；日志见同目录 `wildtoken.log`。Windows SmartScreen 或 macOS Gatekeeper 可能会提示未签名程序。
 
 `POST /v1/messages` 兼容 Anthropic Messages API：可用标准的 `x-api-key` 下游令牌和 `anthropic-version` 请求头。请求、响应和 SSE 事件均原样透传；为此类请求配置渠道 API Key 时，WildToken 会向上游使用 `x-api-key`，并在未指定时补充 `anthropic-version: 2023-06-01`。因此该渠道的 Base URL 应指向 Anthropic 兼容上游（例如 `https://api.anthropic.com`）。
 

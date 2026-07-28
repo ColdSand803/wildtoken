@@ -82,6 +82,47 @@ html[data-theme="minecraft"] {
 
   --transition: 0ms steps(1, end);
   --blur: 0px;
+
+  /* Left rail: wide enough for two CJK glyphs plus the 2px slot border. */
+  --mc-rail-width: 92px;
+
+  /* ── Block textures ───────────────────────────────────────
+     Every block face in the game is a 16×16 grid of hand-placed light and
+     dark pixels. Reproduced here as stacked one-pixel dot grids whose tile
+     sizes are mutually prime (5/6/7/9/11/13), so the layers only realign every
+     few thousand pixels and the speckle never reads as a repeating pattern.
+     Each is a complete list of background layers — compose them in a
+     `background` shorthand, coarsest first, with the base color last. */
+  --mc-tex-stone:
+    radial-gradient(circle at 50% 50%, rgb(0 0 0 / 13%) 0 2.5px, transparent 2.6px) 5px 1px / 23px 19px repeat,
+    radial-gradient(circle at 50% 50%, rgb(0 0 0 / 20%) 0 1.5px, transparent 1.6px) 0 0 / 9px 7px repeat,
+    radial-gradient(circle at 50% 50%, rgb(255 255 255 / 5%) 0 1px, transparent 1.1px) 3px 2px / 13px 11px repeat,
+    radial-gradient(circle at 50% 50%, rgb(0 0 0 / 11%) 0 1px, transparent 1.1px) 1px 4px / 5px 6px repeat,
+    radial-gradient(circle at 50% 50%, rgb(255 255 255 / 3.5%) 0 1.5px, transparent 1.6px) 2px 6px / 17px 29px repeat;
+
+  --mc-tex-deepslate:
+    radial-gradient(circle at 50% 50%, rgb(0 0 0 / 20%) 0 2.5px, transparent 2.6px) 3px 5px / 19px 23px repeat,
+    radial-gradient(circle at 50% 50%, rgb(0 0 0 / 32%) 0 1.5px, transparent 1.6px) 0 0 / 7px 9px repeat,
+    radial-gradient(circle at 50% 50%, rgb(255 255 255 / 4%) 0 1px, transparent 1.1px) 2px 3px / 11px 5px repeat,
+    radial-gradient(circle at 50% 50%, rgb(0 0 0 / 20%) 0 1px, transparent 1.1px) 4px 1px / 6px 13px repeat,
+    radial-gradient(circle at 50% 50%, rgb(255 255 255 / 2.5%) 0 1.5px, transparent 1.6px) 6px 2px / 29px 17px repeat;
+
+  /* Mined-out blocks never break clean. Darkened rectangles bitten out of the
+     corners, no two the same size. */
+  --mc-worn-corners:
+    linear-gradient(rgb(0 0 0 / 34%) 0 0) 0 0 / 7px 3px no-repeat,
+    linear-gradient(rgb(0 0 0 / 34%) 0 0) 0 0 / 3px 6px no-repeat,
+    linear-gradient(rgb(0 0 0 / 26%) 0 0) 100% 0 / 4px 4px no-repeat,
+    linear-gradient(rgb(0 0 0 / 30%) 0 0) 0 100% / 4px 3px no-repeat,
+    linear-gradient(rgb(0 0 0 / 34%) 0 0) 100% 100% / 6px 4px no-repeat,
+    linear-gradient(rgb(0 0 0 / 26%) 0 0) 100% 100% / 3px 7px no-repeat;
+
+  /* Enchantment sheen and the XP bar are the two greens the game reserves for
+     "this is charged" — kept off ordinary surfaces so they still read as such. */
+  --mc-enchant: #b44aff;
+  --mc-enchant-bright: #dcaaff;
+  --mc-xp: #80ff20;
+  --mc-xp-dark: #4a9c10;
 }
 
 /* ── Minecraft / 我的世界 theme structure ───────────────────
@@ -107,104 +148,293 @@ html[data-theme="minecraft"] .aurora {
   display: none;
 }
 
+/* 16px chunk lines over deepslate speckle: the world grid, then the rock. */
 html[data-theme="minecraft"] body {
-  background-color: var(--bg);
-  background-image:
-    linear-gradient(rgb(255 255 255 / 3%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(255 255 255 / 3%) 1px, transparent 1px);
-  background-size: 16px 16px, 16px 16px;
+  background:
+    linear-gradient(rgb(255 255 255 / 3%) 1px, transparent 1px) 0 0 / 16px 16px repeat,
+    linear-gradient(90deg, rgb(255 255 255 / 3%) 1px, transparent 1px) 0 0 / 16px 16px repeat,
+    var(--mc-tex-deepslate),
+    var(--bg);
   -webkit-font-smoothing: auto;
   text-rendering: auto;
 }
 
+/* Desktop shell: the navigation lives in a vertical rail on the left, the work
+   stage takes the rest and scrolls on its own. */
 html[data-theme="minecraft"] .app-shell {
+  display: grid;
+  grid-template-columns: var(--mc-rail-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
   position: relative;
   z-index: 1;
+}
+
+@media (min-width: 761px) {
+  html[data-theme="minecraft"],
+  html[data-theme="minecraft"] body {
+    height: 100%;
+    overflow: hidden;
+  }
 }
 
 /* ── Chrome ──────────────────────────────────────────────── */
 
 html[data-theme="minecraft"] .topbar {
+  align-items: stretch;
+  /* Must stay none: any non-none backdrop-filter makes the rail a containing
+     block for fixed descendants, which would anchor the mobile hotbar to the
+     rail instead of the viewport. */
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  background: var(--topbar-bg);
-  border-bottom: 3px solid #000000;
-  box-shadow: inset 0 2px 0 rgb(255 255 255 / 8%), 0 3px 0 #000000;
+  background: var(--mc-tex-deepslate), #2c2b32;
+  border: 0;
+  border-right: 3px solid #000000;
+  box-shadow: inset 2px 0 0 rgb(255 255 255 / 8%), 3px 0 0 #000000;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  padding: 0 14px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 12px 8px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
 }
 
 html[data-theme="minecraft"] .topbar::after {
   display: none;
 }
 
+/* The nav column is a sunken deepslate well holding five item slots — the
+   inventory hotbar turned on its side. */
 html[data-theme="minecraft"] .topbar-nav {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  gap: 4px;
-  padding: 2px;
+  background: var(--mc-tex-deepslate), #1a1a1a;
+  border: 2px solid #000000;
+  border-radius: 0;
+  box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%);
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 3px;
+  overflow: visible;
+  padding: 3px;
+  width: 100%;
 }
 
 html[data-theme="minecraft"] .topbar-brand {
-  gap: 8px;
-  padding: 4px 2px;
+  align-items: center;
+  border-bottom: 2px solid #000000;
+  box-shadow: 0 2px 0 rgb(255 255 255 / 8%);
+  flex-direction: column;
+  gap: 5px;
+  padding: 2px 2px 10px;
+  width: 100%;
 }
 
 html[data-theme="minecraft"] .brand-mark {
   color: #5ec639;
   filter: none;
+  height: 28px;
+  width: 28px;
+}
+
+html[data-theme="minecraft"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
 }
 
 html[data-theme="minecraft"] .topbar-brand h1 {
   color: #f5f0e6;
   font-family: "Pixelify Sans", var(--font-sans);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
   text-shadow: 2px 2px 0 #000000;
+  white-space: normal;
 }
 
 html[data-theme="minecraft"] .brand-label {
   color: #7ee352;
+  display: block;
   font-family: "Pixelify Sans", var(--font-sans);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
+  margin-top: 3px;
   text-shadow: 1px 1px 0 #000000;
 }
 
+/* An empty inventory slot is sunken, not raised: dark bevel on the top-left,
+   faint light on the bottom-right — the inverse of a button. */
 html[data-theme="minecraft"] .nav-link {
-  background: #2c2b32;
+  background: var(--mc-tex-stone), #2f2e35;
   border: 2px solid #000000;
   border-radius: 0;
-  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 10%), inset -1px -1px 0 rgb(0 0 0 / 40%);
+  box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%), inset -2px -2px 0 rgb(255 255 255 / 7%);
   color: #d4cdb8;
+  font-size: 13px;
   font-weight: 600;
-  padding: 5px 12px;
+  min-height: 42px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px 4px;
+  position: relative;
   text-shadow: 1px 1px 0 #000000;
+  white-space: normal;
+  width: 100%;
 }
 
 html[data-theme="minecraft"] .nav-link:hover {
-  background: #3c3b44;
+  background: var(--mc-tex-stone), #46454e;
   color: #ffffa0;
 }
 
 /* Selected nav-link reads as the highlighted slot in a hotbar: black outer
-   ring, white inner border, replacing the normal black-only slot outline. */
+   ring, white inner border, replacing the normal black-only slot outline. The
+   slot fills with grass and the item inside it is enchanted. */
 html[data-theme="minecraft"] .nav-link.active,
 html[data-theme="minecraft"] .nav-link.active:hover {
-  background: #46454e;
+  background: var(--mc-tex-stone), #5ec639;
   border-color: #ffffff;
-  box-shadow: 0 0 0 2px #000000;
+  box-shadow:
+    0 0 0 2px #000000,
+    inset 2px 2px 0 rgb(255 255 255 / 22%),
+    inset -2px -2px 0 rgb(0 0 0 / 22%);
   color: #ffffff;
   font-weight: 700;
   text-shadow: 1px 1px 0 #000000;
 }
 
+html[data-theme="minecraft"] .nav-link.active::after {
+  animation: minecraft-enchant 3.4s steps(22, end) infinite;
+  background: linear-gradient(
+    115deg,
+    transparent 0 38%,
+    rgb(180 74 255 / 38%) 44%,
+    rgb(220 170 255 / 52%) 50%,
+    rgb(180 74 255 / 38%) 56%,
+    transparent 62%
+  );
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+}
+
+/* The sweep crosses at 115°, so it must travel wider than the slot to clear
+   both corners. */
+@keyframes minecraft-enchant {
+  from {
+    transform: translateX(-140%);
+  }
+  to {
+    transform: translateX(140%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="minecraft"] .nav-link.active::after {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+/* ── Rail footer: utility controls stack at the bottom ───── */
+
+html[data-theme="minecraft"] .topbar-actions {
+  align-items: stretch;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: auto;
+  width: 100%;
+}
+
+html[data-theme="minecraft"] .topbar-actions > *,
+html[data-theme="minecraft"] .topbar-actions button {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-theme="minecraft"] .topbar-actions .live-indicator {
+  border-top: 2px solid #000000;
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / 8%);
+  color: #7ee352;
+  font-size: 9px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 6px 2px 0;
+  text-shadow: 1px 1px 0 #000000;
+}
+
+html[data-theme="minecraft"] .live-label {
+  display: none;
+}
+
+/* These are .ghost buttons, which the theme strips down to bare text. Alone at
+   the foot of a 92px rail that reads as flat background, so give them the same
+   slot chrome as the nav items above. */
+html[data-theme="minecraft"] .topbar-actions .theme-toggle,
+html[data-theme="minecraft"] .topbar-actions .density-toggle,
+html[data-theme="minecraft"] .topbar-actions .nav-logout {
+  background: var(--mc-tex-stone), #38373f;
+  border: 2px solid #000000;
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 10%), inset -1px -1px 0 rgb(0 0 0 / 40%);
+  color: #d4cdb8;
+  font-size: 12px;
+  min-height: 32px;
+  padding: 0 4px;
+  text-shadow: 1px 1px 0 #000000;
+}
+
+html[data-theme="minecraft"] .topbar-actions .theme-toggle:hover,
+html[data-theme="minecraft"] .topbar-actions .density-toggle:hover,
+html[data-theme="minecraft"] .topbar-actions .nav-logout:hover {
+  background: var(--mc-tex-stone), #4a4952;
+  border-color: #000000;
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 15%);
+  color: #ffffa0;
+}
+
+html[data-theme="minecraft"] .topbar-actions .nav-logout:hover {
+  background: var(--mc-tex-stone), #d02b2b;
+  color: #fce8e8;
+}
+
+/* A round swatch is the one non-blocky pixel left in the rail. */
+html[data-theme="minecraft"] .theme-toggle-icon::before {
+  border: 1px solid #000000;
+  border-radius: 0;
+}
+
+html[data-theme="minecraft"] .theme-toggle:hover .theme-toggle-icon::before {
+  transform: none;
+}
+
+/* The rail is narrower than the menu, so it opens alongside instead of below. */
+html[data-theme="minecraft"] .theme-menu {
+  bottom: 0;
+  left: calc(100% + 10px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  right: auto;
+  top: auto;
+}
+
 /* ── Buttons ─────────────────────────────────────────────── */
 
 html[data-theme="minecraft"] button {
-  background: #5ec639;
+  background: var(--mc-tex-stone), #5ec639;
   border: 2px solid #000000;
   border-radius: 0;
   box-shadow:
@@ -219,7 +449,7 @@ html[data-theme="minecraft"] button {
 }
 
 html[data-theme="minecraft"] button:hover {
-  background: #7ee352;
+  background: var(--mc-tex-stone), #7ee352;
   box-shadow:
     inset 1px 1px 0 rgb(255 255 255 / 45%),
     inset -1px -1px 0 rgb(0 0 0 / 25%),
@@ -229,7 +459,7 @@ html[data-theme="minecraft"] button:hover {
 
 html[data-theme="minecraft"] button:active:not(:disabled),
 html[data-theme="minecraft"] button[aria-expanded="true"] {
-  background: #3f8f26;
+  background: var(--mc-tex-stone), #3f8f26;
   box-shadow:
     inset 1px 1px 0 rgb(0 0 0 / 35%),
     inset -1px -1px 0 rgb(255 255 255 / 15%),
@@ -240,7 +470,7 @@ html[data-theme="minecraft"] button[aria-expanded="true"] {
 
 html[data-theme="minecraft"] button:disabled,
 html[data-theme="minecraft"] button:disabled:hover {
-  background: #4a4950;
+  background: var(--mc-tex-stone), #4a4950;
   box-shadow:
     inset 1px 1px 0 rgb(255 255 255 / 10%),
     inset -1px -1px 0 rgb(0 0 0 / 35%),
@@ -251,22 +481,22 @@ html[data-theme="minecraft"] button:disabled:hover {
 }
 
 html[data-theme="minecraft"] button.secondary {
-  background: #2c6d8c;
+  background: var(--mc-tex-stone), #2c6d8c;
   color: #f5f0e6;
 }
 
 html[data-theme="minecraft"] button.secondary:hover {
-  background: #35b0e0;
+  background: var(--mc-tex-stone), #35b0e0;
   color: #ffffa0;
 }
 
 html[data-theme="minecraft"] button.secondary:active:not(:disabled) {
-  background: #1f4a5e;
+  background: var(--mc-tex-stone), #1f4a5e;
   color: #ffffa0;
 }
 
 html[data-theme="minecraft"] button.secondary:disabled:hover {
-  background: #2c6d8c;
+  background: var(--mc-tex-stone), #2c6d8c;
   color: #f5f0e6;
 }
 
@@ -298,17 +528,17 @@ html[data-theme="minecraft"] button.ghost:disabled:hover {
 }
 
 html[data-theme="minecraft"] button.danger {
-  background: #d02b2b;
+  background: var(--mc-tex-stone), #d02b2b;
   color: #fce8e8;
 }
 
 html[data-theme="minecraft"] button.danger:hover {
-  background: #ff5a5a;
+  background: var(--mc-tex-stone), #ff5a5a;
   color: #ffffa0;
 }
 
 html[data-theme="minecraft"] button.danger:active:not(:disabled) {
-  background: #8f1c1c;
+  background: var(--mc-tex-stone), #8f1c1c;
   color: #ffffa0;
 }
 
@@ -412,7 +642,7 @@ html[data-theme="minecraft"] button.ghost:focus-visible {
 
 html[data-theme="minecraft"] .segmented-control button.is-selected,
 html[data-theme="minecraft"] .theme-menu button.is-selected {
-  background: #5ec639;
+  background: var(--mc-tex-stone), #5ec639;
   border-color: #000000;
   box-shadow: inset 1px 1px 0 rgb(255 255 255 / 30%);
   color: #f5f0e6;
@@ -421,7 +651,7 @@ html[data-theme="minecraft"] .theme-menu button.is-selected {
 }
 
 html[data-theme="minecraft"] .segmented-control {
-  background: #1a1a1a;
+  background: var(--mc-tex-deepslate), #1a1a1a;
   border: 2px solid #000000;
   border-radius: 0;
   box-shadow: inset 2px 2px 0 rgb(0 0 0 / 50%);
@@ -453,20 +683,30 @@ html[data-theme="minecraft"] .segmented-control button:active:not(:disabled) {
 }
 
 html[data-theme="minecraft"] .segmented-control button.is-selected:hover {
-  background: #7ee352;
+  background: var(--mc-tex-stone), #7ee352;
   color: #ffffa0;
 }
 
 /* ── Content / panels ────────────────────────────────────── */
 
 html[data-theme="minecraft"] .content {
-  max-width: calc(var(--content-max) + 16px);
-  padding: 20px 22px 44px;
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  margin: 0;
+  max-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 20px 26px 44px;
+  scrollbar-gutter: stable;
+  width: 100%;
 }
 
-/* Inventory-window bevel: black outer frame + inset highlight/shadow lines */
+/* Inventory-window bevel: black outer frame + inset highlight/shadow lines,
+   over quarried stone with chipped corners. */
 html[data-theme="minecraft"] .view > .panel {
-  background: #38373f;
+  background: var(--mc-worn-corners), var(--mc-tex-stone), #38373f;
   border: 3px solid #000000;
   border-radius: 0;
   box-shadow:
@@ -534,7 +774,7 @@ html[data-theme="minecraft"] .admin-token-panel > .modal-head,
 html[data-theme="minecraft"] .balance-panel > .modal-head,
 html[data-theme="minecraft"] .confirm-panel > .modal-head,
 html[data-theme="minecraft"] .log-detail-head {
-  background: #2c2b32;
+  background: var(--mc-tex-stone), #2c2b32;
   border-bottom: 3px solid #000000;
   border-radius: 0;
   box-shadow: inset 0 2px 0 rgb(255 255 255 / 8%);
@@ -567,7 +807,7 @@ html[data-theme="minecraft"] .log-detail-head p {
 }
 
 html[data-theme="minecraft"] .command-palette-head {
-  background: #2c2b32;
+  background: var(--mc-tex-stone), #2c2b32;
   border-bottom: 2px solid #000000;
   padding: 10px 12px;
 }
@@ -597,7 +837,7 @@ html[data-theme="minecraft"] .command-palette-hint {
 html[data-theme="minecraft"] input,
 html[data-theme="minecraft"] select,
 html[data-theme="minecraft"] textarea {
-  background-color: #1a1a1a;
+  background: var(--mc-tex-deepslate), #1a1a1a;
   border: 2px solid #000000;
   border-radius: 0;
   box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%), inset -1px -1px 0 rgb(255 255 255 / 6%);
@@ -633,7 +873,7 @@ html[data-theme="minecraft"] .dashboard-card,
 html[data-theme="minecraft"] .settings-card,
 html[data-theme="minecraft"] .summary-strip,
 html[data-theme="minecraft"] .status {
-  background: #2c2b32;
+  background: var(--mc-worn-corners), var(--mc-tex-stone), #2c2b32;
   border: 2px solid #000000;
   border-radius: 0;
   box-shadow: inset 1px 1px 0 rgb(255 255 255 / 8%), 3px 3px 0 #000000;
@@ -654,11 +894,16 @@ html[data-theme="minecraft"] .status {
   padding: 8px 12px;
 }
 
+/* The tone-* rules below each set only `background`, so the bevel lives in
+   box-shadow and survives every color variant. */
 html[data-theme="minecraft"] .kpi-card::before,
 html[data-theme="minecraft"] .dashboard-kpi::before {
   background: #5ec639;
   border-radius: 0;
-  box-shadow: none;
+  box-shadow:
+    inset 1px 0 0 rgb(255 255 255 / 35%),
+    inset -1px 0 0 rgb(0 0 0 / 30%),
+    1px 0 0 rgb(0 0 0 / 50%);
   height: 100%;
   top: 0;
   width: 5px;
@@ -679,9 +924,11 @@ html[data-theme="minecraft"] .kpi-card.tone-danger::before {
   background: #d02b2b;
 }
 
+/* Progress bars become the XP bar: a black-framed empty channel that fills
+   with the game's two-tone chartreuse — bright on the top half, dark below. */
 html[data-theme="minecraft"] .dashboard-rank-track,
 html[data-theme="minecraft"] .ops-bar-track {
-  background: #1a1a1a;
+  background: var(--mc-tex-deepslate), #1a1a1a;
   border: 2px solid #000000;
   border-radius: 0;
   box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%);
@@ -695,9 +942,28 @@ html[data-theme="minecraft"] .dashboard-rank-track {
 }
 
 html[data-theme="minecraft"] .dashboard-rank-fill {
-  background: linear-gradient(90deg, #3f8f26, #5ec639);
+  background: linear-gradient(180deg, var(--mc-xp) 0 45%, var(--mc-xp-dark) 45%);
   border-radius: 0;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 20%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 45%), inset 0 -1px 0 rgb(0 0 0 / 35%);
+}
+
+/* The ops bar is segmented by state, so each segment gets the same two-tone
+   treatment in its own color rather than one XP-green fill. */
+html[data-theme="minecraft"] .ops-bar-seg {
+  border-radius: 0;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 35%), inset 0 -1px 0 rgb(0 0 0 / 30%);
+}
+
+html[data-theme="minecraft"] .ops-bar-seg.ok {
+  background: linear-gradient(180deg, var(--mc-xp) 0 45%, var(--mc-xp-dark) 45%);
+}
+
+html[data-theme="minecraft"] .ops-bar-seg.warn {
+  background: linear-gradient(180deg, #ffd966 0 45%, #b8901f 45%);
+}
+
+html[data-theme="minecraft"] .ops-bar-seg.danger {
+  background: linear-gradient(180deg, #ff5a5a 0 45%, #8f1c1c 45%);
 }
 
 html[data-theme="minecraft"] .live-dot,
@@ -745,21 +1011,23 @@ html[data-theme="minecraft"] .settings-stack {
 /* ── Tables (no bleed) ───────────────────────────────────── */
 
 html[data-theme="minecraft"] .table-wrap {
-  background: #1a1a1a;
+  background: var(--mc-tex-deepslate), #1a1a1a;
   border: 2px solid #000000;
   border-radius: 0;
   box-shadow: inset 1px 1px 0 rgb(0 0 0 / 40%), 3px 3px 0 #000000;
   margin: 0;
 }
 
+/* Cells stay transparent so the wrapper's deepslate reads through the whole
+   grid instead of restarting its speckle in every row. */
 html[data-theme="minecraft"] .table-wrap table,
 html[data-theme="minecraft"] .table-wrap tbody,
 html[data-theme="minecraft"] .table-wrap td {
-  background-color: #1a1a1a;
+  background-color: transparent;
 }
 
 html[data-theme="minecraft"] th {
-  background: #2c2b32;
+  background: var(--mc-tex-stone), #2c2b32;
   border-bottom: 2px solid #000000;
   color: #d4cdb8;
   font-size: 11px;
@@ -794,14 +1062,14 @@ html[data-theme="minecraft"] .test-model-prompt,
 html[data-theme="minecraft"] .test-model-response,
 html[data-theme="minecraft"] .log-detail-meta-card,
 html[data-theme="minecraft"] .log-detail-section {
-  background: #242329;
+  background: var(--mc-tex-deepslate), #242329;
   border: 2px solid #000000;
   border-radius: 0;
   box-shadow: inset 1px 1px 0 rgb(255 255 255 / 6%);
 }
 
 html[data-theme="minecraft"] .log-detail-section summary {
-  background: #2c2b32;
+  background: var(--mc-tex-stone), #2c2b32;
   border-bottom-color: #000000;
   color: #f5f0e6;
   font-weight: 700;
@@ -831,7 +1099,7 @@ html[data-theme="minecraft"] .admin-token-dialog,
 html[data-theme="minecraft"] .balance-dialog,
 html[data-theme="minecraft"] .confirm-dialog,
 html[data-theme="minecraft"] .command-palette-panel {
-  background: #38373f;
+  background: var(--mc-worn-corners), var(--mc-tex-stone), #38373f;
   border: 3px solid #000000;
   border-radius: 0;
   box-shadow: inset 2px 2px 0 rgb(255 255 255 / 10%), 6px 6px 0 rgb(0 0 0 / 55%);
@@ -844,7 +1112,7 @@ html[data-theme="minecraft"] .quick-import-panel,
 html[data-theme="minecraft"] .admin-token-panel,
 html[data-theme="minecraft"] .balance-panel,
 html[data-theme="minecraft"] .confirm-panel {
-  background: #38373f;
+  background: var(--mc-tex-stone), #38373f;
   border-radius: 0;
 }
 
@@ -855,7 +1123,7 @@ html[data-theme="minecraft"] .quick-import-panel {
 }
 
 html[data-theme="minecraft"] .modal-footer {
-  background: #2c2b32;
+  background: var(--mc-tex-stone), #2c2b32;
   border-top: 2px solid #000000;
   gap: 10px;
   padding: 12px 16px 14px;
@@ -879,10 +1147,15 @@ html[data-theme="minecraft"] dialog.is-maximized {
   box-shadow: inset 2px 2px 0 rgb(255 255 255 / 10%), 6px 6px 0 rgb(0 0 0 / 55%);
 }
 
+/* Menu rows are buttons, so the grass-block button fill above reaches them and
+   paints every row like the selected one. They are list items, not controls —
+   strip them back to bare rows and let hover/selection do the talking. */
 html[data-theme="minecraft"] .theme-menu button,
 html[data-theme="minecraft"] .col-menu label,
 html[data-theme="minecraft"] .select-panel button,
-html[data-theme="minecraft"] .upstream-action-menu button {
+html[data-theme="minecraft"] .upstream-action-menu button,
+html[data-theme="minecraft"] .command-palette-item {
+  background: transparent;
   border-color: transparent;
   border-radius: 0;
   box-shadow: none;
@@ -891,11 +1164,21 @@ html[data-theme="minecraft"] .upstream-action-menu button {
   text-transform: none;
 }
 
+html[data-theme="minecraft"] .theme-menu button:active:not(:disabled),
+html[data-theme="minecraft"] .select-panel button:active:not(:disabled),
+html[data-theme="minecraft"] .upstream-action-menu button:active:not(:disabled),
+html[data-theme="minecraft"] .command-palette-item:active:not(:disabled) {
+  box-shadow: none;
+  transform: none;
+}
+
 html[data-theme="minecraft"] .theme-menu button:hover,
 html[data-theme="minecraft"] .col-menu label:hover,
 html[data-theme="minecraft"] .select-panel button:hover,
 html[data-theme="minecraft"] .select-panel button.is-active,
-html[data-theme="minecraft"] .upstream-action-menu button:hover {
+html[data-theme="minecraft"] .upstream-action-menu button:hover,
+html[data-theme="minecraft"] .command-palette-item:hover,
+html[data-theme="minecraft"] .command-palette-item.is-active {
   background: rgb(94 198 57 / 16%);
   border-color: transparent;
   box-shadow: none;
@@ -903,7 +1186,7 @@ html[data-theme="minecraft"] .upstream-action-menu button:hover {
 }
 
 html[data-theme="minecraft"] .theme-menu button.is-selected:hover {
-  background: #7ee352;
+  background: var(--mc-tex-stone), #7ee352;
   color: #ffffa0;
 }
 
@@ -954,18 +1237,18 @@ html[data-theme="minecraft"] ::-webkit-scrollbar {
 }
 
 html[data-theme="minecraft"] ::-webkit-scrollbar-track {
-  background: #1a1a1a;
+  background: var(--mc-tex-deepslate), #1a1a1a;
   border: 1px solid #000000;
 }
 
 html[data-theme="minecraft"] ::-webkit-scrollbar-thumb {
-  background: #5ec639;
+  background: var(--mc-tex-stone), #5ec639;
   border: 2px solid #000000;
-  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 25%);
+  box-shadow: inset 1px 1px 0 rgb(255 255 255 / 25%), inset -1px -1px 0 rgb(0 0 0 / 25%);
 }
 
 html[data-theme="minecraft"] ::-webkit-scrollbar-thumb:hover {
-  background: #7ee352;
+  background: var(--mc-tex-stone), #7ee352;
 }
 
 html[data-theme="minecraft"] ::-webkit-scrollbar-corner {
@@ -973,48 +1256,154 @@ html[data-theme="minecraft"] ::-webkit-scrollbar-corner {
   border: 1px solid #000000;
 }
 
-/* ── Mobile ──────────────────────────────────────────────── */
-
-@media (max-width: 760px) {
+/* Landscape phones and short desktop windows keep the rail, but at full size
+   its footer controls fall past the fold — the rail never scrolls, because
+   that would clip the theme menu opening out of its right edge. */
+@media (min-width: 761px) and (max-height: 580px) {
   html[data-theme="minecraft"] .topbar {
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    min-height: 0;
-    padding: 6px 10px;
+    gap: 6px;
+    padding: 8px;
   }
 
   html[data-theme="minecraft"] .topbar-brand {
+    gap: 3px;
+    padding: 0 2px 6px;
+  }
+
+  html[data-theme="minecraft"] .brand-mark {
+    height: 20px;
+    width: 20px;
+  }
+
+  html[data-theme="minecraft"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="minecraft"] .nav-link {
+    min-height: 30px;
+    padding: 3px 4px;
+  }
+
+  html[data-theme="minecraft"] .topbar-actions .live-indicator {
+    display: none;
+  }
+
+  html[data-theme="minecraft"] .topbar-actions .theme-toggle,
+  html[data-theme="minecraft"] .topbar-actions .density-toggle,
+  html[data-theme="minecraft"] .topbar-actions .nav-logout {
+    min-height: 27px;
+  }
+}
+
+/* ── Mobile ──────────────────────────────────────────────────
+   The rail unfolds into the real thing: a five-slot hotbar docked to the
+   bottom of the viewport. Theme and density stay reachable from Settings. */
+
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme="minecraft"] .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(70px + env(safe-area-inset-bottom));
+  }
+
+  html[data-theme="minecraft"] .topbar {
+    align-items: center;
+    border-bottom: 3px solid #000000;
+    border-right: 0;
+    box-shadow: inset 0 2px 0 rgb(255 255 255 / 8%), 0 3px 0 #000000;
+    flex-direction: row;
+    gap: 8px;
+    height: auto;
+    justify-content: space-between;
+    min-height: 52px;
+    padding: 6px 10px;
+    width: 100%;
+  }
+
+  html[data-theme="minecraft"] .topbar-brand {
+    border-bottom: 0;
+    box-shadow: none;
+    flex-direction: row;
+    gap: 8px;
     min-height: 32px;
     padding: 4px 2px;
+    width: auto;
   }
 
   html[data-theme="minecraft"] .brand-mark {
     display: none;
   }
 
+  html[data-theme="minecraft"] .brand-text {
+    text-align: left;
+    width: auto;
+  }
+
   html[data-theme="minecraft"] .topbar-brand h1 {
     font-size: 12px;
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  html[data-theme="minecraft"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="minecraft"] .topbar-actions {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="minecraft"] .topbar-actions > *,
+  html[data-theme="minecraft"] .topbar-actions button {
+    width: auto;
+  }
+
+  html[data-theme="minecraft"] .topbar-actions .live-indicator,
+  html[data-theme="minecraft"] .density-toggle,
+  html[data-theme="minecraft"] .theme-menu-wrap {
+    display: none;
+  }
+
+  html[data-theme="minecraft"] .nav-logout {
+    min-height: 30px;
+    padding: 0 9px;
   }
 
   html[data-theme="minecraft"] .topbar-nav {
-    flex: 1 0 100%;
-    order: 3;
-    overflow-x: auto;
-    width: 100%;
+    bottom: max(6px, env(safe-area-inset-bottom));
+    box-shadow: inset 2px 2px 0 rgb(0 0 0 / 55%), 4px 4px 0 rgb(0 0 0 / 55%);
+    display: grid;
+    gap: 3px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 8px;
+    position: fixed;
+    right: 8px;
+    width: auto;
+    z-index: 40;
   }
 
   html[data-theme="minecraft"] .nav-link {
-    flex: 1 1 0;
-    min-width: 0;
-    padding: 5px 6px;
-    text-align: center;
+    min-height: 44px;
+    padding: 5px 2px;
   }
 
   html[data-theme="minecraft"] .content {
+    display: block;
+    height: auto;
+    overflow: visible;
     padding: 12px 12px 28px;
+    width: 100%;
   }
+}
 
+@media (max-width: 760px) {
   html[data-theme="minecraft"] .view > .panel {
     border-width: 2px;
     box-shadow:
