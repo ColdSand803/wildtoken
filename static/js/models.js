@@ -5,12 +5,39 @@ function getFormModels() {
   return uniqueList(splitList(fields.modelNames.value));
 }
 
+function getFormMappings() {
+  return readModelMappingsLenient(fields.modelMappings.value);
+}
+
+function makeSelectionChip({ label, title, removeKey, removeType, removeLabel, isMapping }) {
+  const chip = document.createElement("span");
+  chip.className = isMapping ? "model-selection-chip is-mapping" : "model-selection-chip";
+  chip.title = title;
+
+  const name = document.createElement("span");
+  name.className = "model-selection-chip-name";
+  name.textContent = label;
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "model-selection-remove";
+  remove.dataset[removeType] = removeKey;
+  remove.setAttribute("aria-label", removeLabel);
+  remove.title = removeLabel;
+  remove.textContent = "×";
+
+  chip.append(name, remove);
+  return chip;
+}
+
 function renderFormModelSelection() {
   const models = getFormModels();
-  modelSelectionCount.textContent = models.length ? `${models.length} 个` : "未选择";
+  const mappings = Object.entries(getFormMappings());
+  const total = models.length + mappings.length;
+  modelSelectionCount.textContent = total ? `${total} 项` : "未选择";
   modelSelectionPreview.innerHTML = "";
 
-  if (models.length === 0) {
+  if (total === 0) {
     const empty = document.createElement("span");
     empty.className = "model-selection-empty";
     empty.textContent = "未配置精确模型";
@@ -19,33 +46,39 @@ function renderFormModelSelection() {
   }
 
   const fragment = document.createDocumentFragment();
-  for (const model of models.slice(0, FORM_MODEL_PREVIEW_LIMIT)) {
-    const chip = document.createElement("span");
-    chip.className = "model-selection-chip";
-    chip.title = model;
-
-    const name = document.createElement("span");
-    name.className = "model-selection-chip-name";
-    name.textContent = model;
-
-    const remove = document.createElement("button");
-    remove.type = "button";
-    remove.className = "model-selection-remove";
-    remove.dataset.model = model;
-    remove.setAttribute("aria-label", `移除模型 ${model}`);
-    remove.title = `移除 ${model}`;
-    remove.textContent = "×";
-
-    chip.append(name, remove);
-    fragment.append(chip);
+  let shown = 0;
+  for (const [downstream, upstream] of mappings) {
+    if (shown >= FORM_MODEL_PREVIEW_LIMIT) break;
+    const label = `${downstream} => ${upstream}`;
+    fragment.append(makeSelectionChip({
+      label,
+      title: label,
+      removeKey: downstream,
+      removeType: "mapping",
+      removeLabel: `移除映射 ${label}`,
+      isMapping: true,
+    }));
+    shown += 1;
+  }
+  for (const model of models) {
+    if (shown >= FORM_MODEL_PREVIEW_LIMIT) break;
+    fragment.append(makeSelectionChip({
+      label: model,
+      title: model,
+      removeKey: model,
+      removeType: "model",
+      removeLabel: `移除模型 ${model}`,
+      isMapping: false,
+    }));
+    shown += 1;
   }
 
-  const hiddenCount = models.length - FORM_MODEL_PREVIEW_LIMIT;
+  const hiddenCount = total - shown;
   if (hiddenCount > 0) {
     const more = document.createElement("span");
     more.className = "model-selection-more";
     more.textContent = `+${hiddenCount}`;
-    more.title = `还有 ${hiddenCount} 个模型`;
+    more.title = `还有 ${hiddenCount} 项`;
     fragment.append(more);
   }
   modelSelectionPreview.append(fragment);
@@ -56,17 +89,35 @@ function setFormModels(models) {
   renderFormModelSelection();
 }
 
-// Returns how many models the pending manual input actually added.
+// Commit the pending manual input into model names and mappings.
+// Returns { addedNames, addedMappings } counting only newly created entries.
 function commitFormManualModels() {
-  const additions = uniqueList(splitModelInput(formModelManualInput.value));
-  if (additions.length === 0) {
-    return 0;
+  const { names, mappings } = parseManualModelEntry(formModelManualInput.value);
+  const newMappingKeys = Object.keys(mappings);
+  if (names.length === 0 && newMappingKeys.length === 0) {
+    return { addedNames: 0, addedMappings: 0 };
   }
-  const existing = getFormModels();
-  const merged = uniqueList([...existing, ...additions]);
-  setFormModels(merged);
+
+  let addedMappings = 0;
+  if (newMappingKeys.length > 0) {
+    const existingMappings = getFormMappings();
+    for (const [downstream, upstream] of Object.entries(mappings)) {
+      if (existingMappings[downstream] !== upstream) {
+        addedMappings += 1;
+      }
+      existingMappings[downstream] = upstream;
+    }
+    fields.modelMappings.value = joinModelMappings(existingMappings);
+  }
+
+  const existingNames = getFormModels();
+  const mergedNames = uniqueList([...existingNames, ...names]);
+  const addedNames = mergedNames.length - existingNames.length;
+
+  // setFormModels re-renders the preview, which now also reflects mappings.
+  setFormModels(mergedNames);
   formModelManualInput.value = "";
-  return merged.length - existing.length;
+  return { addedNames, addedMappings };
 }
 
 function addFormManualModels() {
@@ -74,11 +125,14 @@ function addFormManualModels() {
     formModelManualInput.focus();
     return;
   }
-  const added = commitFormManualModels();
+  const { addedNames, addedMappings } = commitFormManualModels();
   formModelManualInput.focus();
+  const parts = [];
+  if (addedNames > 0) parts.push(`${addedNames} 个模型`);
+  if (addedMappings > 0) parts.push(`${addedMappings} 条映射`);
   setStatus(
-    added > 0 ? `已添加 ${added} 个模型，保存渠道后生效。` : "输入的模型都已在列表中。",
-    added > 0 ? "ok" : "neutral",
+    parts.length > 0 ? `已添加 ${parts.join("、")}，保存渠道后生效。` : "输入的内容都已在列表中。",
+    parts.length > 0 ? "ok" : "neutral",
   );
 }
 
@@ -91,6 +145,7 @@ function openFormModelManager() {
     selectedModels,
     selectedModels,
     "form",
+    { mappings: getFormMappings() },
   );
 }
 
@@ -101,6 +156,17 @@ function getVisibleDialogModels() {
       return false;
     }
     return !filter || model.toLowerCase().includes(filter);
+  });
+}
+
+function getVisibleDialogMappings() {
+  const filter = modelFilter.value.trim().toLowerCase();
+  return Object.entries(modelDialogState.mappings).filter(([downstream, upstream]) => {
+    if (modelSelectedOnly.checked && !modelDialogState.selectedMappings.has(downstream)) {
+      return false;
+    }
+    if (!filter) return true;
+    return downstream.toLowerCase().includes(filter) || upstream.toLowerCase().includes(filter);
   });
 }
 
@@ -135,16 +201,20 @@ function renderModelDialogSummary() {
   } else {
     parts.push(`列表 ${modelDialogState.models.length}`);
   }
+  if (Object.keys(modelDialogState.mappings).length > 0) {
+    parts.push(`映射 ${modelDialogState.selectedMappings.size}`);
+  }
   modelDialogSummary.textContent = parts.join(" · ");
   updateRemoveUnavailableButton(unavailableCount);
 }
 
 function renderModelOptions() {
   const visibleModels = getVisibleDialogModels();
+  const visibleMappings = getVisibleDialogMappings();
   modelOptions.innerHTML = "";
   renderModelDialogSummary();
 
-  if (visibleModels.length === 0) {
+  if (visibleModels.length === 0 && visibleMappings.length === 0) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = modelSelectedOnly.checked ? "尚未选择匹配的模型。" : "没有匹配的模型。";
@@ -153,6 +223,30 @@ function renderModelOptions() {
   }
 
   const fragment = document.createDocumentFragment();
+  for (const [downstream, upstream] of visibleMappings) {
+    const text = `${downstream} => ${upstream}`;
+    const selected = modelDialogState.selectedMappings.has(downstream);
+    const label = document.createElement("label");
+    label.className = "model-option is-mapping";
+    label.classList.toggle("is-selected", selected);
+    label.title = text;
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.dataset.mapping = downstream;
+    checkbox.checked = selected;
+
+    const tag = document.createElement("span");
+    tag.className = "model-option-tag";
+    tag.textContent = "映射";
+
+    const name = document.createElement("span");
+    name.className = "model-option-name";
+    name.textContent = text;
+
+    label.append(checkbox, tag, name);
+    fragment.append(label);
+  }
   for (const model of visibleModels) {
     const selected = modelDialogState.selected.has(model);
     const unavailable = modelDialogState.catalogLoaded && !modelDialogState.available.has(model);
@@ -191,6 +285,8 @@ function openModelDialog(upstream, models, selectedNames, mode, options = {}) {
   modelDialogState.selected = new Set(currentSelection);
   modelDialogState.available = new Set(fetchedModels);
   modelDialogState.catalogLoaded = options.catalogLoaded === true;
+  modelDialogState.mappings = { ...(options.mappings || {}) };
+  modelDialogState.selectedMappings = new Set(Object.keys(modelDialogState.mappings));
   modelDialogTitle.textContent = `选择模型：${upstream.name}`;
   modelFilter.value = "";
   modelSelectedOnly.checked = false;
@@ -222,7 +318,10 @@ async function fetchModelsForUpstream(upstream, mode, button, selectedNames) {
   setStatus(`正在拉取 ${upstream.name} 的模型...`);
   try {
     const result = await api(`/api/admin/upstreams/${upstream.id}/models`, { method: "POST" });
-    openModelDialog(upstream, result.models, selectedNames, mode, { catalogLoaded: true });
+    openModelDialog(upstream, result.models, selectedNames, mode, {
+      catalogLoaded: true,
+      mappings: upstream.model_mappings || {},
+    });
     setStatus(`已拉取 ${result.models.length} 个模型。`, "ok");
   } catch (error) {
     setStatus(`拉取模型失败：${error.message}`, "error");
@@ -269,7 +368,10 @@ async function fetchModelsFromForm() {
         timeout_seconds: Number(fields.timeoutSeconds.value || 300),
       }),
     });
-    openModelDialog(draftUpstream, result.models, selectedNames, "form", { catalogLoaded: true });
+    openModelDialog(draftUpstream, result.models, selectedNames, "form", {
+      catalogLoaded: true,
+      mappings: getFormMappings(),
+    });
     setStatus(`已拉取 ${result.models.length} 个模型。`, "ok");
   } catch (error) {
     setStatus(`拉取模型失败：${error.message}`, "error");
@@ -280,15 +382,23 @@ async function fetchModelsFromForm() {
 }
 
 function addManualModels() {
-  const additions = uniqueList(splitModelInput(modelManualInput.value));
-  if (additions.length === 0) {
+  const { names, mappings } = parseManualModelEntry(modelManualInput.value);
+  const additions = uniqueList(names);
+  const mappingEntries = Object.entries(mappings);
+  if (additions.length === 0 && mappingEntries.length === 0) {
     modelManualInput.focus();
     return;
   }
 
-  modelDialogState.models = uniqueList([...modelDialogState.models, ...additions]);
-  for (const model of additions) {
-    modelDialogState.selected.add(model);
+  if (additions.length > 0) {
+    modelDialogState.models = uniqueList([...modelDialogState.models, ...additions]);
+    for (const model of additions) {
+      modelDialogState.selected.add(model);
+    }
+  }
+  for (const [downstream, upstream] of mappingEntries) {
+    modelDialogState.mappings[downstream] = upstream;
+    modelDialogState.selectedMappings.add(downstream);
   }
   modelManualInput.value = "";
   modelFilter.value = "";
@@ -304,7 +414,13 @@ async function saveModelSelection() {
   }
 
   const selectedModels = modelDialogState.models.filter((model) => modelDialogState.selected.has(model));
+  const dialogMappings = Object.fromEntries(
+    Object.entries(modelDialogState.mappings)
+      .filter(([downstream]) => modelDialogState.selectedMappings.has(downstream)),
+  );
   if (modelDialogState.mode === "form") {
+    // Write mappings before setFormModels so the preview re-render reflects them.
+    fields.modelMappings.value = joinModelMappings(dialogMappings);
     setFormModels(selectedModels);
     closeModelDialog();
     setStatus(`已选择 ${selectedModels.length} 个模型，保存渠道后生效。`, "ok");
@@ -323,7 +439,7 @@ async function saveModelSelection() {
         api_key: null,
         model_names: selectedModels,
         model_prefixes: upstream.model_prefixes,
-        model_mappings: upstream.model_mappings || {},
+        model_mappings: dialogMappings,
         priority: upstream.priority,
         weight: upstream.weight,
         auto_weight_enabled: upstream.auto_weight_enabled,
@@ -334,6 +450,7 @@ async function saveModelSelection() {
       }),
     });
     if (fields.id.value === String(upstream.id)) {
+      fields.modelMappings.value = joinModelMappings(dialogMappings);
       setFormModels(selectedModels);
     }
     closeModelDialog();
@@ -765,6 +882,14 @@ formModelManualInput.addEventListener("keydown", (event) => {
   }
 });
 modelSelectionPreview.addEventListener("click", (event) => {
+  const mappingButton = event.target.closest("button[data-mapping]");
+  if (mappingButton) {
+    const mappings = getFormMappings();
+    delete mappings[mappingButton.dataset.mapping];
+    fields.modelMappings.value = joinModelMappings(mappings);
+    renderFormModelSelection();
+    return;
+  }
   const removeButton = event.target.closest("button[data-model]");
   if (!removeButton) return;
   setFormModels(getFormModels().filter((model) => model !== removeButton.dataset.model));
@@ -773,6 +898,26 @@ modelSelectionPreview.addEventListener("click", (event) => {
 modelFilter.addEventListener("input", renderModelOptions);
 modelSelectedOnly.addEventListener("change", renderModelOptions);
 modelOptions.addEventListener("change", (event) => {
+  const mappingCheckbox = event.target.closest("input[type='checkbox'][data-mapping]");
+  if (mappingCheckbox) {
+    const downstream = mappingCheckbox.dataset.mapping;
+    if (mappingCheckbox.checked) {
+      modelDialogState.selectedMappings.add(downstream);
+    } else {
+      modelDialogState.selectedMappings.delete(downstream);
+    }
+    const option = mappingCheckbox.closest(".model-option");
+    option?.classList.toggle("is-selected", mappingCheckbox.checked);
+    renderModelDialogSummary();
+    if (modelSelectedOnly.checked && !mappingCheckbox.checked) {
+      option?.remove();
+      if (!modelOptions.querySelector(".model-option")) {
+        renderModelOptions();
+      }
+    }
+    return;
+  }
+
   const checkbox = event.target.closest("input[type='checkbox'][data-model]");
   if (!checkbox) return;
   if (checkbox.checked) {
@@ -794,6 +939,9 @@ modelSelectAllButton.addEventListener("click", () => {
   for (const model of getVisibleDialogModels()) {
     modelDialogState.selected.add(model);
   }
+  for (const [downstream] of getVisibleDialogMappings()) {
+    modelDialogState.selectedMappings.add(downstream);
+  }
   renderModelOptions();
 });
 modelRemoveUnavailableButton.addEventListener("click", () => {
@@ -811,6 +959,9 @@ modelRemoveUnavailableButton.addEventListener("click", () => {
 modelClearAllButton.addEventListener("click", () => {
   for (const model of getVisibleDialogModels()) {
     modelDialogState.selected.delete(model);
+  }
+  for (const [downstream] of getVisibleDialogMappings()) {
+    modelDialogState.selectedMappings.delete(downstream);
   }
   renderModelOptions();
 });

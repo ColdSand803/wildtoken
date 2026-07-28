@@ -1023,6 +1023,31 @@ html[data-theme="bleach"] .token-chip.ok {
   color: var(--ok-strong);
 }
 
+/* Mappings must read as distinct from plain model names. The flat chip rule
+   above overrides the base .is-mapping accent, so restate it in bleach's
+   language: solid orange reiatsu with the hard black border. */
+html[data-theme="bleach"] .model-selection-chip.is-mapping {
+  background: #f97316;
+  border-color: #080706;
+  color: #160b05;
+}
+
+html[data-theme="bleach"] .model-option-tag {
+  background: #f97316;
+  border: 1px solid #080706;
+  color: #160b05;
+  font-weight: 700;
+}
+
+/* Match column: the flat .model-chip rule above flattens name/prefix/mapping
+   into one look. Restate the mapping variant in bleach's teal success palette
+   so mappings stand apart from plain model names. */
+html[data-theme="bleach"] .model-chip.mapping {
+  background: #d8f3dc;
+  border-color: #0f766e;
+  color: #0b4f49;
+}
+
 html[data-theme="bleach"] pre,
 html[data-theme="bleach"] code,
 html[data-theme="bleach"] .code-frame,

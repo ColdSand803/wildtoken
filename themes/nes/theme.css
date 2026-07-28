@@ -76,8 +76,15 @@ html[data-theme="nes"] {
   --radius-lg: 0px;
   --radius-full: 0px;
 
-  --font-sans: "DotGothic16", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: "VT323", "Fira Code", ui-monospace, Consolas, monospace;
+  /* Reading text (body, tables, logs, forms, descriptions) uses smooth,
+     legible faces — Inter for Latin, Noto Sans SC for CJK. The pixel identity
+     is carried by chrome (nav, titles, brand) via --font-pixel below. */
+  --font-sans: "Inter", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", ui-monospace, Consolas, monospace;
+  /* Chrome pixel face. DotGothic16 is the only loaded pixel font with CJK
+     coverage, so Chinese nav/titles render as real pixels instead of falling
+     back off Press Start 2P (Latin-only) to a jagged system face. */
+  --font-pixel: "DotGothic16", "Press Start 2P", monospace;
 
   --transition: 0ms steps(1, end);
   --blur: 0px;
@@ -167,8 +174,20 @@ html[data-theme="nes"] body {
     0 8px,
     8px -8px,
     -8px 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Keep the pixel chrome crisp (no smoothing) even though body is antialiased. */
+html[data-theme="nes"] .topbar-brand h1,
+html[data-theme="nes"] .brand-label,
+html[data-theme="nes"] .nav-link,
+html[data-theme="nes"] .view > .panel > .panel-head h2,
+html[data-theme="nes"] .modal-head h2,
+html[data-theme="nes"] .command-palette-hint {
   -webkit-font-smoothing: none;
-  text-rendering: auto;
+  -moz-osx-font-smoothing: auto;
 }
 
 html[data-theme="nes"] body::before {
@@ -317,7 +336,7 @@ html[data-theme="nes"] .brand-mark svg * {
 html[data-theme="nes"] .topbar-brand h1 {
   color: #ffffff;
   font-family: "Press Start 2P", var(--font-mono);
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 400;
   letter-spacing: 0.02em;
   line-height: 1.5;
@@ -330,9 +349,9 @@ html[data-theme="nes"] .brand-label {
   color: #f7d51d;
   display: block;
   font-family: "Press Start 2P", var(--font-mono);
-  font-size: 6px;
+  font-size: 8px;
   letter-spacing: 0.08em;
-  margin-top: 4px;
+  margin-top: 6px;
   text-shadow: 1px 1px 0 #0d6aa8;
 }
 
@@ -346,7 +365,8 @@ html[data-theme="nes"] .nav-link {
     inset 1px 1px 0 #686888,
     3px 3px 0 #000000;
   color: #fcfcfc;
-  font-size: 12px;
+  font-family: var(--font-pixel);
+  font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.04em;
   min-height: 40px;
@@ -829,17 +849,17 @@ html[data-theme="nes"] .view > .panel > .panel-head {
 
 html[data-theme="nes"] .view > .panel > .panel-head h2 {
   color: #f7d51d;
-  font-family: "Press Start 2P", var(--font-mono);
-  font-size: 12px;
-  font-weight: 400;
+  font-family: var(--font-pixel);
+  font-size: 20px;
+  font-weight: 700;
   letter-spacing: 0.04em;
-  line-height: 1.55;
+  line-height: 1.4;
   /* Hard pixel shadow first, then the composite smear trailing off it. */
   text-shadow: 2px 2px 0 #000000, var(--nes-ntsc);
 }
 
 html[data-theme="nes"] .view > .panel > .panel-head p {
-  color: #7c7c94;
+  color: #a6a6bc;
   font-size: 13px;
 }
 
@@ -860,7 +880,7 @@ html[data-theme="nes"] .dashboard-kpi-label {
 }
 
 html[data-theme="nes"] .dashboard-kpi-hint {
-  color: #7c7c94;
+  color: #a6a6bc;
   text-shadow: none;
 }
 
@@ -916,11 +936,11 @@ html[data-theme="nes"] .balance-panel > .modal-head h2,
 html[data-theme="nes"] .confirm-panel > .modal-head h2,
 html[data-theme="nes"] .log-detail-head h2 {
   color: #ffffff;
-  font-family: "Press Start 2P", var(--font-mono);
-  font-size: 11px;
-  font-weight: 400;
+  font-family: var(--font-pixel);
+  font-size: 18px;
+  font-weight: 700;
   letter-spacing: 0.04em;
-  line-height: 1.55;
+  line-height: 1.4;
   text-shadow: 2px 2px 0 #0d6aa8;
 }
 
@@ -956,8 +976,8 @@ html[data-theme="nes"] .command-palette-hint {
   border-radius: 0;
   box-shadow: 2px 2px 0 #000000;
   color: #f7d51d;
-  font-family: "Press Start 2P", var(--font-mono);
-  font-size: 8px;
+  font-family: var(--font-pixel);
+  font-size: 12px;
 }
 
 /* ── Fields: hard wells ──────────────────────────────────── */
@@ -1531,7 +1551,7 @@ html[data-theme="nes"] ::-webkit-scrollbar-corner {
   }
 
   html[data-theme="nes"] .nav-link {
-    font-size: 11px;
+    font-size: 13px;
     min-height: 36px;
     padding: 4px 2px;
   }
@@ -1561,7 +1581,7 @@ html[data-theme="nes"] ::-webkit-scrollbar-corner {
   }
 
   html[data-theme="nes"] .view > .panel > .panel-head h2 {
-    font-size: 9px;
+    font-size: 16px;
   }
 
   html[data-theme="nes"] .view-toolbar,

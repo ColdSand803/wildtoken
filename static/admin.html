@@ -650,7 +650,10 @@
                 <h3>模型路由</h3>
                 <p>精确模型、前缀与名称映射。</p>
               </div>
-              <button id="fetch-models" type="button" class="secondary">刷新模型</button>
+              <div class="form-section-head-actions">
+                <button id="manage-models" type="button" class="secondary">管理模型</button>
+                <button id="fetch-models" type="button" class="secondary">拉取模型</button>
+              </div>
             </div>
             <div class="form-grid">
               <div class="field span-2">
@@ -659,30 +662,25 @@
                   <span id="model-selection-count" class="model-selection-count">未选择</span>
                 </div>
                 <input id="model-names" type="hidden" />
+                <input id="model-mappings" type="hidden" />
                 <div class="model-picker" aria-labelledby="model-names-label">
                   <div id="model-selection-preview" class="model-selection-preview" aria-live="polite"></div>
-                  <button id="manage-models" type="button" class="secondary small">管理模型</button>
                 </div>
                 <div class="model-manual-entry">
                   <div class="model-manual-entry-body">
                     <label class="field">
                       <span class="field-label">手动添加</span>
-                      <input id="form-model-manual-input" type="text" spellcheck="false" placeholder="gpt-5.5 claude-sonnet-5 gpt-5.6-sol" />
+                      <input id="form-model-manual-input" type="text" spellcheck="false" placeholder="gpt-5.5 claude-sonnet-5 或 gpt-5.5 => grok-4.5" />
                     </label>
                     <button id="form-model-add-manual" type="button" class="secondary">添加</button>
                   </div>
                 </div>
-                <span class="field-hint">精确匹配所选模型；也可以只配置模型前缀。手动添加支持空白字符分隔，回车快速添加。</span>
+                <span class="field-hint">精确匹配所选模型；也可以只配置模型前缀。手动添加：多个模型名用空白字符分隔，回车快速添加；写成 <code>下游 =&gt; 渠道</code> 则登记为映射，命中后把请求里的模型名替换为渠道模型名。</span>
               </div>
               <label class="field span-2">
                 <span class="field-label">模型前缀</span>
                 <input id="model-prefixes" placeholder="gpt-,claude-" />
                 <span class="field-hint">多个前缀用逗号分隔。</span>
-              </label>
-              <label class="field span-2">
-                <span class="field-label">模型映射（下游 =&gt; 渠道）</span>
-                <textarea id="model-mappings" rows="3" spellcheck="false" placeholder="gpt-5.5 => grok-4.5&#10;gpt-5.6-sol => Grok-4.5[free]"></textarea>
-                <span class="field-hint">命中映射后，将请求中的模型名替换为右侧渠道模型名。</span>
               </label>
             </div>
           </section>
@@ -823,8 +821,8 @@
         <div id="model-manual-entry" class="model-manual-entry">
           <div class="model-manual-entry-body">
             <label class="field">
-              <span class="field-label">模型名</span>
-              <input id="model-manual-input" type="text" spellcheck="false" placeholder="gpt-5.5 gpt-5.6-sol" />
+              <span class="field-label">模型名 / 映射</span>
+              <input id="model-manual-input" type="text" spellcheck="false" placeholder="gpt-5.5 gpt-5.6-sol 或 gpt-5.5 => grok-4.5" />
             </label>
             <button id="model-add-manual" type="button" class="secondary">添加到选择</button>
           </div>

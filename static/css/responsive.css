@@ -373,7 +373,6 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .model-picker > button,
   .model-manual-entry-body > button {
     width: 100%;
   }

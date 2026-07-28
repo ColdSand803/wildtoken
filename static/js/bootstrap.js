@@ -378,6 +378,8 @@ const modelDialogState = {
   selected: new Set(),
   available: new Set(),
   catalogLoaded: false,
+  mappings: {},
+  selectedMappings: new Set(),
 };
 
 
@@ -870,13 +872,56 @@ function splitList(value) {
     .filter(Boolean);
 }
 
-// Manual model entry splits on any whitespace so pasted, space-separated
-// model lists work directly. Commas are treated as whitespace too.
-function splitModelInput(value) {
-  return value
-    .split(/[\s,]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+// Manual model entry: newlines and commas separate entries; within one entry
+// an `=>` marks a model mapping (downstream => channel model), everything else
+// is whitespace-separated plain model names. Returns { names, mappings }.
+function parseManualModelEntry(value) {
+  const names = [];
+  const mappings = {};
+  for (const segment of String(value || "").split(/[,，\n]/)) {
+    const clean = segment.trim();
+    if (!clean) {
+      continue;
+    }
+    const arrow = clean.indexOf("=>");
+    if (arrow !== -1) {
+      const downstream = clean.slice(0, arrow).trim();
+      const upstream = clean.slice(arrow + 2).trim();
+      if (downstream && upstream) {
+        mappings[downstream] = upstream;
+      }
+      continue;
+    }
+    for (const name of clean.split(/\s+/)) {
+      const trimmed = name.trim();
+      if (trimmed) {
+        names.push(trimmed);
+      }
+    }
+  }
+  return { names: uniqueList(names), mappings };
+}
+
+// Read mappings from the textarea without throwing, for live chip preview.
+// Strict validation still runs on submit via parseModelMappings.
+function readModelMappingsLenient(value) {
+  const mappings = {};
+  for (const line of String(value || "").split(/\n/)) {
+    const clean = line.trim();
+    if (!clean) {
+      continue;
+    }
+    const match = clean.match(/^(.+?)(?:=>|=|:)(.+)$/);
+    if (!match) {
+      continue;
+    }
+    const downstream = match[1].trim();
+    const upstream = match[2].trim();
+    if (downstream && upstream) {
+      mappings[downstream] = upstream;
+    }
+  }
+  return mappings;
 }
 
 function joinList(value) {

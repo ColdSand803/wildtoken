@@ -236,9 +236,9 @@ async function editUpstream(upstream) {
     fields.apiKey.value = detail.api_key || "";
     persistedFormApiKey = detail.api_key || null;
     formModelManualInput.value = "";
-    setFormModels(detail.model_names);
     fields.modelPrefixes.value = joinList(detail.model_prefixes);
     fields.modelMappings.value = joinModelMappings(detail.model_mappings);
+    setFormModels(detail.model_names);
     fields.priority.value = detail.priority;
     fields.weight.value = detail.weight;
     fields.autoWeightEnabled.checked = detail.auto_weight_enabled;
@@ -259,9 +259,9 @@ function duplicateUpstream(upstream) {
   resetForm();
   fields.name.value = `${upstream.name} 副本`;
   fields.baseUrl.value = upstream.base_url;
-  setFormModels(upstream.model_names);
   fields.modelPrefixes.value = joinList(upstream.model_prefixes);
   fields.modelMappings.value = joinModelMappings(upstream.model_mappings);
+  setFormModels(upstream.model_names);
   fields.priority.value = upstream.priority;
   fields.weight.value = upstream.weight;
   fields.autoWeightEnabled.checked = upstream.auto_weight_enabled;
@@ -324,7 +324,7 @@ function renderBalanceResult(result, provider) {
 }
 
 async function showBalance(upstream, provider = "new-api") {
-  const providerName = provider === "sub2api" ? "sub2api" : "New-API";
+  const providerName = provider === "sub2api" ? "sub2api" : "new-api";
   const endpoint = provider === "sub2api"
     ? `/api/admin/upstreams/${upstream.id}/balance/sub2api`
     : `/api/admin/upstreams/${upstream.id}/balance`;
@@ -356,8 +356,8 @@ function resetForm() {
   fields.weight.value = 100;
   fields.timeoutSeconds.value = 300;
   formModelManualInput.value = "";
-  setFormModels([]);
   fields.modelMappings.value = "";
+  setFormModels([]);
   fields.extraHeaders.value = "{}";
   fields.enabled.checked = true;
   fields.autoWeightEnabled.checked = true;
@@ -592,7 +592,7 @@ function actionMenuMarkup(upstreamId) {
   return `
     <button type="button" role="menuitem" data-action="test-model" data-id="${upstreamId}">测试模型</button>
     <button type="button" role="menuitem" data-action="test" data-id="${upstreamId}">测试连接</button>
-    <button type="button" role="menuitem" data-action="balance" data-id="${upstreamId}">查询 New-API 余额</button>
+    <button type="button" role="menuitem" data-action="balance" data-id="${upstreamId}">查询 new-api 余额</button>
     <button type="button" role="menuitem" data-action="balance-sub2api" data-id="${upstreamId}">查询 sub2api 余额</button>
     <button type="button" role="menuitem" data-action="models" data-id="${upstreamId}">拉取模型</button>
     <div class="action-menu-separator" role="separator"></div>
