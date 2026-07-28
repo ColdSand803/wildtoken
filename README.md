@@ -89,7 +89,7 @@ TOKIO_WORKER_THREADS=4 APP__SERVER__PORT=3100 APP__DATABASE__MAX_CONNECTIONS=3 A
 
 ## 主题插件
 
-管理界面的默认深色/浅色主题仍从 `static/css/*.css` 加载；其他主题都作为 CSS-only 主题包放在 `themes/` 下，Docker Compose 会把宿主机 `./themes` 只读挂载到容器的 `/app/themes`。随仓库提供的 Win95、动物岛、赛博朋克、像素、CRT、我的世界、Bleach 和 Endfield 都不再内嵌到主样式表。
+管理界面的默认深色/浅色主题仍从 `static/css/*.css` 加载；其他主题都作为 CSS-only 主题包放在 `themes/` 下，Docker Compose 会把宿主机 `./themes` 只读挂载到容器的 `/app/themes`。随仓库提供的 Win95、动物岛、赛博朋克、像素、CRT、我的世界、Bleach、Endfield 和樱雾灰紫都不再内嵌到主样式表。
 
 每个主题包使用一个子目录：
 
