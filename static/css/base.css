@@ -941,6 +941,31 @@ html[data-theme="light"] .nav-link:hover {
   justify-content: flex-end;
 }
 
+/* Kicker above a view's title. Every view header carries one, so the row of
+   them reads as a set when you move between views. */
+.eyebrow {
+  color: var(--accent);
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  margin-bottom: 6px;
+}
+
+/* The kicker pushes the title down by its own height, so buttons aligned to
+   the top of the header end up floating above the title they belong to.
+   Centring puts them back on its line: the kicker and the description are
+   near enough the same height that the block's centre is the title's.
+
+   Applied to the button group rather than the header, so it moves only the
+   buttons — the logs header's filter toolbar is taller than the title block
+   and stays anchored to the top, where its field labels line up with the
+   kicker. */
+.panel-head:has(.eyebrow) > .actions {
+  align-self: center;
+}
+
 .log-toolbar {
   align-items: flex-end;
   display: flex;

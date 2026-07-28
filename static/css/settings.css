@@ -9,15 +9,8 @@
   margin-bottom: 18px;
 }
 
-.eyebrow {
-  color: var(--accent);
-  display: block;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .12em;
-  margin-bottom: 6px;
-}
+/* .eyebrow now labels every view's header, not just this one — it lives in
+   base.css next to .panel-head. */
 
 .settings-stack { display: grid; gap: 12px; }
 .settings-card {
