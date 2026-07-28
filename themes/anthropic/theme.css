@@ -1,0 +1,167 @@
+/* Anthropic: warm ivory paper, slate ink, a single clay accent, serif display.
+   Backgrounds are warm ivory (never pure white); text is warm near-black slate
+   (never pure black). Clay #d97757 is the only accent; everything else neutral.
+   Flat and quiet — no glows or gradients on core surfaces. */
+
+/* Bundled OFL 1.1 open-source fonts (self-hosted from this pack's fonts/ dir):
+   Lora as the serif display stand-in for Anthropic Serif, Poppins for UI sans,
+   JetBrains Mono for code. Latin subset only. font-display: swap so the UI
+   paints immediately in the fallback and swaps when the face arrives. */
+@font-face {
+  font-family: "Lora";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/theme-packs/anthropic/fonts/lora-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Lora";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/theme-packs/anthropic/fonts/lora-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/theme-packs/anthropic/fonts/poppins-latin-400-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/theme-packs/anthropic/fonts/poppins-latin-500-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/theme-packs/anthropic/fonts/poppins-latin-600-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Poppins";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/theme-packs/anthropic/fonts/poppins-latin-700-normal.woff2") format("woff2");
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/theme-packs/anthropic/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+}
+
+html[data-theme="anthropic"] {
+  color-scheme: light;
+
+  /* Surfaces — ivory paper, not white */
+  --bg: #faf9f5;
+  --bg-elevated: #f0eee6;
+  --panel: rgb(250 249 245 / 90%);
+  --panel-solid: #faf9f5;
+  --panel-subtle: #f4f2ea;
+  --panel-muted: #f0eee6;
+  --panel-elevated: #ffffff;
+  --glass: rgb(250 249 245 / 80%);
+  --glass-strong: rgb(250 249 245 / 94%);
+
+  /* Text — warm slate */
+  --text: #141413;
+  --text-secondary: #3d3d3a;
+  --muted: #87867f;
+  --muted-strong: #5e5d59;
+
+  /* Borders — faded slate on oat */
+  --line: #e3dacc;
+  --line-strong: #d1cfc5;
+  --line-soft: #ede9df;
+
+  /* Accent — clay, used sparingly */
+  --accent: #d97757;
+  --accent-strong: #c6613f;
+  --accent-soft: rgb(217 119 87 / 12%);
+  --accent-border: rgb(217 119 87 / 34%);
+  --accent-glow: rgb(217 119 87 / 16%);
+  --accent-on: #faf9f5;
+  --brand-ink: #faf9f5;
+
+  /* Semantic — drawn from the muted decorative swatches */
+  --danger: #b1476b;
+  --danger-soft: rgb(196 102 134 / 12%);
+  --danger-border: rgb(196 102 134 / 36%);
+  --danger-strong: #8f3555;
+  --ok: #607341;
+  --ok-soft: rgb(120 140 93 / 14%);
+  --ok-border: rgb(120 140 93 / 36%);
+  --ok-strong: #4c5c34;
+  --warning: #b07a4a;
+  --warning-soft: rgb(212 162 127 / 16%);
+  --warning-border: rgb(212 162 127 / 42%);
+  --warning-strong: #8f5f34;
+  --warning-text: #7a4f2c;
+
+  /* Focus / elevation — flat and quiet */
+  --focus: #d97757;
+  --focus-ring: 0 0 0 3px rgb(217 119 87 / 26%);
+  --shadow-xs: 0 1px 2px rgb(20 20 19 / 4%);
+  --shadow-sm: 0 1px 2px rgb(20 20 19 / 5%), 0 1px 3px rgb(20 20 19 / 4%);
+  --shadow-md: 0 6px 20px rgb(20 20 19 / 8%);
+  --shadow-lg: 0 14px 40px rgb(20 20 19 / 12%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px rgb(217 119 87 / 20%);
+
+  /* Code frames — slate ground, ivory ink */
+  --code-frame-bg: #141413;
+  --code-bg: #24241f;
+  --code-text: #f0eee6;
+  --code-muted: #b0aea5;
+  --code-border: rgb(250 249 245 / 14%);
+
+  /* Interactive soft surfaces */
+  --row-hover: rgb(217 119 87 / 6%);
+  --row-disabled: #f0eee6;
+  --topbar-bg: rgb(250 249 245 / 92%);
+  --backdrop: rgb(20 20 19 / 32%);
+  --neutral-chip: #ede9df;
+  --toast-neutral: #87867f;
+
+  /* Aurora off — the brand is flat and quiet */
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  /* Serif for display, sans for UI, mono for code — all self-hosted OFL faces */
+  --font-sans: "Poppins", Arial, Helvetica, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "SFMono-Regular", ui-monospace, Consolas, monospace;
+}
+
+/* Flat and quiet: drop the animated aurora mesh entirely. */
+html[data-theme="anthropic"] .aurora {
+  display: none;
+}
+
+/* Serif display: headings and the brand wordmark read as editorial serif,
+   light-weight with negative letter-spacing. UI chrome stays sans. */
+html[data-theme="anthropic"] .topbar-brand h1,
+html[data-theme="anthropic"] .panel h2 {
+  font-family: "Lora", Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+/* Clay hairline under the topbar instead of the cyan signal gradient. */
+html[data-theme="anthropic"] .topbar::after {
+  background: rgb(217 119 87 / 30%);
+  opacity: 1;
+}
+
+/* Keep the RPM pill flat — a quiet clay wash, no gradient. */
+html[data-theme="anthropic"] .panel p.log-rpm {
+  background: var(--accent-soft);
+}
