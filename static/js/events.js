@@ -475,11 +475,6 @@ systemRefreshButton?.addEventListener("click", async () => {
 rotateAdminTokenButton?.addEventListener("click", rotateAdminToken);
 
 // ── Dashboard controls ───────────────────────────────────
-if (dashboardRefreshButton) {
-  dashboardRefreshButton.addEventListener("click", () => {
-    loadDashboardData();
-  });
-}
 if (dashboardChannelNameToggle) {
   updateDashboardChannelNameToggle();
   dashboardChannelNameToggle.addEventListener("click", () => {

@@ -180,7 +180,6 @@ let dashboardLoading = false;
 let lastDashboardLoadError = "";
 
 const dashboardScope = document.querySelector("#dashboard-scope");
-const dashboardRefreshButton = document.querySelector("#dashboard-refresh");
 const dashboardKpis = document.querySelector("#dashboard-kpis");
 const dashboardTokenKpis = document.querySelector("#dashboard-token-kpis");
 const dashboardRequestKpis = document.querySelector("#dashboard-request-kpis");
