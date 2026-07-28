@@ -262,11 +262,8 @@ html[data-theme="dark"] .nav-link.active::before {
   width: 3px;
 }
 
-/* Three stacked full-width buttons put 142px of heavy chrome at the foot of
-   the rail, and stretching the 16px theme swatch across all of it left 33px
-   of dead space on either side. Laid out by weight instead: status on its own
-   line, the two toggles paired (swatch square, density taking the rest), and
-   only the destructive action full width. */
+/* One control per line at the foot of the rail: status, density, theme, then
+   the destructive action last. */
 html[data-theme="dark"] .topbar-actions {
   align-items: center;
   display: flex;
@@ -291,14 +288,13 @@ html[data-theme="dark"] .live-label {
   display: none;
 }
 
-html[data-theme="dark"] .topbar-actions .density-toggle {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: auto;
-}
-
+/* Density and theme toggle each get their own line — no more side-by-side
+   pairing. The status line is still on its own, and the destructive action
+   remains full-width at the foot. */
+html[data-theme="dark"] .topbar-actions .density-toggle,
 html[data-theme="dark"] .topbar-actions .theme-menu-wrap {
-  flex: 0 0 30px;
+  flex: 1 0 100%;
+  width: 100%;
 }
 
 html[data-theme="dark"] .topbar-actions .nav-logout {
