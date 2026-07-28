@@ -56,7 +56,34 @@ function setFormModels(models) {
   renderFormModelSelection();
 }
 
+// Returns how many models the pending manual input actually added.
+function commitFormManualModels() {
+  const additions = uniqueList(splitList(formModelManualInput.value));
+  if (additions.length === 0) {
+    return 0;
+  }
+  const existing = getFormModels();
+  const merged = uniqueList([...existing, ...additions]);
+  setFormModels(merged);
+  formModelManualInput.value = "";
+  return merged.length - existing.length;
+}
+
+function addFormManualModels() {
+  if (!formModelManualInput.value.trim()) {
+    formModelManualInput.focus();
+    return;
+  }
+  const added = commitFormManualModels();
+  formModelManualInput.focus();
+  setStatus(
+    added > 0 ? `已添加 ${added} 个模型，保存渠道后生效。` : "输入的模型都已在列表中。",
+    added > 0 ? "ok" : "neutral",
+  );
+}
+
 function openFormModelManager() {
+  commitFormManualModels();
   const selectedModels = getFormModels();
   const formName = fields.name.value.trim() || "当前渠道";
   openModelDialog(
@@ -323,6 +350,8 @@ async function saveModelSelection() {
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   try {
+    // Saving with text still in the manual box should keep it, not drop it.
+    commitFormManualModels();
     const payload = payloadFromForm();
     const id = fields.id.value;
     const path = id ? `/api/admin/upstreams/${id}` : "/api/admin/upstreams";
@@ -727,6 +756,14 @@ fetchModelsButton.addEventListener("click", async () => {
 });
 
 manageModelsButton.addEventListener("click", openFormModelManager);
+formModelAddManualButton.addEventListener("click", addFormManualModels);
+formModelManualInput.addEventListener("keydown", (event) => {
+  // A single-line input: Enter adds instead of submitting the surrounding form.
+  if (event.key === "Enter") {
+    event.preventDefault();
+    addFormManualModels();
+  }
+});
 modelSelectionPreview.addEventListener("click", (event) => {
   const removeButton = event.target.closest("button[data-model]");
   if (!removeButton) return;

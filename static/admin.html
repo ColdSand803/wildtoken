@@ -663,7 +663,16 @@
                   <div id="model-selection-preview" class="model-selection-preview" aria-live="polite"></div>
                   <button id="manage-models" type="button" class="secondary small">管理模型</button>
                 </div>
-                <span class="field-hint">精确匹配所选模型；也可以只配置模型前缀。</span>
+                <div class="model-manual-entry">
+                  <div class="model-manual-entry-body">
+                    <label class="field">
+                      <span class="field-label">手动添加</span>
+                      <input id="form-model-manual-input" type="text" spellcheck="false" placeholder="gpt-5.5, claude-sonnet-5, gpt-5.6-sol" />
+                    </label>
+                    <button id="form-model-add-manual" type="button" class="secondary">添加</button>
+                  </div>
+                </div>
+                <span class="field-hint">精确匹配所选模型；也可以只配置模型前缀。手动添加支持逗号分隔，回车快速添加。</span>
               </div>
               <label class="field span-2">
                 <span class="field-label">模型前缀</span>

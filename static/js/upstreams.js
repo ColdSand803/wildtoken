@@ -235,6 +235,7 @@ async function editUpstream(upstream) {
     fields.baseUrl.value = detail.base_url;
     fields.apiKey.value = detail.api_key || "";
     persistedFormApiKey = detail.api_key || null;
+    formModelManualInput.value = "";
     setFormModels(detail.model_names);
     fields.modelPrefixes.value = joinList(detail.model_prefixes);
     fields.modelMappings.value = joinModelMappings(detail.model_mappings);
@@ -354,6 +355,7 @@ function resetForm() {
   fields.priority.value = 100;
   fields.weight.value = 100;
   fields.timeoutSeconds.value = 300;
+  formModelManualInput.value = "";
   setFormModels([]);
   fields.modelMappings.value = "";
   fields.extraHeaders.value = "{}";

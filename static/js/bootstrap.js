@@ -320,6 +320,8 @@ const modelAddManualButton = document.querySelector("#model-add-manual");
 const modelSaveSelectionButton = document.querySelector("#model-save-selection");
 const modelCancelSelectionButton = document.querySelector("#model-cancel-selection");
 const manageModelsButton = document.querySelector("#manage-models");
+const formModelManualInput = document.querySelector("#form-model-manual-input");
+const formModelAddManualButton = document.querySelector("#form-model-add-manual");
 const modelSelectionPreview = document.querySelector("#model-selection-preview");
 const modelSelectionCount = document.querySelector("#model-selection-count");
 
