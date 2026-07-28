@@ -454,6 +454,15 @@ html[data-theme="endfield"] .view[data-view="logs"] > .panel > .panel-head::befo
 html[data-theme="endfield"] .view[data-view="tokens"] > .panel > .panel-head::before { content: "04 / ACCESS CONTROL"; }
 html[data-theme="endfield"] .view[data-view="settings"] > .panel > .panel-head::before { content: "05 / CONSOLE CONFIG"; }
 
+/* The label above is this theme's own, numbered to line up with the rail and
+   the sector watermark. base.css gives every view header an .eyebrow saying
+   much the same thing in fewer words, which left the header labelled twice —
+   "01 / OPERATIONS MONITOR" beside "TRAFFIC OVERVIEW". The numbered one wins:
+   it carries the sector, so the generic one is what goes. */
+html[data-theme="endfield"] .view > .panel > .panel-head .eyebrow {
+  display: none;
+}
+
 html[data-theme="endfield"] .view > .panel > .panel-head > div:first-child {
   min-width: 0;
 }
