@@ -244,11 +244,13 @@ html[data-theme="ark"] .nav-link {
   gap: 4px;
   justify-content: center;
   line-height: 1.12;
+  max-width: none;
   min-height: 58px;
   padding: 7px 3px 15px;
   position: relative;
   text-align: center;
   text-transform: uppercase;
+  width: 100%;
 }
 
 html[data-theme="ark"] .nav-link::after {
@@ -266,6 +268,9 @@ html[data-theme="ark"] .nav-link:hover {
   background: rgb(255 255 255 / 5%);
   border-color: var(--ark-rule);
   color: var(--ark-paper);
+  margin-inline-end: calc(var(--ark-nav-active-overhang) * -1);
+  width: calc(100% + var(--ark-nav-active-overhang));
+  z-index: 1;
 }
 
 html[data-theme="ark"] .nav-link.active,
@@ -1105,6 +1110,8 @@ html[data-theme="ark"] .live-indicator:not([hidden]) .live-dot {
   html[data-theme="ark"] .nav-link:hover {
     background: rgb(255 255 255 / 8%);
     color: var(--ark-paper);
+    margin-inline-end: 0;
+    width: 100%;
   }
 
   html[data-theme="ark"] .nav-link.active,
