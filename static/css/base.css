@@ -966,11 +966,14 @@ html[data-theme="light"] .nav-link:hover {
   align-self: center;
 }
 
+/* Sits between the header and the table, like .view-toolbar on the other
+   views, so it needs the same gap under it. */
 .log-toolbar {
   align-items: flex-end;
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  margin-bottom: 12px;
 }
 
 .log-toolbar > button {
@@ -1078,10 +1081,16 @@ html[data-theme="light"] .nav-link:hover {
    auto margin does the pushing, which means it survives filters being added
    or hidden — the batch group appears only with a selection.
 
-   The toolbar aligns to flex-end, so the buttons land on the baseline of the
+   Both toolbars align to flex-end, so the buttons land on the baseline of the
    inputs rather than their labels. */
-.view-toolbar > .toolbar-actions {
+.view-toolbar > .toolbar-actions,
+.log-toolbar > .toolbar-actions {
   margin-inline-start: auto;
+}
+
+/* .log-toolbar > button covered 刷新 before it was wrapped; keep the width. */
+.log-toolbar > .toolbar-actions > button {
+  min-width: 72px;
 }
 
 .filter-field {

@@ -155,6 +155,18 @@
     min-width: 72px;
   }
 
+  /* 刷新 used to be a direct child and got the rule above. Wrapped, the group
+     is the grid item, so it takes the full-width span and the auto margin
+     comes off — there is no right edge to push against in a grid. */
+  .log-toolbar > .toolbar-actions {
+    grid-column: 1 / -1;
+    margin-inline-start: 0;
+  }
+
+  .log-toolbar > .toolbar-actions > button {
+    flex: 1 1 0;
+  }
+
   .log-toolbar > .log-sensitive-toggle {
     grid-column: auto;
     justify-self: start;
@@ -582,6 +594,7 @@
   }
 
   .log-toolbar > button,
+  .log-toolbar > .toolbar-actions > button,
   .modal-footer button {
     width: 100%;
   }

@@ -380,62 +380,64 @@
                   <span class="log-rpm-unit">TPM</span>
                 </p>
               </div>
-              <div class="log-toolbar">
-                <label class="log-filter log-filter-channel">
-                  渠道
-                  <select id="log-upstream-filter">
-                    <option value="">全部渠道</option>
-                  </select>
-                </label>
-                <label class="log-filter">
-                  搜索
-                  <input
-                    id="log-search"
-                    type="search"
-                    autocomplete="off"
-                    placeholder="模型、渠道、状态码…"
-                  />
-                </label>
-                <label class="log-filter">
-                  客户端
-                  <select id="log-client-filter">
-                    <option value="">全部</option>
-                    <option value="codex-desktop">codex-desktop</option>
-                    <option value="codex-tui">codex-tui</option>
-                    <option value="codex">codex</option>
-                    <option value="opencode">opencode</option>
-                    <option value="claude">claude</option>
-                    <option value="unknown">unknown</option>
-                  </select>
-                </label>
-                <label class="log-filter">
-                  状态码
-                  <select id="log-status-filter">
-                    <option value="">全部</option>
-                    <option value="2xx">2xx</option>
-                    <option value="4xx">4xx</option>
-                    <option value="5xx">5xx</option>
-                    <option value="none">无响应</option>
-                  </select>
-                </label>
-                <div class="col-menu-wrap">
-                  <button type="button" id="log-col-menu-btn" class="secondary ghost col-menu-btn" aria-haspopup="true" aria-expanded="false">列</button>
-                  <div id="log-col-menu" class="col-menu" hidden role="menu" aria-label="日志列显示"></div>
-                </div>
-                <button
-                  id="log-sensitive-toggle"
-                  type="button"
-                  class="secondary ghost log-sensitive-toggle is-active"
-                  aria-pressed="true"
-                  aria-label="敏感信息已屏蔽，点击显示令牌与渠道名"
-                  title="敏感信息已屏蔽，点击显示令牌与渠道名"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path class="log-sensitive-eye" d="M2.5 12s3.4-5.5 9.5-5.5S21.5 12 21.5 12 18.1 17.5 12 17.5 2.5 12 2.5 12Z"></path>
-                    <circle class="log-sensitive-eye" cx="12" cy="12" r="2.5"></circle>
-                    <path class="log-sensitive-slash" d="m4 4 16 16"></path>
-                  </svg>
-                </button>
+            </div>
+            <div class="log-toolbar">
+              <label class="log-filter log-filter-channel">
+                渠道
+                <select id="log-upstream-filter">
+                  <option value="">全部渠道</option>
+                </select>
+              </label>
+              <label class="log-filter">
+                搜索
+                <input
+                  id="log-search"
+                  type="search"
+                  autocomplete="off"
+                  placeholder="模型、渠道、状态码…"
+                />
+              </label>
+              <label class="log-filter">
+                客户端
+                <select id="log-client-filter">
+                  <option value="">全部</option>
+                  <option value="codex-desktop">codex-desktop</option>
+                  <option value="codex-tui">codex-tui</option>
+                  <option value="codex">codex</option>
+                  <option value="opencode">opencode</option>
+                  <option value="claude">claude</option>
+                  <option value="unknown">unknown</option>
+                </select>
+              </label>
+              <label class="log-filter">
+                状态码
+                <select id="log-status-filter">
+                  <option value="">全部</option>
+                  <option value="2xx">2xx</option>
+                  <option value="4xx">4xx</option>
+                  <option value="5xx">5xx</option>
+                  <option value="none">无响应</option>
+                </select>
+              </label>
+              <div class="col-menu-wrap">
+                <button type="button" id="log-col-menu-btn" class="secondary ghost col-menu-btn" aria-haspopup="true" aria-expanded="false">列</button>
+                <div id="log-col-menu" class="col-menu" hidden role="menu" aria-label="日志列显示"></div>
+              </div>
+              <button
+                id="log-sensitive-toggle"
+                type="button"
+                class="secondary ghost log-sensitive-toggle is-active"
+                aria-pressed="true"
+                aria-label="敏感信息已屏蔽，点击显示令牌与渠道名"
+                title="敏感信息已屏蔽，点击显示令牌与渠道名"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path class="log-sensitive-eye" d="M2.5 12s3.4-5.5 9.5-5.5S21.5 12 21.5 12 18.1 17.5 12 17.5 2.5 12 2.5 12Z"></path>
+                  <circle class="log-sensitive-eye" cx="12" cy="12" r="2.5"></circle>
+                  <path class="log-sensitive-slash" d="m4 4 16 16"></path>
+                </svg>
+              </button>
+              <div class="actions toolbar-actions">
                 <button id="log-refresh" type="button" class="secondary">刷新</button>
               </div>
             </div>
