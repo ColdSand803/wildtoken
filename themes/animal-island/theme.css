@@ -1,16 +1,15 @@
-/* Animal Island / 动物岛 — warm parchment, mint accent, soft game-UI elevation.
-   Variables, structural rounding, and 3D buttons live together in this theme pack. */
+/* Animal Island / 动物岛 — warm parchment, mint accent, refined operations console. */
 html[data-theme="animal-island"] {
   color-scheme: light;
 
-  --bg: #f8f8f0;
-  --bg-elevated: rgb(247 243 223);
-  --panel: rgb(247 243 223);
-  --panel-solid: #f7f3df;
-  --panel-subtle: #faf6e8;
-  --panel-muted: #efe8d4;
+  --bg: #f5f3e9;
+  --bg-elevated: rgb(248 244 231);
+  --panel: rgb(248 244 231);
+  --panel-solid: #f8f4e7;
+  --panel-subtle: #fbf7ec;
+  --panel-muted: #eee6d3;
   --panel-elevated: #fffdf5;
-  --glass: rgb(247 243 223 / 92%);
+  --glass: rgb(248 244 231 / 92%);
   --glass-strong: rgb(255 253 245 / 96%);
 
   --text: #794f27;
@@ -18,9 +17,9 @@ html[data-theme="animal-island"] {
   --muted: #796d59;
   --muted-strong: #75654f;
 
-  --line: #c4b89e;
-  --line-strong: #9f927d;
-  --line-soft: #d9d0b8;
+  --line: #d2c5aa;
+  --line-strong: #9b8b70;
+  --line-soft: #e2d9c5;
 
   --accent: #19c8b9;
   --accent-strong: #0c746d;
@@ -46,14 +45,14 @@ html[data-theme="animal-island"] {
 
   --focus: #ffcc00;
   --focus-ring: 0 0 0 3px rgb(255 204 0 / 42%);
-  --shadow-xs: 0 1px 2px rgb(61 52 40 / 6%);
-  --shadow-sm: 0 2px 6px rgb(61 52 40 / 8%), 0 1px 2px rgb(61 52 40 / 5%);
-  --shadow-md: 0 8px 24px rgb(61 52 40 / 12%);
-  --shadow-lg: 0 16px 40px rgb(61 52 40 / 16%);
+  --shadow-xs: 0 1px 2px rgb(61 52 40 / 5%);
+  --shadow-sm: 0 3px 12px rgb(61 52 40 / 7%), 0 1px 2px rgb(61 52 40 / 4%);
+  --shadow-md: 0 14px 32px rgb(61 52 40 / 10%);
+  --shadow-lg: 0 22px 52px rgb(61 52 40 / 15%);
   --shadow: var(--shadow-sm);
   --glow-accent: 0 0 0 1px rgb(25 200 185 / 22%), 0 4px 16px rgb(25 200 185 / 14%);
-  --island-button-shadow: #c9b79a;
-  --island-button-shadow-disabled: #d9c9ad;
+  --island-button-shadow: rgb(61 52 40 / 11%);
+  --island-button-shadow-disabled: rgb(61 52 40 / 5%);
 
   /* Code frames — deep warm wood, always dark for readability */
   --code-frame-bg: #2b2118;
@@ -62,9 +61,11 @@ html[data-theme="animal-island"] {
   --code-muted: #a89880;
   --code-border: rgb(196 184 158 / 22%);
 
-  --row-hover: rgb(25 200 185 / 8%);
-  --row-disabled: rgb(247 243 223 / 70%);
-  --topbar-bg: rgb(248 248 240 / 94%);
+  --row-hover: rgb(25 200 185 / 7%);
+  --row-disabled: rgb(248 244 231 / 70%);
+  --topbar-bg: rgb(248 244 231 / 95%);
+  --island-rail-width: 108px;
+  --island-nav-active-overhang: 8px;
   --backdrop: rgb(61 52 40 / 32%);
   --neutral-chip: #efe8d4;
   --toast-neutral: #9f927d;
@@ -73,10 +74,10 @@ html[data-theme="animal-island"] {
   --aurora-b: transparent;
   --aurora-c: transparent;
 
-  --radius-sm: 12px;
-  --radius: 18px;
-  --radius-md: 20px;
-  --radius-lg: 24px;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
   --radius-full: 999px;
 
   --font-sans: "Nunito", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -88,13 +89,8 @@ html[data-theme="animal-island"] {
 
 /* ── Animal Island / 动物岛 theme structure ──────────────────────────
    The variable palette above sets the colors; this file
-   trades glass and glow for warm parchment, mint accent, and soft
-   game-style elevation (rounded, creamy, tactile 3D buttons).
-
-   Button elevation recipe:
-   raised  — cream fill + warm border + box-shadow 0 5px 0 var(--island-button-shadow)
-   hover   — translateY(-1px) + shadow 6px
-   pressed — translateY(2px) + shadow 1px
+   trades glass and glow for warm parchment, mint accent, and a restrained
+   island-ops layout.
 */
 
 html[data-theme="animal-island"] {
@@ -105,101 +101,307 @@ html[data-theme="animal-island"] .aurora {
   display: none;
 }
 
+@media (min-width: 761px) {
+  html[data-theme="animal-island"],
+  html[data-theme="animal-island"] body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  html[data-theme="animal-island"] .app-shell {
+    display: grid;
+    grid-template-columns: var(--island-rail-width) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+}
+
 html[data-theme="animal-island"] body {
   background:
-    radial-gradient(ellipse 120% 80% at 10% -10%, rgb(25 200 185 / 8%), transparent 50%),
-    radial-gradient(ellipse 100% 60% at 90% 0%, rgb(245 195 28 / 7%), transparent 45%),
-    radial-gradient(ellipse 80% 50% at 50% 100%, rgb(111 186 44 / 5%), transparent 50%),
+    linear-gradient(180deg, rgb(255 253 245 / 62%), rgb(238 230 211 / 34%)),
+    linear-gradient(90deg, rgb(12 116 109 / 5%) 0 1px, transparent 1px 100%),
+    linear-gradient(180deg, rgb(121 79 39 / 4%) 0 1px, transparent 1px 100%),
     var(--bg);
+  background-size: auto, 48px 48px, 48px 48px, auto;
   -webkit-font-smoothing: antialiased;
 }
 
 /* ── Chrome ──────────────────────────────────────────────── */
 
 html[data-theme="animal-island"] .topbar {
+  align-items: stretch;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  background: var(--topbar-bg);
-  border-bottom: 2px solid var(--line);
-  box-shadow: 0 2px 8px rgb(61 52 40 / 6%);
-  gap: 12px;
-  /* horizontal rhythm ~ content padding */
-  padding: 8px 18px;
+  background:
+    linear-gradient(180deg, rgb(255 253 245 / 78%), rgb(248 244 231 / 95%)),
+    var(--topbar-bg);
+  border: 0;
+  border-right: 1px solid rgb(196 184 158 / 72%);
+  box-shadow: 10px 0 30px rgb(61 52 40 / 7%);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 14px 10px 12px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
 }
 
 html[data-theme="animal-island"] .topbar::after {
-  display: none;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgb(25 200 185 / 54%) 18%,
+    rgb(245 195 28 / 38%) 50%,
+    rgb(111 186 44 / 42%) 82%,
+    transparent 100%
+  );
+  bottom: 18px;
+  content: "";
+  display: block;
+  left: auto;
+  opacity: 1;
+  pointer-events: none;
+  position: absolute;
+  right: -1px;
+  top: 18px;
+  width: 1px;
 }
 
 html[data-theme="animal-island"] .topbar-nav {
   background: transparent;
   border: none;
+  border-radius: 0;
   box-shadow: none;
+  counter-reset: island-nav;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
   gap: 6px;
-  padding: 2px;
+  overflow: visible;
+  padding: 0;
+  position: relative;
+  width: 100%;
 }
 
 html[data-theme="animal-island"] .topbar-brand {
-  align-self: center;
+  align-items: center;
   background: transparent;
-  gap: 8px;
-  padding: 4px 6px;
+  border-bottom: 1px solid var(--line-soft);
+  flex-direction: column;
+  gap: 7px;
+  padding: 1px 0 13px;
+  width: 100%;
 }
 
 html[data-theme="animal-island"] .brand-mark {
-  color: var(--accent);
+  background:
+    linear-gradient(180deg, rgb(255 253 245 / 92%), rgb(238 246 232 / 78%)),
+    var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 18px rgb(12 116 109 / 13%), inset 0 1px 0 rgb(255 255 255 / 78%);
+  color: var(--accent-strong);
   filter: none;
+  height: 32px;
+  padding: 5px;
+  width: 32px;
+}
+
+html[data-theme="animal-island"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
 }
 
 html[data-theme="animal-island"] .topbar-brand h1 {
   color: var(--text);
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 html[data-theme="animal-island"] .brand-label {
+  display: block;
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  margin-top: 4px;
   color: var(--accent-strong);
   font-weight: 700;
 }
 
 html[data-theme="animal-island"] .nav-link {
+  align-items: center;
   background: transparent;
-  border: 2px solid transparent;
-  border-radius: var(--radius-full);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
   box-shadow: none;
   color: var(--text-secondary);
-  font-weight: 600;
-  padding: 6px 14px;
+  counter-increment: island-nav;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  font-size: 12px;
+  font-weight: 700;
+  gap: 4px;
+  justify-content: center;
+  line-height: 1.12;
+  min-height: 48px;
+  min-width: 0;
+  padding: 8px 5px 15px;
+  position: relative;
+  text-align: center;
   transition:
     background-color var(--transition),
     border-color var(--transition),
     color var(--transition),
     box-shadow var(--transition),
     transform var(--transition);
+  white-space: normal;
+  width: 100%;
+}
+
+html[data-theme="animal-island"] .nav-link::before {
+  background: transparent;
+  border-radius: var(--radius-full);
+  bottom: 11px;
+  content: "";
+  left: 7px;
+  position: absolute;
+  top: 11px;
+  width: 3px;
+}
+
+html[data-theme="animal-island"] .nav-link::after {
+  bottom: 5px;
+  color: var(--muted);
+  content: counter(island-nav, decimal-leading-zero);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  position: absolute;
 }
 
 html[data-theme="animal-island"] .nav-link:hover {
-  background: var(--panel-muted);
+  background: rgb(255 253 245 / 62%);
   border-color: var(--line-soft);
+  box-shadow: 0 8px 18px rgb(61 52 40 / 7%);
   color: var(--text);
+  transform: translateX(2px);
 }
 
 html[data-theme="animal-island"] .nav-link.active,
 html[data-theme="animal-island"] .nav-link.active:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent-border);
-  box-shadow: 0 2px 0 0 rgb(12 116 109 / 28%);
+  background:
+    linear-gradient(90deg, rgb(25 200 185 / 14%), rgb(255 253 245 / 74%)),
+    var(--panel-elevated);
+  border-color: rgb(25 200 185 / 30%);
+  box-shadow: 0 10px 22px rgb(12 116 109 / 12%), inset 0 1px 0 rgb(255 255 255 / 72%);
   color: var(--accent-strong);
   font-weight: 800;
+  margin-inline-end: calc(var(--island-nav-active-overhang) * -1);
+  transform: none;
+  width: calc(100% + var(--island-nav-active-overhang));
+  z-index: 1;
 }
 
-/* ── Buttons: soft 3D game push buttons ──────────────────── */
+html[data-theme="animal-island"] .nav-link.active::before {
+  background: linear-gradient(180deg, var(--accent), #6fba2c);
+}
+
+html[data-theme="animal-island"] .nav-link.active::after {
+  color: var(--accent-strong);
+}
+
+html[data-theme="animal-island"] .topbar-actions {
+  align-items: stretch;
+  border-top: 1px solid var(--line-soft);
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 7px;
+  margin-left: 0;
+  margin-top: auto;
+  padding-top: 9px;
+  width: 100%;
+}
+
+html[data-theme="animal-island"] .topbar-actions > *,
+html[data-theme="animal-island"] .topbar-actions button {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-theme="animal-island"] .topbar-actions .live-indicator {
+  align-items: center;
+  background: rgb(255 253 245 / 64%);
+  border: 1px solid var(--ok-border);
+  border-radius: var(--radius-full);
+  color: var(--ok-strong);
+  display: flex;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 6px;
+}
+
+html[data-theme="animal-island"] .topbar-actions .theme-menu-wrap {
+  width: 100%;
+}
+
+html[data-theme="animal-island"] .topbar-actions .density-toggle,
+html[data-theme="animal-island"] .topbar-actions .theme-toggle,
+html[data-theme="animal-island"] .topbar-actions .nav-logout {
+  background: rgb(255 253 245 / 56%);
+  border-color: var(--line-soft);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  font-size: 11px;
+  min-height: 34px;
+  padding-inline: 8px;
+}
+
+html[data-theme="animal-island"] .topbar-actions .density-toggle:hover,
+html[data-theme="animal-island"] .topbar-actions .theme-toggle:hover,
+html[data-theme="animal-island"] .topbar-actions .nav-logout:hover {
+  background: var(--panel-elevated);
+  border-color: rgb(25 200 185 / 32%);
+  box-shadow: 0 6px 14px rgb(12 116 109 / 9%);
+  transform: none;
+}
+
+html[data-theme="animal-island"] .topbar-actions .theme-toggle {
+  justify-content: center;
+}
+
+html[data-theme="animal-island"] .theme-menu {
+  bottom: 0;
+  left: calc(100% + 12px);
+  right: auto;
+  top: auto;
+}
+
+/* ── Buttons: low-relief command controls ────────────────── */
 
 html[data-theme="animal-island"] button {
-  background: var(--panel-solid);
-  border: 2px solid var(--line);
-  border-radius: var(--radius-full);
-  box-shadow: 0 5px 0 0 var(--island-button-shadow);
+  background:
+    linear-gradient(180deg, rgb(255 253 245 / 76%), rgb(248 244 231 / 92%)),
+    var(--panel-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 1px 1px var(--island-button-shadow), inset 0 1px 0 rgb(255 255 255 / 68%);
   color: var(--text);
   font-weight: 700;
   transition:
@@ -213,7 +415,7 @@ html[data-theme="animal-island"] button {
 html[data-theme="animal-island"] button:hover {
   background: var(--panel-elevated);
   border-color: var(--line-strong);
-  box-shadow: 0 6px 0 0 var(--island-button-shadow);
+  box-shadow: 0 8px 16px rgb(61 52 40 / 10%), inset 0 1px 0 rgb(255 255 255 / 75%);
   color: var(--text);
   transform: translateY(-1px);
 }
@@ -222,15 +424,15 @@ html[data-theme="animal-island"] button:active:not(:disabled),
 html[data-theme="animal-island"] button[aria-expanded="true"] {
   background: var(--panel-muted);
   border-color: var(--line-strong);
-  box-shadow: 0 1px 0 0 var(--island-button-shadow);
-  transform: translateY(2px);
+  box-shadow: inset 0 1px 3px rgb(61 52 40 / 12%);
+  transform: translateY(0);
 }
 
 html[data-theme="animal-island"] button:disabled,
 html[data-theme="animal-island"] button:disabled:hover {
   background: var(--panel-muted);
   border-color: var(--line-soft);
-  box-shadow: 0 3px 0 0 var(--island-button-shadow-disabled);
+  box-shadow: 0 1px 1px var(--island-button-shadow-disabled);
   color: var(--muted);
   opacity: 0.65;
   transform: none;
@@ -238,8 +440,8 @@ html[data-theme="animal-island"] button:disabled:hover {
 
 html[data-theme="animal-island"] button.secondary {
   background: var(--panel-elevated);
-  border-color: var(--line);
-  box-shadow: 0 2px 4px rgb(61 52 40 / 6%);
+  border-color: var(--line-soft);
+  box-shadow: 0 1px 1px rgb(61 52 40 / 4%);
   color: var(--text-secondary);
   font-weight: 600;
 }
@@ -247,20 +449,20 @@ html[data-theme="animal-island"] button.secondary {
 html[data-theme="animal-island"] button.secondary:hover {
   background: var(--panel-elevated);
   border-color: var(--accent);
-  box-shadow: 0 3px 8px rgb(25 200 185 / 14%);
+  box-shadow: 0 8px 16px rgb(25 200 185 / 12%);
   color: var(--accent-strong);
   transform: translateY(-1px);
 }
 
 html[data-theme="animal-island"] button.secondary:active:not(:disabled) {
-  box-shadow: 0 1px 2px rgb(61 52 40 / 8%);
-  transform: translateY(1px);
+  box-shadow: inset 0 1px 3px rgb(61 52 40 / 10%);
+  transform: translateY(0);
 }
 
 html[data-theme="animal-island"] button.secondary:disabled:hover {
   background: var(--panel-elevated);
   border-color: var(--line);
-  box-shadow: 0 2px 4px rgb(61 52 40 / 6%);
+  box-shadow: 0 1px 1px rgb(61 52 40 / 4%);
   color: var(--text-secondary);
   transform: none;
 }
@@ -294,21 +496,21 @@ html[data-theme="animal-island"] button.ghost:disabled:hover {
 html[data-theme="animal-island"] button.danger {
   background: var(--danger-soft);
   border-color: var(--danger-border);
-  box-shadow: 0 2px 4px rgb(61 52 40 / 6%);
+  box-shadow: 0 1px 1px rgb(61 52 40 / 4%);
   color: var(--danger);
 }
 
 html[data-theme="animal-island"] button.danger:hover {
   background: rgb(208 39 39 / 18%);
   border-color: var(--danger);
-  box-shadow: 0 3px 8px rgb(208 39 39 / 12%);
+  box-shadow: 0 8px 16px rgb(208 39 39 / 12%);
   color: var(--danger-strong);
   transform: translateY(-1px);
 }
 
 html[data-theme="animal-island"] button.danger:active:not(:disabled) {
-  box-shadow: 0 1px 2px rgb(61 52 40 / 8%);
-  transform: translateY(1px);
+  box-shadow: inset 0 1px 3px rgb(61 52 40 / 10%);
+  transform: translateY(0);
 }
 
 /* Table affordances and tiny inline actions are not command buttons. */
@@ -369,7 +571,7 @@ html[data-theme="animal-island"] .status-switch:focus-visible {
 html[data-theme="animal-island"] .status-switch-track,
 html[data-theme="animal-island"] .status-switch.on .status-switch-track {
   background: var(--panel-muted);
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius-full);
   box-shadow: inset 0 1px 3px rgb(61 52 40 / 10%);
   height: 22px;
@@ -385,7 +587,7 @@ html[data-theme="animal-island"] .status-switch.on .status-switch-track {
 
 html[data-theme="animal-island"] .status-switch-thumb {
   background: var(--panel-elevated);
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius-full);
   box-shadow: 0 2px 4px rgb(61 52 40 / 12%);
   height: 14px;
@@ -401,11 +603,11 @@ html[data-theme="animal-island"] .status-switch.on .status-switch-thumb {
 /* Soft mint focus for buttons; yellow reserved for inputs */
 html[data-theme="animal-island"] button:focus-visible {
   outline: none;
-  box-shadow: 0 5px 0 0 var(--island-button-shadow), 0 0 0 3px rgb(25 200 185 / 35%);
+  box-shadow: 0 1px 1px var(--island-button-shadow), 0 0 0 3px rgb(25 200 185 / 35%);
 }
 
 html[data-theme="animal-island"] button.secondary:focus-visible {
-  box-shadow: 0 2px 4px rgb(61 52 40 / 6%), 0 0 0 3px rgb(25 200 185 / 35%);
+  box-shadow: 0 1px 1px rgb(61 52 40 / 4%), 0 0 0 3px rgb(25 200 185 / 35%);
 }
 
 html[data-theme="animal-island"] button.ghost:focus-visible {
@@ -413,7 +615,7 @@ html[data-theme="animal-island"] button.ghost:focus-visible {
 }
 
 html[data-theme="animal-island"] button.danger:focus-visible {
-  box-shadow: 0 2px 4px rgb(61 52 40 / 6%), 0 0 0 3px rgb(208 39 39 / 30%);
+  box-shadow: 0 1px 1px rgb(61 52 40 / 4%), 0 0 0 3px rgb(208 39 39 / 30%);
 }
 
 /* Selected choice: soft mint pill */
@@ -421,15 +623,15 @@ html[data-theme="animal-island"] .segmented-control button.is-selected,
 html[data-theme="animal-island"] .theme-menu button.is-selected {
   background: var(--accent-soft);
   border-color: var(--accent-border);
-  box-shadow: 0 2px 0 0 rgb(17 168 155 / 28%);
+  box-shadow: inset 0 1px 2px rgb(12 116 109 / 10%);
   color: var(--accent-strong);
   font-weight: 800;
 }
 
 html[data-theme="animal-island"] .segmented-control {
   background: var(--panel-muted);
-  border: 2px solid var(--line-soft);
-  border-radius: var(--radius-full);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
   box-shadow: none;
   gap: 4px;
   padding: 4px;
@@ -454,29 +656,48 @@ html[data-theme="animal-island"] .segmented-control button:active:not(:disabled)
 html[data-theme="animal-island"] .segmented-control button.is-selected:hover {
   background: var(--accent-soft);
   border-color: var(--accent-border);
-  box-shadow: 0 2px 0 0 rgb(17 168 155 / 28%);
+  box-shadow: inset 0 1px 2px rgb(12 116 109 / 10%);
   color: var(--accent-strong);
   transform: none;
 }
 
 /* ── Layout spacing (soft island rhythm) ───────────────────
    Base ops shell is tighter (content 28/32/56, panel pad 0).
-   Island softens the page frame, cushions panels, and leaves
-   room for 3D button shadows without clipping. */
+   Island softens the page frame, cushions panels, and keeps controls unclipped. */
 
 html[data-theme="animal-island"] .content {
-  max-width: calc(var(--content-max) + 24px);
-  padding: 22px 22px 40px;
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  max-width: calc(var(--content-max) + 40px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 24px 26px 44px;
+  scroll-padding-block: 24px;
+  width: 100%;
 }
 
 html[data-theme="animal-island"] .view > .panel {
-  background: var(--panel);
-  border: 2px solid var(--line);
+  background:
+    linear-gradient(180deg, rgb(255 253 245 / 48%), transparent 130px),
+    var(--panel);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  /* soft cushion; overflow visible so 3D button shadows aren't clipped */
+  box-shadow: var(--shadow-md);
   overflow: visible;
-  padding: 18px 20px 20px;
+  padding: 20px 22px 22px;
+  position: relative;
+}
+
+html[data-theme="animal-island"] .view > .panel::before {
+  background: linear-gradient(90deg, transparent, rgb(25 200 185 / 54%), rgb(245 195 28 / 32%), transparent);
+  content: "";
+  height: 1px;
+  left: 18px;
+  pointer-events: none;
+  position: absolute;
+  right: 18px;
+  top: 0;
 }
 
 html[data-theme="animal-island"] .view > .panel > .panel-head {
@@ -498,7 +719,7 @@ html[data-theme="animal-island"] .view > .panel > .panel-head p {
   margin-top: 4px;
 }
 
-/* Toolbars / action rows: gap + bottom slack for 3D shadows */
+/* Toolbars / action rows */
 html[data-theme="animal-island"] .view-toolbar,
 html[data-theme="animal-island"] .log-toolbar,
 html[data-theme="animal-island"] .toolbar-batch,
@@ -536,7 +757,7 @@ html[data-theme="animal-island"] .pager {
   padding-bottom: 4px;
 }
 
-/* Command buttons in toolbars: tiny bottom margin so 5px shadow breathes */
+/* Command buttons in toolbars: small bottom margin for focus/hover lift */
 html[data-theme="animal-island"] .view-toolbar > button,
 html[data-theme="animal-island"] .log-toolbar > button,
 html[data-theme="animal-island"] .toolbar-batch > button,
@@ -635,7 +856,7 @@ html[data-theme="animal-island"] .settings-fields-grid {
    Earlier horizontal bleed (-20px) broke the right edge on wide tables
    (upstream/logs/tokens min-width > viewport) and clipped against panel. */
 html[data-theme="animal-island"] .view > .panel > .table-wrap {
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   box-sizing: border-box;
   margin: 0;
@@ -646,7 +867,7 @@ html[data-theme="animal-island"] .view > .panel > .table-wrap {
 /* Nested tables (dashboard/settings cards) same inset treatment */
 html[data-theme="animal-island"] .dashboard-card .table-wrap,
 html[data-theme="animal-island"] .settings-card .table-wrap {
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   margin: 0;
   max-width: 100%;
@@ -737,9 +958,9 @@ html[data-theme="animal-island"] .balance-panel > .modal-head,
 html[data-theme="animal-island"] .confirm-panel > .modal-head,
 html[data-theme="animal-island"] .log-detail-head {
   background:
-    linear-gradient(180deg, rgb(25 200 185 / 8%), transparent 70%),
+    linear-gradient(180deg, rgb(25 200 185 / 6%), transparent 70%),
     var(--panel-muted);
-  border-bottom: 2px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   color: var(--text);
   padding: 16px 20px;
@@ -769,13 +990,13 @@ html[data-theme="animal-island"] .log-detail-head p {
 
 html[data-theme="animal-island"] .command-palette-head {
   background: var(--panel-muted);
-  border-bottom: 2px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
   padding: 10px 12px;
 }
 
 html[data-theme="animal-island"] .command-palette-head input {
   background: var(--panel-elevated);
-  border: 2.5px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius-full);
   box-shadow: none !important;
   color: var(--text);
@@ -799,8 +1020,8 @@ html[data-theme="animal-island"] input,
 html[data-theme="animal-island"] select,
 html[data-theme="animal-island"] textarea {
   background-color: var(--panel-elevated);
-  border: 2.5px solid var(--line);
-  border-radius: var(--radius-full);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
   box-shadow: none;
   color: var(--text);
   transition:
@@ -810,7 +1031,7 @@ html[data-theme="animal-island"] textarea {
 }
 
 html[data-theme="animal-island"] textarea {
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
 }
 
 html[data-theme="animal-island"] input:hover,
@@ -837,7 +1058,7 @@ html[data-theme="animal-island"] .settings-card,
 html[data-theme="animal-island"] .summary-strip,
 html[data-theme="animal-island"] .status {
   background: var(--panel-solid);
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-xs);
 }
@@ -848,6 +1069,29 @@ html[data-theme="animal-island"] .kpi-card::before,
 html[data-theme="animal-island"] .dashboard-kpi::before {
   border-radius: var(--radius) 0 0 var(--radius);
   box-shadow: none;
+}
+
+html[data-theme="animal-island"] .dashboard-kpi:not(.tone-ok):not(.tone-warn):not(.tone-danger)::before,
+html[data-theme="animal-island"] .kpi-card:not(.tone-ok):not(.tone-warn):not(.tone-danger)::before {
+  background: var(--accent);
+}
+
+html[data-theme="animal-island"] .dashboard-kpis .dashboard-kpi:nth-child(4n + 2):not(.tone-ok):not(.tone-warn):not(.tone-danger)::before,
+html[data-theme="animal-island"] .dashboard-window-kpis .dashboard-kpi:nth-child(4n + 2):not(.tone-ok):not(.tone-warn):not(.tone-danger)::before,
+html[data-theme="animal-island"] .kpi-card:nth-child(4n + 2):not(.tone-ok):not(.tone-warn):not(.tone-danger)::before {
+  background: var(--warning);
+}
+
+html[data-theme="animal-island"] .dashboard-kpis .dashboard-kpi:nth-child(4n + 3):not(.tone-ok):not(.tone-warn):not(.tone-danger)::before,
+html[data-theme="animal-island"] .dashboard-window-kpis .dashboard-kpi:nth-child(4n + 3):not(.tone-ok):not(.tone-warn):not(.tone-danger)::before,
+html[data-theme="animal-island"] .kpi-card:nth-child(4n + 3):not(.tone-ok):not(.tone-warn):not(.tone-danger)::before {
+  background: var(--ok);
+}
+
+html[data-theme="animal-island"] .dashboard-kpis .dashboard-kpi:nth-child(4n):not(.tone-ok):not(.tone-warn):not(.tone-danger)::before,
+html[data-theme="animal-island"] .dashboard-window-kpis .dashboard-kpi:nth-child(4n):not(.tone-ok):not(.tone-warn):not(.tone-danger)::before,
+html[data-theme="animal-island"] .kpi-card:nth-child(4n):not(.tone-ok):not(.tone-warn):not(.tone-danger)::before {
+  background: #c66a3d;
 }
 
 html[data-theme="animal-island"] .dashboard-rank-track,
@@ -882,7 +1126,7 @@ html[data-theme="animal-island"] .effective-zero-note {
 
 html[data-theme="animal-island"] .table-wrap {
   background: var(--panel-elevated);
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-xs);
 }
@@ -895,7 +1139,7 @@ html[data-theme="animal-island"] .table-wrap td {
 
 html[data-theme="animal-island"] th {
   background: var(--panel-muted);
-  border-bottom: 2px solid var(--line);
+  border-bottom: 1px solid var(--line);
   color: var(--text);
   font-weight: 800;
 }
@@ -926,7 +1170,7 @@ html[data-theme="animal-island"] .test-model-response,
 html[data-theme="animal-island"] .log-detail-meta-card,
 html[data-theme="animal-island"] .log-detail-section {
   background: var(--panel-elevated);
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
   box-shadow: var(--shadow-xs);
 }
@@ -964,7 +1208,7 @@ html[data-theme="animal-island"] .balance-dialog,
 html[data-theme="animal-island"] .confirm-dialog,
 html[data-theme="animal-island"] .command-palette-panel {
   background: var(--panel-solid);
-  border: 2px solid var(--line);
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
 }
@@ -1020,7 +1264,7 @@ html[data-theme="animal-island"] .upstream-action-menu button:hover {
 html[data-theme="animal-island"] .theme-menu button.is-selected:hover {
   background: var(--accent-soft);
   border-color: var(--accent-border);
-  box-shadow: 0 2px 0 0 rgb(17 168 155 / 28%);
+  box-shadow: inset 0 1px 2px rgb(12 116 109 / 10%);
   color: var(--accent-strong);
 }
 
@@ -1071,40 +1315,185 @@ html[data-theme="animal-island"] ::-webkit-scrollbar-corner {
 
 /* ── Mobile ──────────────────────────────────────────────── */
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme="animal-island"],
+  html[data-theme="animal-island"] body {
+    height: auto;
+    overflow: visible;
+  }
+
+  html[data-theme="animal-island"] .app-shell {
+    display: flex;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(76px + env(safe-area-inset-bottom));
+  }
+
   html[data-theme="animal-island"] .topbar {
     align-items: center;
-    flex-wrap: wrap;
+    border-bottom: 1px solid rgb(196 184 158 / 72%);
+    border-right: 0;
+    box-shadow: 0 8px 18px rgb(61 52 40 / 8%);
+    display: flex;
+    flex-direction: row;
     gap: 8px;
-    min-height: 0;
+    grid-column: auto;
+    grid-row: auto;
+    height: auto;
+    justify-content: space-between;
+    min-height: 56px;
     padding: 8px 12px;
-  }
-
-  html[data-theme="animal-island"] .topbar-brand {
-    min-height: 32px;
-    padding: 4px 6px;
-  }
-
-  html[data-theme="animal-island"] .brand-mark {
-    display: none;
-  }
-
-  html[data-theme="animal-island"] .topbar-nav {
-    flex: 1 0 100%;
-    order: 3;
-    overflow-x: auto;
+    position: sticky;
     width: 100%;
   }
 
-  html[data-theme="animal-island"] .nav-link {
-    flex: 1 1 0;
+  html[data-theme="animal-island"] .topbar::after {
+    bottom: -1px;
+    height: 2px;
+    left: 12px;
+    right: auto;
+    top: auto;
+    width: 74px;
+  }
+
+  html[data-theme="animal-island"] .topbar-brand {
+    align-items: center;
+    border-bottom: 0;
+    flex-direction: row;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0;
+    width: auto;
+  }
+
+  html[data-theme="animal-island"] .brand-mark {
+    border-radius: 10px;
+    box-shadow: 0 6px 14px rgb(12 116 109 / 12%), inset 0 1px 0 rgb(255 255 255 / 78%);
+    height: 28px;
+    padding: 4px;
+    width: 28px;
+  }
+
+  html[data-theme="animal-island"] .brand-text {
+    text-align: left;
+    width: auto;
+  }
+
+  html[data-theme="animal-island"] .topbar-brand h1 {
+    font-size: 13px;
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  html[data-theme="animal-island"] .brand-label,
+  html[data-theme="animal-island"] .topbar-actions .live-indicator,
+  html[data-theme="animal-island"] .density-toggle {
+    display: none;
+  }
+
+  html[data-theme="animal-island"] .topbar-actions {
+    align-items: center;
+    border-top: 0;
+    flex-direction: row;
+    gap: 6px;
+    margin-left: 0;
+    margin-top: 0;
+    padding-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="animal-island"] .topbar-actions > *,
+  html[data-theme="animal-island"] .topbar-actions button {
     min-width: 0;
-    padding: 6px 8px;
+    width: auto;
+  }
+
+  html[data-theme="animal-island"] .topbar-actions .theme-menu-wrap {
+    width: auto;
+  }
+
+  html[data-theme="animal-island"] .topbar-actions .theme-toggle {
+    min-height: 36px;
+    min-width: 36px;
+    padding: 0;
+    width: 36px;
+  }
+
+  html[data-theme="animal-island"] .topbar-actions .nav-logout {
+    min-height: 36px;
+    padding-inline: 10px;
+  }
+
+  html[data-theme="animal-island"] .theme-menu {
+    bottom: auto;
+    left: auto;
+    right: 0;
+    top: calc(100% + 8px);
+  }
+
+  html[data-theme="animal-island"] .topbar-nav {
+    background:
+      linear-gradient(180deg, rgb(255 253 245 / 92%), rgb(248 244 231 / 94%)),
+      var(--panel-elevated);
+    border: 1px solid rgb(196 184 158 / 78%);
+    border-radius: 16px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    box-shadow: 0 16px 34px rgb(61 52 40 / 18%), inset 0 1px 0 rgb(255 255 255 / 78%);
+    display: grid;
+    gap: 3px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 8px;
+    overflow: visible;
+    padding: 4px;
+    position: fixed;
+    right: 8px;
+    width: auto;
+    z-index: 40;
+  }
+
+  html[data-theme="animal-island"] .nav-link {
+    border-radius: 10px;
+    box-shadow: none;
+    flex: 1 1 auto;
+    font-size: 12px;
+    min-height: 50px;
+    min-width: 0;
+    padding: 5px 1px 15px;
     text-align: center;
+    width: 100%;
+  }
+
+  html[data-theme="animal-island"] .nav-link:hover {
+    box-shadow: none;
+    transform: none;
+  }
+
+  html[data-theme="animal-island"] .nav-link::before {
+    display: none;
+  }
+
+  html[data-theme="animal-island"] .nav-link.active,
+  html[data-theme="animal-island"] .nav-link.active:hover {
+    box-shadow: inset 0 -3px 0 var(--accent), inset 0 1px 0 rgb(255 255 255 / 62%);
+    margin-inline-end: 0;
+    width: 100%;
+  }
+
+  html[data-theme="animal-island"] .nav-link::after {
+    bottom: 5px;
   }
 
   html[data-theme="animal-island"] .content {
-    padding: 12px 12px 28px;
+    display: block;
+    grid-column: auto;
+    grid-row: auto;
+    height: auto;
+    max-width: none;
+    overflow: visible;
+    padding: 14px 12px 28px;
+    scroll-padding-block: 14px;
+    width: 100%;
   }
 
   html[data-theme="animal-island"] .view > .panel {
@@ -1180,14 +1569,14 @@ html[data-theme="animal-island"] ::-webkit-scrollbar-corner {
   }
 
   html[data-theme="animal-island"] button {
-    box-shadow: 0 4px 0 0 var(--island-button-shadow);
+    box-shadow: 0 1px 1px var(--island-button-shadow), inset 0 1px 0 rgb(255 255 255 / 68%);
   }
 
   html[data-theme="animal-island"] button:hover {
-    box-shadow: 0 5px 0 0 var(--island-button-shadow);
+    box-shadow: 0 8px 16px rgb(61 52 40 / 10%), inset 0 1px 0 rgb(255 255 255 / 75%);
   }
 
   html[data-theme="animal-island"] button:active:not(:disabled) {
-    box-shadow: 0 1px 0 0 var(--island-button-shadow);
+    box-shadow: inset 0 1px 3px rgb(61 52 40 / 12%);
   }
 }

@@ -98,6 +98,32 @@ html[data-theme="cyberpunk"] {
 
 html[data-theme="cyberpunk"] {
   scrollbar-color: #ff2fdc #10081c;
+
+  /* Left operations rail — same shell language as Bleach / Endfield */
+  --cp-rail-width: 92px;
+  --cp-nav-active-overhang: 14px;
+}
+
+/* ── Shell: rail + stage ─────────────────────────────────────
+   Desktop pins a full-height neon rail on the left and gives the
+   work stage its own scroll container, so the fixed scanline /
+   vignette overlay stays put while data scrolls under it. */
+
+@media (min-width: 761px) {
+  html[data-theme="cyberpunk"],
+  html[data-theme="cyberpunk"] body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  html[data-theme="cyberpunk"] .app-shell {
+    display: grid;
+    grid-template-columns: var(--cp-rail-width) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
 }
 
 /* ── Atmosphere ──────────────────────────────────────────── */
@@ -227,54 +253,112 @@ html[data-theme="cyberpunk"] input[type="checkbox"] {
 /* ── Chrome ──────────────────────────────────────────────── */
 
 html[data-theme="cyberpunk"] .topbar {
+  align-items: stretch;
   backdrop-filter: saturate(1.35) blur(var(--blur));
   -webkit-backdrop-filter: saturate(1.35) blur(var(--blur));
   background:
-    linear-gradient(180deg, rgb(255 47 220 / 8%) 0%, transparent 70%),
+    linear-gradient(180deg, rgb(255 47 220 / 10%) 0%, transparent 26%),
     var(--topbar-bg);
-  border-bottom: 1px solid rgb(255 47 220 / 55%);
+  border: 0;
+  border-right: 1px solid rgb(255 47 220 / 55%);
   box-shadow:
-    0 1px 0 rgb(0 245 255 / 28%),
+    1px 0 0 rgb(0 245 255 / 28%),
     0 0 28px rgb(255 47 220 / 12%),
-    0 10px 32px rgb(0 0 0 / 50%);
+    10px 0 32px rgb(0 0 0 / 50%);
+  display: flex;
+  flex-direction: column;
   gap: 14px;
-  padding: 0 16px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 14px 10px 12px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
 }
 
-/* Dual neon rail under topbar: magenta core + cyan halo */
+/* Dual neon rail along the stage edge: magenta core + cyan halo */
 html[data-theme="cyberpunk"] .topbar::after {
   background: linear-gradient(
-    90deg,
+    180deg,
     transparent 0%,
     #ff2fdc 12%,
     #00f5ff 50%,
     #ff2fdc 88%,
     transparent 100%
   );
-  bottom: -1px;
+  bottom: 0;
   box-shadow:
     0 0 10px rgb(255 47 220 / 70%),
     0 0 18px rgb(0 245 255 / 45%);
   content: "";
-  height: 2px;
-  left: 0;
+  height: auto;
+  left: auto;
   opacity: 1;
   pointer-events: none;
   position: absolute;
-  right: 0;
+  right: -1px;
+  top: 0;
+  width: 2px;
 }
+
+html[data-theme="cyberpunk"] .topbar-brand {
+  align-items: center;
+  border-bottom: 1px solid rgb(0 245 255 / 22%);
+  flex-direction: column;
+  gap: 7px;
+  padding: 2px 0 12px;
+  width: 100%;
+}
+
+html[data-theme="cyberpunk"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
+}
+
+/* ── Rail navigation ─────────────────────────────────────────
+   Stacked HUD tiles: neon edge marker, sector counter, and an
+   active tile that overhangs the rail border into the stage. */
 
 html[data-theme="cyberpunk"] .topbar-nav {
   background: transparent;
   border: none;
+  border-radius: 0;
   box-shadow: none;
-  gap: 4px;
-  padding: 2px;
+  counter-reset: cyberpunk-nav;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 5px;
+  overflow-x: visible;
+  overflow-y: visible;
+  padding: 2px 0 0;
+  position: relative;
+  width: 100%;
 }
 
-html[data-theme="cyberpunk"] .topbar-brand {
-  gap: 8px;
-  padding: 4px 2px;
+/* Circuit spine threading the tiles together */
+html[data-theme="cyberpunk"] .topbar-nav::before {
+  background: linear-gradient(
+    180deg,
+    transparent,
+    rgb(0 245 255 / 55%) 18%,
+    rgb(255 47 220 / 45%) 50%,
+    rgb(0 245 255 / 55%) 82%,
+    transparent
+  );
+  bottom: 10px;
+  content: "";
+  left: 4px;
+  position: absolute;
+  top: 10px;
+  width: 1px;
+  z-index: 0;
 }
 
 html[data-theme="cyberpunk"] .brand-mark {
@@ -283,41 +367,58 @@ html[data-theme="cyberpunk"] .brand-mark {
   filter:
     drop-shadow(0 0 6px rgb(255 47 220 / 85%))
     drop-shadow(0 0 14px rgb(255 47 220 / 45%));
+  height: 26px;
+  width: 26px;
 }
 
 html[data-theme="cyberpunk"] .topbar-brand h1 {
   animation: cyberpunk-text-breathe 4s ease-in-out infinite;
   color: #f8f0ff;
   font-family: "Orbitron", var(--font-sans);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
   text-shadow:
     0 0 8px rgb(255 47 220 / 45%),
     0 0 18px rgb(255 47 220 / 22%);
   text-transform: uppercase;
+  white-space: normal;
 }
 
 html[data-theme="cyberpunk"] .brand-label {
   color: #00f5ff;
+  display: block;
   font-family: "Orbitron", var(--font-sans);
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 600;
-  letter-spacing: 0.2em;
+  letter-spacing: 0.18em;
+  margin-top: 4px;
   text-shadow:
     0 0 8px rgb(0 245 255 / 75%),
     0 0 16px rgb(0 245 255 / 40%);
 }
 
 html[data-theme="cyberpunk"] .nav-link {
-  background: transparent;
-  border: 1px solid transparent;
+  align-items: center;
+  background: rgb(0 245 255 / 4%);
+  border: 1px solid rgb(160 90 220 / 26%);
   border-radius: var(--radius-sm);
   box-shadow: none;
   color: var(--muted-strong);
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  padding: 6px 12px;
+  counter-increment: cyberpunk-nav;
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+  justify-content: center;
+  letter-spacing: 0.08em;
+  min-height: 52px;
+  min-width: 0;
+  padding: 6px 4px 16px 10px;
+  position: relative;
+  text-align: center;
   text-transform: uppercase;
   transition:
     background-color var(--transition),
@@ -325,42 +426,173 @@ html[data-theme="cyberpunk"] .nav-link {
     color var(--transition),
     box-shadow var(--transition),
     text-shadow var(--transition);
+  white-space: normal;
+  width: 100%;
+  z-index: 1;
+}
+
+/* Neon edge marker — grows on hover, solid when active */
+html[data-theme="cyberpunk"] .nav-link::before {
+  background: rgb(0 245 255 / 45%);
+  bottom: 8px;
+  content: "";
+  left: 4px;
+  position: absolute;
+  top: 8px;
+  transform: scaleY(0.4);
+  transition:
+    background-color var(--transition),
+    box-shadow var(--transition),
+    transform var(--transition);
+  width: 2px;
+}
+
+/* Sector counter — matches the Bleach / Endfield rail numbering */
+html[data-theme="cyberpunk"] .nav-link::after {
+  bottom: 4px;
+  color: rgb(0 245 255 / 55%);
+  content: counter(cyberpunk-nav, decimal-leading-zero);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  left: 0;
+  letter-spacing: 0.12em;
+  position: absolute;
+  right: 0;
 }
 
 html[data-theme="cyberpunk"] .nav-link:hover {
   background: rgb(255 47 220 / 12%);
-  border-color: rgb(255 47 220 / 35%);
+  border-color: rgb(255 47 220 / 40%);
   color: #f8f0ff;
   text-shadow: 0 0 8px rgb(255 47 220 / 35%);
 }
 
+html[data-theme="cyberpunk"] .nav-link:hover::before {
+  background: #00f5ff;
+  box-shadow: 0 0 8px rgb(0 245 255 / 65%);
+  transform: scaleY(0.75);
+}
+
 html[data-theme="cyberpunk"] .nav-link.active,
 html[data-theme="cyberpunk"] .nav-link.active:hover {
-  background: rgb(255 47 220 / 20%);
+  background: linear-gradient(
+    100deg,
+    rgb(255 47 220 / 30%) 0%,
+    rgb(255 47 220 / 14%) 100%
+  );
   border-color: rgb(255 47 220 / 70%);
   box-shadow:
-    0 0 0 1px rgb(255 47 220 / 30%),
-    0 0 20px rgb(255 47 220 / 40%),
-    0 0 36px rgb(255 47 220 / 18%),
-    inset 0 -3px 0 0 #ff2fdc,
-    inset 0 -4px 0 0 rgb(0 245 255 / 55%);
+    0 0 18px rgb(255 47 220 / 34%),
+    0 0 34px rgb(255 47 220 / 14%),
+    inset 0 0 0 1px rgb(0 245 255 / 16%);
   color: #ffb0f5;
   font-weight: 700;
+  margin-inline-end: calc(var(--cp-nav-active-overhang) * -1);
   text-shadow: 0 0 10px rgb(255 47 220 / 55%);
+  width: calc(100% + var(--cp-nav-active-overhang));
+  z-index: 2;
+}
+
+html[data-theme="cyberpunk"] .nav-link.active::before {
+  background: #ff2fdc;
+  box-shadow:
+    0 0 10px rgb(255 47 220 / 80%),
+    0 0 20px rgb(255 47 220 / 40%);
+  transform: scaleY(1);
+  width: 3px;
+}
+
+html[data-theme="cyberpunk"] .nav-link.active::after {
+  color: #00f5ff;
+  text-shadow: 0 0 8px rgb(0 245 255 / 55%);
+}
+
+html[data-theme="cyberpunk"] .nav-link:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+/* ── Rail footer: live state + utility controls ──────────── */
+
+html[data-theme="cyberpunk"] .topbar-actions {
+  align-items: stretch;
+  border-top: 1px solid rgb(0 245 255 / 20%);
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  margin-left: 0;
+  margin-top: auto;
+  padding-top: 10px;
+  width: 100%;
+}
+
+html[data-theme="cyberpunk"] .topbar-actions > *,
+html[data-theme="cyberpunk"] .topbar-actions button {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-theme="cyberpunk"] .live-indicator {
+  background: rgb(57 255 20 / 8%);
+  border-color: rgb(57 255 20 / 32%);
+  color: var(--ok-strong);
+  font-size: 9px;
+  justify-content: center;
+  letter-spacing: 0.1em;
+  min-height: 28px;
+  text-transform: uppercase;
+}
+
+html[data-theme="cyberpunk"] .live-label {
+  display: none;
+}
+
+/* Ghost utilities float invisibly against the void — give them a faint
+   cyan chassis so the rail footer reads as a control cluster. */
+html[data-theme="cyberpunk"] .topbar-actions .density-toggle,
+html[data-theme="cyberpunk"] .topbar-actions .theme-toggle,
+html[data-theme="cyberpunk"] .topbar-actions .nav-logout {
+  background: rgb(0 245 255 / 5%);
+  border: 1px solid rgb(0 245 255 / 26%);
+  color: var(--muted-strong);
+  min-height: 30px;
+  padding: 0 6px;
+}
+
+html[data-theme="cyberpunk"] .topbar-actions .density-toggle:hover,
+html[data-theme="cyberpunk"] .topbar-actions .theme-toggle:hover,
+html[data-theme="cyberpunk"] .topbar-actions .nav-logout:hover {
+  background: rgb(0 245 255 / 14%);
+  border-color: rgb(0 245 255 / 65%);
+  box-shadow: 0 0 14px rgb(0 245 255 / 26%);
+  color: #d0feff;
+}
+
+/* The theme picker now hangs off the rail instead of dropping down */
+html[data-theme="cyberpunk"] .theme-menu {
+  bottom: 0;
+  left: calc(100% + 12px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  right: auto;
+  top: auto;
 }
 
 /* ── Buttons ─────────────────────────────────────────────── */
 
+/* HUD bevel note: an earlier pass cut the corners with `clip-path`, which
+   clips the border box and therefore ate every outer glow *and* the
+   focus ring. The chamfer now rides on `corner-shape` (progressive
+   enhancement, see below) so the neon actually renders. */
 html[data-theme="cyberpunk"] button {
   background: linear-gradient(180deg, #ff6aec 0%, #ff2fdc 42%, #c412a8 100%);
   border: 1px solid rgb(255 180 240 / 75%);
   border-radius: var(--radius-sm);
-  /* mild HUD bevel via clip — keeps toolbar alignment */
-  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
   box-shadow:
     0 0 0 1px rgb(255 47 220 / 45%),
-    0 0 16px rgb(255 47 220 / 45%),
-    0 0 32px rgb(255 47 220 / 22%),
+    0 0 14px rgb(255 47 220 / 38%),
+    0 0 26px rgb(255 47 220 / 16%),
     inset 0 1px 0 rgb(255 255 255 / 28%),
     inset 0 -1px 0 rgb(0 0 0 / 25%);
   color: #120018;
@@ -382,8 +614,8 @@ html[data-theme="cyberpunk"] button:hover {
   border-color: rgb(255 220 250 / 90%);
   box-shadow:
     0 0 0 1px rgb(255 47 220 / 60%),
-    0 0 24px rgb(255 47 220 / 60%),
-    0 0 48px rgb(255 47 220 / 35%),
+    0 0 20px rgb(255 47 220 / 52%),
+    0 0 38px rgb(255 47 220 / 26%),
     0 0 12px rgb(0 245 255 / 25%),
     inset 0 1px 0 rgb(255 255 255 / 35%);
   color: #1a0018;
@@ -406,7 +638,6 @@ html[data-theme="cyberpunk"] button:disabled:hover {
   background: var(--panel-muted);
   border-color: rgb(154 134 176 / 35%);
   box-shadow: none;
-  clip-path: none;
   color: var(--muted);
   filter: none;
   opacity: 0.55;
@@ -421,7 +652,6 @@ html[data-theme="cyberpunk"] button.secondary {
     0 0 0 1px rgb(0 245 255 / 18%),
     0 0 14px rgb(0 245 255 / 22%),
     inset 0 0 12px rgb(0 245 255 / 8%);
-  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
   color: #8cfcff;
   font-weight: 600;
   text-shadow: 0 0 8px rgb(0 245 255 / 40%);
@@ -457,7 +687,6 @@ html[data-theme="cyberpunk"] button.ghost {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
-  clip-path: none;
   color: var(--muted-strong);
   font-weight: 600;
   letter-spacing: 0.05em;
@@ -488,7 +717,6 @@ html[data-theme="cyberpunk"] button.danger {
   box-shadow:
     0 0 0 1px rgb(255 61 110 / 20%),
     0 0 16px rgb(255 61 110 / 28%);
-  clip-path: polygon(4px 0, 100% 0, 100% calc(100% - 4px), calc(100% - 4px) 100%, 0 100%, 0 4px);
   color: #ff9aaf;
   text-shadow: 0 0 8px rgb(255 61 110 / 35%);
 }
@@ -508,7 +736,39 @@ html[data-theme="cyberpunk"] button.danger:active:not(:disabled) {
   transform: translateY(1px);
 }
 
-/* Tiny controls: no heavy neon chrome / no clip-path */
+/* HUD chamfer, restored the right way: `corner-shape` bevels the actual
+   border box, so the border traces the cut and the glow still spills
+   outside it. Browsers without support keep the plain 2px radius. */
+@supports (corner-shape: bevel) {
+  html[data-theme="cyberpunk"] button:not(.nav-link):not(.ghost),
+  html[data-theme="cyberpunk"] .segmented-control,
+  html[data-theme="cyberpunk"] .command-palette-hint {
+    border-radius: 6px 0 6px 0;
+    corner-shape: bevel;
+  }
+
+  /* Small inline controls stay rectangular — a bevel at that size reads
+     as a rendering artefact rather than a HUD cue. */
+  html[data-theme="cyberpunk"] .table-sort-button,
+  html[data-theme="cyberpunk"] .url-action,
+  html[data-theme="cyberpunk"] .priority-value,
+  html[data-theme="cyberpunk"] .token-preview-button,
+  html[data-theme="cyberpunk"] .model-selection-remove,
+  html[data-theme="cyberpunk"] .toast-close,
+  html[data-theme="cyberpunk"] .icon-close,
+  html[data-theme="cyberpunk"] .icon-maximize,
+  html[data-theme="cyberpunk"] .action-menu-trigger,
+  html[data-theme="cyberpunk"] .status-switch,
+  html[data-theme="cyberpunk"] .segmented-control button,
+  html[data-theme="cyberpunk"] .theme-menu button,
+  html[data-theme="cyberpunk"] .select-panel button,
+  html[data-theme="cyberpunk"] .upstream-action-menu button,
+  html[data-theme="cyberpunk"] button:disabled {
+    corner-shape: round;
+  }
+}
+
+/* Tiny controls: no heavy neon chrome */
 html[data-theme="cyberpunk"] .table-sort-button,
 html[data-theme="cyberpunk"] .url-action,
 html[data-theme="cyberpunk"] .priority-value,
@@ -522,7 +782,6 @@ html[data-theme="cyberpunk"] .action-menu-trigger {
   border-color: transparent;
   border-radius: var(--radius-sm);
   box-shadow: none;
-  clip-path: none;
   color: inherit;
   filter: none;
   font-weight: inherit;
@@ -630,7 +889,6 @@ html[data-theme="cyberpunk"] button.ghost:focus-visible {
   box-shadow:
     0 0 0 2px var(--bg),
     0 0 0 4px rgb(0 245 255 / 65%);
-  clip-path: none;
 }
 
 html[data-theme="cyberpunk"] button.danger:focus-visible {
@@ -648,7 +906,6 @@ html[data-theme="cyberpunk"] .theme-menu button.is-selected {
   box-shadow:
     0 0 0 1px rgb(255 47 220 / 28%),
     0 0 16px rgb(255 47 220 / 30%);
-  clip-path: none;
   color: #ffb0f5;
   font-weight: 700;
   text-shadow: 0 0 8px rgb(255 47 220 / 40%);
@@ -668,7 +925,6 @@ html[data-theme="cyberpunk"] .segmented-control button {
   border-color: transparent;
   border-radius: var(--radius-sm);
   box-shadow: none;
-  clip-path: none;
   color: var(--muted);
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -700,8 +956,17 @@ html[data-theme="cyberpunk"] .segmented-control button.is-selected:hover {
 /* ── Content / panels ────────────────────────────────────── */
 
 html[data-theme="cyberpunk"] .content {
-  max-width: calc(var(--content-max) + 16px);
-  padding: 22px 24px 48px;
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  margin: 0;
+  max-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 22px clamp(20px, 2.6vw, 40px) 48px;
+  scrollbar-gutter: stable;
+  width: 100%;
 }
 
 /* Dual-edge HUD panel: magenta outer + cyan inner glow + top neon rail */
@@ -881,7 +1146,8 @@ html[data-theme="cyberpunk"] textarea {
 
 html[data-theme="cyberpunk"] input::placeholder,
 html[data-theme="cyberpunk"] textarea::placeholder {
-  color: #6d5d80;
+  /* #6d5d80 sat at ~3.2:1 on the void field background — barely legible */
+  color: #8a7aa0;
   opacity: 1;
 }
 
@@ -1180,14 +1446,20 @@ html[data-theme="cyberpunk"] dialog.is-maximized {
     0 0 64px rgb(255 47 220 / 12%);
 }
 
+/* List rows inside menus and palettes are buttons, so the broad primary
+   `button` rule above outranks their single-class base styles and used to
+   paint every dropdown entry as a solid magenta pill. Reset the fill here,
+   not just the chrome. */
 html[data-theme="cyberpunk"] .theme-menu button,
 html[data-theme="cyberpunk"] .col-menu label,
 html[data-theme="cyberpunk"] .select-panel button,
-html[data-theme="cyberpunk"] .upstream-action-menu button {
+html[data-theme="cyberpunk"] .upstream-action-menu button,
+html[data-theme="cyberpunk"] .command-palette-item {
+  background: transparent;
   border-color: transparent;
   border-radius: var(--radius-sm);
   box-shadow: none;
-  clip-path: none;
+  color: var(--text-secondary);
   font-weight: 600;
   letter-spacing: 0.03em;
   text-shadow: none;
@@ -1198,13 +1470,30 @@ html[data-theme="cyberpunk"] .theme-menu button:hover,
 html[data-theme="cyberpunk"] .col-menu label:hover,
 html[data-theme="cyberpunk"] .select-panel button:hover,
 html[data-theme="cyberpunk"] .select-panel button.is-active,
-html[data-theme="cyberpunk"] .upstream-action-menu button:hover {
+html[data-theme="cyberpunk"] .upstream-action-menu button:hover,
+html[data-theme="cyberpunk"] .command-palette-item:hover,
+html[data-theme="cyberpunk"] .command-palette-item.is-active {
   background: rgb(0 245 255 / 12%);
   border-color: transparent;
   box-shadow: none;
   color: #8cfcff;
   filter: none;
   transform: none;
+}
+
+html[data-theme="cyberpunk"] .select-panel button.is-selected,
+html[data-theme="cyberpunk"] .select-panel button.is-selected:hover,
+html[data-theme="cyberpunk"] .select-panel button.is-selected.is-active {
+  background: rgb(255 47 220 / 22%);
+  border-color: rgb(255 47 220 / 55%);
+  box-shadow: inset 0 0 0 1px rgb(255 47 220 / 45%);
+  color: #ffb0f5;
+}
+
+html[data-theme="cyberpunk"] .select-panel button:disabled,
+html[data-theme="cyberpunk"] .select-panel button:disabled:hover {
+  background: transparent;
+  color: var(--muted);
 }
 
 html[data-theme="cyberpunk"] .theme-menu button.is-selected:hover {
@@ -1269,48 +1558,185 @@ html[data-theme="cyberpunk"] ::-webkit-scrollbar-corner {
   background: #060310;
 }
 
-/* ── Mobile ──────────────────────────────────────────────── */
+/* ── Mobile ──────────────────────────────────────────────────
+   The rail unrolls into a fixed neon dock at the bottom of the
+   viewport, mirroring the Bleach / Endfield mobile behaviour. */
 
 @media (max-width: 760px) {
+  html[data-theme="cyberpunk"],
+  html[data-theme="cyberpunk"] body {
+    height: auto;
+    overflow: visible;
+  }
+
+  html[data-theme="cyberpunk"] .app-shell {
+    display: flex;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+
   html[data-theme="cyberpunk"] .topbar {
     align-items: center;
-    flex-wrap: wrap;
+    /* A non-none backdrop-filter turns the topbar into a containing block
+       for fixed descendants, which would anchor the dock to the bar
+       instead of the viewport. */
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background:
+      linear-gradient(180deg, rgb(255 47 220 / 8%) 0%, transparent 70%),
+      var(--topbar-bg);
+    border-bottom: 1px solid rgb(255 47 220 / 55%);
+    border-right: 0;
+    box-shadow:
+      0 1px 0 rgb(0 245 255 / 28%),
+      0 0 28px rgb(255 47 220 / 12%),
+      0 10px 32px rgb(0 0 0 / 50%);
+    flex-direction: row;
     gap: 8px;
-    min-height: 0;
+    height: auto;
+    justify-content: space-between;
+    min-height: 52px;
+    min-width: 0;
     padding: 6px 10px;
+    width: 100%;
+  }
+
+  html[data-theme="cyberpunk"] .topbar::after {
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      #ff2fdc 12%,
+      #00f5ff 50%,
+      #ff2fdc 88%,
+      transparent 100%
+    );
+    bottom: -1px;
+    height: 2px;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: auto;
   }
 
   html[data-theme="cyberpunk"] .topbar-brand {
+    border-bottom: 0;
+    flex-direction: row;
+    gap: 8px;
     min-height: 32px;
     padding: 4px 2px;
+    width: auto;
   }
 
   html[data-theme="cyberpunk"] .brand-mark {
     display: none;
   }
 
+  html[data-theme="cyberpunk"] .brand-text {
+    text-align: left;
+    width: auto;
+  }
+
   html[data-theme="cyberpunk"] .topbar-brand h1 {
     font-size: 12px;
     letter-spacing: 0.05em;
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  html[data-theme="cyberpunk"] .brand-label,
+  html[data-theme="cyberpunk"] .topbar-actions .live-indicator,
+  html[data-theme="cyberpunk"] .density-toggle,
+  html[data-theme="cyberpunk"] .theme-menu-wrap {
+    display: none;
+  }
+
+  html[data-theme="cyberpunk"] .topbar-actions {
+    align-items: center;
+    border-top: 0;
+    flex-direction: row;
+    gap: 4px;
+    margin-top: 0;
+    padding-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="cyberpunk"] .topbar-actions > *,
+  html[data-theme="cyberpunk"] .topbar-actions button {
+    width: auto;
   }
 
   html[data-theme="cyberpunk"] .topbar-nav {
-    flex: 1 0 100%;
-    order: 3;
-    overflow-x: auto;
-    width: 100%;
+    background: rgb(6 2 14 / 96%);
+    border: 1px solid rgb(255 47 220 / 55%);
+    border-radius: var(--radius);
+    bottom: max(8px, env(safe-area-inset-bottom));
+    box-shadow:
+      0 0 0 1px rgb(0 245 255 / 20%),
+      0 0 26px rgb(255 47 220 / 22%),
+      0 10px 30px rgb(0 0 0 / 62%);
+    display: grid;
+    gap: 3px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 8px;
+    padding: 4px;
+    position: fixed;
+    right: 8px;
+    width: auto;
+    z-index: 40;
+  }
+
+  html[data-theme="cyberpunk"] .topbar-nav::before {
+    display: none;
   }
 
   html[data-theme="cyberpunk"] .nav-link {
-    flex: 1 1 0;
     letter-spacing: 0.03em;
+    min-height: 52px;
     min-width: 0;
-    padding: 6px 8px;
-    text-align: center;
+    padding: 6px 2px 14px;
+  }
+
+  /* Edge marker flips to a top bar so it reads in a horizontal dock */
+  html[data-theme="cyberpunk"] .nav-link::before {
+    bottom: auto;
+    height: 2px;
+    left: 9px;
+    right: 9px;
+    top: 5px;
+    transform: scaleX(0.4);
+    width: auto;
+  }
+
+  html[data-theme="cyberpunk"] .nav-link:hover::before {
+    transform: scaleX(0.75);
+  }
+
+  html[data-theme="cyberpunk"] .nav-link.active,
+  html[data-theme="cyberpunk"] .nav-link.active:hover {
+    margin-inline-end: 0;
+    width: 100%;
+  }
+
+  html[data-theme="cyberpunk"] .nav-link.active::before {
+    height: 3px;
+    transform: scaleX(1);
+    width: auto;
+  }
+
+  html[data-theme="cyberpunk"] .theme-menu {
+    bottom: auto;
+    left: auto;
+    right: 0;
+    top: calc(100% + 8px);
   }
 
   html[data-theme="cyberpunk"] .content {
+    height: auto;
+    overflow: visible;
     padding: 12px 12px 28px;
+    width: 100%;
   }
 
   html[data-theme="cyberpunk"] .view > .panel {

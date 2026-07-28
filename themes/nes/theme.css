@@ -81,6 +81,44 @@ html[data-theme="nes"] {
 
   --transition: 0ms steps(1, end);
   --blur: 0px;
+
+  /* Left rail: two CJK glyphs, the 2px slot border, room for the 3px hard
+     shadow the pixel language puts under everything, and enough width for the
+     wordmark to stay on one line in Press Start 2P. */
+  --nes-rail-width: 100px;
+
+  /* ── Dither ───────────────────────────────────────────────
+     The 2C02 has no gradients and no alpha: every shade between two palette
+     entries is faked by alternating them on a checkerboard. That checker is
+     the single most recognisable thing about 8-bit art, and flat fills are
+     what make a "pixel" theme read as merely square rather than 8-bit.
+
+     Built from repeating-conic-gradient, which gives hard 2px cells with no
+     interpolation. Compose in a `background` shorthand, top band first, base
+     colour last. */
+  --nes-dither:
+    repeating-conic-gradient(rgb(252 252 252 / 6.5%) 0 25%, transparent 0 50%) 0 0 / 4px 4px repeat;
+
+  /* An 8-bit surface catches light by packing the checker tighter at the top
+     edge rather than by ramping a gradient. repeat-x confines each to one 8px
+     band, offset so they stack into a stepped ramp — 13% then 9% over the
+     6.5% field. Three discrete densities is how the hardware fakes a
+     gradient; a single band against the field just looks like a seam. */
+  --nes-dither-lit:
+    repeating-conic-gradient(rgb(252 252 252 / 13%) 0 25%, transparent 0 50%) 0 0 / 4px 8px repeat-x;
+  --nes-dither-mid:
+    repeating-conic-gradient(rgb(252 252 252 / 9%) 0 25%, transparent 0 50%) 0 8px / 4px 8px repeat-x;
+
+  /* Same trick inverted: a denser dark checker along the bottom edge. */
+  --nes-dither-shade:
+    repeating-conic-gradient(rgb(0 0 0 / 26%) 0 25%, transparent 0 50%) 0 100% / 4px 6px repeat-x;
+
+  /* NTSC composite artifacting. The console fed a TV through one wire, so
+     chroma smeared to the RIGHT of every edge — asymmetric trailing, not the
+     symmetric convergence fringe of a direct-drive tube. Large type only. */
+  --nes-ntsc:
+    1px 0 0 rgb(255 60 60 / 16%),
+    2px 0 0 rgb(60 90 255 / 10%);
 }
 
 /* ── NES / 像素 theme structure ─────────────────────────────
@@ -145,9 +183,25 @@ html[data-theme="nes"] body::before {
   z-index: 0;
 }
 
+/* Desktop shell: navigation moves into a vertical rail, the work stage takes
+   the rest and scrolls on its own. */
 html[data-theme="nes"] .app-shell {
+  display: grid;
+  grid-template-columns: var(--nes-rail-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
   position: relative;
   z-index: 1;
+}
+
+@media (min-width: 761px) {
+  html[data-theme="nes"],
+  html[data-theme="nes"] body {
+    height: 100%;
+    overflow: hidden;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -175,20 +229,34 @@ html[data-theme="nes"] input[type="checkbox"] {
 
 /* ── Chrome: game title bar ──────────────────────────────── */
 
+/* The rail is the dark menu frame; the blue window chrome survives as the
+   title block pinned at its top. */
 html[data-theme="nes"] .topbar {
+  align-items: stretch;
+  /* Must stay none: any non-none backdrop-filter makes the rail a containing
+     block for fixed descendants, which would anchor the mobile dock to the
+     rail instead of the viewport. */
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  /* classic blue window chrome */
-  background: #209cee;
-  border-bottom: 4px solid #000000;
-  border-top: 2px solid #7ec8f5;
-  box-shadow:
-    0 4px 0 #000000,
-    inset 0 2px 0 #b8e4ff,
-    inset 0 -2px 0 #0d6aa8;
+  background:
+    var(--nes-dither),
+    #181a2a;
+  border: 0;
+  border-right: 4px solid #000000;
+  box-shadow: inset -2px 0 0 #3c3c58;
+  display: flex;
+  flex-direction: column;
   gap: 10px;
-  min-height: 52px;
-  padding: 6px 12px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 10px 8px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
 }
 
 html[data-theme="nes"] .topbar::after {
@@ -199,20 +267,41 @@ html[data-theme="nes"] .topbar-nav {
   background: transparent;
   border: none;
   box-shadow: none;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
   gap: 6px;
-  padding: 2px;
+  overflow: visible;
+  padding: 0;
+  width: 100%;
 }
 
 html[data-theme="nes"] .topbar-brand {
-  gap: 8px;
-  padding: 2px 4px;
+  align-items: center;
+  background: #209cee;
+  border: 2px solid #000000;
+  box-shadow:
+    inset 0 2px 0 #b8e4ff,
+    inset 0 -2px 0 #0d6aa8,
+    2px 2px 0 #000000;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 4px;
+  width: 100%;
+}
+
+html[data-theme="nes"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
 }
 
 html[data-theme="nes"] .brand-mark {
   color: #f7d51d;
   filter: none;
-  height: 18px;
-  width: 18px;
+  height: 20px;
+  width: 20px;
 }
 
 /* Kill anti-aliasing on the logo vector for a hard pixel-cut edge */
@@ -221,26 +310,36 @@ html[data-theme="nes"] .brand-mark svg * {
   shape-rendering: crispEdges;
 }
 
+/* Press Start 2P is a fixed-width pixel face: every glyph costs a full em, so
+   "WildToken" needs 9em. At 7px that is 63px, inside the rail's 76px of
+   content width — enough that it stays on one line rather than breaking after
+   "WildTok". overflow-wrap stays as a guard for a narrower fallback face. */
 html[data-theme="nes"] .topbar-brand h1 {
   color: #ffffff;
   font-family: "Press Start 2P", var(--font-mono);
-  font-size: 11px;
+  font-size: 7px;
   font-weight: 400;
-  letter-spacing: 0.06em;
-  line-height: 1.4;
-  text-shadow: 2px 2px 0 #0d6aa8;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  text-shadow: 2px 2px 0 #0d6aa8, var(--nes-ntsc);
+  white-space: normal;
 }
 
 html[data-theme="nes"] .brand-label {
   color: #f7d51d;
+  display: block;
   font-family: "Press Start 2P", var(--font-mono);
-  font-size: 8px;
+  font-size: 6px;
   letter-spacing: 0.08em;
+  margin-top: 4px;
   text-shadow: 1px 1px 0 #0d6aa8;
 }
 
 html[data-theme="nes"] .nav-link {
-  background: #181a2a;
+  background:
+    var(--nes-dither),
+    #2c2e4a;
   border: 2px solid #000000;
   border-radius: 0;
   box-shadow:
@@ -250,18 +349,27 @@ html[data-theme="nes"] .nav-link {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.04em;
-  padding: 5px 12px;
+  min-height: 40px;
+  min-width: 0;
+  padding: 5px 4px 5px 14px;
+  position: relative;
   text-transform: uppercase;
+  white-space: normal;
+  width: 100%;
 }
 
 html[data-theme="nes"] .nav-link:hover {
-  background: #2c2e4a;
+  background:
+    var(--nes-dither),
+    #383a58;
   color: #f7d51d;
 }
 
 html[data-theme="nes"] .nav-link.active,
 html[data-theme="nes"] .nav-link.active:hover {
-  background: #e52521;
+  background:
+    var(--nes-dither),
+    #e52521;
   border-color: #000000;
   box-shadow:
     inset 2px 2px 0 #ff6b63,
@@ -271,10 +379,99 @@ html[data-theme="nes"] .nav-link.active:hover {
   font-weight: 700;
 }
 
+/* Every 8-bit menu marks its selection with a blinking cursor rather than a
+   fill alone. Absolutely positioned so it costs the label no width — the
+   asymmetric padding above reserves the gutter it sits in. */
+html[data-theme="nes"] .nav-link.active::before {
+  animation: nes-menu-cursor 1s steps(2, end) infinite;
+  color: #f7d51d;
+  content: "▶";
+  font-size: 8px;
+  left: 3px;
+  line-height: 1;
+  position: absolute;
+  text-shadow: 1px 1px 0 #8a100e;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+@keyframes nes-menu-cursor {
+  0%, 50% {
+    opacity: 1;
+  }
+  50.01%, 100% {
+    opacity: 0;
+  }
+}
+
+/* ── Rail footer: utility controls stack at the bottom ───── */
+
+html[data-theme="nes"] .topbar-actions {
+  align-items: stretch;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: auto;
+  width: 100%;
+}
+
+html[data-theme="nes"] .topbar-actions > *,
+html[data-theme="nes"] .topbar-actions button {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-theme="nes"] .topbar-actions .live-indicator {
+  border-top: 2px solid #000000;
+  box-shadow: 0 -2px 0 #3c3c58;
+  color: #92cc41;
+  font-size: 8px;
+  justify-content: center;
+  min-height: 24px;
+  padding: 7px 2px 0;
+}
+
+html[data-theme="nes"] .live-label {
+  display: none;
+}
+
+html[data-theme="nes"] .topbar-actions .theme-toggle,
+html[data-theme="nes"] .topbar-actions .density-toggle,
+html[data-theme="nes"] .topbar-actions .nav-logout {
+  font-size: 11px;
+  min-height: 30px;
+  padding: 0 4px;
+}
+
+/* The swatch disc is the only rounded pixel in a zero-radius theme, and the
+   rail now shows it full-width. Square it off and drop the hover spin, which
+   reads as a glitch on a hard-edged square. */
+html[data-theme="nes"] .theme-toggle-icon::before {
+  border: 2px solid #000000;
+  border-radius: 0;
+}
+
+html[data-theme="nes"] .theme-toggle:hover .theme-toggle-icon::before {
+  transform: none;
+}
+
+/* The rail is narrower than the menu, so it opens alongside instead of below.
+   The 4px rail border plus the menu's own hard shadow need the clearance. */
+html[data-theme="nes"] .theme-menu {
+  bottom: 0;
+  left: calc(100% + 14px);
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  right: auto;
+  top: auto;
+}
+
 /* ── Buttons ─────────────────────────────────────────────── */
 
 html[data-theme="nes"] button {
-  background: #e52521;
+  background:
+    var(--nes-dither),
+    #e52521;
   border: 3px solid #000000;
   border-radius: 0;
   box-shadow:
@@ -289,7 +486,9 @@ html[data-theme="nes"] button {
 }
 
 html[data-theme="nes"] button:hover {
-  background: #ff4a40;
+  background:
+    var(--nes-dither),
+    #ff4a40;
   box-shadow:
     inset 2px 2px 0 #ff8a82,
     inset -2px -2px 0 #a01814,
@@ -300,7 +499,9 @@ html[data-theme="nes"] button:hover {
 
 html[data-theme="nes"] button:active:not(:disabled),
 html[data-theme="nes"] button[aria-expanded="true"] {
-  background: #c41e1a;
+  background:
+    var(--nes-dither),
+    #c41e1a;
   box-shadow:
     inset 2px 2px 0 #8a100e,
     inset -1px -1px 0 #ff6b63,
@@ -310,7 +511,9 @@ html[data-theme="nes"] button[aria-expanded="true"] {
 
 html[data-theme="nes"] button:disabled,
 html[data-theme="nes"] button:disabled:hover {
-  background: #5a5a78;
+  background:
+    var(--nes-dither),
+    #5a5a78;
   border-color: #000000;
   box-shadow:
     inset 1px 1px 0 #8888a0,
@@ -321,7 +524,9 @@ html[data-theme="nes"] button:disabled:hover {
 }
 
 html[data-theme="nes"] button.secondary {
-  background: #209cee;
+  background:
+    var(--nes-dither),
+    #209cee;
   border-color: #000000;
   box-shadow:
     inset 2px 2px 0 #7ec8f5,
@@ -331,7 +536,9 @@ html[data-theme="nes"] button.secondary {
 }
 
 html[data-theme="nes"] button.secondary:hover {
-  background: #3db1f5;
+  background:
+    var(--nes-dither),
+    #3db1f5;
   box-shadow:
     inset 2px 2px 0 #a8dcff,
     inset -2px -2px 0 #0d6aa8,
@@ -348,7 +555,9 @@ html[data-theme="nes"] button.secondary:active:not(:disabled) {
 }
 
 html[data-theme="nes"] button.secondary:disabled:hover {
-  background: #209cee;
+  background:
+    var(--nes-dither),
+    #209cee;
   box-shadow:
     inset 1px 1px 0 #7ec8f5,
     3px 3px 0 #000000;
@@ -356,7 +565,9 @@ html[data-theme="nes"] button.secondary:disabled:hover {
 }
 
 html[data-theme="nes"] button.ghost {
-  background: #181a2a;
+  background:
+    var(--nes-dither),
+    #181a2a;
   border-color: #000000;
   box-shadow:
     inset 1px 1px 0 #686888,
@@ -365,7 +576,9 @@ html[data-theme="nes"] button.ghost {
 }
 
 html[data-theme="nes"] button.ghost:hover {
-  background: #2c2e4a;
+  background:
+    var(--nes-dither),
+    #2c2e4a;
   border-color: #000000;
   box-shadow:
     inset 1px 1px 0 #9898a8,
@@ -380,14 +593,18 @@ html[data-theme="nes"] button.ghost:active:not(:disabled) {
 }
 
 html[data-theme="nes"] button.ghost:disabled:hover {
-  background: #181a2a;
+  background:
+    var(--nes-dither),
+    #181a2a;
   border-color: #000000;
   color: #c8c8d0;
   transform: none;
 }
 
 html[data-theme="nes"] button.danger {
-  background: #181a2a;
+  background:
+    var(--nes-dither),
+    #181a2a;
   border-color: #e52521;
   box-shadow:
     inset 1px 1px 0 #686888,
@@ -396,7 +613,9 @@ html[data-theme="nes"] button.danger {
 }
 
 html[data-theme="nes"] button.danger:hover {
-  background: #e52521;
+  background:
+    var(--nes-dither),
+    #e52521;
   border-color: #000000;
   box-shadow:
     inset 2px 2px 0 #ff6b63,
@@ -570,13 +789,27 @@ html[data-theme="nes"] .segmented-control button.is-selected:hover {
 /* ── Content / panels ────────────────────────────────────── */
 
 html[data-theme="nes"] .content {
-  max-width: calc(var(--content-max) + 16px);
-  padding: 20px 20px 40px;
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  margin: 0;
+  max-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 20px 24px 40px;
+  scrollbar-gutter: stable;
+  width: 100%;
 }
 
 /* Dual hard frame: outer black + inner white (classic NES window) */
 html[data-theme="nes"] .view > .panel {
-  background: #181a2a;
+  background:
+    var(--nes-dither-lit),
+    var(--nes-dither-mid),
+    var(--nes-dither-shade),
+    var(--nes-dither),
+    #181a2a;
   border: 4px solid #000000;
   border-radius: 0;
   box-shadow:
@@ -601,12 +834,34 @@ html[data-theme="nes"] .view > .panel > .panel-head h2 {
   font-weight: 400;
   letter-spacing: 0.04em;
   line-height: 1.55;
-  text-shadow: 2px 2px 0 #000000;
+  /* Hard pixel shadow first, then the composite smear trailing off it. */
+  text-shadow: 2px 2px 0 #000000, var(--nes-ntsc);
 }
 
 html[data-theme="nes"] .view > .panel > .panel-head p {
-  color: #9898a8;
+  color: #7c7c94;
   font-size: 13px;
+}
+
+/* ── HUD readout tiers ───────────────────────────────────────
+   A game HUD drives the score in solid white and drops everything around it
+   well down the ramp. These four collapsed into two — label and hint were
+   both #9898a8 — which is what flattened the dashboard. */
+html[data-theme="nes"] .kpi-value,
+html[data-theme="nes"] .dashboard-kpi-value {
+  color: #fcfcfc;
+  text-shadow: 2px 2px 0 #000000, var(--nes-ntsc);
+}
+
+html[data-theme="nes"] .kpi-label,
+html[data-theme="nes"] .dashboard-kpi-label {
+  color: #c8c8d0;
+  text-shadow: 1px 1px 0 #000000;
+}
+
+html[data-theme="nes"] .dashboard-kpi-hint {
+  color: #7c7c94;
+  text-shadow: none;
 }
 
 html[data-theme="nes"] .view-toolbar,
@@ -750,7 +1005,11 @@ html[data-theme="nes"] .dashboard-card,
 html[data-theme="nes"] .settings-card,
 html[data-theme="nes"] .summary-strip,
 html[data-theme="nes"] .status {
-  background: #202238;
+  background:
+    var(--nes-dither-lit),
+    var(--nes-dither-mid),
+    var(--nes-dither),
+    #202238;
   border: 3px solid #000000;
   border-radius: 0;
   box-shadow:
@@ -859,7 +1118,9 @@ html[data-theme="nes"] .settings-stack {
 /* ── Tables (no bleed) ───────────────────────────────────── */
 
 html[data-theme="nes"] .table-wrap {
-  background: #0a0a14;
+  background:
+    var(--nes-dither),
+    #0a0a14;
   border: 3px solid #000000;
   border-radius: 0;
   box-shadow: inset 0 0 0 2px #fcfcfc, 4px 4px 0 #000000;
@@ -873,7 +1134,9 @@ html[data-theme="nes"] .table-wrap td {
 }
 
 html[data-theme="nes"] th {
-  background: #209cee;
+  background:
+    var(--nes-dither),
+    #209cee;
   border-bottom: 3px solid #000000;
   border-right: 2px solid #000000;
   color: #ffffff;
@@ -950,7 +1213,11 @@ html[data-theme="nes"] .admin-token-dialog,
 html[data-theme="nes"] .balance-dialog,
 html[data-theme="nes"] .confirm-dialog,
 html[data-theme="nes"] .command-palette-panel {
-  background: #181a2a;
+  background:
+    var(--nes-dither-lit),
+    var(--nes-dither-mid),
+    var(--nes-dither),
+    #181a2a;
   border: 4px solid #000000;
   border-radius: 0;
   box-shadow:
@@ -965,7 +1232,9 @@ html[data-theme="nes"] .quick-import-panel,
 html[data-theme="nes"] .admin-token-panel,
 html[data-theme="nes"] .balance-panel,
 html[data-theme="nes"] .confirm-panel {
-  background: #181a2a;
+  background:
+    var(--nes-dither),
+    #181a2a;
   border-radius: 0;
 }
 
@@ -976,7 +1245,9 @@ html[data-theme="nes"] .quick-import-panel {
 }
 
 html[data-theme="nes"] .modal-footer {
-  background: #202238;
+  background:
+    var(--nes-dither),
+    #202238;
   border-top: 3px solid #000000;
   gap: 12px;
   padding: 14px 16px;
@@ -1002,10 +1273,15 @@ html[data-theme="nes"] dialog.is-maximized {
     8px 8px 0 #000000;
 }
 
+/* Menu rows are buttons, so the red command-button fill above reaches them and
+   paints every row like the selected one. They are list items, not controls —
+   strip them back to bare rows and let hover/selection do the talking. */
 html[data-theme="nes"] .theme-menu button,
 html[data-theme="nes"] .col-menu label,
 html[data-theme="nes"] .select-panel button,
-html[data-theme="nes"] .upstream-action-menu button {
+html[data-theme="nes"] .upstream-action-menu button,
+html[data-theme="nes"] .command-palette-item {
+  background: transparent;
   border-color: transparent;
   border-radius: 0;
   box-shadow: none;
@@ -1018,11 +1294,22 @@ html[data-theme="nes"] .theme-menu button:hover,
 html[data-theme="nes"] .col-menu label:hover,
 html[data-theme="nes"] .select-panel button:hover,
 html[data-theme="nes"] .select-panel button.is-active,
-html[data-theme="nes"] .upstream-action-menu button:hover {
+html[data-theme="nes"] .upstream-action-menu button:hover,
+html[data-theme="nes"] .command-palette-item:hover,
+html[data-theme="nes"] .command-palette-item.is-active {
   background: #209cee;
   border-color: transparent;
   box-shadow: none;
   color: #ffffff;
+  transform: none;
+}
+
+/* The pixel press (translate 3px) belongs to command buttons, not list rows. */
+html[data-theme="nes"] .theme-menu button:active:not(:disabled),
+html[data-theme="nes"] .select-panel button:active:not(:disabled),
+html[data-theme="nes"] .upstream-action-menu button:active:not(:disabled),
+html[data-theme="nes"] .command-palette-item:active:not(:disabled) {
+  box-shadow: none;
   transform: none;
 }
 
@@ -1097,53 +1384,174 @@ html[data-theme="nes"] ::-webkit-scrollbar-corner {
   border: 2px solid #000000;
 }
 
-/* ── Mobile ──────────────────────────────────────────────── */
-
-@media (max-width: 760px) {
+/* Landscape phones and short desktop windows keep the rail, but at full size
+   its footer controls fall past the fold — the rail never scrolls, because
+   that would clip the theme menu opening out of its right edge. */
+@media (min-width: 761px) and (max-height: 580px) {
   html[data-theme="nes"] .topbar {
-    align-items: center;
-    flex-wrap: wrap;
     gap: 6px;
-    min-height: 0;
-    padding: 6px 8px;
+    padding: 7px 8px;
   }
 
   html[data-theme="nes"] .topbar-brand {
+    gap: 2px;
+    padding: 4px 3px;
+  }
+
+  html[data-theme="nes"] .brand-mark,
+  html[data-theme="nes"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="nes"] .topbar-nav {
+    gap: 4px;
+  }
+
+  html[data-theme="nes"] .nav-link {
+    min-height: 30px;
+    padding: 3px 4px 3px 14px;
+  }
+
+  html[data-theme="nes"] .topbar-actions {
+    gap: 4px;
+  }
+
+  html[data-theme="nes"] .topbar-actions .live-indicator {
+    display: none;
+  }
+
+  html[data-theme="nes"] .topbar-actions .theme-toggle,
+  html[data-theme="nes"] .topbar-actions .density-toggle,
+  html[data-theme="nes"] .topbar-actions .nav-logout {
+    min-height: 26px;
+  }
+}
+
+/* ── Mobile ──────────────────────────────────────────────────
+   The rail unfolds into a five-slot dock pinned to the bottom of the
+   viewport. Theme and density stay reachable from Settings. */
+
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme="nes"] .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(66px + env(safe-area-inset-bottom));
+  }
+
+  html[data-theme="nes"] .topbar {
+    align-items: center;
+    background: #209cee;
+    border-bottom: 4px solid #000000;
+    border-right: 0;
+    border-top: 2px solid #7ec8f5;
+    box-shadow:
+      0 4px 0 #000000,
+      inset 0 2px 0 #b8e4ff,
+      inset 0 -2px 0 #0d6aa8;
+    flex-direction: row;
+    gap: 6px;
+    height: auto;
+    justify-content: space-between;
+    min-height: 46px;
+    padding: 6px 8px;
+    width: 100%;
+  }
+
+  html[data-theme="nes"] .topbar-brand {
+    background: transparent;
+    border: 0;
+    box-shadow: none;
+    flex-direction: row;
+    gap: 8px;
     min-height: 28px;
     padding: 2px 4px;
+    width: auto;
   }
 
   html[data-theme="nes"] .brand-mark {
     display: none;
   }
 
+  html[data-theme="nes"] .brand-text {
+    text-align: left;
+    width: auto;
+  }
+
   html[data-theme="nes"] .topbar-brand h1 {
     font-size: 8px;
+    overflow-wrap: normal;
+    white-space: nowrap;
   }
 
   html[data-theme="nes"] .brand-label {
-    font-size: 6px;
+    display: none;
+  }
+
+  html[data-theme="nes"] .topbar-actions {
+    align-items: center;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="nes"] .topbar-actions > *,
+  html[data-theme="nes"] .topbar-actions button {
+    width: auto;
+  }
+
+  html[data-theme="nes"] .topbar-actions .live-indicator,
+  html[data-theme="nes"] .density-toggle,
+  html[data-theme="nes"] .theme-menu-wrap {
+    display: none;
+  }
+
+  html[data-theme="nes"] .nav-logout {
+    min-height: 28px;
+    padding: 0 8px;
   }
 
   html[data-theme="nes"] .topbar-nav {
-    flex: 1 0 100%;
-    order: 3;
-    overflow-x: auto;
-    width: 100%;
+    background: #181a2a;
+    border: 3px solid #000000;
+    bottom: max(6px, env(safe-area-inset-bottom));
+    box-shadow: inset 0 0 0 2px #fcfcfc, 4px 4px 0 #000000;
+    display: grid;
+    gap: 4px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    left: 8px;
+    padding: 5px;
+    position: fixed;
+    right: 8px;
+    width: auto;
+    z-index: 40;
   }
 
   html[data-theme="nes"] .nav-link {
-    flex: 1 1 0;
     font-size: 11px;
-    min-width: 0;
-    padding: 4px 6px;
-    text-align: center;
+    min-height: 36px;
+    padding: 4px 2px;
+  }
+
+  /* No room for a cursor gutter across five columns; the red fill carries the
+     selection on its own. */
+  html[data-theme="nes"] .nav-link.active::before {
+    display: none;
   }
 
   html[data-theme="nes"] .content {
+    display: block;
+    height: auto;
+    overflow: visible;
     padding: 10px 10px 24px;
+    width: 100%;
   }
+}
 
+@media (max-width: 760px) {
   html[data-theme="nes"] .view > .panel {
     border-width: 3px;
     box-shadow:
