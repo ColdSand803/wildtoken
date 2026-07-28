@@ -16,6 +16,30 @@ function activeRule(css, theme, startAt = 0) {
   return css.slice(start, end + 2);
 }
 
+function navRule(css, theme, selector, startAt = 0) {
+  const start = css.indexOf(`html[data-theme="${theme}"] ${selector} {`, startAt);
+  assert.notEqual(start, -1, `${theme} must define a ${selector} rule`);
+  const end = css.indexOf("\n}", start);
+  return css.slice(start, end + 2);
+}
+
+test("Ark hover targets fill the desktop rail without widening the mobile dock", () => {
+  const css = read(themeCssPath.ark);
+  const desktopNav = navRule(css, "ark", ".nav-link");
+  const desktopHover = navRule(css, "ark", ".nav-link:hover");
+
+  assert.match(desktopNav, /max-width:\s*none/);
+  assert.match(desktopNav, /width:\s*100%/);
+  assert.match(desktopHover, /margin-inline-end:\s*calc\(var\(--ark-nav-active-overhang\) \* -1\)/);
+  assert.match(desktopHover, /width:\s*calc\(100% \+ var\(--ark-nav-active-overhang\)\)/);
+
+  const mobileStart = css.indexOf("@media (max-width: 760px)");
+  assert.notEqual(mobileStart, -1, "Ark must retain its mobile breakpoint");
+  const mobileHover = navRule(css, "ark", ".nav-link:hover", mobileStart);
+  assert.match(mobileHover, /margin-inline-end:\s*0/);
+  assert.match(mobileHover, /width:\s*100%/);
+});
+
 test("Ark and Endfield active desktop tabs extend but reset in the mobile dock", () => {
   for (const [theme, token, overhang] of [
     ["ark", "--ark-nav-active-overhang", "4px"],
