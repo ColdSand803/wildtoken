@@ -816,7 +816,8 @@ modelClearAllButton.addEventListener("click", () => {
 });
 modelAddManualButton.addEventListener("click", addManualModels);
 modelManualInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+  // A single-line input: Enter adds instead of submitting the dialog form.
+  if (event.key === "Enter") {
     event.preventDefault();
     addManualModels();
   }
