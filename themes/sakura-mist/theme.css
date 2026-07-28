@@ -1,0 +1,84 @@
+/* Sakura Mist: the reference palette's soft pink surfaces and gray-violet ink. */
+html[data-theme="sakura-mist"] {
+  color-scheme: light;
+
+  --bg: #ffe3ee;
+  --bg-elevated: #f6d7e4;
+  --panel: rgb(255 250 253 / 88%);
+  --panel-solid: #fffafd;
+  --panel-subtle: #fdf4f8;
+  --panel-muted: #eadbe3;
+  --panel-elevated: #ffffff;
+  --glass: rgb(255 250 253 / 78%);
+  --glass-strong: rgb(255 250 253 / 94%);
+
+  --text: #272333;
+  --text-secondary: #494252;
+  --muted: #6f6474;
+  --muted-strong: #5a5160;
+
+  --line: #dfcbd5;
+  --line-strong: #c9afbd;
+  --line-soft: #f0e1e9;
+
+  --accent: #535369;
+  --accent-strong: #3d3d52;
+  --accent-soft: rgb(83 83 105 / 12%);
+  --accent-border: rgb(83 83 105 / 32%);
+  --accent-glow: rgb(83 83 105 / 18%);
+  --accent-on: #ffffff;
+  --brand-ink: #ffffff;
+
+  --danger: #ad3f61;
+  --danger-soft: rgb(201 97 125 / 12%);
+  --danger-border: rgb(201 97 125 / 36%);
+  --danger-strong: #8f2f4d;
+  --ok: #3f725e;
+  --ok-soft: rgb(63 114 94 / 12%);
+  --ok-border: rgb(63 114 94 / 32%);
+  --ok-strong: #2f5c4a;
+  --warning: #8e5146;
+  --warning-soft: rgb(183 121 107 / 14%);
+  --warning-border: rgb(183 121 107 / 38%);
+  --warning-strong: #754138;
+  --warning-text: #65352e;
+
+  --focus: #535369;
+  --focus-ring: 0 0 0 3px rgb(83 83 105 / 24%);
+  --shadow-xs: 0 1px 2px rgb(39 35 51 / 5%);
+  --shadow-sm: 0 1px 2px rgb(39 35 51 / 6%), 0 2px 8px rgb(39 35 51 / 5%);
+  --shadow-md: 0 8px 24px rgb(39 35 51 / 11%);
+  --shadow-lg: 0 16px 44px rgb(39 35 51 / 15%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px rgb(83 83 105 / 18%), 0 0 18px rgb(83 83 105 / 12%);
+
+  --code-frame-bg: #2e293a;
+  --code-bg: #393346;
+  --code-text: #f8f0f6;
+  --code-muted: #b4a7b3;
+  --code-border: rgb(255 250 253 / 16%);
+
+  --row-hover: rgb(83 83 105 / 6%);
+  --row-disabled: #f7e9f0;
+  --topbar-bg: rgb(255 250 253 / 90%);
+  --backdrop: rgb(39 35 51 / 32%);
+  --neutral-chip: #f0e3e9;
+  --toast-neutral: #7d7080;
+
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+}
+
+html[data-theme="sakura-mist"] .aurora {
+  display: none;
+}
+
+html[data-theme="sakura-mist"] .topbar::after {
+  background: rgb(83 83 105 / 28%);
+  opacity: 1;
+}
+
+html[data-theme="sakura-mist"] .panel p.log-rpm {
+  background: var(--accent-soft);
+}
