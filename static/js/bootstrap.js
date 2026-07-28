@@ -870,6 +870,15 @@ function splitList(value) {
     .filter(Boolean);
 }
 
+// Manual model entry splits on any whitespace so pasted, space-separated
+// model lists work directly. Commas are treated as whitespace too.
+function splitModelInput(value) {
+  return value
+    .split(/[\s,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function joinList(value) {
   return (value || []).join(", ");
 }

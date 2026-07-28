@@ -58,7 +58,7 @@ function setFormModels(models) {
 
 // Returns how many models the pending manual input actually added.
 function commitFormManualModels() {
-  const additions = uniqueList(splitList(formModelManualInput.value));
+  const additions = uniqueList(splitModelInput(formModelManualInput.value));
   if (additions.length === 0) {
     return 0;
   }
@@ -280,7 +280,7 @@ async function fetchModelsFromForm() {
 }
 
 function addManualModels() {
-  const additions = uniqueList(splitList(modelManualInput.value));
+  const additions = uniqueList(splitModelInput(modelManualInput.value));
   if (additions.length === 0) {
     modelManualInput.focus();
     return;
