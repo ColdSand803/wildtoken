@@ -641,6 +641,15 @@
                 <input id="api-key" autocomplete="off" spellcheck="false" placeholder="未配置时留空" />
                 <span class="field-hint">编辑时会显示当前密钥；复制渠道需重新填写。</span>
               </label>
+              <div class="toggle-list span-2">
+                <label class="toggle-row span-2">
+                  <input id="clear-api-key" type="checkbox" />
+                  <span>
+                    <strong>清空 API Key</strong>
+                    <small>编辑已有渠道时使用；保存后会移除当前渠道密钥。</small>
+                  </span>
+                </label>
+              </div>
             </div>
           </section>
 
@@ -720,13 +729,6 @@
                   <span>
                     <strong>自动权重</strong>
                     <small>失败扣分，成功和时间恢复；关闭后始终使用基础权重。</small>
-                  </span>
-                </label>
-                <label class="toggle-row">
-                  <input id="clear-api-key" type="checkbox" />
-                  <span>
-                    <strong>清空 API Key</strong>
-                    <small>编辑已有渠道时使用。</small>
                   </span>
                 </label>
               </div>
