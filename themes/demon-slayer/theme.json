@@ -1,0 +1,8 @@
+{
+  "id": "demon-slayer",
+  "label": "鬼灭之刃",
+  "css": "theme.css",
+  "swatch": ["#0b0d0c", "#3fbfa6"],
+  "version": "1.0.0",
+  "description": "Sumi-ink console theme with a checkered haori rail, seigaiha wave field, and water-breathing teal accents."
+}
