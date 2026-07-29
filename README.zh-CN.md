@@ -1,0 +1,291 @@
+# WildToken
+
+语言：[English](README.md) | 简体中文
+
+WildToken 是一个自托管的 LLM API 聚合网关，使用 Rust 编写。它向下游暴露 OpenAI 兼容的 `/v1/*` 接口和 Anthropic 兼容的 `/v1/messages` 接口，再根据显式渠道、模型规则、优先级、权重和运行时健康状态，把请求转发到合适的上游渠道。
+
+如果你想用一个稳定入口管理多个 LLM 提供商、隐藏上游 Key、给不同客户端发放下游令牌、查看请求日志和 Tokens 用量，并通过网页后台日常运维，WildToken 的定位就是这类 LLM API 聚合网关。
+
+## 特色功能
+
+- OpenAI 兼容网关：通过一个本地入口转发 Chat Completions、Responses、模型列表、流式响应以及其他 `/v1/*` 请求。
+- Anthropic Messages 兼容：`POST /v1/messages` 支持标准 `x-api-key` 和 `anthropic-version` 请求头，并转发到 Anthropic 兼容上游。
+- 多上游聚合：每个渠道可配置 Base URL、上游 API Key、模型名、模型映射、模型前缀和额外 Header。
+- 路由控制：支持 `X-WildToken-Upstream`、`?upstream=`、精确模型映射、模型名、前缀匹配、优先级分层、按权重随机和自动健康权重。
+- 重试与故障切换：自动路由失败后可重新选择渠道；再次选到同一渠道时遵守同渠道重试间隔。
+- 下游令牌管理：在后台创建客户端使用的 API Token；完整值只在创建时显示一次，数据库仅保存摘要和不可还原预览。
+- 管理看板：查看渠道状态、请求日志、Token 用量、Top 模型和渠道、延迟、运行指标以及请求/响应快照。
+- 渠道工具：支持拉取模型列表、测试连通性、测试指定模型，以及查询 new-api / sub2api 风格余额。
+- 正文保留策略：可以保留日志元数据，同时清理旧请求/响应正文，控制 SQLite 体积。
+- 主题包：后台支持 `themes/` 下的 CSS-only 主题包，不执行主题 JavaScript。
+- 桌面友好：Windows 发布包可在系统托盘运行；Linux、macOS、Docker 和源码运行保持普通服务模式。
+
+## 界面截图
+
+内置浅色与深色主题下的数据看板：
+
+| 浅色 | 深色 |
+| --- | --- |
+| ![内置浅色主题下的数据看板](screenshots/screenshot-light.png) | ![内置深色主题下的数据看板](screenshots/screenshot-dark.png) |
+
+使用 [`themes/`](themes/) 下 CSS-only 主题包渲染的使用日志页：
+
+| Ark | Bleach |
+| --- | --- |
+| ![Ark 主题下的使用日志页](screenshots/screenshot-ark.png) | ![Bleach 主题下的使用日志页](screenshots/screenshot-bleach.png) |
+
+## 快速启动
+
+### Docker Compose
+
+Docker Compose 是最简单的本地服务运行方式。
+
+```bash
+cp .env.example .env
+# 编辑 .env，把 ADMIN_TOKEN 设置为唯一的 8-256 字节可打印 ASCII 值。
+docker compose up -d --build
+curl -fsS http://127.0.0.1:3100/health
+```
+
+打开管理后台：
+
+```text
+http://127.0.0.1:3100/admin
+```
+
+Compose 会把 SQLite 数据保存到 `wildtoken-data` 卷，并发布 `3100` 端口。它还会把宿主机 `./themes` 只读挂载进容器，方便修改主题而不重建镜像。
+
+全新数据库如果监听非本机地址，必须显式设置 `ADMIN_TOKEN`，否则 WildToken 会拒绝启动。该 Token 必须是 8-256 字节、可打印 ASCII、不包含空格，且不能是 `change-me`。
+
+### 源码运行
+
+要求：
+
+- Rust 工具链与仓库 lockfile 兼容
+- 通过 `sqlx` 使用 SQLite
+
+本地运行：
+
+```bash
+cp .env.example .env
+# 仅本机首次启动时可不设置；暴露服务前必须设置强 Token。
+ADMIN_TOKEN=replace-with-a-long-random-token cargo run
+```
+
+源码运行默认监听 `127.0.0.1:3100`，数据库为 `sqlite:wildtoken.db?mode=rwc`。
+
+### Windows 桌面
+
+发布压缩包包含 `wildtoken.exe`。双击后会以系统托盘模式启动：
+
+- 左键单击或双击托盘图标可打开管理后台
+- 托盘菜单可打开后台或退出
+- 日志写入工作目录下的 `wildtoken.log`
+- 需要无托盘服务模式时，可设置 `WILDTOKEN_NO_TRAY=1`，或使用 `--no-tray` / `--console`
+
+Linux、macOS 和 Docker 版本仍按前台服务方式运行。
+
+## 首次配置
+
+1. 打开 `/admin`，使用 Admin Token 登录。
+2. 创建上游渠道，填写 Base URL、提供商 API Key、模型、模型映射、优先级、权重和可选 Header 覆盖。
+3. 使用渠道测试或模型测试确认上游可用。
+4. 在令牌页创建下游 Token。
+5. 客户端通过 `http://127.0.0.1:3100/v1/...` 调用 WildToken，使用下游 Token，不直接使用提供商 Key。
+
+上游提供商 Key 保存在服务端渠道记录中；客户端只需要 WildToken 下游令牌。
+
+## API 示例
+
+OpenAI 兼容 Chat Completions：
+
+```bash
+curl http://127.0.0.1:3100/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>' \
+  -d '{
+    "model": "gpt-4o-mini",
+    "messages": [{"role": "user", "content": "hello"}]
+  }'
+```
+
+Anthropic 兼容 Messages：
+
+```bash
+curl http://127.0.0.1:3100/v1/messages \
+  -H 'Content-Type: application/json' \
+  -H 'x-api-key: <DOWNSTREAM_TOKEN>' \
+  -H 'anthropic-version: 2023-06-01' \
+  -d '{
+    "model": "claude-sonnet-4-20250514",
+    "max_tokens": 128,
+    "messages": [{"role": "user", "content": "hello"}]
+  }'
+```
+
+本地聚合模型列表：
+
+```bash
+curl http://127.0.0.1:3100/v1/models \
+  -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>'
+```
+
+按名称或 ID 强制指定渠道：
+
+```bash
+curl http://127.0.0.1:3100/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>' \
+  -H 'X-WildToken-Upstream: openai' \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}'
+```
+
+## 路由模型
+
+WildToken 按以下顺序选择上游：
+
+1. `X-WildToken-Upstream` 请求头或 `?upstream=` 查询参数按渠道名称或 ID 指定渠道。
+2. 请求 JSON 中的 `model` 精确匹配渠道模型映射 key 或模型名。
+3. 同一个 `model` 再匹配模型前缀、渠道名前缀和渠道名后缀。
+4. 在启用的候选渠道中，最高 `priority` 层获胜。
+5. 在同一优先级内按权重随机；开启自动权重时，有效权重为 `基础权重 * 运行时健康分`。
+
+如果更高优先级层内所有渠道的有效权重都降为 0，WildToken 会回退到下一优先级。当渠道恢复到正权重后，高优先级层会重新接管流量。
+
+显式指定渠道会跳过自动池选择。自动重试每次都会重新选择渠道；选到不同渠道立即重试，选回同一渠道则等待配置的同渠道重试间隔。
+
+## 模型映射
+
+模型映射允许客户端使用稳定的下游模型名，由 WildToken 在转发前改写请求体。
+
+示例：
+
+```text
+gpt-4o-mini => provider-specific-fast-model
+```
+
+客户端仍发送 `"model": "gpt-4o-mini"`。上游收到的是 `"model": "provider-specific-fast-model"`，日志中会同时记录请求模型名和上游模型名。
+
+`GET /v1/models` 由本地启用渠道配置聚合，返回：
+
+- 精确 `model_names`
+- `model_mappings` 的 key，也就是下游可见名称
+
+`model_prefixes` 只是路由规则，不会展开成具体模型 ID。需要出现在 `/v1/models` 中时，请添加精确模型名或模型映射 key。
+
+按渠道过滤模型：
+
+```bash
+curl 'http://127.0.0.1:3100/v1/models?upstream=openai' \
+  -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>'
+```
+
+## Header 覆盖
+
+每个渠道可以配置静态 Header 和选定的客户端 Header 透传：
+
+```json
+{
+  "User-Agent": "{client_header:User-Agent}",
+  "X-Provider-Route": "premium"
+}
+```
+
+渠道配置 Header 会在下游 Header、协议默认 Header 和渠道 API Key 之后应用，所以同名 Header 以渠道配置为准。
+
+`{client_header:<Header-Name>}` 仅在下游请求存在对应 Header 时复制。它不能复制下游 `Authorization` 或 `x-api-key`，也不能覆盖 `Host`、`Content-Length`、`X-WildToken-Upstream` 等传输或内部 Header。
+
+静态覆盖会用于正常转发、渠道测试、模型拉取、模型测试和余额查询。客户端 Header 透传只在正常转发中生效，因为只有这类请求有下游请求上下文。
+
+## 配置
+
+默认配置位于 [`config/default.toml`](config/default.toml)：
+
+```toml
+[server]
+host = "127.0.0.1"
+port = 3100
+
+[database]
+url = "sqlite:wildtoken.db?mode=rwc"
+max_connections = 3
+
+[upstream]
+default_timeout_seconds = 300.0
+
+[admin]
+token = "change-me"
+
+[themes]
+dir = "themes"
+```
+
+配置加载顺序：
+
+1. `config/default.toml`
+2. 可选的 `config/<RUN_ENV>.toml`
+3. 带 `APP__` 前缀的环境变量，例如 `APP__SERVER__PORT=3100`
+4. `.env` 里的兼容变量：`ADMIN_TOKEN`、`DATABASE_URL`、`WILDTOKEN_THEME_DIR`
+
+常用环境变量：
+
+```bash
+APP__SERVER__HOST=127.0.0.1
+APP__SERVER__PORT=3100
+DATABASE_URL='sqlite:wildtoken.db?mode=rwc'
+APP__DATABASE__MAX_CONNECTIONS=3
+APP__LOGGING__LOG_QUEUE_CAPACITY=512
+APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS=300
+WILDTOKEN_THEME_DIR=themes
+TOKIO_WORKER_THREADS=4
+RUST_LOG=info
+```
+
+`ADMIN_TOKEN` 只用于初始化新数据库中的管理员凭证。SQLite 里已有管理员凭证后，请在后台的“设置 -> 安全”中更换；修改 `.env` 不会轮换或重置已有凭证。
+
+## 可观测性与保留策略
+
+管理后台包含：
+
+- 请求、Tokens、渠道状态和运行态 KPI
+- 按请求数或 Token 用量统计的 Top 模型和 Top 渠道
+- 请求日志搜索和筛选
+- 下游请求、上游请求、上游响应快照
+- 首字延迟、总耗时、Token 数、缓存命中 Token 和提供商返回的 reasoning Token
+- 服务端日志正文保留、完整日志保留和快照字节上限
+
+日志元数据和正文快照分开存储。WildToken 可以清理旧正文快照，同时保留状态码、渠道、模型、Token 用量、延迟和 Header。SQLite 使用增量 vacuum，避免清理正文后空闲页长期累积。
+
+## 主题
+
+内置浅色/深色主题位于 `static/css/`。可选主题包位于 [`themes/`](themes/)，详见 [`themes/README.md`](themes/README.md)。
+
+一个主题包包含 `theme.json` 清单和 CSS 文件。主题 CSS 应以 `html[data-theme="<id>"]` 为作用域，并覆盖 CSS 变量。WildToken 会把主题 CSS 作为同源静态文件加载，不执行主题包中的 JavaScript。
+
+## 安全说明
+
+- 在可信机器或内网之外暴露 WildToken 前，请放到 TLS 和常规网络访问控制之后。
+- 非 localhost 监听必须使用强 `ADMIN_TOKEN`；暴露前请轮换遗留的 `change-me` 凭证。
+- 不要把 `.env`、SQLite 数据、日志或带真实配置的发布压缩包提交到公开仓库。
+- 下游 API Token 存储为 SHA-256 摘要和不可还原预览；完整值只在创建时显示一次。
+- 提供商 API Key 只应由服务端注入上游请求，不应分发给下游客户端。
+- 管理 API 同源访问并要求 `x-admin-token`；兼容性 `/v1/*` API 会为下游客户端开启 CORS。
+
+## 开发检查
+
+发布变更前常用检查：
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+docker compose up -d --build
+curl -fsS http://127.0.0.1:3100/health
+docker compose ps
+```
+
+如果只修改后台 JavaScript，也应按触及文件运行仓库里的 Node 检查，例如 `node --check` 或 `tests/*.mjs` 中的主题契约测试。
+
+## 发布
+
+推送与 `Cargo.toml` 版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。发布压缩包包含运行所需的 `static/`、`config/`、`themes/` 目录以及 `SHA256SUMS`。当前发布目标包括 Windows x86_64、Linux x86_64 GNU 和 macOS Universal。

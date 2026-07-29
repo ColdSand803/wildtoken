@@ -1199,6 +1199,14 @@ html[data-theme="crt"] .effective-zero-note {
   font-family: var(--font-mono);
 }
 
+/* Every CRT hue is the same green phosphor, so name and mapping chips collide.
+   Give mappings the classic amber phosphor — the one alternate CRT color. */
+html[data-theme="crt"] .model-chip.mapping {
+  background: rgb(255 176 0 / 18%);
+  border-color: rgb(255 176 0 / 55%);
+  color: #ffc23d;
+}
+
 html[data-theme="crt"] .dashboard-kpis,
 html[data-theme="crt"] .dashboard-window-kpis,
 html[data-theme="crt"] .dashboard-grid,

@@ -371,6 +371,12 @@ html:has(dialog:modal) {
   margin: 2px 0 0;
 }
 
+.form-section-head-actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
 .form-grid {
   display: grid;
   gap: 12px;
@@ -431,15 +437,15 @@ html:has(dialog:modal) {
   border-radius: var(--radius);
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 52px;
   padding: 8px;
-  transition: border-color var(--transition), background-color var(--transition), box-shadow var(--transition);
+  transition: min-height var(--transition), background-color var(--transition);
 }
 
-.model-picker:focus-within {
-  border-color: var(--focus);
-  box-shadow: var(--focus-ring);
+/* A read-only display area for selected chips; collapse when there's nothing. */
+.model-picker:has(.model-selection-empty) {
+  background: transparent;
+  border-style: dashed;
+  padding: 6px 8px;
 }
 
 .model-selection-preview {
@@ -448,13 +454,17 @@ html:has(dialog:modal) {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  min-height: 34px;
   min-width: 0;
+}
+
+.model-picker:has(.model-selection-chip) .model-selection-preview,
+.model-picker:has(.model-selection-more) .model-selection-preview {
+  min-height: 34px;
 }
 
 .model-selection-empty {
   color: var(--muted);
-  font-size: var(--text-base);
+  font-size: var(--text-sm);
   padding: 0 4px;
 }
 
@@ -472,6 +482,12 @@ html:has(dialog:modal) {
   max-width: min(240px, 100%);
   min-height: 28px;
   padding: 2px 3px 2px 8px;
+}
+
+.model-selection-chip.is-mapping {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
 }
 
 .model-selection-chip-name {
@@ -901,6 +917,20 @@ dialog.is-maximized .log-detail-panel {
 
 .model-option.is-selected {
   background: var(--accent-soft);
+}
+
+.model-option.is-mapping {
+  grid-template-columns: auto auto minmax(0, 1fr);
+}
+
+.model-option-tag {
+  background: var(--accent-border);
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  padding: 2px 6px;
+  white-space: nowrap;
 }
 
 .model-option input {

@@ -1001,6 +1001,14 @@ html[data-theme="minecraft"] .effective-zero-note {
   font-weight: 600;
 }
 
+/* Name chip is grass green and mapping green sits in the same family — too
+   close in the match column. Recolor mappings with the theme's gold. */
+html[data-theme="minecraft"] .model-chip.mapping {
+  background: rgb(226 185 59 / 22%);
+  border-color: #000000;
+  color: #ffd966;
+}
+
 html[data-theme="minecraft"] .dashboard-kpis,
 html[data-theme="minecraft"] .dashboard-window-kpis,
 html[data-theme="minecraft"] .dashboard-grid,
