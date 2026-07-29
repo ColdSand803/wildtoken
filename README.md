@@ -1,144 +1,119 @@
 # WildToken
 
-WildToken 是一个 Rust 版 OpenAI 与 Anthropic Messages API 兼容的 LLM API 中转服务，监听 `3100` 端口。它向下游暴露 `/v1/*` API，并按渠道配置把请求转发到不同上游服务。
+Language: English | [Simplified Chinese](README.zh-CN.md)
 
-## 启动
+WildToken is a self-hosted LLM API aggregation gateway written in Rust. It
+exposes OpenAI-compatible `/v1/*` endpoints and an Anthropic-compatible
+`/v1/messages` endpoint, then routes each downstream request to the right
+upstream channel by explicit channel hints, model rules, priority, weight, and
+runtime health.
 
-本地开发：
+Use it when you want one stable API entrypoint for multiple LLM providers,
+private provider keys, per-client downstream tokens, request observability, and
+an admin console for day-to-day operations.
+
+## Highlights
+
+- OpenAI-compatible gateway: forward Chat Completions, Responses, model-list,
+  streaming, and other `/v1/*` requests through one local endpoint.
+- Anthropic Messages compatibility: `POST /v1/messages` accepts standard
+  `x-api-key` and `anthropic-version` headers and forwards them to
+  Anthropic-compatible upstreams.
+- Multi-upstream aggregation: configure channels with base URLs, provider API
+  keys, model names, model mappings, model prefixes, and per-channel headers.
+- Routing controls: select by `X-WildToken-Upstream`, `?upstream=`, exact model
+  mappings, model names, prefixes, priority layers, weighted random choice, and
+  automatic health-based effective weight.
+- Retry and failover policy: failed automatic routes can reselect another
+  channel, while same-channel retries respect the configured delay.
+- Downstream token management: create client-facing API tokens in the admin
+  console; full token values are shown once, and the database stores only
+  hashes plus irreversible previews.
+- Admin dashboard: inspect channel status, request logs, token usage, top
+  models/channels, latency, runtime metrics, and request/response snapshots.
+- Channel tools: fetch model lists, test connectivity, test a selected model,
+  and query new-api/sub2api-style balances from the console.
+- Body retention controls: keep metadata while pruning old request/response
+  bodies to limit SQLite growth.
+- Theme packs: optional CSS-only admin themes under `themes/`, loaded without
+  executing theme JavaScript.
+- Desktop-friendly release mode: Windows builds can run from the system tray;
+  Linux, macOS, Docker, and source builds run as normal services.
+
+## Quick Start
+
+### Docker Compose
+
+Docker Compose is the easiest way to run WildToken as a local service.
 
 ```bash
-cargo run
-```
-
-Docker：
-
-```bash
+cp .env.example .env
+# Edit .env and set ADMIN_TOKEN to a unique 8-256 byte printable ASCII value.
 docker compose up -d --build
+curl -fsS http://127.0.0.1:3100/health
 ```
 
-管理界面：
+Open the admin console:
 
 ```text
 http://127.0.0.1:3100/admin
 ```
 
-### Windows 桌面
+The Compose file stores SQLite data in the `wildtoken-data` volume and publishes
+port `3100`. It also mounts `./themes` read-only into the container so theme
+changes do not require an image rebuild.
 
-解压发布包后双击 `wildtoken.exe` 会进入**系统托盘**模式（无黑色控制台窗口）：
+For a brand-new database listening beyond localhost, WildToken refuses to start
+unless `ADMIN_TOKEN` is explicitly set. The token must be 8-256 bytes, printable
+ASCII, contain no spaces, and not be `change-me`.
 
-- 托盘菜单：**打开管理后台**、**退出**
-- 左键单击 / 双击托盘图标也可打开管理后台
-- 运行日志写入工作目录下的 `wildtoken.log`
-- 需要无托盘的纯服务模式（CI、脚本、远程会话）时设置环境变量 `WILDTOKEN_NO_TRAY=1`，或启动参数 `--no-tray` / `--console`
+### From Source
 
-Linux、macOS 与 Docker 仍为前台控制台服务，行为不变。
+Requirements:
 
-管理界面和管理接口（`/api/admin/*`）需要 Admin Token。首次启动时可以从 `.env.example` 复制一份 `.env`，通过 `ADMIN_TOKEN` 设置初始凭证；之后可在管理界面的「设置 > 安全」中自行填写并更换。全新数据库若监听非本机地址，必须显式提供 8–256 字节、非 `change-me` 的可打印 ASCII 凭证，否则服务会拒绝启动。本机首次启动仍兼容 `change-me`，但应登录后立即更换。
+- Rust toolchain compatible with the repository lockfile
+- SQLite support through `sqlx`
 
-下游 API 令牌在管理界面的「令牌」页创建和管理。完整值仅在创建成功时返回一次；数据库只保存 SHA-256 摘要和不可还原的预览，已有明文令牌会在升级启动时自动迁移且原令牌继续有效。
-
-## 配置
-
-默认配置在 `config/default.toml`：
-
-```toml
-[server]
-host = "127.0.0.1"
-port = 3100
-
-[database]
-url = "sqlite:wildtoken.db?mode=rwc"
-max_connections = 3
-sqlite_cache_size_kib = 2048
-sqlite_statement_cache_capacity = 32
-sqlite_mmap_size_bytes = 0
-idle_timeout_seconds = 60
-
-[logging]
-log_queue_capacity = 512
-
-[upstream]
-default_timeout_seconds = 300.0
-
-[admin]
-token = "change-me"
-
-[themes]
-dir = "themes"
-```
-
-也可以用环境变量覆盖，例如：
+Run locally:
 
 ```bash
-TOKIO_WORKER_THREADS=4 APP__SERVER__PORT=3100 APP__DATABASE__MAX_CONNECTIONS=3 APP__LOGGING__LOG_QUEUE_CAPACITY=512 DATABASE_URL='sqlite:wildtoken.db?mode=rwc' cargo run
+cp .env.example .env
+# Optional for localhost-only first boot, required before exposing the service.
+ADMIN_TOKEN=replace-with-a-long-random-token cargo run
 ```
 
-原生运行默认只监听本机；Docker 会在容器内显式覆盖为 `0.0.0.0`。为兼容旧配置，`.env` 里的 `ADMIN_TOKEN`、`DATABASE_URL` 也会被读取。`ADMIN_TOKEN` 只用于首次初始化数据库中的管理员凭证，已初始化后的凭证以数据库记录为准，修改 `.env` 不会覆盖或重置已有凭证。`themes.dir` 可用 `APP__THEMES__DIR` 或 `WILDTOKEN_THEME_DIR` 覆盖。
+By default, source runs bind to `127.0.0.1:3100` and use
+`sqlite:wildtoken.db?mode=rwc`.
 
-## 主题插件
+### Windows Desktop
 
-管理界面的默认深色/浅色主题仍从 `static/css/*.css` 加载；其他主题都作为 CSS-only 主题包放在 `themes/` 下。随仓库提供的 Win95、动物岛、赛博朋克、像素、CRT、我的世界、Bleach、Endfield 和樱雾灰紫都不再内嵌到主样式表，但会随发布压缩包和 Docker 镜像一起分发。Docker Compose 另外把宿主机 `./themes` 只读挂载到容器的 `/app/themes`，该挂载会覆盖镜像内自带的同名目录。
+Release archives include `wildtoken.exe`. Double-clicking it starts WildToken in
+system-tray mode:
 
-每个主题包是 `themes/` 下的一个子目录，含一份 `theme.json` 清单和它指向的 `.css` 文件；主题 CSS 以 `html[data-theme="<id>"]` 为顶层选择器，通过覆盖 CSS 变量改变外观。WildToken 只读取清单并按同源静态文件加载 CSS，不执行主题包里的 JavaScript。
+- left-click or double-click the tray icon to open the admin console
+- use the tray menu to open the console or quit
+- logs are written to `wildtoken.log` in the working directory
+- set `WILDTOKEN_NO_TRAY=1`, or pass `--no-tray` / `--console`, for service or CI
+  usage without the tray UI
 
-清单字段、可用的 CSS 变量清单和调试方式见 [`themes/README.md`](themes/README.md)。
+Linux, macOS, and Docker builds keep the foreground service behavior.
 
-## 路由规则
+## First Configuration
 
-请求会按以下顺序选择渠道：
+1. Open `/admin` and log in with the Admin Token.
+2. Create an upstream channel with its base URL, provider API key, models, model
+   mappings, priority, weight, and optional header overrides.
+3. Use the channel test or model test action to verify provider connectivity.
+4. Create a downstream token on the Tokens page.
+5. Call WildToken through `http://127.0.0.1:3100/v1/...` using the downstream
+   token instead of the provider key.
 
-1. `X-WildToken-Upstream` 请求头或 `?upstream=` 查询参数指定渠道名称/ID。
-2. JSON 请求体里的 `model` 精确匹配渠道的模型映射 key 或模型全名，两者匹配强度相同。
-3. 其次匹配模型前缀、模型名前缀、模型名后缀。
-4. 使用已启用渠道中 `priority` 最大的一组，同优先级随机选择。
+Provider API keys stay on the server-side channel records. Clients only need
+their downstream WildToken token.
 
-如果渠道配置了 API Key，WildToken 会把转发请求的 `Authorization` 改为该渠道的 Key。请求体、路径、查询参数和方法会按原样转发；如果配置了模型映射，转发时会重写请求体中的 `model`。
+## API Examples
 
-每个渠道还可以在管理界面的「高级设置」中配置 Header 覆盖。例如：
-
-```json
-{
-  "User-Agent": "{client_header:User-Agent}",
-  "X-Provider-Route": "premium"
-}
-```
-
-Header 名大小写不敏感，配置值会在下游请求头、协议默认头和渠道 API Key 之后写入，因此同名 Header 以渠道配置为准。值完全写成 `{client_header:<Header-Name>}` 时，会读取对应下游 Header；下游没有该值时跳过这条覆盖。出于凭证隔离要求，不能读取下游 `Authorization` 或 `x-api-key`。
-
-`Host`、`Content-Length` 等传输头以及 `X-WildToken-Upstream` 内部路由头不可覆盖。静态覆盖同时用于正常转发、渠道测试、模型拉取、模型测试和余额查询；`client_header` 占位符仅在正常转发有下游请求上下文时生效。
-
-调用 `/v1/*` 需要携带令牌管理页中启用的下游令牌。
-
-## 日志存储
-
-请求日志的元数据与正文快照分表存储。服务每分钟清理超出“正文保留数量”的旧快照正文，同时保留状态码、渠道、模型、Tokens、耗时与 Headers 等元数据；超过“日志保留天数”的完整日志按小时删除。SQLite 使用增量自动回收模式，避免正文清理后空闲页长期累积。
-
-## 发布
-
-发布前建议先在本地完成一次基础回归：
-
-```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
-docker compose up -d --build
-curl -fsS http://127.0.0.1:3100/health
-docker compose ps
-```
-
-确认工作区干净、`Cargo.toml` 版本号已更新后，再创建并推送版本标签。
-
-推送与 `Cargo.toml` 版本一致的 `v*` 标签后，GitHub Actions 会创建 Release，并生成以下未签名产物及 `SHA256SUMS`：
-
-- Windows x86_64
-- Linux x86_64（GNU，基于 Ubuntu 22.04）
-- macOS Universal（Intel 与 Apple Silicon）
-
-也可以从 Actions 页面手动运行发布流程并填写一个已经存在的版本标签。压缩包包含运行所需的 `static/`、`config/` 与 `themes/`，解压后应在该目录中启动 WildToken。Windows 双击 `wildtoken.exe` 进入系统托盘；日志见同目录 `wildtoken.log`。Windows SmartScreen 或 macOS Gatekeeper 可能会提示未签名程序。
-
-`POST /v1/messages` 兼容 Anthropic Messages API：可用标准的 `x-api-key` 下游令牌和 `anthropic-version` 请求头。请求、响应和 SSE 事件均原样透传；为此类请求配置渠道 API Key 时，WildToken 会向上游使用 `x-api-key`，并在未指定时补充 `anthropic-version: 2023-06-01`。因此该渠道的 Base URL 应指向 Anthropic 兼容上游（例如 `https://api.anthropic.com`）。
-
-## 下游调用示例
+OpenAI-compatible Chat Completions:
 
 ```bash
 curl http://127.0.0.1:3100/v1/chat/completions \
@@ -150,7 +125,7 @@ curl http://127.0.0.1:3100/v1/chat/completions \
   }'
 ```
 
-Anthropic Messages API：
+Anthropic-compatible Messages:
 
 ```bash
 curl http://127.0.0.1:3100/v1/messages \
@@ -164,24 +139,213 @@ curl http://127.0.0.1:3100/v1/messages \
   }'
 ```
 
-## 模型列表
+Aggregated local model list:
 
-`GET /v1/models` 由 WildToken 本地聚合，不转发上游。返回所有**启用**渠道配置里的：
+```bash
+curl http://127.0.0.1:3100/v1/models \
+  -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>'
+```
 
-- `model_names` 精确模型名
-- `model_mappings` 的 **key**（下游请求名）
+Force a specific channel by name or ID:
 
-`model_prefixes` 只是路由匹配规则，**不会**展开成具体模型 id，因此仅配置了前缀的渠道不会出现在列表中。需要出现在列表里时，请把具体模型写进 `model_names` 或 `model_mappings`。
+```bash
+curl http://127.0.0.1:3100/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>' \
+  -H 'X-WildToken-Upstream: openai' \
+  -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}'
+```
 
-可按渠道过滤（名称或 id）：
+## Routing Model
+
+WildToken chooses an upstream in this order:
+
+1. `X-WildToken-Upstream` header or `?upstream=` query parameter selects a
+   channel by name or ID.
+2. Request JSON `model` exact-matches a channel model-mapping key or model name.
+3. The same `model` is matched against configured model prefixes, upstream-name
+   prefixes, and upstream-name suffixes.
+4. Among enabled candidates, the highest `priority` layer wins.
+5. Within that priority layer, WildToken performs weighted random selection.
+   When automatic weight is enabled, effective weight is
+   `base weight * runtime health score`.
+
+If every channel in a higher-priority layer has zero effective weight,
+WildToken falls back to the next priority layer. When a channel recovers above
+zero, the higher-priority layer can take traffic again.
+
+Explicit channel selection bypasses pool selection. Automatic retries re-run
+selection for each attempt; selecting another channel retries immediately, while
+selecting the same channel waits for the configured same-channel retry interval.
+
+## Model Mapping
+
+Model mappings let clients use a stable downstream model name while WildToken
+rewrites the request body before forwarding upstream.
+
+Example:
+
+```text
+gpt-4o-mini => provider-specific-fast-model
+```
+
+The client still sends `"model": "gpt-4o-mini"`. The upstream receives
+`"model": "provider-specific-fast-model"`, and logs show both request and
+upstream model names.
+
+`GET /v1/models` is aggregated locally from enabled upstream configuration. It
+returns:
+
+- exact `model_names`
+- `model_mappings` keys, which are the downstream-facing names
+
+`model_prefixes` are only routing rules and are not expanded into concrete model
+IDs. Add exact model names or mapping keys if a model should appear in
+`/v1/models`.
+
+Filter models to one channel:
 
 ```bash
 curl 'http://127.0.0.1:3100/v1/models?upstream=openai' \
   -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>'
-
-curl http://127.0.0.1:3100/v1/models \
-  -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>' \
-  -H 'X-WildToken-Upstream: openai'
 ```
 
-未指定渠道时结果会缓存；创建/更新/启停/调整优先级/删除渠道后缓存失效。指定渠道的请求不走该全局缓存。
+## Header Overrides
+
+Each channel can define static headers and selected client-header passthroughs:
+
+```json
+{
+  "User-Agent": "{client_header:User-Agent}",
+  "X-Provider-Route": "premium"
+}
+```
+
+Configured headers are applied after downstream headers, protocol defaults, and
+the channel API key, so channel configuration wins on duplicate names.
+
+`{client_header:<Header-Name>}` copies a downstream header only when that value
+exists. It cannot copy downstream `Authorization` or `x-api-key`, and transport
+or internal headers such as `Host`, `Content-Length`, and
+`X-WildToken-Upstream` cannot be overridden.
+
+Static overrides apply to normal forwarding, channel tests, model fetching,
+model tests, and balance queries. Client-header passthrough only applies during
+normal forwarding, where a downstream request context exists.
+
+## Configuration
+
+Default settings live in [`config/default.toml`](config/default.toml):
+
+```toml
+[server]
+host = "127.0.0.1"
+port = 3100
+
+[database]
+url = "sqlite:wildtoken.db?mode=rwc"
+max_connections = 3
+
+[upstream]
+default_timeout_seconds = 300.0
+
+[admin]
+token = "change-me"
+
+[themes]
+dir = "themes"
+```
+
+Configuration sources are loaded in this order:
+
+1. `config/default.toml`
+2. optional `config/<RUN_ENV>.toml`
+3. environment variables with the `APP__` prefix, for example
+   `APP__SERVER__PORT=3100`
+4. compatibility variables from `.env`: `ADMIN_TOKEN`, `DATABASE_URL`, and
+   `WILDTOKEN_THEME_DIR`
+
+Common environment variables:
+
+```bash
+APP__SERVER__HOST=127.0.0.1
+APP__SERVER__PORT=3100
+DATABASE_URL='sqlite:wildtoken.db?mode=rwc'
+APP__DATABASE__MAX_CONNECTIONS=3
+APP__LOGGING__LOG_QUEUE_CAPACITY=512
+APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS=300
+WILDTOKEN_THEME_DIR=themes
+TOKIO_WORKER_THREADS=4
+RUST_LOG=info
+```
+
+`ADMIN_TOKEN` is used only to initialize a new database credential. After the
+admin credential exists in SQLite, change it from the admin console under
+Settings -> Security; editing `.env` will not rotate or reset it.
+
+## Observability and Retention
+
+The admin console includes:
+
+- dashboard KPIs for requests, tokens, channel status, and runtime state
+- top models and channels by request count or token usage
+- request log search and filtering
+- downstream request, upstream request, and upstream response snapshots
+- first-token latency, total duration, token counts, cache-hit tokens, and
+  reasoning-token fields when providers report them
+- server-side log body retention, full-log retention, and snapshot byte limits
+
+Log metadata and body snapshots are stored separately. WildToken can prune old
+snapshot bodies while keeping status code, channel, model, token usage, latency,
+and headers. SQLite incremental vacuum keeps reclaimed pages from accumulating
+indefinitely.
+
+## Themes
+
+Built-in light and dark themes live under `static/css/`. Optional theme packs
+live under [`themes/`](themes/) and are documented in
+[`themes/README.md`](themes/README.md).
+
+A theme pack contains a `theme.json` manifest and CSS files. Theme CSS should be
+scoped under `html[data-theme="<id>"]` and override CSS variables. WildToken
+loads theme CSS as same-origin static files and does not execute JavaScript from
+theme packs.
+
+## Security Notes
+
+- Put WildToken behind TLS and normal network controls before exposing it
+  outside a trusted machine or network.
+- Use a strong `ADMIN_TOKEN` for any non-localhost bind and rotate the legacy
+  `change-me` credential before exposure.
+- Keep `.env`, SQLite data, logs, and release archives with live configuration
+  out of public repositories.
+- Downstream API tokens are stored as SHA-256 digests plus irreversible previews;
+  the full token is displayed only once at creation time.
+- Provider API keys are injected into upstream requests server-side and should
+  never be distributed to downstream clients.
+- Admin APIs are same-origin and require `x-admin-token`; compatibility `/v1/*`
+  APIs are intentionally CORS-enabled for downstream clients.
+
+## Development Checks
+
+Useful local checks before shipping a change:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --all-targets
+docker compose up -d --build
+curl -fsS http://127.0.0.1:3100/health
+docker compose ps
+```
+
+For JavaScript-only changes in the admin console, also run the repository's
+Node-based checks that match the touched files, for example `node --check` or
+the theme contract tests under `tests/*.mjs`.
+
+## Releases
+
+Pushing a `v*` tag matching the `Cargo.toml` version creates a GitHub Release
+through Actions. Release archives include the required `static/`, `config/`, and
+`themes/` directories plus `SHA256SUMS`. Current release targets are Windows
+x86_64, Linux x86_64 GNU, and macOS Universal.
