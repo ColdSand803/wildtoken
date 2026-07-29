@@ -12,49 +12,49 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/theme-packs/anthropic-dark/fonts/lora-latin-400-normal.woff2") format("woff2");
+  src: url("/static/fonts/anthropic/lora-latin-400-normal.woff2") format("woff2");
 }
 @font-face {
   font-family: "Lora";
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url("/theme-packs/anthropic-dark/fonts/lora-latin-600-normal.woff2") format("woff2");
+  src: url("/static/fonts/anthropic/lora-latin-600-normal.woff2") format("woff2");
 }
 @font-face {
   font-family: "Poppins";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/theme-packs/anthropic-dark/fonts/poppins-latin-400-normal.woff2") format("woff2");
+  src: url("/static/fonts/anthropic/poppins-latin-400-normal.woff2") format("woff2");
 }
 @font-face {
   font-family: "Poppins";
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url("/theme-packs/anthropic-dark/fonts/poppins-latin-500-normal.woff2") format("woff2");
+  src: url("/static/fonts/anthropic/poppins-latin-500-normal.woff2") format("woff2");
 }
 @font-face {
   font-family: "Poppins";
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url("/theme-packs/anthropic-dark/fonts/poppins-latin-600-normal.woff2") format("woff2");
+  src: url("/static/fonts/anthropic/poppins-latin-600-normal.woff2") format("woff2");
 }
 @font-face {
   font-family: "Poppins";
   font-style: normal;
   font-weight: 700;
   font-display: swap;
-  src: url("/theme-packs/anthropic-dark/fonts/poppins-latin-700-normal.woff2") format("woff2");
+  src: url("/static/fonts/anthropic/poppins-latin-700-normal.woff2") format("woff2");
 }
 @font-face {
   font-family: "JetBrains Mono";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/theme-packs/anthropic-dark/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2");
+  src: url("/static/fonts/anthropic/jetbrains-mono-latin-400-normal.woff2") format("woff2");
 }
 
 html[data-theme="anthropic-dark"] {

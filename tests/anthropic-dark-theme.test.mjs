@@ -11,7 +11,7 @@ const adminHtml = read("static/admin.html");
 test("Anthropic Dark manifest exposes the dark brand palette", () => {
   assert.deepEqual(manifest, {
     id: "anthropic-dark",
-    label: "Anthropic 深色",
+    label: "A/ dark",
     css: "theme.css",
     swatch: ["#141413", "#d97757"],
     version: "1.0.0",
@@ -37,12 +37,12 @@ test("Anthropic Dark defines scoped slate surfaces and a clay accent", () => {
   assert.match(css, /font-family: "Lora", Georgia/);
 });
 
-test("Anthropic Dark self-hosts its OFL fonts from the pack directory", () => {
+test("Anthropic Dark loads its OFL fonts from the shared static font directory", () => {
   for (const face of [
-    "/theme-packs/anthropic-dark/fonts/lora-latin-400-normal.woff2",
-    "/theme-packs/anthropic-dark/fonts/lora-latin-600-normal.woff2",
-    "/theme-packs/anthropic-dark/fonts/poppins-latin-400-normal.woff2",
-    "/theme-packs/anthropic-dark/fonts/jetbrains-mono-latin-400-normal.woff2",
+    "/static/fonts/anthropic/lora-latin-400-normal.woff2",
+    "/static/fonts/anthropic/lora-latin-600-normal.woff2",
+    "/static/fonts/anthropic/poppins-latin-400-normal.woff2",
+    "/static/fonts/anthropic/jetbrains-mono-latin-400-normal.woff2",
   ]) {
     assert.ok(css.includes(`url("${face}") format("woff2")`), `missing @font-face for ${face}`);
   }
@@ -54,7 +54,7 @@ test("Anthropic Dark is available before and after theme registry initialization
   const cssHref = "/theme-packs/anthropic-dark/theme.css";
   assert.match(
     events,
-    /\{ id: "anthropic-dark", label: "Anthropic 深色", swatch: \["#141413", "#d97757"\], css: "\/theme-packs\/anthropic-dark\/theme\.css", description: ".*" \}/,
+    /\{ id: "anthropic-dark", label: "A\/ dark", swatch: \["#141413", "#d97757"\], css: "\/theme-packs\/anthropic-dark\/theme\.css", description: ".*" \}/,
   );
   assert.ok(adminHtml.includes(`"anthropic-dark": "${cssHref}"`));
 });

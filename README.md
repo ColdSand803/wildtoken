@@ -89,7 +89,7 @@ TOKIO_WORKER_THREADS=4 APP__SERVER__PORT=3100 APP__DATABASE__MAX_CONNECTIONS=3 A
 
 ## 主题插件
 
-管理界面的默认深色/浅色主题仍从 `static/css/*.css` 加载；其他主题都作为 CSS-only 主题包放在 `themes/` 下。随仓库提供的 Win95、动物岛、赛博朋克、像素、CRT、我的世界、Bleach、Endfield、樱雾灰紫、Anthropic 和 Anthropic 深色都不再内嵌到主样式表，但会随发布压缩包和 Docker 镜像一起分发。Docker Compose 另外把宿主机 `./themes` 只读挂载到容器的 `/app/themes`，该挂载会覆盖镜像内自带的同名目录。
+管理界面的默认深色/浅色主题仍从 `static/css/*.css` 加载；其他主题都作为 CSS-only 主题包放在 `themes/` 下。随仓库提供的 Win95、动物岛、赛博朋克、像素、CRT、我的世界、Bleach、Endfield、樱雾灰紫、A/ 和 A/都不再内嵌到主样式表，但会随发布压缩包和 Docker 镜像一起分发。Docker Compose 另外把宿主机 `./themes` 只读挂载到容器的 `/app/themes`，该挂载会覆盖镜像内自带的同名目录。
 
 每个主题包是 `themes/` 下的一个子目录，含一份 `theme.json` 清单和它指向的 `.css` 文件；主题 CSS 以 `html[data-theme="<id>"]` 为顶层选择器，通过覆盖 CSS 变量改变外观。WildToken 只读取清单并按同源静态文件加载 CSS，不执行主题包里的 JavaScript。
 

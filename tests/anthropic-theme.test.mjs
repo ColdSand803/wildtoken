@@ -11,7 +11,7 @@ const adminHtml = read("static/admin.html");
 test("Anthropic manifest exposes the brand palette", () => {
   assert.deepEqual(manifest, {
     id: "anthropic",
-    label: "Anthropic",
+    label: "A/",
     css: "theme.css",
     swatch: ["#faf9f5", "#d97757"],
     version: "1.0.0",
@@ -36,12 +36,12 @@ test("Anthropic defines scoped ivory surfaces and a clay accent", () => {
   assert.match(css, /font-family: "Lora", Georgia/);
 });
 
-test("Anthropic self-hosts its OFL fonts from the pack directory", () => {
+test("Anthropic self-hosts its OFL fonts from the shared static font directory", () => {
   for (const face of [
-    "/theme-packs/anthropic/fonts/lora-latin-400-normal.woff2",
-    "/theme-packs/anthropic/fonts/lora-latin-600-normal.woff2",
-    "/theme-packs/anthropic/fonts/poppins-latin-400-normal.woff2",
-    "/theme-packs/anthropic/fonts/jetbrains-mono-latin-400-normal.woff2",
+    "/static/fonts/anthropic/lora-latin-400-normal.woff2",
+    "/static/fonts/anthropic/lora-latin-600-normal.woff2",
+    "/static/fonts/anthropic/poppins-latin-400-normal.woff2",
+    "/static/fonts/anthropic/jetbrains-mono-latin-400-normal.woff2",
   ]) {
     assert.ok(css.includes(`url("${face}") format("woff2")`), `missing @font-face for ${face}`);
   }
@@ -53,7 +53,7 @@ test("Anthropic is available before and after theme registry initialization", ()
   const cssHref = "/theme-packs/anthropic/theme.css";
   assert.match(
     events,
-    /\{ id: "anthropic", label: "Anthropic", swatch: \["#faf9f5", "#d97757"\], css: "\/theme-packs\/anthropic\/theme\.css", description: ".*" \}/,
+    /\{ id: "anthropic", label: "A\/", swatch: \["#faf9f5", "#d97757"\], css: "\/theme-packs\/anthropic\/theme\.css", description: ".*" \}/,
   );
   assert.ok(adminHtml.includes(`anthropic: "${cssHref}"`));
 });
