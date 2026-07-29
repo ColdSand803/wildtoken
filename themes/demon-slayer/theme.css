@@ -1356,9 +1356,88 @@ html[data-theme="demon-slayer"] .upstream-action-menu button:hover {
   color: #eaf3ee;
 }
 
+/* -- Theme menu ---------------------------------------------
+   The menu is a 色見本 — a pigment sample book. Each row shows a theme's two
+   colours as a cut chip beside its name, selection is marked with the same
+   blade the rail uses, and the two built-in consoles are ruled off from the
+   packs below them. */
+
+/* A square chip, not a disc. The swatch is a colour sample and samples are
+   cut square; a disc sitting at the head of every row in a vertical list
+   reads as a radio button instead — the control it sits next to rather than
+   the thing it is showing. The inner ink line keeps a pale swatch (Win95,
+   Endfield) from bleeding into the menu surface. */
 html[data-theme="demon-slayer"] .theme-swatch {
-  border-color: rgb(122 148 133 / 34%);
-  border-radius: 50%;
+  border-color: rgb(122 148 133 / 40%);
+  border-radius: 1px;
+  box-shadow: inset 0 0 0 1px rgb(5 7 6 / 50%);
+  height: 15px;
+  width: 15px;
+}
+
+html[data-theme="demon-slayer"] .theme-menu button {
+  overflow: hidden;
+  position: relative;
+}
+
+/* Choosing a theme and choosing a view are the same gesture, so they answer
+   with the same mark: a notch that grows into the blade. */
+html[data-theme="demon-slayer"] .theme-menu button::before {
+  background: transparent;
+  bottom: 0;
+  content: "";
+  left: 0;
+  position: absolute;
+  top: 0;
+  transition: background var(--transition);
+  width: 3px;
+}
+
+html[data-theme="demon-slayer"] .theme-menu button:hover::before {
+  background: rgb(63 191 166 / 60%);
+}
+
+/* After the hover rule, so hovering the current theme keeps the blade. */
+html[data-theme="demon-slayer"] .theme-menu button.is-selected::before {
+  background: var(--ds-blade);
+}
+
+html[data-theme="demon-slayer"] .theme-menu button.is-selected {
+  font-family: var(--ds-display);
+  font-weight: 700;
+}
+
+/* The two built-in consoles are ruled off from the packs below them.
+
+   Selected by identity, not position. :nth-child(2) would work today but it
+   carries a second, unstated assumption — that the menu holds nothing but
+   theme buttons — and renderThemeChoices() owns that container, so a group
+   heading or a filter box landing there later would silently move the wave
+   onto the wrong row. Every button already carries data-theme-choice, so the
+   rule can say what it means instead.
+
+   What it means is "the last built-in": a built-in that is followed by
+   another button which is not a built-in. That reads directly as :is() for
+   the set, :has(+ button) to confirm something follows, and :not(:has(...))
+   to confirm what follows has left the set. Reordering the built-ins, adding
+   packs, or restructuring the container all leave it correct.
+
+   The one hard-coded thing left is the membership list itself, which CSS
+   cannot infer — nothing in the DOM distinguishes a built-in console from an
+   external pack. But a list is a better thing to hard-code than an index: a
+   third built-in needs its id added here and the logic re-derives the rest.
+
+   Where :has() is unsupported the whole selector drops and the menu simply
+   goes unruled, which is the safe way to be wrong. */
+html[data-theme="demon-slayer"] .theme-menu
+  button:is([data-theme-choice="dark"], [data-theme-choice="light"]):has(+ button):not(
+    :has(+ button:is([data-theme-choice="dark"], [data-theme-choice="light"]))
+  ) {
+  background-image: var(--ds-hamon-dim);
+  background-position: bottom left;
+  background-repeat: repeat-x;
+  margin-bottom: 6px;
+  padding-bottom: 10px;
 }
 
 html[data-theme="demon-slayer"] .field-label,
