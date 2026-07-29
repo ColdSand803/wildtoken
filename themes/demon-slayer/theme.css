@@ -1,11 +1,16 @@
 /* Demon Slayer inspired anime theme pack.
-   No external art assets. Five motifs carry the whole pack, and each one is
+   No external art assets. Seven motifs carry the whole pack, and each one is
    pinned to a different job so they never compete:
 
      ichimatsu (市松)  — the checkered haori, on the navigation rail
      seigaiha  (青海波) — water-breathing wave crests, on the page field
      nichirin  (日輪)   — a blade edge: ink, then teal, then a white hamon
                           highlight, on every rule that separates two regions
+     tsukamaki (柄巻)  — the diamond wrap of a sword grip, laid over every
+                          primary action's fill
+     daiji     (題字)   — the view's name distilled to one large glyph,
+                          ghosted onto the panel like a title written on the
+                          scroll itself
      hyōsō     (表装)   — the mounting of a hanging scroll: an ink outer edge,
                           a thin teal 綾 inside it, then a margin before the
                           content. This is what makes a surface read as a
@@ -33,6 +38,19 @@
   symbols: "壹" "貳" "參" "肆" "伍";
   suffix: "";
   fallback: decimal-leading-zero;
+}
+
+/* Water running the length of a blade. Every gradient this animates begins
+   and ends on the same ink (#050706), so the 240px tile loops without a
+   visible seam. The global prefers-reduced-motion rule below stills it. */
+@keyframes ds-blade-flow {
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 0 240px;
+  }
 }
 
 html[data-theme="demon-slayer"] {
@@ -146,9 +164,11 @@ html[data-theme="demon-slayer"] {
 
   /* 青海波. Four nested crests per fan, fans overlapping at half their radius,
      with the second row offset by half a fan — the standard tiling. Drawn at
-     48px so the crests stay legible without turning the page into wallpaper;
-     opacity is carried by the layer that uses it, not baked in here. */
-  --ds-seigaiha: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cpath fill='none' stroke='%233fbfa6' stroke-width='1' d='M-24 24a24 24 0 0 1 48 0M-18 24a18 18 0 0 1 36 0M-12 24a12 12 0 0 1 24 0M-6 24a6 6 0 0 1 12 0M0 24a24 24 0 0 1 48 0M6 24a18 18 0 0 1 36 0M12 24a12 12 0 0 1 24 0M18 24a6 6 0 0 1 12 0M24 24a24 24 0 0 1 48 0M30 24a18 18 0 0 1 36 0M36 24a12 12 0 0 1 24 0M42 24a6 6 0 0 1 12 0M-36 48a24 24 0 0 1 48 0M-30 48a18 18 0 0 1 36 0M-24 48a12 12 0 0 1 24 0M-18 48a6 6 0 0 1 12 0M-12 48a24 24 0 0 1 48 0M-6 48a18 18 0 0 1 36 0M0 48a12 12 0 0 1 24 0M6 48a6 6 0 0 1 12 0M12 48a24 24 0 0 1 48 0M18 48a18 18 0 0 1 36 0M24 48a12 12 0 0 1 24 0M30 48a6 6 0 0 1 12 0M36 48a24 24 0 0 1 48 0M42 48a18 18 0 0 1 36 0M48 48a12 12 0 0 1 24 0M54 48a6 6 0 0 1 12 0'/%3E%3C/svg%3E");
+     48px so the crests stay legible without turning the page into wallpaper.
+     Opacity is baked into the stroke rather than carried by the consumer:
+     the panel layers this under the 題字 watermark in one pseudo-element,
+     and an element-level opacity would drag the watermark down with it. */
+  --ds-seigaiha: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cpath fill='none' stroke='%233fbfa6' stroke-width='1' stroke-opacity='0.14' d='M-24 24a24 24 0 0 1 48 0M-18 24a18 18 0 0 1 36 0M-12 24a12 12 0 0 1 24 0M-6 24a6 6 0 0 1 12 0M0 24a24 24 0 0 1 48 0M6 24a18 18 0 0 1 36 0M12 24a12 12 0 0 1 24 0M18 24a6 6 0 0 1 12 0M24 24a24 24 0 0 1 48 0M30 24a18 18 0 0 1 36 0M36 24a12 12 0 0 1 24 0M42 24a6 6 0 0 1 12 0M-36 48a24 24 0 0 1 48 0M-30 48a18 18 0 0 1 36 0M-24 48a12 12 0 0 1 24 0M-18 48a6 6 0 0 1 12 0M-12 48a24 24 0 0 1 48 0M-6 48a18 18 0 0 1 36 0M0 48a12 12 0 0 1 24 0M6 48a6 6 0 0 1 12 0M12 48a24 24 0 0 1 48 0M18 48a18 18 0 0 1 36 0M24 48a12 12 0 0 1 24 0M30 48a6 6 0 0 1 12 0M36 48a24 24 0 0 1 48 0M42 48a18 18 0 0 1 36 0M48 48a12 12 0 0 1 24 0M54 48a6 6 0 0 1 12 0'/%3E%3C/svg%3E");
 
   /* Washi grain. fractalNoise at a high base frequency is paper fibre rather
      than television static; stitchTiles keeps the seams from showing when the
@@ -219,7 +239,8 @@ html[data-theme="demon-slayer"] body::before {
   background-size: 48px 48px;
   content: "";
   inset: 0;
-  opacity: 0.16;
+  /* The stroke now carries its own 0.14; the mask alone shapes the field. */
+  opacity: 1;
   pointer-events: none;
   position: fixed;
   z-index: 0;
@@ -277,27 +298,32 @@ html[data-theme="demon-slayer"] input[type="checkbox"] {
 
 /* -- Rail -------------------------------------------------- */
 
-/* 市松 on the rail — but held down to a whisper. The haori's green and black
-   at full strength is a chequerboard the labels have to be read against, and
-   the labels lose: the pattern has a hard edge every 13px and the text does
-   not. An even ink veil over it drops the two squares to roughly #0d1713 and
-   #0a0d0b, which still reads as woven cloth up close and stops competing at
-   arm's length.
+/* 市松 on the rail, worn at strength. An earlier cut veiled the checker to a
+   whisper so labels could sit directly on it; the labels have since moved
+   onto ink plates (below), which frees the cloth to actually read as
+   Tanjirō's haori instead of a texture you have to be told about.
 
-   The veil is even rather than graded on purpose. A gradient that thins in
-   the middle puts the loudest part of the pattern exactly where the rail is
-   empty — under the last nav row — and that is the one stretch with nothing
-   to justify the noise. The motif gets its one full-contrast statement on the
-   band under the wordmark, where nothing has to be read over it. */
+   The veil that remains is graded, and its logic is the reverse of the
+   whisper era's: darkest at the foot where the small utility labels live,
+   calm behind the brand, and most open through the middle stretch — which is
+   exactly the part of the rail with nothing to read, so it is where the
+   cloth can afford to be loudest. */
 html[data-theme="demon-slayer"] .topbar {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   align-items: stretch;
   background-color: var(--ds-haori-dark);
   background-image:
-    linear-gradient(180deg, rgb(10 12 11 / 80%), rgb(10 12 11 / 74%)),
+    linear-gradient(
+      180deg,
+      rgb(10 12 11 / 68%) 0,
+      rgb(10 12 11 / 40%) 30%,
+      rgb(10 12 11 / 40%) 62%,
+      rgb(10 12 11 / 80%) 80%,
+      rgb(10 12 11 / 84%) 100%
+    ),
     repeating-conic-gradient(var(--ds-haori-green) 0% 25%, var(--ds-haori-dark) 0% 50%);
-  background-size: auto, 26px 26px;
+  background-size: auto, 32px 32px;
   border: 0;
   box-shadow: 1px 0 0 rgb(63 191 166 / 22%), 10px 0 26px rgb(0 0 0 / 46%);
   display: flex;
@@ -316,9 +342,16 @@ html[data-theme="demon-slayer"] .topbar {
   z-index: 30;
 }
 
-/* The rail's outer edge is a blade stood on end. */
+/* The rail's outer edge is a blade stood on end — and water runs down it.
+   The gradient tiles seamlessly (both ends sit on the same ink), so the slow
+   background-position drift reads as the hamon travelling the edge rather
+   than a banner looping. Nine seconds keeps it at the threshold where you
+   notice it only when you look for it. */
 html[data-theme="demon-slayer"] .topbar::after {
+  animation: ds-blade-flow 9s linear infinite;
   background: var(--ds-blade);
+  background-repeat: repeat-y;
+  background-size: 100% 240px;
   bottom: 0;
   height: auto;
   left: auto;
@@ -376,6 +409,9 @@ html[data-theme="demon-slayer"] .topbar-brand h1 {
   letter-spacing: 0.01em;
   line-height: 1.1;
   overflow-wrap: anywhere;
+  /* The wordmark sits directly on the cloth; the shadow keeps its thin
+     mincho strokes from breaking against the checker's edges. */
+  text-shadow: 0 1px 3px rgb(4 6 5 / 85%);
   white-space: normal;
 }
 
@@ -386,6 +422,7 @@ html[data-theme="demon-slayer"] .brand-label {
   font-weight: 600;
   letter-spacing: 0.08em;
   margin-top: 4px;
+  text-shadow: 0 1px 2px rgb(4 6 5 / 85%);
 }
 
 html[data-theme="demon-slayer"] .topbar-nav {
@@ -405,12 +442,15 @@ html[data-theme="demon-slayer"] .topbar-nav {
   width: 100%;
 }
 
-/* No resting fill: the rows sit directly on the cloth, so the haori shows
-   through the rail rather than behind a column of grey plates. */
+/* Lacquered tags hung on the cloth. When the checker ran at a whisper the
+   rows could sit directly on it; at strength, a serif label over a pattern
+   edge smears. The plates give each label its own ground and — because they
+   are near-black against the green squares — make the cloth between them
+   read louder, not quieter. */
 html[data-theme="demon-slayer"] .nav-link {
   align-items: center;
-  background: transparent;
-  border: 1px solid transparent;
+  background: rgb(8 11 9 / 66%);
+  border: 1px solid rgb(122 148 133 / 14%);
   border-radius: var(--radius);
   color: #b6c6bc;
   counter-increment: ds-corps;
@@ -479,7 +519,8 @@ html[data-theme="demon-slayer"] .nav-link::after {
 }
 
 html[data-theme="demon-slayer"] .nav-link:hover {
-  background: rgb(63 191 166 / 10%);
+  background: rgb(19 37 31 / 82%);
+  border-color: rgb(63 191 166 / 26%);
   color: #eaf3ee;
 }
 
@@ -507,9 +548,14 @@ html[data-theme="demon-slayer"] .nav-link.active:hover {
   color: #ffffff;
 }
 
+/* The selected row's blade runs with the same water as the rail edge — the
+   two are the only moving things in the console, and they move together. */
 html[data-theme="demon-slayer"] .nav-link.active::before,
 html[data-theme="demon-slayer"] .nav-link.active:hover::before {
+  animation: ds-blade-flow 9s linear infinite;
   background: var(--ds-blade);
+  background-repeat: repeat-y;
+  background-size: 100% 240px;
   height: 100%;
 }
 
@@ -768,16 +814,51 @@ html[data-theme="demon-slayer"] .view > .panel::before {
    sheet of paper, which is what they are. The one gradient left just lifts
    them off the title block. */
 html[data-theme="demon-slayer"] .view > .panel::after {
-  background-image: var(--ds-seigaiha);
-  background-size: 48px 48px;
+  /* Two layers share this element: the view's 題字 glyph over the wave
+     field. Both bake their own opacity into the SVG, so the element stays at
+     1 and neither drags the other down. The mask's top fade brushes the
+     glyph's upper edge, which lets it surface out of the blank rather than
+     sit printed on it. */
+  background-image: var(--ds-view-kanji, none), var(--ds-seigaiha);
+  background-position: right 20px top 132px, 0 0;
+  background-repeat: no-repeat, repeat;
+  background-size: 320px 320px, 48px 48px;
   content: "";
   inset: 0;
-  opacity: 0.13;
+  opacity: 1;
   pointer-events: none;
   position: absolute;
   z-index: -1;
   mask-image: linear-gradient(180deg, transparent 0 64px, #000 150px);
   -webkit-mask-image: linear-gradient(180deg, transparent 0 64px, #000 150px);
+}
+
+/* 題字 — each view's name distilled to one glyph, ghosted under the seal.
+   觀 watches, 流 flows, 記 records, 符 is the talisman a token is, 調 tunes.
+   Set on the section rather than the pseudo-element so the one ::after rule
+   above stays generic; the custom property inherits down into it.
+
+   The SVGs ask for generic 'serif': an SVG used as an image cannot reach the
+   document's webfonts, and every platform resolves a CJK glyph in 'serif' to
+   its installed mincho/song cut — which is the voice the pack wants anyway. */
+html[data-theme="demon-slayer"] .view[data-view="dashboard"] {
+  --ds-view-kanji: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Ctext x='160' y='274' text-anchor='middle' font-family='serif' font-size='300' font-weight='700' fill='%233fbfa6' fill-opacity='0.09'%3E%E8%A7%80%3C/text%3E%3C/svg%3E");
+}
+
+html[data-theme="demon-slayer"] .view[data-view="upstreams"] {
+  --ds-view-kanji: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Ctext x='160' y='274' text-anchor='middle' font-family='serif' font-size='300' font-weight='700' fill='%233fbfa6' fill-opacity='0.09'%3E%E6%B5%81%3C/text%3E%3C/svg%3E");
+}
+
+html[data-theme="demon-slayer"] .view[data-view="logs"] {
+  --ds-view-kanji: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Ctext x='160' y='274' text-anchor='middle' font-family='serif' font-size='300' font-weight='700' fill='%233fbfa6' fill-opacity='0.09'%3E%E8%A8%98%3C/text%3E%3C/svg%3E");
+}
+
+html[data-theme="demon-slayer"] .view[data-view="tokens"] {
+  --ds-view-kanji: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Ctext x='160' y='274' text-anchor='middle' font-family='serif' font-size='300' font-weight='700' fill='%233fbfa6' fill-opacity='0.09'%3E%E7%AC%A6%3C/text%3E%3C/svg%3E");
+}
+
+html[data-theme="demon-slayer"] .view[data-view="settings"] {
+  --ds-view-kanji: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Ctext x='160' y='274' text-anchor='middle' font-family='serif' font-size='300' font-weight='700' fill='%233fbfa6' fill-opacity='0.09'%3E%E8%AA%BF%3C/text%3E%3C/svg%3E");
 }
 
 /* The blade that used to run along the panel's top edge is gone: the mounting
@@ -947,7 +1028,16 @@ html[data-theme="demon-slayer"] button:not(:where(
   .select-panel button,
   .upstream-action-menu button
 )) {
-  background: linear-gradient(180deg, #3fbfa6 0%, #2b8c7e 100%);
+  /* 柄巻 — the diamond wrap of a sword grip, as two crossed stripe fields
+     over the fill. A primary action is the thing you take hold of, so it is
+     the one control that carries the grip's texture. 16px period keeps the
+     diamonds legible at button size without turning the fill into plaid,
+     and the lines run at 18% so the label's contrast survives crossing
+     them. */
+  background:
+    repeating-linear-gradient(45deg, transparent 0 7px, rgb(5 18 15 / 18%) 7px 8px),
+    repeating-linear-gradient(-45deg, transparent 0 7px, rgb(5 18 15 / 18%) 7px 8px),
+    linear-gradient(180deg, #3fbfa6 0%, #2b8c7e 100%);
   border: 1px solid #1d6c60;
   border-radius: var(--radius);
   box-shadow:
@@ -978,7 +1068,10 @@ html[data-theme="demon-slayer"] button:not(:where(
   .select-panel button,
   .upstream-action-menu button
 )):hover {
-  background: linear-gradient(180deg, #55d3b9 0%, #31a08f 100%);
+  background:
+    repeating-linear-gradient(45deg, transparent 0 7px, rgb(5 18 15 / 14%) 7px 8px),
+    repeating-linear-gradient(-45deg, transparent 0 7px, rgb(5 18 15 / 14%) 7px 8px),
+    linear-gradient(180deg, #55d3b9 0%, #31a08f 100%);
   box-shadow:
     inset 0 1px 0 rgb(232 252 247 / 72%),
     0 2px 8px rgb(63 191 166 / 26%);
@@ -1574,10 +1667,25 @@ html[data-theme="demon-slayer"] ::-webkit-scrollbar-track {
   background: #0a0c0b;
 }
 
+/* Each thumb is a blade: the gradient stretches to whatever length the thumb
+   takes, spine at one end, hamon at the other. Orientation picks the matching
+   gradient so the temper line always runs along the blade, never across it.
+   The flat rule above stays as the fallback for engines without the
+   orientation pseudo-classes. */
 html[data-theme="demon-slayer"] ::-webkit-scrollbar-thumb {
   background: #2b8c7e;
   border: 2px solid #0a0c0b;
   border-radius: var(--radius-full);
+}
+
+html[data-theme="demon-slayer"] ::-webkit-scrollbar-thumb:vertical {
+  background: var(--ds-blade);
+  border: 2px solid #0a0c0b;
+}
+
+html[data-theme="demon-slayer"] ::-webkit-scrollbar-thumb:horizontal {
+  background: var(--ds-blade-h);
+  border: 2px solid #0a0c0b;
 }
 
 html[data-theme="demon-slayer"] ::-webkit-scrollbar-thumb:hover {
@@ -1623,6 +1731,18 @@ html[data-theme="demon-slayer"] .kpi-label,
 html[data-theme="demon-slayer"] .dashboard-kpi-label {
   color: var(--muted);
   letter-spacing: 0.08em;
+}
+
+/* The ranking rows set their name in the mono face, which is right for the
+   count beside it and wrong for the name itself: the mono stack carries no
+   CJK glyphs, so a Chinese channel name falls through to whatever the
+   browser scrapes together — a different weight and width from everything
+   around it. Names are prose; they take the sans stack, whose CJK members
+   are actually in the list. The index and count stay mono, because they are
+   the figures that have to align. */
+html[data-theme="demon-slayer"] .dashboard-rank-name,
+html[data-theme="demon-slayer"] .dashboard-rank-label {
+  font-family: var(--font-sans);
 }
 
 /* -- Loading and empty states ------------------------------- */
@@ -1981,7 +2101,9 @@ html[data-theme="demon-slayer"] .balance-row {
   }
 
   html[data-theme="demon-slayer"] .topbar::after {
+    animation: none;
     background: var(--ds-blade-h);
+    background-size: auto;
     bottom: 0;
     height: 2px;
     left: 0;
@@ -2095,7 +2217,9 @@ html[data-theme="demon-slayer"] .balance-row {
 
   html[data-theme="demon-slayer"] .nav-link.active::before,
   html[data-theme="demon-slayer"] .nav-link.active:hover::before {
+    animation: none;
     background: var(--ds-blade-h);
+    background-size: auto;
     height: 2px;
   }
 
