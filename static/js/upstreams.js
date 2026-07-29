@@ -274,6 +274,25 @@ function duplicateUpstream(upstream) {
   setStatus("已复制渠道配置，API Key 需要重新填写后再保存。", "ok");
 }
 
+function formatUpstreamClipboardText(detail) {
+  const baseUrl = String(detail?.base_url || "");
+  const apiKey = String(detail?.api_key || "");
+  return `baseURL: ${baseUrl}\napiKey: ${apiKey}`;
+}
+
+async function copyUpstreamInfo(upstream) {
+  try {
+    const detail = await api(`/api/admin/upstreams/${upstream.id}`);
+    const copied = await copyTextToClipboard(formatUpstreamClipboardText(detail));
+    if (!copied) {
+      throw new Error("浏览器拒绝复制，请手动复制。");
+    }
+    setStatus(`渠道「${detail.name || upstream.name}」信息已复制。`, "ok");
+  } catch (error) {
+    setStatus(`复制渠道信息失败：${error.message}`, "error");
+  }
+}
+
 function openBalanceDialog() {
   if (typeof balanceDialog.showModal === "function") {
     balanceDialog.showModal();
@@ -597,7 +616,8 @@ function actionMenuMarkup(upstreamId) {
     <button type="button" role="menuitem" data-action="models" data-id="${upstreamId}">拉取模型</button>
     <div class="action-menu-separator" role="separator"></div>
     <button type="button" role="menuitem" data-action="edit" data-id="${upstreamId}">编辑</button>
-    <button type="button" role="menuitem" data-action="duplicate" data-id="${upstreamId}">复制</button>
+    <button type="button" role="menuitem" data-action="duplicate" data-id="${upstreamId}">复制渠道</button>
+    <button type="button" role="menuitem" data-action="copy-info" data-id="${upstreamId}">复制渠道信息</button>
     <div class="action-menu-separator" role="separator"></div>
     <button type="button" role="menuitem" data-action="delete" data-id="${upstreamId}" class="danger">删除</button>
   `;

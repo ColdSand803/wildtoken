@@ -508,6 +508,11 @@ async function handleUpstreamAction(button) {
     return;
   }
 
+  if (button.dataset.action === "copy-info") {
+    await copyUpstreamInfo(upstream);
+    return;
+  }
+
   if (button.dataset.action === "delete") {
     const confirmed = await requestConfirm({
       title: "删除渠道",
