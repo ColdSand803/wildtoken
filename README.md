@@ -1,46 +1,57 @@
 # WildToken
 
-Language: English | [Simplified Chinese](README.zh-CN.md)
+**🌐 Language:** English | [简体中文](README.zh-CN.md)
 
-WildToken is a self-hosted LLM API aggregation gateway written in Rust. It
-exposes OpenAI-compatible `/v1/*` endpoints and an Anthropic-compatible
-`/v1/messages` endpoint, then routes each downstream request to the right
-upstream channel by explicit channel hints, model rules, priority, weight, and
-runtime health.
+> **Self-hosted LLM API aggregation gateway in Rust.**
+>
+> WildToken exposes OpenAI-compatible `/v1/*` endpoints and an
+> Anthropic-compatible `/v1/messages` endpoint, then routes each downstream
+> request to the right upstream channel by explicit channel hints, model rules,
+> priority, weight, and runtime health.
 
 Use it when you want one stable API entrypoint for multiple LLM providers,
 private provider keys, per-client downstream tokens, request observability, and
 an admin console for day-to-day operations.
 
-## Highlights
+## ⚡ At a Glance
 
-- OpenAI-compatible gateway: forward Chat Completions, Responses, model-list,
+| Need | WildToken provides |
+| --- | --- |
+| One client endpoint | OpenAI-compatible `/v1/*` plus Anthropic-compatible `/v1/messages` |
+| Provider isolation | Server-side upstream keys and client-facing downstream tokens |
+| Smart routing | Explicit channels, model mappings, priorities, weights, and health-aware failover |
+| Daily operations | Admin console for channels, tokens, logs, usage, balances, and runtime metrics |
+| Visual customization | Built-in light/dark themes plus CSS-only theme packs under `themes/` |
+
+## ✨ Highlights
+
+- 🔌 **OpenAI-compatible gateway:** forward Chat Completions, Responses, model-list,
   streaming, and other `/v1/*` requests through one local endpoint.
-- Anthropic Messages compatibility: `POST /v1/messages` accepts standard
+- 🧩 **Anthropic Messages compatibility:** `POST /v1/messages` accepts standard
   `x-api-key` and `anthropic-version` headers and forwards them to
   Anthropic-compatible upstreams.
-- Multi-upstream aggregation: configure channels with base URLs, provider API
+- 🛣️ **Multi-upstream aggregation:** configure channels with base URLs, provider API
   keys, model names, model mappings, model prefixes, and per-channel headers.
-- Routing controls: select by `X-WildToken-Upstream`, `?upstream=`, exact model
+- 🧭 **Routing controls:** select by `X-WildToken-Upstream`, `?upstream=`, exact model
   mappings, model names, prefixes, priority layers, weighted random choice, and
   automatic health-based effective weight.
-- Retry and failover policy: failed automatic routes can reselect another
+- 🔁 **Retry and failover policy:** failed automatic routes can reselect another
   channel, while same-channel retries respect the configured delay.
-- Downstream token management: create client-facing API tokens in the admin
+- 🔐 **Downstream token management:** create client-facing API tokens in the admin
   console; full token values are shown once, and the database stores only
   hashes plus irreversible previews.
-- Admin dashboard: inspect channel status, request logs, token usage, top
+- 📊 **Admin dashboard:** inspect channel status, request logs, token usage, top
   models/channels, latency, runtime metrics, and request/response snapshots.
-- Channel tools: fetch model lists, test connectivity, test a selected model,
+- 🧰 **Channel tools:** fetch model lists, test connectivity, test a selected model,
   and query new-api/sub2api-style balances from the console.
-- Body retention controls: keep metadata while pruning old request/response
+- 🧹 **Body retention controls:** keep metadata while pruning old request/response
   bodies to limit SQLite growth.
-- Theme packs: optional CSS-only admin themes under `themes/`, loaded without
+- 🎨 **Theme packs:** optional CSS-only admin themes under `themes/`, loaded without
   executing theme JavaScript.
-- Desktop-friendly release mode: Windows builds can run from the system tray;
+- 🖥️ **Desktop-friendly release mode:** Windows builds can run from the system tray;
   Linux, macOS, Docker, and source builds run as normal services.
 
-## Screenshots
+## 🖼️ Screenshots
 
 Dashboard with the built-in light and dark themes:
 
@@ -54,9 +65,9 @@ Request log page rendered by two CSS-only theme packs from [`themes/`](themes/):
 | --- | --- |
 | ![Request logs with the Ark theme](screenshots/screenshot-ark.png) | ![Request logs with the Bleach theme](screenshots/screenshot-bleach.png) |
 
-## Quick Start
+## 🚀 Quick Start
 
-### Docker Compose
+### 🐳 Docker Compose
 
 Docker Compose is the easiest way to run WildToken as a local service.
 
@@ -81,7 +92,7 @@ For a brand-new database listening beyond localhost, WildToken refuses to start
 unless `ADMIN_TOKEN` is explicitly set. The token must be 8-256 bytes, printable
 ASCII, contain no spaces, and not be `change-me`.
 
-### From Source
+### 🛠️ From Source
 
 Requirements:
 
@@ -99,7 +110,7 @@ ADMIN_TOKEN=replace-with-a-long-random-token cargo run
 By default, source runs bind to `127.0.0.1:3100` and use
 `sqlite:wildtoken.db?mode=rwc`.
 
-### Windows Desktop
+### 🪟 Windows Desktop
 
 Release archives include `wildtoken.exe`. Double-clicking it starts WildToken in
 system-tray mode:
@@ -112,7 +123,7 @@ system-tray mode:
 
 Linux, macOS, and Docker builds keep the foreground service behavior.
 
-## First Configuration
+## ✅ First Configuration
 
 1. Open `/admin` and log in with the Admin Token.
 2. Create an upstream channel with its base URL, provider API key, models, model
@@ -125,7 +136,7 @@ Linux, macOS, and Docker builds keep the foreground service behavior.
 Provider API keys stay on the server-side channel records. Clients only need
 their downstream WildToken token.
 
-## API Examples
+## 🔌 API Examples
 
 OpenAI-compatible Chat Completions:
 
@@ -170,7 +181,7 @@ curl http://127.0.0.1:3100/v1/chat/completions \
   -d '{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hello"}]}'
 ```
 
-## Routing Model
+## 🧭 Routing Model
 
 WildToken chooses an upstream in this order:
 
@@ -192,7 +203,7 @@ Explicit channel selection bypasses pool selection. Automatic retries re-run
 selection for each attempt; selecting another channel retries immediately, while
 selecting the same channel waits for the configured same-channel retry interval.
 
-## Model Mapping
+## 🗺️ Model Mapping
 
 Model mappings let clients use a stable downstream model name while WildToken
 rewrites the request body before forwarding upstream.
@@ -224,7 +235,7 @@ curl 'http://127.0.0.1:3100/v1/models?upstream=openai' \
   -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>'
 ```
 
-## Header Overrides
+## 🧾 Header Overrides
 
 Each channel can define static headers and selected client-header passthroughs:
 
@@ -247,7 +258,7 @@ Static overrides apply to normal forwarding, channel tests, model fetching,
 model tests, and balance queries. Client-header passthrough only applies during
 normal forwarding, where a downstream request context exists.
 
-## Configuration
+## ⚙️ Configuration
 
 Default settings live in [`config/default.toml`](config/default.toml):
 
@@ -297,7 +308,7 @@ RUST_LOG=info
 admin credential exists in SQLite, change it from the admin console under
 Settings -> Security; editing `.env` will not rotate or reset it.
 
-## Observability and Retention
+## 📈 Observability and Retention
 
 The admin console includes:
 
@@ -314,7 +325,7 @@ snapshot bodies while keeping status code, channel, model, token usage, latency,
 and headers. SQLite incremental vacuum keeps reclaimed pages from accumulating
 indefinitely.
 
-## Themes
+## 🎨 Themes
 
 Built-in light and dark themes live under `static/css/`. Optional theme packs
 live under [`themes/`](themes/) and are documented in
@@ -325,7 +336,7 @@ scoped under `html[data-theme="<id>"]` and override CSS variables. WildToken
 loads theme CSS as same-origin static files and does not execute JavaScript from
 theme packs.
 
-## Security Notes
+## 🔐 Security Notes
 
 - Put WildToken behind TLS and normal network controls before exposing it
   outside a trusted machine or network.
@@ -340,7 +351,7 @@ theme packs.
 - Admin APIs are same-origin and require `x-admin-token`; compatibility `/v1/*`
   APIs are intentionally CORS-enabled for downstream clients.
 
-## Development Checks
+## 🧪 Development Checks
 
 Useful local checks before shipping a change:
 
@@ -357,7 +368,7 @@ For JavaScript-only changes in the admin console, also run the repository's
 Node-based checks that match the touched files, for example `node --check` or
 the theme contract tests under `tests/*.mjs`.
 
-## Releases
+## 📦 Releases
 
 Pushing a `v*` tag matching the `Cargo.toml` version creates a GitHub Release
 through Actions. Release archives include the required `static/`, `config/`, and
