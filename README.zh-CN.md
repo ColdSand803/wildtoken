@@ -20,6 +20,20 @@ WildToken 是一个自托管的 LLM API 聚合网关，使用 Rust 编写。它�
 - 主题包：后台支持 `themes/` 下的 CSS-only 主题包，不执行主题 JavaScript。
 - 桌面友好：Windows 发布包可在系统托盘运行；Linux、macOS、Docker 和源码运行保持普通服务模式。
 
+## 界面截图
+
+内置浅色与深色主题下的数据看板：
+
+| 浅色 | 深色 |
+| --- | --- |
+| ![内置浅色主题下的数据看板](screenshots/screenshot-light.png) | ![内置深色主题下的数据看板](screenshots/screenshot-dark.png) |
+
+使用 [`themes/`](themes/) 下 CSS-only 主题包渲染的使用日志页：
+
+| Ark | Bleach |
+| --- | --- |
+| ![Ark 主题下的使用日志页](screenshots/screenshot-ark.png) | ![Bleach 主题下的使用日志页](screenshots/screenshot-bleach.png) |
+
 ## 快速启动
 
 ### Docker Compose

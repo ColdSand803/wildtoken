@@ -40,6 +40,20 @@ an admin console for day-to-day operations.
 - Desktop-friendly release mode: Windows builds can run from the system tray;
   Linux, macOS, Docker, and source builds run as normal services.
 
+## Screenshots
+
+Dashboard with the built-in light and dark themes:
+
+| Light | Dark |
+| --- | --- |
+| ![Dashboard in the built-in light theme](screenshots/screenshot-light.png) | ![Dashboard in the built-in dark theme](screenshots/screenshot-dark.png) |
+
+Request log page rendered by two CSS-only theme packs from [`themes/`](themes/):
+
+| Ark | Bleach |
+| --- | --- |
+| ![Request logs with the Ark theme](screenshots/screenshot-ark.png) | ![Request logs with the Bleach theme](screenshots/screenshot-bleach.png) |
+
 ## Quick Start
 
 ### Docker Compose
