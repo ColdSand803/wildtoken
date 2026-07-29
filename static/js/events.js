@@ -23,6 +23,8 @@ const BUNDLED_THEME_PACKS = Object.freeze([
   { id: "bleach", label: "Bleach", swatch: ["#fff7ed", "#f97316"], css: "/theme-packs/bleach/theme.css", description: "Manga-paper admin theme with ink rails and orange reiatsu accents." },
   { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"], css: "/theme-packs/endfield/theme.css", description: "Field-engineering admin theme with pale work surfaces, signal yellow, and left-rail operations layout." },
   { id: "sakura-mist", label: "樱雾灰紫", swatch: ["#ffe3ee", "#535369"], css: "/theme-packs/sakura-mist/theme.css", description: "Soft pink surfaces with restrained gray-violet accents." },
+  { id: "anthropic", label: "A/", swatch: ["#faf9f5", "#d97757"], css: "/theme-packs/anthropic/theme.css", description: "Warm ivory paper surfaces with slate ink, a single clay accent, and serif display type." },
+  { id: "anthropic-dark", label: "A/ dark", swatch: ["#141413", "#d97757"], css: "/theme-packs/anthropic-dark/theme.css", description: "Slate ground with warm ivory ink, the same single clay accent, and serif display type." },
 ]);
 let THEMES = [...BUILT_IN_THEMES, ...BUNDLED_THEME_PACKS];
 

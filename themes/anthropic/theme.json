@@ -1,0 +1,8 @@
+{
+  "id": "anthropic",
+  "label": "A/",
+  "css": "theme.css",
+  "swatch": ["#faf9f5", "#d97757"],
+  "version": "1.0.0",
+  "description": "Warm ivory paper surfaces with slate ink, a single clay accent, and serif display type."
+}
