@@ -16,7 +16,7 @@ use tokio::sync::{Mutex, RwLock};
 
 use crate::config::Settings;
 use crate::error::AppError;
-use crate::proxy::matcher::AutoWeightManager;
+use crate::proxy::matcher::{AutoWeightManager, UpstreamRoutingCache};
 use crate::{
     db::settings as settings_db,
     models::settings::{AdminCredential, RuntimeSettings},
@@ -366,6 +366,7 @@ pub struct AppState {
     pub log_writer: crate::proxy::logging::LogWriter,
     pub log_stats: Arc<crate::db::log_stats::LogStatsCache>,
     pub models_list_cache: Arc<ModelsListCache>,
+    pub routing_cache: Arc<UpstreamRoutingCache>,
     pub started_at: Instant,
 }
 

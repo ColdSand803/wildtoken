@@ -229,6 +229,7 @@ pub async fn proxy_handler(
     let direct_selection = if selector.is_some() {
         match matcher::select_upstream(
             &state.db,
+            &state.routing_cache,
             &state.auto_weight,
             auto_weight_policy,
             selector.as_deref(),
@@ -257,6 +258,7 @@ pub async fn proxy_handler(
         } else {
             match matcher::select_upstream(
                 &state.db,
+                &state.routing_cache,
                 &state.auto_weight,
                 auto_weight_policy,
                 None,
@@ -541,6 +543,7 @@ mod tests {
             log_writer,
             log_stats,
             models_list_cache: Arc::new(crate::state::ModelsListCache::new()),
+            routing_cache: Arc::new(crate::proxy::matcher::UpstreamRoutingCache::new()),
             started_at: Instant::now(),
         }
     }
@@ -928,6 +931,7 @@ mod tests {
             log_writer,
             log_stats,
             models_list_cache: Arc::new(crate::state::ModelsListCache::new()),
+            routing_cache: Arc::new(crate::proxy::matcher::UpstreamRoutingCache::new()),
             started_at: Instant::now(),
         };
         let proxy_app = Router::new()

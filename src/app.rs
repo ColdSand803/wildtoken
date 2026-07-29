@@ -171,6 +171,7 @@ pub async fn run_server(
         log_writer,
         log_stats,
         models_list_cache: Arc::new(crate::state::ModelsListCache::new()),
+        routing_cache: Arc::new(crate::proxy::matcher::UpstreamRoutingCache::new()),
         started_at: std::time::Instant::now(),
     };
 
