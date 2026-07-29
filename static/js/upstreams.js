@@ -87,7 +87,7 @@ function payloadFromForm() {
     model_mappings: modelMappings,
     priority: Number(fields.priority.value || 100),
     weight: Number(fields.weight.value),
-    auto_weight_enabled: fields.autoWeightEnabled.checked,
+    auto_weight_enabled: !fields.fixedWeightEnabled.checked,
     timeout_seconds: Number(fields.timeoutSeconds.value || 300),
     enabled: fields.enabled.checked,
     extra_headers: extraHeaders,
@@ -241,7 +241,7 @@ async function editUpstream(upstream) {
     setFormModels(detail.model_names);
     fields.priority.value = detail.priority;
     fields.weight.value = detail.weight;
-    fields.autoWeightEnabled.checked = detail.auto_weight_enabled;
+    fields.fixedWeightEnabled.checked = !detail.auto_weight_enabled;
     fields.timeoutSeconds.value = detail.timeout_seconds;
     fields.extraHeaders.value = JSON.stringify(detail.extra_headers || {}, null, 2);
     fields.enabled.checked = detail.enabled;
@@ -264,7 +264,7 @@ function duplicateUpstream(upstream) {
   setFormModels(upstream.model_names);
   fields.priority.value = upstream.priority;
   fields.weight.value = upstream.weight;
-  fields.autoWeightEnabled.checked = upstream.auto_weight_enabled;
+  fields.fixedWeightEnabled.checked = !upstream.auto_weight_enabled;
   fields.timeoutSeconds.value = upstream.timeout_seconds;
   fields.extraHeaders.value = JSON.stringify(upstream.extra_headers || {}, null, 2);
   fields.enabled.checked = upstream.enabled;
@@ -379,7 +379,7 @@ function resetForm() {
   setFormModels([]);
   fields.extraHeaders.value = "{}";
   fields.enabled.checked = true;
-  fields.autoWeightEnabled.checked = true;
+  fields.fixedWeightEnabled.checked = false;
   setAdvancedSettingsOpen(false);
   fetchModelsButton.disabled = false;
   formTitle.textContent = "新增渠道";
@@ -391,9 +391,22 @@ function formatEffectiveWeight(value) {
   return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function isFixedWeight(upstream) {
+  return !upstream.auto_weight_enabled;
+}
+
+function weightCellMarkup(upstream) {
+  const baseWeight = formatEffectiveWeight(upstream.weight);
+  if (isFixedWeight(upstream)) {
+    return `<strong>${baseWeight}</strong><span>固定权重</span>`;
+  }
+  return `<strong>${formatEffectiveWeight(upstream.effective_weight)} / ${baseWeight}</strong><span>有效权重 / 基础权重</span>`;
+}
+
 function formatZeroWeightNote(upstream, remainingRecovery) {
-  if (Number(upstream.weight) === 0) return "基础权重 0 · 不参与自动路由";
-  return formatHealthZeroNote(remainingRecovery);
+  if (isFixedWeight(upstream)) return "固定权重 0 · 不参与路由";
+  if (Number(upstream.weight) === 0) return "基础权重 0 · 不参与动态路由";
+  return formatEffectiveZeroNote(remainingRecovery);
 }
 
 function renderRows() {
@@ -447,7 +460,7 @@ function renderRows() {
     const row = document.createElement("tr");
     row.className = upstream.enabled ? "" : "row-disabled";
     row.dataset.upstreamId = String(upstream.id);
-    const remainingRecovery = liveHealthRecoverySeconds(upstream);
+    const remainingRecovery = liveEffectiveRecoverySeconds(upstream);
     const checked = selectedUpstreamIds.has(upstream.id) ? "checked" : "";
     row.innerHTML = `
       <td class="col-check" data-col="check">
@@ -489,8 +502,7 @@ function renderRows() {
       </td>
       <td class="col-weight" data-col="weight">
         <div class="weight-stack">
-          <strong>${formatEffectiveWeight(upstream.effective_weight)}</strong>
-          <span>${upstream.auto_weight_enabled ? `基础 ${upstream.weight} · 健康 ${upstream.runtime_health_score}` : `基础 ${upstream.weight} · 固定`}</span>
+          ${weightCellMarkup(upstream)}
         </div>
       </td>
       <td class="col-status" data-col="status">
@@ -590,17 +602,17 @@ async function batchSetEnabled(enabled) {
   }
 }
 
-function liveHealthRecoverySeconds(upstream) {
-  if (!upstream.healthRecoveryAtMs) {
+function liveEffectiveRecoverySeconds(upstream) {
+  if (!upstream.effectiveRecoveryAtMs) {
     return 0;
   }
-  return Math.max(0, Math.ceil((upstream.healthRecoveryAtMs - Date.now()) / 1000));
+  return Math.max(0, Math.ceil((upstream.effectiveRecoveryAtMs - Date.now()) / 1000));
 }
 
-function updateHealthNotes() {
+function updateEffectiveWeightNotes() {
   for (const note of rows.querySelectorAll("[data-effective-zero-id]")) {
     const upstream = upstreams.find((item) => item.id === Number(note.dataset.effectiveZeroId));
-    const remaining = upstream ? liveHealthRecoverySeconds(upstream) : 0;
+    const remaining = upstream ? liveEffectiveRecoverySeconds(upstream) : 0;
     note.textContent = upstream ? formatZeroWeightNote(upstream, remaining) : "";
     note.hidden = !upstream || Number(upstream.effective_weight) > 0;
   }
@@ -685,7 +697,7 @@ async function loadUpstreams() {
   try {
     upstreams = await api("/api/admin/upstreams");
     for (const upstream of upstreams) {
-      upstream.healthRecoveryAtMs = upstream.health_recovery_remaining_seconds
+      upstream.effectiveRecoveryAtMs = upstream.health_recovery_remaining_seconds
         ? Date.now() + upstream.health_recovery_remaining_seconds * 1000
         : null;
     }

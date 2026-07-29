@@ -1157,7 +1157,7 @@ function initApp() {
     loadTokens();
   }
   loadUpstreams();
-  // Warm log window for health/charts even when not on logs tab.
+  // Warm log window for channel charts even when not on logs tab.
   if (currentViewFromHash() !== "logs") {
     loadLogs().catch(() => {});
   }

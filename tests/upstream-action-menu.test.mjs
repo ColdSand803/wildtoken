@@ -45,3 +45,54 @@ test("upstream credential clipboard text keeps the requested two-line shape", ()
 
   assert.equal(text, "baseURL: https://api.example.com/v1\napiKey: sk-test");
 });
+
+test("fixed weight checkbox maps to the existing dynamic-weight API field", () => {
+  const source = read("static/js/upstreams.js");
+  const context = vm.createContext({
+    fields: {
+      name: { value: "fixed" },
+      baseUrl: { value: "https://api.example.test/v1" },
+      apiKey: { value: "" },
+      modelMappings: { value: "{}" },
+      modelPrefixes: { value: "" },
+      priority: { value: "100" },
+      weight: { value: "25" },
+      fixedWeightEnabled: { checked: true },
+      timeoutSeconds: { value: "300" },
+      enabled: { checked: true },
+      clearApiKey: { checked: false },
+    },
+    parseHeaderOverrides: () => ({}),
+    parseModelMappings: () => ({}),
+    getFormModels: () => [],
+    splitList: () => [],
+  });
+  vm.runInContext(extractFunction(source, "payloadFromForm"), context);
+
+  assert.equal(vm.runInContext("payloadFromForm().auto_weight_enabled", context), false);
+  context.fields.fixedWeightEnabled.checked = false;
+  assert.equal(vm.runInContext("payloadFromForm().auto_weight_enabled", context), true);
+});
+
+test("upstream weight cell uses fixed and effective weight wording", () => {
+  const source = read("static/js/upstreams.js");
+  const context = vm.createContext({});
+  vm.runInContext(extractFunction(source, "formatEffectiveWeight"), context);
+  vm.runInContext(extractFunction(source, "isFixedWeight"), context);
+  vm.runInContext(extractFunction(source, "weightCellMarkup"), context);
+
+  const fixedMarkup = vm.runInContext(
+    "weightCellMarkup({ weight: 80, effective_weight: 12, auto_weight_enabled: false })",
+    context,
+  );
+  assert.match(fixedMarkup, /<strong>80<\/strong>/);
+  assert.match(fixedMarkup, /固定权重/);
+  assert.doesNotMatch(fixedMarkup, /有效权重 \/ 基础权重/);
+
+  const dynamicMarkup = vm.runInContext(
+    "weightCellMarkup({ weight: 80, effective_weight: 0, auto_weight_enabled: true })",
+    context,
+  );
+  assert.match(dynamicMarkup, /<strong>0 \/ 80<\/strong>/);
+  assert.match(dynamicMarkup, /有效权重 \/ 基础权重/);
+});

@@ -144,7 +144,7 @@ function getFilteredUpstreams() {
   return upstreams.filter((upstream) => {
     if (status === "enabled" && !upstream.enabled) return false;
     if (status === "disabled" && upstream.enabled) return false;
-    if (status === "health-zero" && Number(upstream.effective_weight) > 0) return false;
+    if (status === "effective-zero" && Number(upstream.effective_weight) > 0) return false;
     if (!query) return true;
     const haystack = [
       upstream.name,
@@ -353,10 +353,10 @@ function switchView(name) {
   if (name === "upstreams") {
     loadUpstreams();
     startUpstreamRefresh();
-    startHealthTick();
+    startEffectiveWeightTick();
   } else {
     stopUpstreamRefresh();
-    stopHealthTick();
+    stopEffectiveWeightTick();
   }
   if (name === "tokens") {
     loadTokens();
@@ -419,19 +419,19 @@ function stopUpstreamRefresh() {
   updateLiveIndicator();
 }
 
-function startHealthTick() {
-  if (healthTickTimer !== null || !pageVisible) {
+function startEffectiveWeightTick() {
+  if (effectiveWeightTickTimer !== null || !pageVisible) {
     return;
   }
-  healthTickTimer = window.setInterval(updateHealthNotes, HEALTH_TICK_MS);
+  effectiveWeightTickTimer = window.setInterval(updateEffectiveWeightNotes, EFFECTIVE_WEIGHT_TICK_MS);
 }
 
-function stopHealthTick() {
-  if (healthTickTimer === null) {
+function stopEffectiveWeightTick() {
+  if (effectiveWeightTickTimer === null) {
     return;
   }
-  window.clearInterval(healthTickTimer);
-  healthTickTimer = null;
+  window.clearInterval(effectiveWeightTickTimer);
+  effectiveWeightTickTimer = null;
 }
 
 function stopLogRefresh() {
@@ -468,7 +468,7 @@ function pauseAllAutoRefresh() {
   stopLogStream();
   stopUpstreamRefresh();
   stopTokenRefresh();
-  stopHealthTick();
+  stopEffectiveWeightTick();
   stopDashboardRefresh();
   stopSystemUptimeTicker();
   updateLiveIndicator();
@@ -487,7 +487,7 @@ function resumeAutoRefreshForCurrentView() {
     startLogStream();
   } else if (name === "upstreams") {
     startUpstreamRefresh();
-    startHealthTick();
+    startEffectiveWeightTick();
   } else if (name === "tokens") {
     startTokenRefresh();
   } else if (name === "settings") {
