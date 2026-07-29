@@ -582,10 +582,65 @@ button.model-selection-remove:focus-visible {
 
 .form-section-collapsible summary {
   align-items: center;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   cursor: pointer;
-  display: flex;
-  gap: 10px;
-  list-style-position: outside;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  list-style: none;
+  padding: 10px 12px;
+  transition: border-color var(--transition);
+  user-select: none;
+}
+
+/* summary 不再是 list-item，去掉两种引擎的默认三角。 */
+.form-section-collapsible summary::-webkit-details-marker {
+  display: none;
+}
+
+.form-section-collapsible summary::marker {
+  content: "";
+}
+
+.form-section-collapsible summary:hover {
+  border-color: var(--line-strong);
+}
+
+.form-section-collapsible summary:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* 与日志详情折叠区一致的 +/− 展开指示。 */
+.section-summary-state {
+  align-items: center;
+  background: var(--panel-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted-strong);
+  display: inline-flex;
+  font-size: var(--text-md);
+  font-weight: 600;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.section-summary-state::before {
+  content: "+";
+  transform: translateY(-1px);
+}
+
+.form-section-collapsible[open] .section-summary-state {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+
+.form-section-collapsible[open] .section-summary-state::before {
+  content: "−";
 }
 
 .section-title {
