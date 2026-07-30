@@ -94,6 +94,24 @@ fn protocol_error_response(
         })
 }
 
+/// Describe why routing found no upstream.
+///
+/// The text goes to both the downstream error body and the request log, so a
+/// 503 can be traced back to the requested model and channel hint without
+/// reproducing the request.
+fn no_route_reason(selector: Option<&str>, model: Option<&str>) -> String {
+    let target = match model {
+        Some(model) => format!("model {model:?}"),
+        None => "a request without a model".to_string(),
+    };
+    match selector {
+        Some(selector) => {
+            format!("no enabled upstream matches {target} on the requested channel {selector:?}")
+        }
+        None => format!("no enabled upstream matches {target}"),
+    }
+}
+
 struct ClientAbortLogGuard {
     log_writer: logging::LogWriter,
     started_at: Instant,
@@ -239,7 +257,9 @@ pub async fn proxy_handler(
         {
             Ok(selected) => selected,
             Err(error) => {
-                abort_log.disarm();
+                // Selection only fails on SQLite errors, which `AppError`
+                // renders as 500.
+                abort_log.log_and_disarm(500, format!("upstream selection failed: {error}"));
                 return Err(error);
             }
         }
@@ -268,7 +288,7 @@ pub async fn proxy_handler(
             {
                 Ok(selected) => selected,
                 Err(error) => {
-                    abort_log.disarm();
+                    abort_log.log_and_disarm(500, format!("upstream selection failed: {error}"));
                     return Err(error);
                 }
             }
@@ -278,11 +298,12 @@ pub async fn proxy_handler(
             if let Some(failure) = last_failure.take() {
                 break failure;
             }
-            abort_log.disarm();
+            let reason = no_route_reason(selector.as_deref(), model.as_deref());
+            abort_log.log_and_disarm(503, reason.clone());
             return Ok(protocol_error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
                 path,
-                "No enabled upstream is configured",
+                &reason,
                 "upstream_not_configured",
             ));
         };
@@ -1353,5 +1374,102 @@ mod tests {
         let full_json: serde_json::Value = serde_json::from_slice(&full_body).unwrap();
         assert_eq!(full_json["data"].as_array().unwrap().len(), 2);
         assert!(state.models_list_cache.get().await.is_some());
+    }
+
+    /// Wait for the single row the background writer is expected to persist.
+    async fn only_routing_failure_log(
+        db: &sqlx::SqlitePool,
+    ) -> (Option<i32>, Option<i64>, Option<String>, Option<String>) {
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                let row = sqlx::query_as::<_, (Option<i32>, Option<i64>, Option<String>, Option<String>)>(
+                    "SELECT status_code, upstream_id, request_model, error FROM request_logs LIMIT 1",
+                )
+                .fetch_optional(db)
+                .await
+                .unwrap();
+                if let Some(row) = row {
+                    break row;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the unroutable request was not logged")
+    }
+
+    #[tokio::test]
+    async fn a_model_without_a_matching_channel_is_logged_as_503() {
+        let db = proxy_test_database().await;
+        sqlx::query(
+            r#"INSERT INTO upstreams
+               (name, base_url, model_names, priority, weight, enabled)
+               VALUES ('other', 'http://example.com', '["other-model"]', 999, 100, 1)"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let state = test_proxy_state(db, RuntimeSettings::default()).await;
+        let app = Router::new()
+            .route("/v1/{*path}", any(proxy_handler))
+            .with_state(state.clone());
+
+        let response = app
+            .oneshot(proxy_request_for("missing-model"))
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let message = json["error"]["message"].as_str().unwrap();
+        assert!(message.contains("missing-model"), "{message}");
+
+        let (status_code, upstream_id, request_model, error) =
+            only_routing_failure_log(&state.db).await;
+        assert_eq!(status_code, Some(503));
+        assert_eq!(upstream_id, None);
+        assert_eq!(request_model.as_deref(), Some("missing-model"));
+        let error = error.unwrap();
+        assert!(error.contains("missing-model"), "{error}");
+    }
+
+    #[tokio::test]
+    async fn an_unmatched_channel_hint_is_logged_with_its_selector() {
+        let db = proxy_test_database().await;
+        sqlx::query(
+            r#"INSERT INTO upstreams
+               (name, base_url, model_names, priority, weight, enabled)
+               VALUES ('pinned', 'http://example.com', '["other-model"]', 999, 100, 1)"#,
+        )
+        .execute(&db)
+        .await
+        .unwrap();
+        let state = test_proxy_state(db, RuntimeSettings::default()).await;
+        let app = Router::new()
+            .route("/v1/{*path}", any(proxy_handler))
+            .with_state(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/responses")
+                    .header(header::AUTHORIZATION, "Bearer downstream-secret")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .header("x-wildtoken-upstream", "pinned")
+                    .body(Body::from(r#"{"model":"missing-model","input":[]}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let (status_code, upstream_id, _, error) = only_routing_failure_log(&state.db).await;
+        assert_eq!(status_code, Some(503));
+        assert_eq!(upstream_id, None);
+        let error = error.unwrap();
+        assert!(error.contains("pinned"), "{error}");
+        assert!(error.contains("missing-model"), "{error}");
     }
 }
