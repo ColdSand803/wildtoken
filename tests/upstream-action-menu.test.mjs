@@ -9,6 +9,11 @@ function extractFunction(source, name) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} must exist`);
 
+  // Keep an `async` keyword: without it the extracted body cannot await.
+  const asyncPrefix = "async ";
+  const declarationStart = source.startsWith(asyncPrefix, start - asyncPrefix.length)
+    ? start - asyncPrefix.length
+    : start;
   const bodyStart = source.indexOf("{", start);
   let depth = 0;
   for (let index = bodyStart; index < source.length; index += 1) {
@@ -17,7 +22,7 @@ function extractFunction(source, name) {
     if (char === "}") {
       depth -= 1;
       if (depth === 0) {
-        return source.slice(start, index + 1);
+        return source.slice(declarationStart, index + 1);
       }
     }
   }
@@ -95,4 +100,47 @@ test("upstream weight cell uses fixed and effective weight wording", () => {
   );
   assert.match(dynamicMarkup, /<strong>0 \/ 80<\/strong>/);
   assert.match(dynamicMarkup, /有效权重 \/ 基础权重/);
+});
+
+test("the balance dialog head carries a refresh control", () => {
+  const markup = read("static/admin.html");
+  const dialog = markup.slice(
+    markup.indexOf('<dialog id="balance-dialog"'),
+    markup.indexOf('<dialog id="admin-token-dialog"'),
+  );
+
+  assert.match(dialog, /id="balance-refresh"/);
+  assert.match(dialog, /class="secondary ghost icon-refresh"/);
+  assert.match(read("static/js/models.js"), /balanceRefresh\.addEventListener\("click"/);
+});
+
+test("a superseded balance query cannot overwrite the newer result", async () => {
+  const source = read("static/js/upstreams.js");
+  let releaseStale;
+  const staleResponse = new Promise((resolve) => {
+    releaseStale = () => resolve({ ok: true, remaining_usd: 1 });
+  });
+  const responses = [staleResponse, Promise.resolve({ ok: true, remaining_usd: 2 })];
+  const context = vm.createContext({
+    activeBalanceQuery: { provider: "new-api", endpoint: "/api/admin/upstreams/1/balance" },
+    balanceQueryToken: 0,
+    balanceRefresh: { disabled: false, classList: { toggle() {} } },
+    balanceSummary: { textContent: "" },
+    balanceBody: { innerHTML: "" },
+    api: () => responses.shift(),
+    escapeHtml: (value) => value,
+    renderBalanceResult: (result) => `remaining:${result.remaining_usd}`,
+  });
+  vm.runInContext(extractFunction(source, "setBalanceRefreshBusy"), context);
+  vm.runInContext(extractFunction(source, "refreshBalance"), context);
+
+  const stale = vm.runInContext("refreshBalance()", context);
+  const fresh = vm.runInContext("refreshBalance()", context);
+  await fresh;
+  releaseStale();
+  await stale;
+
+  assert.equal(context.balanceBody.innerHTML, "remaining:2");
+  assert.equal(context.balanceSummary.textContent, "查询成功");
+  assert.equal(context.balanceRefresh.disabled, false);
 });

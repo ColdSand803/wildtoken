@@ -1019,6 +1019,7 @@ html[data-theme="demon-slayer"] button:not(:where(
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
+  .icon-refresh,
   .status-switch,
   .theme-toggle,
   .density-toggle,
@@ -1059,6 +1060,7 @@ html[data-theme="demon-slayer"] button:not(:where(
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
+  .icon-refresh,
   .status-switch,
   .theme-toggle,
   .density-toggle,
@@ -1093,6 +1095,7 @@ html[data-theme="demon-slayer"] button:not(:where(
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
+  .icon-refresh,
   .status-switch,
   .segmented-control > button,
   .theme-menu button,
@@ -1114,6 +1117,7 @@ html[data-theme="demon-slayer"] button:not(:where(
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
+  .icon-refresh,
   .status-switch,
   .segmented-control > button,
   .theme-menu button,
@@ -1131,6 +1135,7 @@ html[data-theme="demon-slayer"] button:not(:where(
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
+  .icon-refresh,
   .status-switch,
   .segmented-control > button,
   .theme-menu button,
@@ -1237,6 +1242,7 @@ html[data-theme="demon-slayer"] .action-menu-trigger:hover {
 
 html[data-theme="demon-slayer"] .modal-head .icon-close,
 html[data-theme="demon-slayer"] .modal-head .icon-maximize,
+html[data-theme="demon-slayer"] .modal-head .icon-refresh,
 html[data-theme="demon-slayer"] .log-detail-head .icon-close,
 html[data-theme="demon-slayer"] .log-detail-head .icon-maximize {
   background: transparent;
@@ -1257,6 +1263,8 @@ html[data-theme="demon-slayer"] .log-detail-head .icon-close:focus-visible {
 
 html[data-theme="demon-slayer"] .modal-head .icon-maximize:hover,
 html[data-theme="demon-slayer"] .modal-head .icon-maximize:focus-visible,
+html[data-theme="demon-slayer"] .modal-head .icon-refresh:enabled:hover,
+html[data-theme="demon-slayer"] .modal-head .icon-refresh:enabled:focus-visible,
 html[data-theme="demon-slayer"] .log-detail-head .icon-maximize:hover,
 html[data-theme="demon-slayer"] .log-detail-head .icon-maximize:focus-visible {
   background: rgb(63 191 166 / 16%);

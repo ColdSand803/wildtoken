@@ -659,6 +659,7 @@ html[data-theme="nes"] .model-selection-remove,
 html[data-theme="nes"] .toast-close,
 html[data-theme="nes"] .icon-close,
 html[data-theme="nes"] .icon-maximize,
+html[data-theme="nes"] .icon-refresh,
 html[data-theme="nes"] .action-menu-trigger {
   background: transparent;
   border-color: transparent;
@@ -691,6 +692,7 @@ html[data-theme="nes"] .model-selection-remove:hover,
 html[data-theme="nes"] .toast-close:hover,
 html[data-theme="nes"] .icon-close:hover,
 html[data-theme="nes"] .icon-maximize:hover,
+html[data-theme="nes"] .icon-refresh:enabled:hover,
 html[data-theme="nes"] .action-menu-trigger:hover {
   background: #2a2c44;
   box-shadow: none;
@@ -1351,7 +1353,8 @@ html[data-theme="nes"] .upstream-action-menu button.danger:focus-visible {
 
 /* Pixel icon chrome (still not chunky command buttons) */
 html[data-theme="nes"] .icon-close,
-html[data-theme="nes"] .icon-maximize {
+html[data-theme="nes"] .icon-maximize,
+html[data-theme="nes"] .icon-refresh {
   background: #e52521;
   border: 2px solid #000000;
   box-shadow: inset 1px 1px 0 #ff6b63, 2px 2px 0 #000000;
@@ -1363,8 +1366,14 @@ html[data-theme="nes"] .icon-maximize {
   box-shadow: inset 1px 1px 0 #b4e06a, 2px 2px 0 #000000;
 }
 
+html[data-theme="nes"] .icon-refresh {
+  background: #209cee;
+  box-shadow: inset 1px 1px 0 #6fc4f5, 2px 2px 0 #000000;
+}
+
 html[data-theme="nes"] .icon-close:hover,
-html[data-theme="nes"] .icon-maximize:hover {
+html[data-theme="nes"] .icon-maximize:hover,
+html[data-theme="nes"] .icon-refresh:enabled:hover {
   background: #f7d51d;
   box-shadow: inset 1px 1px 0 #ffe566, 2px 2px 0 #000000;
   color: #000000;

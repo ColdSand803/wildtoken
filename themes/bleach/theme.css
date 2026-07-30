@@ -639,7 +639,8 @@ html[data-theme="bleach"] .model-selection-remove,
 html[data-theme="bleach"] .toast-close,
 html[data-theme="bleach"] .action-menu-trigger,
 html[data-theme="bleach"] .icon-close,
-html[data-theme="bleach"] .icon-maximize {
+html[data-theme="bleach"] .icon-maximize,
+html[data-theme="bleach"] .icon-refresh {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
@@ -650,6 +651,7 @@ html[data-theme="bleach"] .icon-maximize {
 
 html[data-theme="bleach"] .modal-head .icon-close,
 html[data-theme="bleach"] .modal-head .icon-maximize,
+html[data-theme="bleach"] .modal-head .icon-refresh,
 html[data-theme="bleach"] .log-detail-head .icon-close,
 html[data-theme="bleach"] .log-detail-head .icon-maximize {
   background: #fffaf0;
@@ -671,6 +673,8 @@ html[data-theme="bleach"] .log-detail-head .icon-close:focus-visible {
 
 html[data-theme="bleach"] .modal-head .icon-maximize:hover,
 html[data-theme="bleach"] .modal-head .icon-maximize:focus-visible,
+html[data-theme="bleach"] .modal-head .icon-refresh:enabled:hover,
+html[data-theme="bleach"] .modal-head .icon-refresh:enabled:focus-visible,
 html[data-theme="bleach"] .log-detail-head .icon-maximize:hover,
 html[data-theme="bleach"] .log-detail-head .icon-maximize:focus-visible {
   background: #f97316;

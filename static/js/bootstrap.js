@@ -29,7 +29,10 @@ const balanceDialog = document.querySelector("#balance-dialog");
 const balanceTitle = document.querySelector("#balance-title");
 const balanceSummary = document.querySelector("#balance-summary");
 const balanceBody = document.querySelector("#balance-body");
+const balanceRefresh = document.querySelector("#balance-refresh");
 const balanceClose = document.querySelector("#balance-close");
+let activeBalanceQuery = null;
+let balanceQueryToken = 0;
 
 const toastRegion = document.querySelector("#toast-region");
 const selectPanel = document.querySelector("#select-panel");

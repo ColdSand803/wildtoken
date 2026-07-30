@@ -521,7 +521,8 @@ html[data-theme="animal-island"] .token-preview-button,
 html[data-theme="animal-island"] .model-selection-remove,
 html[data-theme="animal-island"] .toast-close,
 html[data-theme="animal-island"] .icon-close,
-html[data-theme="animal-island"] .icon-maximize {
+html[data-theme="animal-island"] .icon-maximize,
+html[data-theme="animal-island"] .icon-refresh {
   background: transparent;
   border-color: transparent;
   border-radius: var(--radius-sm);
@@ -550,7 +551,8 @@ html[data-theme="animal-island"] .token-preview-button:hover,
 html[data-theme="animal-island"] .model-selection-remove:hover,
 html[data-theme="animal-island"] .toast-close:hover,
 html[data-theme="animal-island"] .icon-close:hover,
-html[data-theme="animal-island"] .icon-maximize:hover {
+html[data-theme="animal-island"] .icon-maximize:hover,
+html[data-theme="animal-island"] .icon-refresh:enabled:hover {
   background: var(--panel-muted);
   box-shadow: none;
   transform: none;

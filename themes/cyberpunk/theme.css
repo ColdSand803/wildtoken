@@ -757,6 +757,7 @@ html[data-theme="cyberpunk"] button.danger:active:not(:disabled) {
   html[data-theme="cyberpunk"] .toast-close,
   html[data-theme="cyberpunk"] .icon-close,
   html[data-theme="cyberpunk"] .icon-maximize,
+  html[data-theme="cyberpunk"] .icon-refresh,
   html[data-theme="cyberpunk"] .action-menu-trigger,
   html[data-theme="cyberpunk"] .status-switch,
   html[data-theme="cyberpunk"] .segmented-control button,
@@ -777,6 +778,7 @@ html[data-theme="cyberpunk"] .model-selection-remove,
 html[data-theme="cyberpunk"] .toast-close,
 html[data-theme="cyberpunk"] .icon-close,
 html[data-theme="cyberpunk"] .icon-maximize,
+html[data-theme="cyberpunk"] .icon-refresh,
 html[data-theme="cyberpunk"] .action-menu-trigger {
   background: transparent;
   border-color: transparent;
@@ -812,6 +814,7 @@ html[data-theme="cyberpunk"] .model-selection-remove:hover,
 html[data-theme="cyberpunk"] .toast-close:hover,
 html[data-theme="cyberpunk"] .icon-close:hover,
 html[data-theme="cyberpunk"] .icon-maximize:hover,
+html[data-theme="cyberpunk"] .icon-refresh:enabled:hover,
 html[data-theme="cyberpunk"] .action-menu-trigger:hover {
   background: rgb(255 43 214 / 12%);
   box-shadow: none;

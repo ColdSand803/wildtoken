@@ -1096,6 +1096,9 @@ for (const button of document.querySelectorAll(".log-detail-expand")) {
 logDetailClose.addEventListener("click", closeLogDetailDialog);
 dismissOnBackdropClick(logDetailDialog, closeLogDetailDialog);
 
+balanceRefresh.addEventListener("click", async () => {
+  await refreshBalance();
+});
 balanceClose.addEventListener("click", closeBalanceDialog);
 dismissOnBackdropClick(balanceDialog, closeBalanceDialog);
 

@@ -800,7 +800,8 @@ button.model-selection-remove:focus-visible {
 }
 
 .icon-close,
-.icon-maximize {
+.icon-maximize,
+.icon-refresh {
   align-items: center;
   border-radius: var(--radius);
   color: var(--muted);
@@ -814,9 +815,10 @@ button.model-selection-remove:focus-visible {
   width: 32px;
 }
 
-/* Shared stroke weight so maximize/restore/close read as one family. */
+/* Shared stroke weight so refresh/maximize/restore/close read as one family. */
 .icon-close .dialog-icon,
-.icon-maximize .dialog-icon {
+.icon-maximize .dialog-icon,
+.icon-refresh .dialog-icon {
   display: block;
   fill: none;
   flex: 0 0 auto;
@@ -844,9 +846,30 @@ button.model-selection-remove:focus-visible {
 .icon-close:hover,
 .icon-close:focus-visible,
 .icon-maximize:hover,
-.icon-maximize:focus-visible {
+.icon-maximize:focus-visible,
+.icon-refresh:enabled:hover,
+.icon-refresh:enabled:focus-visible {
   background: var(--panel-muted);
   color: var(--text);
+}
+
+/* The arrow keeps turning for as long as the query is out. */
+.icon-refresh.is-busy .dialog-icon {
+  animation: balance-refresh-spin 0.9s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+/* Busy means in progress, not unavailable: hold the arrow bright enough to
+   read as motion, and drop the not-allowed cursor the base rule applies. */
+.icon-refresh:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+@keyframes balance-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Maximized dialog: fill the viewport; keep a single scroll surface on the panel. */

@@ -303,6 +303,9 @@ function openBalanceDialog() {
 
 function closeBalanceDialog() {
   clearDialogMaximized(balanceDialog);
+  // Retire any in-flight query so its result cannot land in a later dialog.
+  balanceQueryToken += 1;
+  setBalanceRefreshBusy(false);
   if (balanceDialog.open && typeof balanceDialog.close === "function") {
     balanceDialog.close();
   } else {
@@ -342,18 +345,25 @@ function renderBalanceResult(result, provider) {
   ].join("");
 }
 
-async function showBalance(upstream, provider = "new-api") {
-  const providerName = provider === "sub2api" ? "sub2api" : "new-api";
-  const endpoint = provider === "sub2api"
-    ? `/api/admin/upstreams/${upstream.id}/balance/sub2api`
-    : `/api/admin/upstreams/${upstream.id}/balance`;
-  balanceTitle.textContent = `${providerName} 余额：${upstream.name}`;
+function setBalanceRefreshBusy(busy) {
+  balanceRefresh.disabled = busy;
+  balanceRefresh.classList.toggle("is-busy", busy);
+}
+
+/// Re-run the query the balance dialog is currently showing.
+async function refreshBalance() {
+  if (!activeBalanceQuery) return;
+  const { endpoint, provider } = activeBalanceQuery;
+  // Refreshing and reopening the dialog both supersede whatever is in flight;
+  // a stale response must not overwrite the newer one it loses the race to.
+  const token = ++balanceQueryToken;
   balanceSummary.textContent = "正在查询...";
   balanceBody.innerHTML = "";
-  openBalanceDialog();
+  setBalanceRefreshBusy(true);
 
   try {
     const result = await api(endpoint, { method: "POST" });
+    if (token !== balanceQueryToken) return;
     if (result.ok) {
       balanceSummary.textContent = "查询成功";
       balanceBody.innerHTML = renderBalanceResult(result, provider);
@@ -362,9 +372,27 @@ async function showBalance(upstream, provider = "new-api") {
       balanceBody.innerHTML = `<p class="muted">${escapeHtml(result.message || "未知错误")}</p>`;
     }
   } catch (error) {
+    if (token !== balanceQueryToken) return;
     balanceSummary.textContent = "查询失败";
     balanceBody.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`;
+  } finally {
+    if (token === balanceQueryToken) {
+      setBalanceRefreshBusy(false);
+    }
   }
+}
+
+async function showBalance(upstream, provider = "new-api") {
+  const providerName = provider === "sub2api" ? "sub2api" : "new-api";
+  activeBalanceQuery = {
+    provider,
+    endpoint: provider === "sub2api"
+      ? `/api/admin/upstreams/${upstream.id}/balance/sub2api`
+      : `/api/admin/upstreams/${upstream.id}/balance`,
+  };
+  balanceTitle.textContent = `${providerName} 余额：${upstream.name}`;
+  openBalanceDialog();
+  await refreshBalance();
 }
 
 function resetForm() {
