@@ -22,7 +22,7 @@ use crate::proxy;
 use crate::proxy::matcher::AutoWeightManager;
 use crate::state::{
     bootstrap_admin_credential, init_db, load_runtime_settings, verify_admin_token, AdminAuthCache,
-    AppState, RuntimeMetrics,
+    AdminAuthThrottle, AppState, RuntimeMetrics,
 };
 
 fn is_loopback_bind_host(host: &str) -> bool {
@@ -167,6 +167,7 @@ pub async fn run_server(
         admin_credential_version: Arc::new(AtomicI64::new(admin_credential.credential_version)),
         admin_credential: Arc::new(tokio::sync::RwLock::new(admin_credential)),
         admin_auth_cache: Arc::new(AdminAuthCache::new()),
+        admin_throttle: Arc::new(AdminAuthThrottle::new()),
         runtime_metrics,
         log_writer,
         log_stats,
@@ -348,9 +349,12 @@ pub async fn run_server(
     if let Some(tx) = ready {
         let _ = tx.send((port, admin_url));
     }
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown)
+    .await?;
     tracing::info!("WildToken stopped");
 
     Ok(())
@@ -450,10 +454,13 @@ mod tests {
     #[tokio::test]
     async fn existing_strong_database_credential_ignores_startup_material() {
         let pool = test_pool().await;
-        let first =
-            load_or_bootstrap_admin_credential(&pool, "strong-admin-token".into(), "127.0.0.1")
-                .await
-                .unwrap();
+        let first = load_or_bootstrap_admin_credential(
+            &pool,
+            "strong-admin-token-for-tests".into(),
+            "127.0.0.1",
+        )
+        .await
+        .unwrap();
         let loaded = load_or_bootstrap_admin_credential(&pool, "change-me".into(), "0.0.0.0")
             .await
             .unwrap();

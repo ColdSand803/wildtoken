@@ -14,7 +14,14 @@ use crate::{
     proxy::matcher::AutoWeightManager,
 };
 
-use super::{hash_admin_token, init_db, AdminAuthCache, AppState, RuntimeMetrics};
+use super::{
+    hash_admin_token, init_db, AdminAuthCache, AdminAuthThrottle, AdminClient, AppState,
+    RuntimeMetrics,
+};
+
+/// Authentication tests exercise the cache and credential generation, not the
+/// throttle, so they authenticate as loopback and are exempt from it.
+const LOCAL: AdminClient = AdminClient::Loopback;
 
 async fn test_pool() -> SqlitePool {
     SqlitePoolOptions::new()
@@ -43,6 +50,7 @@ fn state_with_credential(credential: AdminCredential) -> AppState {
         admin_credential_version: Arc::new(AtomicI64::new(credential.credential_version)),
         admin_credential: Arc::new(RwLock::new(credential)),
         admin_auth_cache: Arc::new(AdminAuthCache::new()),
+        admin_throttle: Arc::new(AdminAuthThrottle::new()),
         runtime_metrics,
         log_writer,
         log_stats,
@@ -384,8 +392,14 @@ async fn successful_admin_auth_reuses_the_cached_fingerprint() {
         credential_version: 1,
     });
 
-    assert_eq!(state.authenticate_admin_token(token.clone()).await, Some(1));
-    assert_eq!(state.authenticate_admin_token(token.clone()).await, Some(1));
+    assert_eq!(
+        state.authenticate_admin_token(token.clone(), LOCAL).await,
+        Some(1)
+    );
+    assert_eq!(
+        state.authenticate_admin_token(token.clone(), LOCAL).await,
+        Some(1)
+    );
     assert_eq!(
         state
             .admin_auth_cache
@@ -396,11 +410,11 @@ async fn successful_admin_auth_reuses_the_cached_fingerprint() {
 
     assert_eq!(
         state
-            .authenticate_admin_token("wrong-admin-token".into())
+            .authenticate_admin_token("wrong-admin-token".into(), LOCAL)
             .await,
         None
     );
-    assert_eq!(state.authenticate_admin_token(token).await, Some(1));
+    assert_eq!(state.authenticate_admin_token(token, LOCAL).await, Some(1));
     assert_eq!(
         state
             .admin_auth_cache
@@ -419,9 +433,9 @@ async fn concurrent_admin_auth_performs_one_argon2_verification() {
     });
 
     let (first, second, third) = tokio::join!(
-        state.authenticate_admin_token(token.clone()),
-        state.authenticate_admin_token(token.clone()),
-        state.authenticate_admin_token(token),
+        state.authenticate_admin_token(token.clone(), LOCAL),
+        state.authenticate_admin_token(token.clone(), LOCAL),
+        state.authenticate_admin_token(token, LOCAL),
     );
 
     assert_eq!((first, second, third), (Some(1), Some(1), Some(1)));
@@ -431,6 +445,80 @@ async fn concurrent_admin_auth_performs_one_argon2_verification() {
             .argon2_verifications
             .load(Ordering::Relaxed),
         1
+    );
+}
+
+#[tokio::test]
+async fn a_throttled_client_stops_costing_argon2_verifications() {
+    let token = "throttled-admin-token".to_string();
+    let state = state_with_credential(AdminCredential {
+        credential_hash: hash_admin_token(token).await.unwrap(),
+        credential_version: 1,
+    });
+    let client = AdminClient::from_ip("203.0.113.11".parse().unwrap());
+
+    let mut attempts = 0;
+    while state
+        .authenticate_admin_token("wrong-token".into(), client)
+        .await
+        .is_none()
+        && state.admin_throttle.admit(client).await
+    {
+        attempts += 1;
+        assert!(attempts < 100, "the client was never throttled");
+    }
+
+    // Once blocked, further guesses are refused before reaching Argon2.
+    let verifications = state
+        .admin_auth_cache
+        .argon2_verifications
+        .load(Ordering::Relaxed);
+    for _ in 0..20 {
+        assert_eq!(
+            state
+                .authenticate_admin_token("wrong-token".into(), client)
+                .await,
+            None
+        );
+    }
+    assert_eq!(
+        state
+            .admin_auth_cache
+            .argon2_verifications
+            .load(Ordering::Relaxed),
+        verifications
+    );
+}
+
+#[tokio::test]
+async fn a_signed_in_operator_is_unaffected_by_another_clients_backoff() {
+    let token = "operator-admin-token".to_string();
+    let state = state_with_credential(AdminCredential {
+        credential_hash: hash_admin_token(token.clone()).await.unwrap(),
+        credential_version: 1,
+    });
+    let operator = AdminClient::from_ip("198.51.100.20".parse().unwrap());
+    let attacker = AdminClient::from_ip("203.0.113.12".parse().unwrap());
+
+    // The operator signs in once, warming the verified-token cache.
+    assert_eq!(
+        state
+            .authenticate_admin_token(token.clone(), operator)
+            .await,
+        Some(1)
+    );
+
+    // The attacker guesses until it is blocked outright.
+    while state.admin_throttle.admit(attacker).await {
+        let _ = state
+            .authenticate_admin_token("wrong-token".into(), attacker)
+            .await;
+    }
+
+    // The operator's valid token still answers from cache, unthrottled.
+    assert_eq!(
+        state.authenticate_admin_token(token, operator).await,
+        Some(1)
     );
 }
 
@@ -473,7 +561,9 @@ async fn published_rotation_invalidates_the_admin_auth_cache() {
     });
 
     assert_eq!(
-        state.authenticate_admin_token(old_token.clone()).await,
+        state
+            .authenticate_admin_token(old_token.clone(), LOCAL)
+            .await,
         Some(1)
     );
 
@@ -484,12 +574,17 @@ async fn published_rotation_invalidates_the_admin_auth_cache() {
         })
         .await;
 
-    assert_eq!(state.authenticate_admin_token(old_token).await, None);
+    assert_eq!(state.authenticate_admin_token(old_token, LOCAL).await, None);
     assert_eq!(
-        state.authenticate_admin_token(new_token.clone()).await,
+        state
+            .authenticate_admin_token(new_token.clone(), LOCAL)
+            .await,
         Some(2)
     );
-    assert_eq!(state.authenticate_admin_token(new_token).await, Some(2));
+    assert_eq!(
+        state.authenticate_admin_token(new_token, LOCAL).await,
+        Some(2)
+    );
     assert_eq!(
         state
             .admin_auth_cache

@@ -56,7 +56,7 @@ Docker Compose 是最简单的本地服务运行方式。
 
 ```bash
 cp .env.example .env
-# 编辑 .env，把 ADMIN_TOKEN 设置为唯一的 8-256 字节可打印 ASCII 值。
+# 编辑 .env，把 ADMIN_TOKEN 设置为唯一的 24-256 字节可打印 ASCII 值。
 docker compose up -d --build
 curl -fsS http://127.0.0.1:3100/health
 ```
@@ -69,7 +69,7 @@ http://127.0.0.1:3100/admin
 
 Compose 会把 SQLite 数据保存到 `wildtoken-data` 卷，并发布 `3100` 端口。它还会把宿主机 `./themes` 只读挂载进容器，方便修改主题而不重建镜像。
 
-全新数据库如果监听非本机地址，必须显式设置 `ADMIN_TOKEN`，否则 WildToken 会拒绝启动。该 Token 必须是 8-256 字节、可打印 ASCII、不包含空格，且不能是 `change-me`。
+全新数据库如果监听非本机地址，必须显式设置 `ADMIN_TOKEN`，否则 WildToken 会拒绝启动。该 Token 必须是 24-256 字节、可打印 ASCII、不包含空格，且不能是 `change-me`。
 
 ### 🛠️ 源码运行
 
@@ -284,6 +284,12 @@ RUST_LOG=info
 - 下游 API Token 存储为 SHA-256 摘要和不可还原预览；完整值只在创建时显示一次。
 - 提供商 API Key 只应由服务端注入上游请求，不应分发给下游客户端。
 - 管理 API 同源访问并要求 `x-admin-token`；兼容性 `/v1/*` API 会为下游客户端开启 CORS。
+- 管理端认证带准入控制：单个来源连续失败 5 次后按指数退避（1 秒起，最长 60 秒），
+  全局每分钟失败超过 100 次则进入 30 秒冷却。已验证通过的 Token 走缓存，不受影响。
+  本机来源始终豁免，避免把运维人员锁在自己的控制台外。
+- 放在反向代理后面时，把 `admin.client_ip_header` 设为代理覆写的头（如 `x-forwarded-for`），
+  否则所有请求会被当作同一个来源。**只有在代理确实覆写该头时才配置它** —— 该头由调用方可控，
+  未经覆写就信任等于让每个调用方自选身份、随时甩掉失败记录。
 
 ## 🧪 开发检查
 

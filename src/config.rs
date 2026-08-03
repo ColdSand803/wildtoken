@@ -46,6 +46,11 @@ pub struct UpstreamSettings {
 #[serde(default)]
 pub struct AdminSettings {
     pub token: String,
+    /// Header carrying the real client address when WildToken sits behind a
+    /// reverse proxy, e.g. `x-forwarded-for`. Unset by default: the header is
+    /// caller-controlled, so trusting one that no proxy overwrites would let
+    /// every caller pick its own identity and shed its failure history.
+    pub client_ip_header: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,6 +101,7 @@ impl Default for AdminSettings {
     fn default() -> Self {
         Self {
             token: "change-me".into(),
+            client_ip_header: None,
         }
     }
 }
