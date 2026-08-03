@@ -1,5 +1,6 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::models::settings::RuntimeSettings;
@@ -208,6 +209,167 @@ fn normalize_model_match(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
+#[derive(Clone)]
+struct ParsedModelName {
+    original: String,
+    normalized: String,
+}
+
+#[derive(Clone)]
+struct ParsedModelMapping {
+    key_normalized: String,
+    value: Option<String>,
+}
+
+#[derive(Clone)]
+struct ParsedUpstream {
+    row: UpstreamRow,
+    model_names: Vec<ParsedModelName>,
+    model_prefixes: Vec<String>,
+    model_mappings: Vec<ParsedModelMapping>,
+}
+
+impl ParsedUpstream {
+    fn from_row(row: UpstreamRow) -> Self {
+        let model_names = serde_json::from_str::<Vec<String>>(&row.model_names)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|original| ParsedModelName {
+                normalized: normalize_model_match(&original),
+                original,
+            })
+            .collect();
+        let model_prefixes = serde_json::from_str::<Vec<String>>(&row.model_prefixes)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|prefix| normalize_model_match(&prefix))
+            .collect();
+        let model_mappings =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&row.model_mappings)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(key, value)| ParsedModelMapping {
+                    key_normalized: normalize_model_match(&key),
+                    value: value.as_str().map(str::to_owned),
+                })
+                .collect();
+
+        Self {
+            row,
+            model_names,
+            model_prefixes,
+            model_mappings,
+        }
+    }
+}
+
+struct UpstreamRoutingSnapshot {
+    upstreams: Vec<ParsedUpstream>,
+    by_id: HashMap<i64, usize>,
+    by_name: HashMap<String, usize>,
+}
+
+impl UpstreamRoutingSnapshot {
+    fn from_rows(rows: Vec<UpstreamRow>) -> Self {
+        let mut upstreams = Vec::with_capacity(rows.len());
+        let mut by_id = HashMap::with_capacity(rows.len());
+        let mut by_name = HashMap::with_capacity(rows.len());
+
+        for row in rows.into_iter().filter(|row| row.enabled == 1) {
+            let index = upstreams.len();
+            by_id.insert(row.id, index);
+            by_name.insert(row.name.clone(), index);
+            upstreams.push(ParsedUpstream::from_row(row));
+        }
+
+        Self {
+            upstreams,
+            by_id,
+            by_name,
+        }
+    }
+
+    fn by_id(&self, id: i64) -> Option<&ParsedUpstream> {
+        self.by_id
+            .get(&id)
+            .and_then(|index| self.upstreams.get(*index))
+    }
+
+    fn by_name(&self, name: &str) -> Option<&ParsedUpstream> {
+        self.by_name
+            .get(name)
+            .and_then(|index| self.upstreams.get(*index))
+    }
+}
+
+/// In-memory cache for enabled upstream routing data.
+///
+/// The cache stores parsed model fields so the proxy hot path does not query
+/// SQLite and reparse JSON on every request. Admin upstream mutations invalidate
+/// it; the next proxy request reloads from SQLite.
+pub struct UpstreamRoutingCache {
+    value: tokio::sync::RwLock<Option<Arc<UpstreamRoutingSnapshot>>>,
+    revision: AtomicU64,
+}
+
+impl UpstreamRoutingCache {
+    pub fn new() -> Self {
+        Self {
+            value: tokio::sync::RwLock::new(None),
+            revision: AtomicU64::new(0),
+        }
+    }
+
+    async fn get(&self) -> Option<Arc<UpstreamRoutingSnapshot>> {
+        self.value.read().await.clone()
+    }
+
+    pub async fn invalidate(&self) {
+        self.revision.fetch_add(1, Ordering::AcqRel);
+        *self.value.write().await = None;
+    }
+
+    async fn get_or_load(
+        &self,
+        pool: &sqlx::SqlitePool,
+    ) -> Result<Arc<UpstreamRoutingSnapshot>, AppError> {
+        loop {
+            if let Some(snapshot) = self.get().await {
+                return Ok(snapshot);
+            }
+
+            let observed_revision = self.revision.load(Ordering::Acquire);
+            let rows = db::upstream::list_enabled_upstreams(pool).await?;
+            let loaded = Arc::new(UpstreamRoutingSnapshot::from_rows(rows));
+
+            let mut guard = self.value.write().await;
+            if let Some(snapshot) = guard.clone() {
+                return Ok(snapshot);
+            }
+            if self.revision.load(Ordering::Acquire) == observed_revision {
+                *guard = Some(loaded.clone());
+                return Ok(loaded);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    async fn is_cached(&self) -> bool {
+        self.value.read().await.is_some()
+    }
+}
+
+impl Default for UpstreamRoutingCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+pub fn model_match_score(upstream: &UpstreamRow, model: Option<&str>) -> i32 {
+    parsed_model_match_score(&ParsedUpstream::from_row(upstream.clone()), model)
+}
+
 /// Return a match score 0–4.
 ///
 /// - 4: exact match in `model_mappings` or `model_names`
@@ -215,7 +377,7 @@ fn normalize_model_match(value: &str) -> String {
 /// - 2: any non-exact candidate in `model_names` starts with the requested model
 /// - 1: any non-exact candidate in `model_names` ends with the requested model
 /// - 0: no match
-pub fn model_match_score(upstream: &UpstreamRow, model: Option<&str>) -> i32 {
+fn parsed_model_match_score(upstream: &ParsedUpstream, model: Option<&str>) -> i32 {
     let model = match model {
         Some(m) => m,
         None => return 0,
@@ -223,48 +385,41 @@ pub fn model_match_score(upstream: &UpstreamRow, model: Option<&str>) -> i32 {
 
     let req = normalize_model_match(model);
 
-    // 4: exact match in model_mappings or model_names
-    if let Ok(map) =
-        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&upstream.model_mappings)
+    if upstream
+        .model_mappings
+        .iter()
+        .any(|mapping| mapping.key_normalized == req)
     {
-        for key in map.keys() {
-            if normalize_model_match(key) == req {
-                return 4;
-            }
-        }
-    }
-
-    let names = serde_json::from_str::<Vec<String>>(&upstream.model_names).unwrap_or_default();
-    if names.iter().any(|name| normalize_model_match(name) == req) {
         return 4;
     }
 
-    // 3: prefix match in model_prefixes
-    if let Ok(prefixes) = serde_json::from_str::<Vec<String>>(&upstream.model_prefixes) {
-        for prefix in &prefixes {
-            if req.starts_with(&normalize_model_match(prefix)) {
-                return 3;
-            }
+    if upstream
+        .model_names
+        .iter()
+        .any(|name| name.normalized == req)
+    {
+        return 4;
+    }
+
+    for prefix in &upstream.model_prefixes {
+        if req.starts_with(prefix) {
+            return 3;
         }
     }
 
-    // 2: candidate starts with request
-    // 1: candidate ends with request
     let mut best = 0i32;
-    for name in &names {
-        let n = normalize_model_match(name);
-        if n.starts_with(&req) {
+    for name in &upstream.model_names {
+        if name.normalized.starts_with(&req) {
             best = best.max(2);
-        } else if n.ends_with(&req) {
+        } else if name.normalized.ends_with(&req) {
             best = best.max(1);
         }
     }
     best
 }
 
-/// Check whether the upstream supports the given model.
-pub fn match_model(upstream: &UpstreamRow, model: Option<&str>) -> bool {
-    model.is_none_or(|model| model_match_score(upstream, Some(model)) > 0)
+fn parsed_match_model(upstream: &ParsedUpstream, model: Option<&str>) -> bool {
+    model.is_none_or(|model| parsed_model_match_score(upstream, Some(model)) > 0)
 }
 
 /// Select the forward model name.
@@ -273,45 +428,32 @@ pub fn match_model(upstream: &UpstreamRow, model: Option<&str>) -> bool {
 /// 2. Else if a model_names candidate starts with / equals the request → return that candidate.
 /// 3. Else if a model_names candidate ends with the request → return that candidate.
 /// 4. Otherwise fall back to the original model.
-pub fn select_forward_model(
-    upstream: &UpstreamRow,
+fn parsed_select_forward_model(
+    upstream: &ParsedUpstream,
     requested_model: Option<&str>,
 ) -> Option<String> {
     let model = requested_model?;
     let req = normalize_model_match(model);
 
-    // 1. check mappings
-    if let Ok(map) =
-        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&upstream.model_mappings)
-    {
-        for (key, val) in map.iter() {
-            if normalize_model_match(key) == req {
-                // prefer the string value
-                if let Some(s) = val.as_str() {
-                    return Some(s.to_string());
-                }
+    for mapping in &upstream.model_mappings {
+        if mapping.key_normalized == req {
+            if let Some(value) = &mapping.value {
+                return Some(value.clone());
             }
         }
     }
 
-    // 2. check model_names — starts_with / exact first (higher priority)
-    if let Ok(names) = serde_json::from_str::<Vec<String>>(&upstream.model_names) {
-        for name in &names {
-            let n = normalize_model_match(name);
-            if n.starts_with(&req) || n == req {
-                return Some(name.clone());
-            }
+    for name in &upstream.model_names {
+        if name.normalized.starts_with(&req) || name.normalized == req {
+            return Some(name.original.clone());
         }
-        // 3. ends_with fallback (matches Python select_forward_model)
-        for name in &names {
-            let n = normalize_model_match(name);
-            if !n.is_empty() && n.ends_with(&req) {
-                return Some(name.clone());
-            }
+    }
+    for name in &upstream.model_names {
+        if !name.normalized.is_empty() && name.normalized.ends_with(&req) {
+            return Some(name.original.clone());
         }
     }
 
-    // 4. fallback
     Some(model.to_string())
 }
 
@@ -331,66 +473,80 @@ use rand::distributions::{Distribution, WeightedIndex};
 ///    whose total effective weight is positive, choose by weighted random.
 pub async fn select_upstream(
     pool: &sqlx::SqlitePool,
+    routing_cache: &UpstreamRoutingCache,
     auto_weight: &AutoWeightManager,
     policy: AutoWeightPolicy,
     upstream_selector: Option<&str>,
     model: Option<&str>,
 ) -> Result<Option<(UpstreamRow, Option<String>)>, AppError> {
+    let snapshot = routing_cache.get_or_load(pool).await?;
+    Ok(select_upstream_from_snapshot(
+        &snapshot,
+        auto_weight,
+        policy,
+        upstream_selector,
+        model,
+    ))
+}
+
+fn select_upstream_from_snapshot(
+    snapshot: &UpstreamRoutingSnapshot,
+    auto_weight: &AutoWeightManager,
+    policy: AutoWeightPolicy,
+    upstream_selector: Option<&str>,
+    model: Option<&str>,
+) -> Option<(UpstreamRow, Option<String>)> {
     // ── Direct selection ─────────────────────────────────────────────────
     if let Some(selector) = upstream_selector {
-        // Try as id first
         if let Ok(id) = selector.parse::<i64>() {
-            let row = db::upstream::get_upstream(pool, id).await?;
-            if let Some(upstream) = row {
-                if upstream.enabled == 1 && match_model(&upstream, model) {
-                    let fwd = select_forward_model(&upstream, model);
-                    return Ok(Some((upstream, fwd)));
+            if let Some(upstream) = snapshot.by_id(id) {
+                if parsed_match_model(upstream, model) {
+                    let fwd = parsed_select_forward_model(upstream, model);
+                    return Some((upstream.row.clone(), fwd));
                 }
             }
         }
 
-        // Then try as name
-        let row = db::upstream::get_upstream_by_name(pool, selector).await?;
-        if let Some(upstream) = row {
-            if upstream.enabled == 1 && match_model(&upstream, model) {
-                let fwd = select_forward_model(&upstream, model);
-                return Ok(Some((upstream, fwd)));
+        if let Some(upstream) = snapshot.by_name(selector) {
+            if parsed_match_model(upstream, model) {
+                let fwd = parsed_select_forward_model(upstream, model);
+                return Some((upstream.row.clone(), fwd));
             }
         }
 
-        return Ok(None);
+        return None;
     }
 
     // ── Pool-based selection ─────────────────────────────────────────────
-    let all = db::upstream::list_enabled_upstreams(pool).await?;
-    if all.is_empty() {
-        return Ok(None);
+    if snapshot.upstreams.is_empty() {
+        return None;
     }
 
     // Filter by model score
-    let mut scored: Vec<(&UpstreamRow, i32)> = all
+    let mut scored: Vec<(&ParsedUpstream, i32)> = snapshot
+        .upstreams
         .iter()
-        .map(|u| (u, model_match_score(u, model)))
+        .map(|u| (u, parsed_model_match_score(u, model)))
         .collect();
 
     if model.is_some() {
         // keep the best score
         let best = scored.iter().map(|(_, s)| *s).max().unwrap_or(0);
         if best <= 0 {
-            return Ok(None);
+            return None;
         }
         scored.retain(|(_, s)| *s == best);
     }
 
-    let mut candidates_by_priority: HashMap<i32, Vec<&UpstreamRow>> = HashMap::new();
+    let mut candidates_by_priority: HashMap<i32, Vec<&ParsedUpstream>> = HashMap::new();
     for (up, _) in &scored {
         candidates_by_priority
-            .entry(up.priority)
+            .entry(up.row.priority)
             .or_default()
             .push(up);
     }
     if candidates_by_priority.is_empty() {
-        return Ok(None);
+        return None;
     }
 
     let mut priorities: Vec<i32> = candidates_by_priority.keys().copied().collect();
@@ -402,9 +558,9 @@ pub async fn select_upstream(
         let mut weights = Vec::with_capacity(candidates.len());
         for candidate in candidates {
             let snapshot = auto_weight.snapshot(
-                candidate.id,
-                candidate.weight,
-                candidate.auto_weight_enabled == 1,
+                candidate.row.id,
+                candidate.row.weight,
+                candidate.row.auto_weight_enabled == 1,
                 policy,
             );
             if snapshot.routing_weight > 0 {
@@ -416,24 +572,37 @@ pub async fn select_upstream(
             continue;
         }
         let distribution = WeightedIndex::new(&weights)
-            .map_err(|error| AppError::Internal(format!("invalid routing weights: {error}")))?;
+            .expect("selectable routing weights must contain a positive weight");
         let chosen = selectable[distribution.sample(&mut rand::thread_rng())];
-        let fwd = select_forward_model(chosen, model);
-        return Ok(Some((chosen.clone(), fwd)));
+        let fwd = parsed_select_forward_model(chosen, model);
+        return Some((chosen.row.clone(), fwd));
     }
 
-    Ok(None)
+    None
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{model_match_score, select_upstream, AutoWeightManager, AutoWeightPolicy};
+    use super::{model_match_score, AutoWeightManager, AutoWeightPolicy, UpstreamRoutingCache};
+    use crate::error::AppError;
     use crate::models::settings::RuntimeSettings;
+    use crate::models::upstream::UpstreamRow;
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
     use std::time::{Duration, Instant};
 
     fn policy() -> AutoWeightPolicy {
         AutoWeightPolicy::from(&RuntimeSettings::default())
+    }
+
+    async fn select_upstream(
+        pool: &SqlitePool,
+        auto_weight: &AutoWeightManager,
+        policy: AutoWeightPolicy,
+        upstream_selector: Option<&str>,
+        model: Option<&str>,
+    ) -> Result<Option<(UpstreamRow, Option<String>)>, AppError> {
+        let cache = UpstreamRoutingCache::new();
+        super::select_upstream(pool, &cache, auto_weight, policy, upstream_selector, model).await
     }
 
     async fn test_pool() -> SqlitePool {
@@ -545,6 +714,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn numeric_direct_selection_falls_back_to_name_when_id_does_not_match() {
+        let pool = test_pool().await;
+        insert_upstream(&pool, "id-one", &["other-model"], 100, 100, true).await;
+        insert_upstream(&pool, "1", &["target-model"], 100, 100, true).await;
+        let auto_weight = AutoWeightManager::new();
+
+        let selected = select_upstream(
+            &pool,
+            &auto_weight,
+            policy(),
+            Some("1"),
+            Some("target-model"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(selected.0.name, "1");
+    }
+
+    #[tokio::test]
     async fn matching_model_still_selects_enabled_channel() {
         let pool = test_pool().await;
         insert_upstream(
@@ -570,6 +760,74 @@ mod tests {
         let (upstream, forward_model) = selected.unwrap();
         assert_eq!(upstream.name, "deepseek-only");
         assert_eq!(forward_model.as_deref(), Some("DeepSeek-V4-Flash"));
+    }
+
+    #[tokio::test]
+    async fn routing_cache_reuses_snapshot_until_invalidated() {
+        let pool = test_pool().await;
+        insert_upstream(&pool, "cached", &["first-model"], 100, 100, true).await;
+        let cache = UpstreamRoutingCache::new();
+        let auto_weight = AutoWeightManager::new();
+
+        let first = super::select_upstream(
+            &pool,
+            &cache,
+            &auto_weight,
+            policy(),
+            None,
+            Some("first-model"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(first.0.name, "cached");
+        assert!(cache.is_cached().await);
+
+        sqlx::query(
+            "UPDATE upstreams SET model_names = '[\"second-model\"]' WHERE name = 'cached'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let stale = super::select_upstream(
+            &pool,
+            &cache,
+            &auto_weight,
+            policy(),
+            None,
+            Some("first-model"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(stale.0.name, "cached");
+
+        cache.invalidate().await;
+        let old_model = super::select_upstream(
+            &pool,
+            &cache,
+            &auto_weight,
+            policy(),
+            None,
+            Some("first-model"),
+        )
+        .await
+        .unwrap();
+        assert!(old_model.is_none());
+
+        let reloaded = super::select_upstream(
+            &pool,
+            &cache,
+            &auto_weight,
+            policy(),
+            None,
+            Some("second-model"),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(reloaded.0.name, "cached");
     }
 
     #[tokio::test]

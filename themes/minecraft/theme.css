@@ -551,6 +551,7 @@ html[data-theme="minecraft"] .model-selection-remove,
 html[data-theme="minecraft"] .toast-close,
 html[data-theme="minecraft"] .icon-close,
 html[data-theme="minecraft"] .icon-maximize,
+html[data-theme="minecraft"] .icon-refresh,
 html[data-theme="minecraft"] .action-menu-trigger {
   background: transparent;
   border-color: transparent;
@@ -583,6 +584,7 @@ html[data-theme="minecraft"] .model-selection-remove:hover,
 html[data-theme="minecraft"] .toast-close:hover,
 html[data-theme="minecraft"] .icon-close:hover,
 html[data-theme="minecraft"] .icon-maximize:hover,
+html[data-theme="minecraft"] .icon-refresh:enabled:hover,
 html[data-theme="minecraft"] .action-menu-trigger:hover {
   background: rgb(255 255 255 / 10%);
   box-shadow: none;

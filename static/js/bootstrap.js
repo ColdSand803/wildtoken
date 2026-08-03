@@ -29,7 +29,10 @@ const balanceDialog = document.querySelector("#balance-dialog");
 const balanceTitle = document.querySelector("#balance-title");
 const balanceSummary = document.querySelector("#balance-summary");
 const balanceBody = document.querySelector("#balance-body");
+const balanceRefresh = document.querySelector("#balance-refresh");
 const balanceClose = document.querySelector("#balance-close");
+let activeBalanceQuery = null;
+let balanceQueryToken = 0;
 
 const toastRegion = document.querySelector("#toast-region");
 const selectPanel = document.querySelector("#select-panel");
@@ -93,6 +96,28 @@ function parseLogTimestamp(value) {
 function formatLogTimestamp(value) {
   const timestamp = parseLogTimestamp(value);
   return Number.isFinite(timestamp) ? logTimeFormatter.format(new Date(timestamp)) : "—";
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the textarea fallback below.
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.append(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  return copied;
 }
 
 
@@ -219,9 +244,9 @@ let upstreamSearchQuery = "";
 let upstreamStatusFilterValue = "";
 let upstreamSearchTimer = null;
 
-const HEALTH_TICK_MS = 1000;
+const EFFECTIVE_WEIGHT_TICK_MS = 1000;
 const MAX_MODEL_CHIPS = 5;
-let healthTickTimer = null;
+let effectiveWeightTickTimer = null;
 let pageVisible = typeof document.visibilityState === "string"
   ? document.visibilityState !== "hidden"
   : true;
@@ -338,7 +363,7 @@ const fields = {
   timeoutSeconds: document.querySelector("#timeout-seconds"),
   extraHeaders: document.querySelector("#extra-headers"),
   enabled: document.querySelector("#enabled"),
-  autoWeightEnabled: document.querySelector("#auto-weight-enabled"),
+  fixedWeightEnabled: document.querySelector("#auto-weight-enabled"),
   clearApiKey: document.querySelector("#clear-api-key"),
 };
 let persistedFormApiKey = null;
@@ -1088,15 +1113,15 @@ function renderUpstreamSummaryCore() {
   }
   lastSummarySignature = signature;
 
-  const healthHint = zeroEffectiveWeight > 0
-    ? `<span class="summary-hint">自动降为 0 的渠道会按恢复周期重新加入</span>`
+  const effectiveWeightHint = zeroEffectiveWeight > 0
+    ? `<span class="summary-hint">有效权重为 0 的动态渠道会按恢复周期重新加入</span>`
     : "";
 
   upstreamSummary.innerHTML = `
     <span><strong>${total}</strong>渠道总数</span>
     <span><strong>${enabled}</strong>启用</span>
     <span><strong>${disabled}</strong>停用</span>
-    <span class="${zeroEffectiveWeight ? "summary-warn" : ""}"><strong>${zeroEffectiveWeight}</strong>有效权重为 0${healthHint}</span>
+    <span class="${zeroEffectiveWeight ? "summary-warn" : ""}"><strong>${zeroEffectiveWeight}</strong>有效权重为 0${effectiveWeightHint}</span>
   `;
 }
 
@@ -1108,7 +1133,7 @@ function debounce(fn, wait = 150) {
   };
 }
 
-// ── Density / column prefs / health / charts ─────────────
+// ── Density / column prefs / effective weight / charts ─────────────
 
 const DEFAULT_UPSTREAM_COLUMNS = {
   check: true,
@@ -1276,7 +1301,7 @@ function toggleColMenu(menu, button) {
   }
 }
 
-function formatHealthZeroNote(seconds) {
-  if (!seconds) return "健康分 0 · 等待恢复周期";
-  return `健康分 0 · ${seconds}s 后恢复`;
+function formatEffectiveZeroNote(seconds) {
+  if (!seconds) return "有效权重 0 · 等待恢复周期";
+  return `有效权重 0 · ${seconds}s 后恢复`;
 }

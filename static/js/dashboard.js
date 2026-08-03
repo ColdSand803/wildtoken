@@ -488,12 +488,12 @@ async function loadDashboardData() {
     if (!upstreamsLoadedOnce) {
       await loadUpstreams();
     } else {
-      // Refresh the upstream snapshot for enabled and runtime-health counts.
+      // Refresh the upstream snapshot for enabled and effective-weight counts.
       try {
         const list = await api("/api/admin/upstreams");
         upstreams = list;
         for (const upstream of upstreams) {
-          upstream.healthRecoveryAtMs = upstream.health_recovery_remaining_seconds
+          upstream.effectiveRecoveryAtMs = upstream.health_recovery_remaining_seconds
             ? Date.now() + upstream.health_recovery_remaining_seconds * 1000
             : null;
         }

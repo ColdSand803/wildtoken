@@ -97,28 +97,6 @@ async function loadTokens() {
   }
 }
 
-async function copyTextToClipboard(text) {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // Fall through to the textarea fallback below.
-    }
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  document.body.append(textarea);
-  textarea.select();
-  const copied = document.execCommand("copy");
-  textarea.remove();
-  return copied;
-}
-
 async function handleBaseUrlAction(button) {
   const baseUrl = button.dataset.baseUrl || "";
   if (button.dataset.urlAction === "copy") {

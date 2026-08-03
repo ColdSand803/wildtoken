@@ -87,7 +87,7 @@ function payloadFromForm() {
     model_mappings: modelMappings,
     priority: Number(fields.priority.value || 100),
     weight: Number(fields.weight.value),
-    auto_weight_enabled: fields.autoWeightEnabled.checked,
+    auto_weight_enabled: !fields.fixedWeightEnabled.checked,
     timeout_seconds: Number(fields.timeoutSeconds.value || 300),
     enabled: fields.enabled.checked,
     extra_headers: extraHeaders,
@@ -241,7 +241,7 @@ async function editUpstream(upstream) {
     setFormModels(detail.model_names);
     fields.priority.value = detail.priority;
     fields.weight.value = detail.weight;
-    fields.autoWeightEnabled.checked = detail.auto_weight_enabled;
+    fields.fixedWeightEnabled.checked = !detail.auto_weight_enabled;
     fields.timeoutSeconds.value = detail.timeout_seconds;
     fields.extraHeaders.value = JSON.stringify(detail.extra_headers || {}, null, 2);
     fields.enabled.checked = detail.enabled;
@@ -264,7 +264,7 @@ function duplicateUpstream(upstream) {
   setFormModels(upstream.model_names);
   fields.priority.value = upstream.priority;
   fields.weight.value = upstream.weight;
-  fields.autoWeightEnabled.checked = upstream.auto_weight_enabled;
+  fields.fixedWeightEnabled.checked = !upstream.auto_weight_enabled;
   fields.timeoutSeconds.value = upstream.timeout_seconds;
   fields.extraHeaders.value = JSON.stringify(upstream.extra_headers || {}, null, 2);
   fields.enabled.checked = upstream.enabled;
@@ -272,6 +272,25 @@ function duplicateUpstream(upstream) {
   formTitle.textContent = `复制渠道：${upstream.name}`;
   openUpstreamDialog();
   setStatus("已复制渠道配置，API Key 需要重新填写后再保存。", "ok");
+}
+
+function formatUpstreamClipboardText(detail) {
+  const baseUrl = String(detail?.base_url || "");
+  const apiKey = String(detail?.api_key || "");
+  return `baseURL: ${baseUrl}\napiKey: ${apiKey}`;
+}
+
+async function copyUpstreamInfo(upstream) {
+  try {
+    const detail = await api(`/api/admin/upstreams/${upstream.id}`);
+    const copied = await copyTextToClipboard(formatUpstreamClipboardText(detail));
+    if (!copied) {
+      throw new Error("浏览器拒绝复制，请手动复制。");
+    }
+    setStatus(`渠道「${detail.name || upstream.name}」信息已复制。`, "ok");
+  } catch (error) {
+    setStatus(`复制渠道信息失败：${error.message}`, "error");
+  }
 }
 
 function openBalanceDialog() {
@@ -284,6 +303,9 @@ function openBalanceDialog() {
 
 function closeBalanceDialog() {
   clearDialogMaximized(balanceDialog);
+  // Retire any in-flight query so its result cannot land in a later dialog.
+  balanceQueryToken += 1;
+  setBalanceRefreshBusy(false);
   if (balanceDialog.open && typeof balanceDialog.close === "function") {
     balanceDialog.close();
   } else {
@@ -323,18 +345,25 @@ function renderBalanceResult(result, provider) {
   ].join("");
 }
 
-async function showBalance(upstream, provider = "new-api") {
-  const providerName = provider === "sub2api" ? "sub2api" : "new-api";
-  const endpoint = provider === "sub2api"
-    ? `/api/admin/upstreams/${upstream.id}/balance/sub2api`
-    : `/api/admin/upstreams/${upstream.id}/balance`;
-  balanceTitle.textContent = `${providerName} 余额：${upstream.name}`;
+function setBalanceRefreshBusy(busy) {
+  balanceRefresh.disabled = busy;
+  balanceRefresh.classList.toggle("is-busy", busy);
+}
+
+/// Re-run the query the balance dialog is currently showing.
+async function refreshBalance() {
+  if (!activeBalanceQuery) return;
+  const { endpoint, provider } = activeBalanceQuery;
+  // Refreshing and reopening the dialog both supersede whatever is in flight;
+  // a stale response must not overwrite the newer one it loses the race to.
+  const token = ++balanceQueryToken;
   balanceSummary.textContent = "正在查询...";
   balanceBody.innerHTML = "";
-  openBalanceDialog();
+  setBalanceRefreshBusy(true);
 
   try {
     const result = await api(endpoint, { method: "POST" });
+    if (token !== balanceQueryToken) return;
     if (result.ok) {
       balanceSummary.textContent = "查询成功";
       balanceBody.innerHTML = renderBalanceResult(result, provider);
@@ -343,9 +372,27 @@ async function showBalance(upstream, provider = "new-api") {
       balanceBody.innerHTML = `<p class="muted">${escapeHtml(result.message || "未知错误")}</p>`;
     }
   } catch (error) {
+    if (token !== balanceQueryToken) return;
     balanceSummary.textContent = "查询失败";
     balanceBody.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`;
+  } finally {
+    if (token === balanceQueryToken) {
+      setBalanceRefreshBusy(false);
+    }
   }
+}
+
+async function showBalance(upstream, provider = "new-api") {
+  const providerName = provider === "sub2api" ? "sub2api" : "new-api";
+  activeBalanceQuery = {
+    provider,
+    endpoint: provider === "sub2api"
+      ? `/api/admin/upstreams/${upstream.id}/balance/sub2api`
+      : `/api/admin/upstreams/${upstream.id}/balance`,
+  };
+  balanceTitle.textContent = `${providerName} 余额：${upstream.name}`;
+  openBalanceDialog();
+  await refreshBalance();
 }
 
 function resetForm() {
@@ -360,7 +407,7 @@ function resetForm() {
   setFormModels([]);
   fields.extraHeaders.value = "{}";
   fields.enabled.checked = true;
-  fields.autoWeightEnabled.checked = true;
+  fields.fixedWeightEnabled.checked = false;
   setAdvancedSettingsOpen(false);
   fetchModelsButton.disabled = false;
   formTitle.textContent = "新增渠道";
@@ -372,9 +419,22 @@ function formatEffectiveWeight(value) {
   return Number.isInteger(number) ? String(number) : number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+function isFixedWeight(upstream) {
+  return !upstream.auto_weight_enabled;
+}
+
+function weightCellMarkup(upstream) {
+  const baseWeight = formatEffectiveWeight(upstream.weight);
+  if (isFixedWeight(upstream)) {
+    return `<strong>${baseWeight}</strong><span>固定权重</span>`;
+  }
+  return `<strong>${formatEffectiveWeight(upstream.effective_weight)} / ${baseWeight}</strong><span>有效权重 / 基础权重</span>`;
+}
+
 function formatZeroWeightNote(upstream, remainingRecovery) {
-  if (Number(upstream.weight) === 0) return "基础权重 0 · 不参与自动路由";
-  return formatHealthZeroNote(remainingRecovery);
+  if (isFixedWeight(upstream)) return "固定权重 0 · 不参与路由";
+  if (Number(upstream.weight) === 0) return "基础权重 0 · 不参与动态路由";
+  return formatEffectiveZeroNote(remainingRecovery);
 }
 
 function renderRows() {
@@ -428,7 +488,7 @@ function renderRows() {
     const row = document.createElement("tr");
     row.className = upstream.enabled ? "" : "row-disabled";
     row.dataset.upstreamId = String(upstream.id);
-    const remainingRecovery = liveHealthRecoverySeconds(upstream);
+    const remainingRecovery = liveEffectiveRecoverySeconds(upstream);
     const checked = selectedUpstreamIds.has(upstream.id) ? "checked" : "";
     row.innerHTML = `
       <td class="col-check" data-col="check">
@@ -470,8 +530,7 @@ function renderRows() {
       </td>
       <td class="col-weight" data-col="weight">
         <div class="weight-stack">
-          <strong>${formatEffectiveWeight(upstream.effective_weight)}</strong>
-          <span>${upstream.auto_weight_enabled ? `基础 ${upstream.weight} · 健康 ${upstream.runtime_health_score}` : `基础 ${upstream.weight} · 固定`}</span>
+          ${weightCellMarkup(upstream)}
         </div>
       </td>
       <td class="col-status" data-col="status">
@@ -571,17 +630,17 @@ async function batchSetEnabled(enabled) {
   }
 }
 
-function liveHealthRecoverySeconds(upstream) {
-  if (!upstream.healthRecoveryAtMs) {
+function liveEffectiveRecoverySeconds(upstream) {
+  if (!upstream.effectiveRecoveryAtMs) {
     return 0;
   }
-  return Math.max(0, Math.ceil((upstream.healthRecoveryAtMs - Date.now()) / 1000));
+  return Math.max(0, Math.ceil((upstream.effectiveRecoveryAtMs - Date.now()) / 1000));
 }
 
-function updateHealthNotes() {
+function updateEffectiveWeightNotes() {
   for (const note of rows.querySelectorAll("[data-effective-zero-id]")) {
     const upstream = upstreams.find((item) => item.id === Number(note.dataset.effectiveZeroId));
-    const remaining = upstream ? liveHealthRecoverySeconds(upstream) : 0;
+    const remaining = upstream ? liveEffectiveRecoverySeconds(upstream) : 0;
     note.textContent = upstream ? formatZeroWeightNote(upstream, remaining) : "";
     note.hidden = !upstream || Number(upstream.effective_weight) > 0;
   }
@@ -597,7 +656,8 @@ function actionMenuMarkup(upstreamId) {
     <button type="button" role="menuitem" data-action="models" data-id="${upstreamId}">拉取模型</button>
     <div class="action-menu-separator" role="separator"></div>
     <button type="button" role="menuitem" data-action="edit" data-id="${upstreamId}">编辑</button>
-    <button type="button" role="menuitem" data-action="duplicate" data-id="${upstreamId}">复制</button>
+    <button type="button" role="menuitem" data-action="duplicate" data-id="${upstreamId}">复制渠道</button>
+    <button type="button" role="menuitem" data-action="copy-info" data-id="${upstreamId}">复制渠道信息</button>
     <div class="action-menu-separator" role="separator"></div>
     <button type="button" role="menuitem" data-action="delete" data-id="${upstreamId}" class="danger">删除</button>
   `;
@@ -665,7 +725,7 @@ async function loadUpstreams() {
   try {
     upstreams = await api("/api/admin/upstreams");
     for (const upstream of upstreams) {
-      upstream.healthRecoveryAtMs = upstream.health_recovery_remaining_seconds
+      upstream.effectiveRecoveryAtMs = upstream.health_recovery_remaining_seconds
         ? Date.now() + upstream.health_recovery_remaining_seconds * 1000
         : null;
     }

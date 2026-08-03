@@ -21,8 +21,9 @@
             bleach: "/theme-packs/bleach/theme.css",
             endfield: "/theme-packs/endfield/theme.css",
             "sakura-mist": "/theme-packs/sakura-mist/theme.css",
-            anthropic: "/theme-packs/anthropic/theme.css",
+anthropic: "/theme-packs/anthropic/theme.css",
             "anthropic-dark": "/theme-packs/anthropic-dark/theme.css",
+            "demon-slayer": "/theme-packs/demon-slayer/theme.css",
           };
           var t = localStorage.getItem("wildtoken_theme");
           if (t === "animal") t = "animal-island";
@@ -62,7 +63,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Orbitron:wght@500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&family=Rajdhani:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@600;700&family=Orbitron:wght@500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&family=Rajdhani:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css" />
@@ -321,7 +322,7 @@
                   <option value="">全部</option>
                   <option value="enabled">启用</option>
                   <option value="disabled">停用</option>
-                  <option value="health-zero">有效权重为 0</option>
+                  <option value="effective-zero">有效权重为 0</option>
                 </select>
               </label>
               <div class="toolbar-batch" id="upstream-batch-actions" hidden>
@@ -561,25 +562,25 @@
               </section>
 
               <section class="settings-card" aria-labelledby="routing-settings-title">
-                <div class="settings-card-head"><div><h3 id="routing-settings-title">路由、自动权重与重试</h3><p>这些参数由服务端保存，并用于保存后的新请求。</p></div><span class="settings-readonly-tag">全局</span></div>
+                <div class="settings-card-head"><div><h3 id="routing-settings-title">路由、有效权重与重试</h3><p>这些参数由服务端保存，并用于保存后的新请求。</p></div><span class="settings-readonly-tag">全局</span></div>
                 <div class="routing-rule-guide">
                   <ol class="routing-rule-steps">
                     <li><strong>模型优先</strong><span>先保留模型匹配分最高的渠道；显式指定渠道时跳过池内权重选择。</span></li>
                     <li><strong>优先级硬分层</strong><span>只要最高 priority 组内存在有效权重大于 0 的渠道，就不会使用更低 priority。</span></li>
-                    <li><strong>同层按权重随机</strong><span>自动权重开启时，路由票数为基础权重 × 健康分；关闭时按基础权重固定分流。</span></li>
+                    <li><strong>同层按权重随机</strong><span>未固定权重时按有效权重分流；固定权重时始终按基础权重分流。</span></li>
                     <li><strong>降到 0 后切换</strong><span>某一层全部为 0 才回退到下一层。渠道恢复为正数后，高优先级层会立即重新接管流量。</span></li>
                   </ol>
-                  <p class="routing-rule-detail">健康分范围为 0–100。所有上游非 2xx、连接失败、超时、读取失败和 SSE 上游异常都扣分；正常完成的 2xx 请求加分。健康分为 0 时退出自动池，经过完整恢复周期后增加恢复分值并重新参与选择。</p>
+                  <p class="routing-rule-detail">有效权重由基础权重派生，范围为 0 到基础权重。所有上游非 2xx、连接失败、超时、读取失败和 SSE 上游异常都会降低有效权重；正常完成的 2xx 请求会恢复有效权重。有效权重为 0 时退出动态池，经过完整恢复周期后重新参与选择。</p>
                   <p class="routing-rule-detail">自动路由的每次重试都会重新选择渠道。选到不同渠道立即重试；再次选到同一渠道才等待。显式指定渠道的重试始终等待。一旦下游响应头已经提交，尤其是成功的 SSE 流，后续异常只记失败，不再透明重试。</p>
                 </div>
                 <form id="routing-settings-form" class="settings-server-form">
                   <div class="settings-fields-grid routing-settings-grid">
                     <label class="field"><span class="field-label">最大重试次数</span><input id="settings-max-retries" type="number" min="0" max="5" required inputmode="numeric" /><span class="field-hint">额外尝试次数；0 表示不重试。</span></label>
                     <label class="field"><span class="field-label">同渠道重试间隔（毫秒）</span><input id="settings-same-upstream-retry-ms" type="number" min="0" max="60000" required inputmode="numeric" /><span class="field-hint">换到不同渠道时不会等待。</span></label>
-                    <label class="field"><span class="field-label">失败扣分</span><input id="settings-failure-penalty" type="number" min="0" max="100" required inputmode="numeric" /><span class="field-hint">每次渠道失败从当前健康分扣除。</span></label>
-                    <label class="field"><span class="field-label">成功加分</span><input id="settings-success-increment" type="number" min="0" max="100" required inputmode="numeric" /><span class="field-hint">每次正常完成后增加，最高为 100。</span></label>
-                    <label class="field"><span class="field-label">定时恢复分值</span><input id="settings-recovery-increment" type="number" min="0" max="100" required inputmode="numeric" /><span class="field-hint">每经过一个完整恢复周期增加的分值。</span></label>
-                    <label class="field"><span class="field-label">恢复周期（秒）</span><input id="settings-recovery-interval" type="number" min="1" max="3600" required inputmode="numeric" /><span class="field-hint">健康状态发生变化后重新开始计时。</span></label>
+                    <label class="field"><span class="field-label">失败降幅</span><input id="settings-failure-penalty" type="number" min="0" max="100" required inputmode="numeric" /><span class="field-hint">每次渠道失败都会降低动态有效权重。</span></label>
+                    <label class="field"><span class="field-label">成功恢复幅度</span><input id="settings-success-increment" type="number" min="0" max="100" required inputmode="numeric" /><span class="field-hint">每次正常完成后提高动态有效权重，最高不超过基础权重。</span></label>
+                    <label class="field"><span class="field-label">定时恢复幅度</span><input id="settings-recovery-increment" type="number" min="0" max="100" required inputmode="numeric" /><span class="field-hint">有效权重为 0 后，每经过一个完整周期恢复一次。</span></label>
+                    <label class="field"><span class="field-label">恢复周期（秒）</span><input id="settings-recovery-interval" type="number" min="1" max="3600" required inputmode="numeric" /><span class="field-hint">有效权重变化后重新开始计时。</span></label>
                   </div>
                   <div class="settings-save-row"><p id="routing-settings-status" class="settings-inline-status" role="status"></p><button id="routing-settings-save" type="submit">保存路由策略</button></div>
                 </form>
@@ -643,6 +644,15 @@
                 <input id="api-key" autocomplete="off" spellcheck="false" placeholder="未配置时留空" />
                 <span class="field-hint">编辑时会显示当前密钥；复制渠道需重新填写。</span>
               </label>
+              <div class="toggle-list span-2">
+                <label class="toggle-row span-2">
+                  <input id="clear-api-key" type="checkbox" />
+                  <span>
+                    <strong>清空 API Key</strong>
+                    <small>编辑已有渠道时使用；保存后会移除当前渠道密钥。</small>
+                  </span>
+                </label>
+              </div>
             </div>
           </section>
 
@@ -703,7 +713,7 @@
               <label class="field">
                 <span class="field-label">基础权重</span>
                 <input id="weight" type="number" min="0" max="10000" value="100" required />
-                <span class="field-hint">仅在相同优先级内决定比例；0 表示不参加自动池路由。</span>
+                <span class="field-hint">动态时作为有效权重上限；固定时直接作为路由权重；0 表示不参与池内路由。</span>
               </label>
               <label class="field">
                 <span class="field-label">超时秒数</span>
@@ -718,17 +728,10 @@
                   </span>
                 </label>
                 <label class="toggle-row">
-                  <input id="auto-weight-enabled" type="checkbox" checked />
+                  <input id="auto-weight-enabled" type="checkbox" />
                   <span>
-                    <strong>自动权重</strong>
-                    <small>失败扣分，成功和时间恢复；关闭后始终使用基础权重。</small>
-                  </span>
-                </label>
-                <label class="toggle-row">
-                  <input id="clear-api-key" type="checkbox" />
-                  <span>
-                    <strong>清空 API Key</strong>
-                    <small>编辑已有渠道时使用。</small>
+                    <strong>固定权重</strong>
+                    <small>选中后始终使用基础权重；未选中时按失败、成功和恢复动态调整有效权重。</small>
                   </span>
                 </label>
               </div>
@@ -741,6 +744,7 @@
                 <span class="section-title">高级设置</span>
                 <span class="section-copy">Header 覆盖 JSON</span>
               </span>
+              <span class="section-summary-state" aria-hidden="true"></span>
             </summary>
             <label class="field">
               <span class="field-label">Header 覆盖（JSON）</span>
@@ -915,7 +919,7 @@
             <h2 id="balance-title">余额查询</h2>
             <p id="balance-summary"></p>
           </div>
-          <div class="modal-head-actions"><button type="button" class="secondary ghost icon-maximize" data-dialog-maximize aria-label="最大化" title="最大化" aria-pressed="false"><svg class="dialog-icon dialog-icon--maximize" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="0.5"/></svg><svg class="dialog-icon dialog-icon--restore" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="3" width="7" height="7" rx="0.5"/><rect x="3.5" y="5.5" width="7" height="7" rx="0.5"/></svg></button><button id="balance-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button></div>
+          <div class="modal-head-actions"><button id="balance-refresh" type="button" class="secondary ghost icon-refresh" aria-label="刷新" title="刷新"><svg class="dialog-icon dialog-icon--refresh" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M13.5 8a5.5 5.5 0 1 1-1.75-4.02"/><path d="M13.6 2.4v3.2h-3.2"/></svg></button><button type="button" class="secondary ghost icon-maximize" data-dialog-maximize aria-label="最大化" title="最大化" aria-pressed="false"><svg class="dialog-icon dialog-icon--maximize" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="0.5"/></svg><svg class="dialog-icon dialog-icon--restore" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="3" width="7" height="7" rx="0.5"/><rect x="3.5" y="5.5" width="7" height="7" rx="0.5"/></svg></button><button id="balance-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button></div>
         </div>
         <div id="balance-body" class="balance-body"></div>
       </div>

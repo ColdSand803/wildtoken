@@ -702,6 +702,7 @@ html[data-theme="crt"] .model-selection-remove,
 html[data-theme="crt"] .toast-close,
 html[data-theme="crt"] .icon-close,
 html[data-theme="crt"] .icon-maximize,
+html[data-theme="crt"] .icon-refresh,
 html[data-theme="crt"] .action-menu-trigger {
   background: transparent;
   border-color: transparent;
@@ -732,6 +733,7 @@ html[data-theme="crt"] .model-selection-remove:hover,
 html[data-theme="crt"] .toast-close:hover,
 html[data-theme="crt"] .icon-close:hover,
 html[data-theme="crt"] .icon-maximize:hover,
+html[data-theme="crt"] .icon-refresh:enabled:hover,
 html[data-theme="crt"] .action-menu-trigger:hover {
   background: rgb(57 255 20 / 10%);
   box-shadow: none;
