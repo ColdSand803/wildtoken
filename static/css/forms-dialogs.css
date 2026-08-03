@@ -582,10 +582,65 @@ button.model-selection-remove:focus-visible {
 
 .form-section-collapsible summary {
   align-items: center;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   cursor: pointer;
-  display: flex;
-  gap: 10px;
-  list-style-position: outside;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  list-style: none;
+  padding: 10px 12px;
+  transition: border-color var(--transition);
+  user-select: none;
+}
+
+/* summary 不再是 list-item，去掉两种引擎的默认三角。 */
+.form-section-collapsible summary::-webkit-details-marker {
+  display: none;
+}
+
+.form-section-collapsible summary::marker {
+  content: "";
+}
+
+.form-section-collapsible summary:hover {
+  border-color: var(--line-strong);
+}
+
+.form-section-collapsible summary:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
+}
+
+/* 与日志详情折叠区一致的 +/− 展开指示。 */
+.section-summary-state {
+  align-items: center;
+  background: var(--panel-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted-strong);
+  display: inline-flex;
+  font-size: var(--text-md);
+  font-weight: 600;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.section-summary-state::before {
+  content: "+";
+  transform: translateY(-1px);
+}
+
+.form-section-collapsible[open] .section-summary-state {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-on);
+}
+
+.form-section-collapsible[open] .section-summary-state::before {
+  content: "−";
 }
 
 .section-title {
@@ -745,7 +800,8 @@ button.model-selection-remove:focus-visible {
 }
 
 .icon-close,
-.icon-maximize {
+.icon-maximize,
+.icon-refresh {
   align-items: center;
   border-radius: var(--radius);
   color: var(--muted);
@@ -759,9 +815,10 @@ button.model-selection-remove:focus-visible {
   width: 32px;
 }
 
-/* Shared stroke weight so maximize/restore/close read as one family. */
+/* Shared stroke weight so refresh/maximize/restore/close read as one family. */
 .icon-close .dialog-icon,
-.icon-maximize .dialog-icon {
+.icon-maximize .dialog-icon,
+.icon-refresh .dialog-icon {
   display: block;
   fill: none;
   flex: 0 0 auto;
@@ -789,9 +846,30 @@ button.model-selection-remove:focus-visible {
 .icon-close:hover,
 .icon-close:focus-visible,
 .icon-maximize:hover,
-.icon-maximize:focus-visible {
+.icon-maximize:focus-visible,
+.icon-refresh:enabled:hover,
+.icon-refresh:enabled:focus-visible {
   background: var(--panel-muted);
   color: var(--text);
+}
+
+/* The arrow keeps turning for as long as the query is out. */
+.icon-refresh.is-busy .dialog-icon {
+  animation: balance-refresh-spin 0.9s linear infinite;
+  transform-origin: 50% 50%;
+}
+
+/* Busy means in progress, not unavailable: hold the arrow bright enough to
+   read as motion, and drop the not-allowed cursor the base rule applies. */
+.icon-refresh:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+@keyframes balance-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Maximized dialog: fill the viewport; keep a single scroll surface on the panel. */

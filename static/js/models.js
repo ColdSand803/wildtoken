@@ -508,6 +508,11 @@ async function handleUpstreamAction(button) {
     return;
   }
 
+  if (button.dataset.action === "copy-info") {
+    await copyUpstreamInfo(upstream);
+    return;
+  }
+
   if (button.dataset.action === "delete") {
     const confirmed = await requestConfirm({
       title: "删除渠道",
@@ -1091,6 +1096,9 @@ for (const button of document.querySelectorAll(".log-detail-expand")) {
 logDetailClose.addEventListener("click", closeLogDetailDialog);
 dismissOnBackdropClick(logDetailDialog, closeLogDetailDialog);
 
+balanceRefresh.addEventListener("click", async () => {
+  await refreshBalance();
+});
 balanceClose.addEventListener("click", closeBalanceDialog);
 dismissOnBackdropClick(balanceDialog, closeBalanceDialog);
 
@@ -1152,7 +1160,7 @@ function initApp() {
     loadTokens();
   }
   loadUpstreams();
-  // Warm log window for health/charts even when not on logs tab.
+  // Warm log window for channel charts even when not on logs tab.
   if (currentViewFromHash() !== "logs") {
     loadLogs().catch(() => {});
   }

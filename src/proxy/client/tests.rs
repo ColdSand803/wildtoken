@@ -78,6 +78,7 @@ async fn test_state() -> AppState {
         log_writer,
         log_stats,
         models_list_cache: Arc::new(crate::state::ModelsListCache::new()),
+        routing_cache: Arc::new(crate::proxy::matcher::UpstreamRoutingCache::new()),
         started_at: Instant::now(),
     }
 }

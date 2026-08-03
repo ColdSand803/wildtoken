@@ -47,6 +47,7 @@ fn state_with_credential(credential: AdminCredential) -> AppState {
         log_writer,
         log_stats,
         models_list_cache: Arc::new(super::ModelsListCache::new()),
+        routing_cache: Arc::new(crate::proxy::matcher::UpstreamRoutingCache::new()),
         started_at: Instant::now(),
     }
 }
