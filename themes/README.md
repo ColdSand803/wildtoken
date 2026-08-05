@@ -94,8 +94,54 @@ html[data-theme="soul-society"] .topbar {
 ```
 
 想改得更彻底可以参考仓库里现成的包：`win95/` 是硬边框拟物，`bleach/` 是漫画分镜
-质感，`demon-slayer/` 是纯 CSS 画的和风纹样（市松格纹、青海波、和纸颗粒），三者都
-在变量之外写了大量结构规则。
+质感，`demon-slayer/` 是纯 CSS 画的和风纹样（市松格纹、青海波、和纸颗粒），
+`railgun/`（学园都市）把顶栏换成了左侧竖排导航栏，并用 SVG 纹样铺出磁力线场，
+四者都在变量之外写了大量结构规则。
+
+`railgun/` 的侧栏还留了个坑的解法：基础样式给 `html`、`body`、`.app-shell` 都设了
+`overflow-x: hidden`，这会让另一根轴隐式变成 `auto`，三者因此都成了滚动容器，侧栏
+的 `position: sticky` 会去贴一个根本不滚动的 `.app-shell`，于是跟着页面一起滚走。
+改用 `overflow-x: clip` 即可——它同样裁剪横向溢出，但不创建滚动容器。
+
+## 覆盖元素选择器时的特异性
+
+`html[data-theme="x"] button` 比基础样式里的 `.nav-link`、`button.secondary`、
+`.table-sort-button` 都重——它多了 `html` 和 `button` 两个元素分量。所以给裸
+`button`、`input` 这类元素选择器加样式，会连带盖掉基础样式为各个变体准备的
+`background: transparent`，表现是排序表头、未选中的导航标签、行内开关全都套上了
+主按钮的填充。
+
+把主题作用域包进 `:where()` 就能解决——它把作用域的权重归零，选择器退回成基础
+样式用的那个：
+
+```css
+/* 与基础样式的 `button` 同权重，靠主题表加载在 styles.css 之后取胜；
+   而 `.nav-link`、`button.secondary` 这些类选择器仍然压得住它 */
+:where(html[data-theme="railgun"]) button {
+  background: linear-gradient(180deg, #0a7ab8, #0369a1 52%, #04537f);
+}
+```
+
+要注意这只挡得住基础样式**声明过**的属性。多数透明按钮没写 `box-shadow`，所以
+主按钮的立体高光仍会漏到它们身上，得在主题里显式重置——`railgun/theme.css` 里
+那串 `.table-sort-button, .icon-close, …{ box-shadow: none }` 就是干这个的。
+
+## 同一个包里自己盖住自己
+
+媒体查询不增加特异性。如果包里有个响应式布局块（比如 `@media (min-width: 761px)`
+里的整套侧栏规则），而下面的通用段落又用**同样的选择器**写了一遍，那么后写的那条
+赢——不管它在不在媒体查询里。
+
+`railgun/` 上踩过两次：侧栏在布局块里声明了自己的背景和 `border-bottom: 0`，下面
+chrome 段又有一条同权重的 `html[data-theme="railgun"] .topbar`，于是侧栏一直穿着
+横向顶栏的半透明底、还在列底部拖着一条边框；字标的字体同理，改了不生效。
+
+排查时别只看选择器，用 DevTools 看**实际生效**的那条。修法是给布局块里的选择器多
+加一层真实存在的类（`.app-shell .topbar`、`.topbar-brand .brand-text h1`），并在
+注释里写明这一层是为了权重而不是为了范围，否则下一个人会把它当冗余删掉。
+
+另外，基础样式里少数属性带了 `!important`（例如 `.dashboard-card-sub` 的
+`color`），那是主题包再怎么提权都赢不了的，只能同样用 `!important`。
 
 ## 调试
 
