@@ -230,21 +230,77 @@ html[data-theme="railgun"] .dashboard-kpi[data-tone-escalated] {
    `innerHTML =` every five seconds, and an entrance animation anywhere inside
    them would not play on arrival, it would play forever.
 
-   One pass, left to right, gone in half a second. It reads as the rail
-   energising for the view you just selected. */
-@keyframes rg-view-arc {
-  from {
-    opacity: 1;
-    transform: scaleX(0);
-  }
+   This was a gradient bar stretching left to right, and it read as a wipe,
+   because that is what it was. Anime lightning is not a swept highlight: it
+   is a hard-edged zigzag with forks coming off it, it appears whole rather
+   than growing, and it does not fade — it strikes, cuts out, strikes again
+   fainter, and is gone. The shape is the same 稲妻 the active tab and every
+   eyebrow already use, so the console has one bolt and not two.
 
-  70% {
-    opacity: 1;
+   Two animations rather than one, because a real strike does two independent
+   things: the *shape* is revealed left to right along the discharge path
+   (rg-strike-wipe, driving a mask), and the *brightness* flickers in hard
+   steps (rg-strike-flash, driving opacity with `step-end` so nothing tweens
+   between levels — a cross-fade is exactly the soft reading being removed).
+
+   The flicker pattern is deliberately uneven: full, out, full, dim, out. Even
+   spacing reads as a blinking cursor. Total 460ms, which is long enough to
+   register and short enough that it is over before the eye settles on the
+   new view's first row. */
+/* The reveal runs from 100% to 0, which looks backwards and is not.
+
+   `mask-position` resolves the same way `background-position` does: the offset
+   is `(positioningArea - maskSize) × pct`. With `mask-size: 200%` that is
+   `(W - 2W) × pct`, i.e. `-W × pct` — the sign flips, so a *larger* percentage
+   pushes the mask further left. At 100% the opaque half sits entirely off the
+   left edge and nothing is revealed; at 0 it covers the element exactly.
+
+   This is the same trap that had the turbine masts detached from their rotors,
+   in a different property. Any percentage against a layer bigger than its box
+   moves opposite to the intuition. */
+@keyframes rg-strike-wipe {
+  from {
+    -webkit-mask-position: 100% 0;
+    mask-position: 100% 0;
   }
 
   to {
+    -webkit-mask-position: 0 0;
+    mask-position: 0 0;
+  }
+}
+
+@keyframes rg-strike-flash {
+  0% {
+    opacity: 1;
+  }
+
+  38% {
+    opacity: 1;
+  }
+
+  44% {
     opacity: 0;
-    transform: scaleX(1);
+  }
+
+  52% {
+    opacity: 1;
+  }
+
+  74% {
+    opacity: 0.55;
+  }
+
+  84% {
+    opacity: 0;
+  }
+
+  92% {
+    opacity: 0.3;
+  }
+
+  100% {
+    opacity: 0;
   }
 }
 
@@ -1924,32 +1980,61 @@ html[data-theme="railgun"] .view > .panel {
    wholesale every five seconds, where a one-shot entrance would restart on
    every poll and never stop.
 
-   `transform-origin: left` with a scaleX from 0 makes it travel rather than
-   fade in place — the rail energising for the view just selected. It is above
-   the panel but `pointer-events: none`, and it is 2px tall, so nothing under
-   it moves or becomes unclickable while it plays. */
+   The bolt is an SVG rather than a gradient, and that is the difference
+   between lightning and a wipe. The zigzag is a hard-edged polyline with four
+   forks coming off it — no stroke softening, no glow, because on this ground
+   nothing emits: the discharge is the darkest thing in the frame, not the
+   brightest, which is the same inversion the whole pack runs on.
+
+   Two things it needs to read as lightning rather than as a sawtooth. The
+   segments are irregular in both length and height — evenly spaced peaks are
+   an EKG trace — and the amplitude is most of the box: a shallow wobble across
+   1258px is a squiggle no matter how hard the edges are. 40px tall, drawn at
+   1200×40 and stretched with `preserveAspectRatio="none"` so one path fits
+   whatever width the column happens to be.
+
+   Two layers, core first. Background layers paint in the order listed, so the
+   1.5px dark core has to come *before* the 3.5px pale halo or the halo covers
+   it — which is exactly what the first cut did, and it rendered as a pale
+   scratch with no bolt in it. Core on top, halo behind: ionised air around a
+   discharge, and it is what keeps a 1.5px line from reading as a hairline
+   crack in the screen. */
 html[data-theme="railgun"] .view {
   position: relative;
 }
 
 html[data-theme="railgun"] .view:not([hidden])::before {
-  animation: rg-view-arc 520ms cubic-bezier(0.16, 0.84, 0.3, 1) both;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--rg-arc) 12%,
-    var(--rg-arc-ink) 46%,
-    var(--rg-arc) 74%,
-    transparent
-  );
+  animation:
+    rg-strike-wipe 190ms cubic-bezier(0.12, 0.9, 0.25, 1) both,
+    rg-strike-flash 460ms step-end both;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='40' viewBox='0 0 1200 40' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='%23075985' stroke-width='2' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M0 21 L74 9 L108 27 L191 6 L214 22 L318 4 L349 31 L436 11 L472 25 L534 3 L578 34 L681 12 L702 24 L806 5 L841 29 L928 9 L963 22 L1049 4 L1078 27 L1152 13 L1200 20'/%3E%3Cpath d='M108 27 L131 39'/%3E%3Cpath d='M318 4 L342 0'/%3E%3Cpath d='M578 34 L604 40'/%3E%3Cpath d='M806 5 L828 1'/%3E%3Cpath d='M1049 4 L1071 0'/%3E%3C/g%3E%3C/svg%3E")
+      0 0 / 100% 100% no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='40' viewBox='0 0 1200 40' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='%23bae6fd' stroke-width='5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M0 21 L74 9 L108 27 L191 6 L214 22 L318 4 L349 31 L436 11 L472 25 L534 3 L578 34 L681 12 L702 24 L806 5 L841 29 L928 9 L963 22 L1049 4 L1078 27 L1152 13 L1200 20'/%3E%3Cpath d='M108 27 L131 39'/%3E%3Cpath d='M318 4 L342 0'/%3E%3Cpath d='M578 34 L604 40'/%3E%3Cpath d='M806 5 L828 1'/%3E%3Cpath d='M1049 4 L1071 0'/%3E%3C/g%3E%3C/svg%3E")
+      0 0 / 100% 100% no-repeat;
   content: "";
-  height: 2px;
+  height: 40px;
   left: 0;
+  /* The wipe. A hard-edged mask travelling left to right reveals the bolt
+     along its own path rather than stretching it into place — the strike is
+     already its full length at every moment, only more of it has arrived.
+
+     The mask is twice the element's width, opaque on its *leading* (left) half,
+     and slides from -100% to 0. At -100% the opaque half sits entirely off to
+     the left and nothing shows; at 0 it covers the element. Getting this the
+     wrong way round puts the opaque half over the right-hand side at the start
+     and the bolt arrives backwards, which is what the first cut did. The hard
+     50% boundary is what keeps this a reveal rather than a fade. */
+  -webkit-mask-image: linear-gradient(90deg, #000 0 50%, transparent 58% 100%);
+  mask-image: linear-gradient(90deg, #000 0 50%, transparent 58% 100%);
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 200% 100%;
+  mask-size: 200% 100%;
   pointer-events: none;
   position: absolute;
   right: 0;
-  top: 0;
-  transform-origin: left center;
+  top: -28px;
   z-index: 3;
 }
 
@@ -3161,6 +3246,18 @@ html[data-theme="railgun"] .model-test-template-item:hover {
     background: none;
     border-left: 0;
     padding: 0;
+  }
+
+  /* The bolt gets a shorter path on a phone. The desktop one is 21 segments
+     across 1258px; squeezed into 430px they collapse into a band of noise with
+     no zigzag legible in it. Seven segments and two forks, same amplitude, so
+     it still reads as a strike at a fifth of the width. */
+  html[data-theme="railgun"] .view:not([hidden])::before {
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='40' viewBox='0 0 420 40' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='%23075985' stroke-width='2' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M0 20 L58 7 L92 28 L163 5 L198 25 L262 6 L296 30 L360 10 L420 22'/%3E%3Cpath d='M92 28 L112 39'/%3E%3Cpath d='M262 6 L286 1'/%3E%3C/g%3E%3C/svg%3E")
+        0 0 / 100% 100% no-repeat,
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='420' height='40' viewBox='0 0 420 40' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='%23bae6fd' stroke-width='5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M0 20 L58 7 L92 28 L163 5 L198 25 L262 6 L296 30 L360 10 L420 22'/%3E%3Cpath d='M92 28 L112 39'/%3E%3Cpath d='M262 6 L286 1'/%3E%3C/g%3E%3C/svg%3E")
+        0 0 / 100% 100% no-repeat;
   }
 
   html[data-theme="railgun"] .eyebrow {
