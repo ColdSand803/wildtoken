@@ -465,14 +465,44 @@ html[data-theme="railgun"] body::after {
     /* horizon */
     linear-gradient(90deg, transparent, rgb(3 105 161 / 26%) 8% 92%, transparent) 0 230px / 100% 1px
       no-repeat,
-    /* cloud bank */
-    radial-gradient(ellipse 96px 26px at 22% 62px, rgb(255 255 255 / 88%), transparent 74%),
-    radial-gradient(ellipse 64px 18px at 30% 70px, rgb(255 255 255 / 88%), transparent 74%),
-    radial-gradient(ellipse 118px 30px at 68% 44px, rgb(255 255 255 / 76%), transparent 76%),
-    radial-gradient(ellipse 74px 20px at 76% 54px, rgb(255 255 255 / 76%), transparent 76%),
-    radial-gradient(ellipse 62px 17px at 92% 96px, rgb(255 255 255 / 64%), transparent 74%),
-    /* sky, resolving to the page at the horizon */
-    linear-gradient(180deg, #a5d8f4 0px, #c2e4f9 96px, #e4f2fc 178px, rgb(244 246 248 / 0%) 230px),
+    /* cloud bank — cel-shaded, hard-edged.
+
+       These were five radial-gradient ellipses with `transparent 74%`. A soft
+       radial falloff is fog, or a smudge on the glass; it is not a cloud, and
+       at 88% white on a pale sky it read as neither. Cumulus has a flat base —
+       every cloud in a bank condenses at the same altitude, so they all sit on
+       one line — a lumpy dome above it, and a hard edge all the way round.
+
+       And anime skies are cel-shaded: the cloud is flat white with a single
+       band of blue-grey along its underside and a *hard* boundary between the
+       two. No gradient anywhere. That is the whole difference between this
+       reading as animation and reading as a stock CSS header, and it is why
+       the shading is a clipped path rather than another soft stop.
+
+       Three clouds, two silhouettes, three sizes — the big one appears twice
+       at very different scale, which distance already justifies, and a third
+       shape would only be a third thing to get wrong. */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='86' viewBox='0 0 240 86'%3E%3CclipPath id='c'%3E%3Cpath d='M16 70 C2 70 0 56 12 50 C8 34 30 24 44 34 C50 14 84 10 96 28 C106 12 136 12 144 30 C158 20 180 28 182 46 C198 44 206 58 196 70 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='240' height='86' fill='%23ffffff'/%3E%3Cpath d='M0 52 C30 60 62 48 96 55 C130 62 164 50 200 56 C218 59 232 55 240 52 L240 86 L0 86 Z' fill='%23bcd9f0'/%3E%3C/g%3E%3C/svg%3E")
+      46% 40px / 210px 76px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='62' viewBox='0 0 160 62'%3E%3CclipPath id='c'%3E%3Cpath d='M12 52 C2 52 0 42 10 37 C7 25 26 18 36 27 C43 11 70 9 80 23 C92 13 116 17 120 31 C137 27 151 37 146 52 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='160' height='62' fill='%23ffffff'/%3E%3Cpath d='M0 39 C24 45 50 35 78 41 C106 47 130 37 160 42 L160 62 L0 62 Z' fill='%23bcd9f0'/%3E%3C/g%3E%3C/svg%3E")
+      72% 92px / 140px 54px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='86' viewBox='0 0 240 86'%3E%3CclipPath id='c'%3E%3Cpath d='M16 70 C2 70 0 56 12 50 C8 34 30 24 44 34 C50 14 84 10 96 28 C106 12 136 12 144 30 C158 20 180 28 182 46 C198 44 206 58 196 70 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='240' height='86' fill='%23ffffff'/%3E%3Cpath d='M0 52 C30 60 62 48 96 55 C130 62 164 50 200 56 C218 59 232 55 240 52 L240 86 L0 86 Z' fill='%23c7e0f3'/%3E%3C/g%3E%3C/svg%3E")
+      93% 46px / 112px 40px no-repeat,
+    /* sky, resolving to the page at the horizon.
+
+       Banded, not blended. A continuous gradient is a photograph of a sky; a
+       painted one is laid in as flats, and the boundaries between them are
+       visible. The steps here are narrow enough to read as depth rather than
+       as stripes, and only the last one softens — that is the haze at the
+       horizon line, which is the one place a real edge would look wrong. */
+    linear-gradient(
+      180deg,
+      #9ed3f2 0px 58px,
+      #b2ddf6 58px 104px,
+      #c8e6fa 104px 152px,
+      #ddf0fd 152px 196px,
+      rgb(244 246 248 / 0%) 232px
+    ),
     /* ground falling into shade at the foot of a long table */
     radial-gradient(150% 90% at 50% 100%, transparent 40%, rgb(80 106 136 / 11%) 100%);
   content: "";
@@ -508,7 +538,7 @@ html[data-theme="railgun"] .aurora {
    Navigation runs down the left rather than across the top. A launcher's rails
    are parallel and vertical, and the column gives the pack somewhere to put
    the things that make it this series rather than generic neon: the clearance
-   plate, the vertical title, the city on the horizon.
+   plate, the channel numbers, the city on the horizon.
 
    It is narrow — 96px — and the decoration is sized to that rather than the
    other way round. A wide rail is a second column competing with the tables
@@ -556,37 +586,33 @@ html[data-theme="railgun"] .aurora {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     align-self: start;
-    /* 軌條 — the rail wears the launcher. `demon-slayer` puts Tanjirō's haori
-       on its navigation column and wears it at strength; the equivalent here
-       is the thing the pack is named after: two conductors with the armature
-       track running between them, as repeating windings down the whole
-       column.
+    /* 軌條 — the rail wears the launcher, and now it can.
 
-       The veil over the windings is graded, and the grading follows the same
-       logic that pack found: calm behind the brand and the utilities where
-       small labels have to be read, most open through the middle stretch,
-       which is exactly the part of the rail with nothing on it — so that is
-       where the hardware can afford to be loudest. */
+       The windings that used to run here came out because they crossed the
+       tabs' translucent plates and read as dirt through them. The plates are
+       gone now — nothing in this column is a box — so the objection goes with
+       them: there is no longer anything for a texture to show through.
+
+       So the material comes back, at the scale it should have been. The
+       armature is a coil, and a coil seen side-on is a diagonal wrap, not a
+       ladder of horizontal rules — that was the tell that the old layer was
+       ruled paper rather than hardware. 45°, tight, and very faint, with the
+       two conductors it is wound between at the outer edges.
+
+       The veil stays gone. It graded the windings down to nothing where labels
+       sat; at this strength the type sits on them without a fight. */
     background:
       /* the two conductors, down the outer edges */
-      linear-gradient(180deg, transparent, rgb(3 105 161 / 34%) 12% 88%, transparent) 7px 0 / 2px
+      linear-gradient(180deg, transparent, rgb(3 105 161 / 22%) 12% 88%, transparent) 7px 0 / 2px
         100% no-repeat,
-      linear-gradient(180deg, transparent, rgb(3 105 161 / 34%) 12% 88%, transparent) 87px 0 / 2px
+      linear-gradient(180deg, transparent, rgb(3 105 161 / 22%) 12% 88%, transparent) 87px 0 / 2px
         100% no-repeat,
-      /* the veil */
-      linear-gradient(
-        180deg,
-        rgb(255 255 255 / 92%) 0 150px,
-        rgb(255 255 255 / 52%) 300px,
-        rgb(255 255 255 / 52%) calc(100% - 260px),
-        rgb(255 255 255 / 92%) calc(100% - 150px)
-      ),
-      /* windings */
+      /* the coil, wound between them */
       repeating-linear-gradient(
-        180deg,
-        transparent 0 13px,
-        rgb(3 105 161 / 26%) 13px 15px,
-        transparent 15px 28px
+        45deg,
+        transparent 0 9px,
+        rgb(3 105 161 / 3%) 9px 10px,
+        transparent 10px 19px
       ),
       linear-gradient(180deg, #ffffff 0%, #f4f8fb 62%, #eaf1f7 100%);
     border-bottom: 0;
@@ -601,10 +627,8 @@ html[data-theme="railgun"] .aurora {
        auto too, the column becomes a scroll container on both, and the theme
        menu — which deliberately opens out over the content — gets clipped at
        96px. So everything the rail stacks has to fit in the shortest viewport
-       worth supporting, and the vertical title is ~150px of that — which is
-       why it is dropped below 780px by the media query further down rather
-       than allowed to push the logout button off the bottom. Measured without
-       it: ~536px. Add a row here and re-measure; this has been missed twice
+       worth supporting. Measured as it now stands, with the vertical title
+       gone: ~620px. Add a row here and re-measure; this has been missed twice
        already. */
     height: 100dvh;
     min-height: 0;
@@ -772,24 +796,76 @@ html[data-theme="railgun"] .aurora {
     width: 100%;
   }
 
-  /* The labels move onto plates, which is what lets the hardware behind them
-     be worn at strength — a label sitting directly on windings has to have
-     the windings turned down until they are a texture nobody can name. On a
-     plate, the cloth is free.
+  /* The labels sit on plates, and the plates are opaque — which is what lets
+     the conductors behind them run the full height of the column. The earlier
+     arrangement was the other way round: translucent plates over hardware that
+     had to be dimmed until nobody could name it, and it still crossed the
+     labels. Occlusion is cheaper than restraint here.
 
      Each tab also carries its channel number, the way both working packs in
      this repo number theirs. It is two CJK characters over two digits, which
      is the whole reason the label can be centred: 26px of text in the middle
      of 84px never reaches the marker holding the left margin. */
+  /* No plate. The tab is type on the rail's own material, and only the live
+     one is drawn.
+
+     There were plates here, and they were mine: when the windings came out,
+     the plate lost the only job it had — masking a texture so a label could be
+     read — and I kept it anyway, opaque. Five white cards stacked down a 96px
+     column, plus the brand, plus the clearance plate, read as a stack of
+     form fields, not as an instrument. `demon-slayer` is the proof next door:
+     its rail has no boxes at all, the haori runs the full height uninterrupted,
+     and the tabs are bare type on it.
+
+     What replaces the box is the thing this pack is actually about. The active
+     tab gets a live rail down its inner edge — the two conductors and the arc
+     between them, the pack's title motif at tab height — and everything else
+     is just type. One drawn element in the column instead of seven. */
   html[data-theme="railgun"] .nav-link {
-    background: rgb(255 255 255 / 72%);
-    box-shadow: inset 0 0 0 1px rgb(3 105 161 / 12%);
+    background: none;
+    box-shadow: none;
     flex-direction: column;
     gap: 0;
     justify-content: center;
-    min-height: 46px;
-    padding: 3px 6px 2px;
+    min-height: 44px;
+    padding: 4px 6px 3px;
     width: 100%;
+  }
+
+  /* Hover is a wash, not a card — no border, nothing that reads as an object
+     appearing under the pointer. The active state is the launcher's rail at
+     tab height: two dim conductors with the arc riding between them, down the
+     inner edge. It is the pack's title motif, used on the one control that is
+     actually live, which is the job the motif was defined for.
+
+     `.app-shell` is in the selector for weight — the states below are declared
+     `.nav-link.active` later in the file and win from anywhere without it.
+     Same trap as the rail and the wordmark. */
+  html[data-theme="railgun"] .app-shell .nav-link:hover {
+    background: linear-gradient(90deg, rgb(14 165 233 / 13%), transparent 82%);
+    box-shadow: none;
+  }
+
+  html[data-theme="railgun"] .app-shell .nav-link.active,
+  html[data-theme="railgun"] .app-shell .nav-link.active:hover {
+    background:
+      /* the arc, riding between them */
+      linear-gradient(
+          180deg,
+          transparent 6%,
+          var(--rg-arc) 26%,
+          var(--rg-arc-ink) 50%,
+          var(--rg-arc) 74%,
+          transparent 94%
+        )
+        2px 0 / 2px 100% no-repeat,
+      /* two conductors */
+      linear-gradient(180deg, transparent, rgb(3 105 161 / 52%) 18% 82%, transparent) 0 0 / 1px 100%
+        no-repeat,
+      linear-gradient(180deg, transparent, rgb(3 105 161 / 52%) 18% 82%, transparent) 5px 0 / 1px
+        100% no-repeat,
+      linear-gradient(90deg, rgb(14 165 233 / 17%), transparent 88%);
+    box-shadow: none;
   }
 
   html[data-theme="railgun"] .nav-link::after {
@@ -827,47 +903,15 @@ html[data-theme="railgun"] .aurora {
     color: var(--rg-arc-ink);
   }
 
-  /* The vertical title, set in the space the nav leaves above the utilities.
-     Placed on the nav's ::after so it is anchored to the end of the list and
-     cannot collide with it. */
-  /* The vertical title is back, and this is a deliberate reversal — it was
-     removed at your instruction, on the grounds that a mark which cannot
-     express the style is not worth its space. That was true of the version it
-     was removed as: 18% alpha, 22px, a stain in the middle of the rail.
-
-     It comes back at the other end of the scale, and it comes back into a
-     console that now has a city across the top of it. In a pack this quiet it
-     was the loudest thing on the page and it was shouting from the wrong
-     column; among an establishing shot, a visible field grid and targeting
-     brackets, it is one member of a set. Vertical kanji is also the single
-     most recognisable graphic device anime key art has, and a narrow left
-     column is the one place in an interface where it is the obvious answer
-     rather than a costume. */
-  html[data-theme="railgun"] .topbar-nav::after {
-    background: linear-gradient(
-        180deg,
-        transparent,
-        var(--rg-arc) 8%,
-        var(--rg-arc) 92%,
-        transparent
-      )
-      left center / 2px 100% no-repeat;
-    color: rgb(27 36 48 / 68%);
-    content: "学園都市";
-    display: block;
-    font-family: "Noto Serif SC", "Noto Sans SC", serif;
-    font-size: 30px;
-    font-weight: 700;
-    letter-spacing: 0.26em;
-    line-height: 1;
-    /* auto on the block axis centres it in whatever the nav list leaves. */
-    margin: auto;
-    /* Physical rather than logical, so it clears the conductor at the left
-       edge no matter which writing mode the text is set in. */
-    padding-left: 15px;
-    text-orientation: upright;
-    writing-mode: vertical-rl;
-  }
+  /* The vertical 学園都市 that used to hang in the slack between the tabs and
+     the utilities is out, at your instruction — twice now, which is the answer.
+     The rail already says what pack this is: the conductors run down both
+     edges, every tab carries a channel number, and the city itself is across
+     the top of the content area. The title was the one thing in the column carrying no
+     information, and its own breakpoint below already conceded that by
+     dropping it first whenever the rail ran short. `.topbar-nav::after` is
+     free; the nav's `flex: 1 1 auto` still takes the slack, so the tabs stay
+     under the brand and the utilities stay pinned to the foot. */
 
   html[data-theme="railgun"] .topbar-actions {
     flex-wrap: wrap;
@@ -997,21 +1041,12 @@ html[data-theme="railgun"] .aurora {
   }
 }
 
-/* The title is the tallest thing in the rail that carries no information, so
-   it is what goes when the column runs out of room.
-
-   Measured, and re-measured every time the rail grows — which it has done
-   three times now, and every time this number was found the hard way, with
-   the logout button sitting exactly on the fold. With the title: ~781px. With
-   it dropped: ~620px, up from ~550 since the tabs became plates with channel
-   numbers under them. The threshold is set above the first figure with room
-   to spare rather than on it, because these measurements are taken with
-   whatever fonts happened to load. */
-@media (min-width: 761px) and (max-height: 830px) {
-  html[data-theme="railgun"] .topbar-nav::after {
-    content: none;
-  }
-}
+/* The short-viewport rule that dropped the vertical title went out with the
+   title itself. It existed because the rail needed ~781px with the title and
+   ~620px without, and the logout button was landing on the fold in between.
+   ~620px is now the only figure there is, so nothing has to be shed. If
+   anything else is ever added to the rail, that is the number to measure
+   against. */
 
 html[data-theme="railgun"] .topbar {
   background: linear-gradient(180deg, rgb(255 255 255 / 92%), rgb(247 249 251 / 84%));
@@ -1111,7 +1146,16 @@ html[data-theme="railgun"] .nav-link.active:hover::before {
   transform: translateY(-50%) scale(1);
 }
 
-/* ── Rail utilities ──────────────────────────────────────── */
+/* ── Rail utilities ────────────────────────────────────────
+   These sit in the same 96px column as the tabs and have to speak the same
+   way. Solid white cards for 舒适 / 主题 / 退出 put three more boxes at the
+   foot of a column that just had five taken out of it — and they are the
+   *least* important controls in the console, so they were the loudest thing
+   in the rail by pure accident of having a fill.
+
+   Hairline outline, no fill, transparent ground: the coil runs behind them
+   the way it runs behind the tabs. Only 実時 keeps a fill, because it is the
+   one live readout and copper is reserved for exactly that. */
 
 html[data-theme="railgun"] .topbar-actions button {
   border-radius: 2px;
@@ -1120,8 +1164,8 @@ html[data-theme="railgun"] .topbar-actions button {
 html[data-theme="railgun"] .topbar-actions .theme-toggle,
 html[data-theme="railgun"] .topbar-actions .density-toggle,
 html[data-theme="railgun"] .topbar-actions .nav-logout {
-  background: #ffffff;
-  border: 1px solid var(--line);
+  background: none;
+  border: 1px solid rgb(3 105 161 / 22%);
   color: var(--muted-strong);
 }
 
@@ -2875,9 +2919,9 @@ html[data-theme="railgun"] .model-test-template-item:hover {
 /* ── Narrow layouts ──────────────────────────────────────────
    The left rail is a desktop shape; below the tablet breakpoint the whole
    grid block above simply does not apply and the bar returns to the base
-   sheet's horizontal layout, taking the clearance plate, the vertical title
-   and the skyline with it — they are all defined inside that block and never
-   generate content here.
+   sheet's horizontal layout, taking the clearance plate, the channel numbers,
+   the conductors and the skyline with it — they are all defined inside that
+   block and never generate content here.
 
    What is left to do is pull back the decoration that would otherwise crowd a
    phone: the field grid behind a full-width table, the travelling arc, the
@@ -2886,6 +2930,30 @@ html[data-theme="railgun"] .model-test-template-item:hover {
 @media (max-width: 760px) {
   html[data-theme="railgun"] body::before {
     opacity: 0.45;
+  }
+
+  /* The cloud bank is sized for a 1344px content area; at phone width the same
+     three clouds land across the standfirst. Same sky, smaller weather.
+
+     Both lists have to carry all twelve layers of `body::after` in order —
+     3 rotors, 3 towers, horizon, 3 clouds, sky, ground — because a short list
+     repeats cyclically rather than leaving the rest alone, which would drag
+     the turbines around with the clouds. Only entries 8–10 differ from the
+     values declared up there; the rest are restatements. Add a layer to the
+     establishing shot and these two lists have to grow with it. */
+  html[data-theme="railgun"] body::after {
+    background-size:
+      62px 62px, 44px 44px, 34px 34px,
+      1px 111px, 1px 102px, 1px 93px,
+      100% 1px,
+      124px 45px, 88px 34px, 74px 26px,
+      auto, auto;
+    background-position:
+      13% 88px, 54% 106px, 78% 120px,
+      calc(13% + 31px) 119px, calc(54% + 22px) 128px, calc(78% + 17px) 137px,
+      0 230px,
+      4% 22px, 60% 52px, 92% 18px,
+      0 0, 0 0;
   }
 
   html[data-theme="railgun"] .topbar::after {
