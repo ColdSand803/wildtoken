@@ -12,7 +12,12 @@ use rand::{rngs::OsRng, RngCore};
 use sha2::Sha256;
 use sqlx::SqlitePool;
 use subtle::ConstantTimeEq;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::RwLock;
+
+mod admin_throttle;
+
+use admin_throttle::VerificationQueue;
+pub use admin_throttle::{AdminAuthThrottle, AdminClient};
 
 use crate::config::Settings;
 use crate::error::AppError;
@@ -40,7 +45,11 @@ struct CachedAdminToken {
 
 pub(crate) struct AdminAuthCache {
     key: [u8; 32],
-    verified: Mutex<Option<CachedAdminToken>>,
+    /// Guarded by a blocking mutex on purpose: the critical section is a
+    /// comparison, and holding it across the Argon2id verification is what
+    /// would let unauthenticated callers stall authenticated ones.
+    verified: std::sync::Mutex<Option<CachedAdminToken>>,
+    queue: VerificationQueue,
     #[cfg(test)]
     argon2_verifications: std::sync::atomic::AtomicU64,
 }
@@ -296,7 +305,8 @@ impl AdminAuthCache {
         OsRng.fill_bytes(&mut key);
         Self {
             key,
-            verified: Mutex::new(None),
+            verified: std::sync::Mutex::new(None),
+            queue: VerificationQueue::new(),
             #[cfg(test)]
             argon2_verifications: std::sync::atomic::AtomicU64::new(0),
         }
@@ -309,8 +319,28 @@ impl AdminAuthCache {
         mac.finalize().into_bytes().into()
     }
 
-    async fn clear(&self) {
-        *self.verified.lock().await = None;
+    fn entry(&self) -> std::sync::MutexGuard<'_, Option<CachedAdminToken>> {
+        self.verified
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn hit(&self, fingerprint: &[u8; 32], credential_version: i64) -> bool {
+        self.entry().as_ref().is_some_and(|entry| {
+            entry.credential_version == credential_version
+                && bool::from(entry.fingerprint.ct_eq(fingerprint))
+        })
+    }
+
+    fn store(&self, fingerprint: [u8; 32], credential_version: i64) {
+        *self.entry() = Some(CachedAdminToken {
+            credential_version,
+            fingerprint,
+        });
+    }
+
+    fn clear(&self) {
+        *self.entry() = None;
     }
 }
 
@@ -362,6 +392,8 @@ pub struct AppState {
     /// This closes the commit-to-publication window for newly-started requests.
     pub admin_credential_version: Arc<AtomicI64>,
     pub(crate) admin_auth_cache: Arc<AdminAuthCache>,
+    /// Admission control for callers that have not yet proven a valid token.
+    pub admin_throttle: Arc<AdminAuthThrottle>,
     pub runtime_metrics: Arc<RuntimeMetrics>,
     pub log_writer: crate::proxy::logging::LogWriter,
     pub log_stats: Arc<crate::db::log_stats::LogStatsCache>,
@@ -371,39 +403,55 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub async fn authenticate_admin_token(&self, token: String) -> Option<i64> {
-        let credential = self.admin_credential.read().await.clone();
+    pub async fn authenticate_admin_token(
+        &self,
+        token: String,
+        client: AdminClient,
+    ) -> Option<i64> {
+        let fingerprint = self.admin_auth_cache.fingerprint(&token);
+
+        // A token that has already been verified is answered without touching
+        // the verification slot, so wrong-token traffic cannot queue ahead of a
+        // signed-in operator. The cache is cleared on rotation, and every entry
+        // carries the generation it was proven against, so a stale credential
+        // cannot be admitted here.
         let credential_version = self.admin_credential_version.load(Ordering::Acquire);
-        if credential.credential_version != credential_version {
-            return None;
+        if self.admin_auth_cache.hit(&fingerprint, credential_version) {
+            return Some(credential_version);
         }
 
-        let fingerprint = self.admin_auth_cache.fingerprint(&token);
-        let mut cached = self.admin_auth_cache.verified.lock().await;
-        if self.admin_credential_version.load(Ordering::Acquire) != credential_version {
+        if !self.admin_throttle.admit(client).await {
             return None;
         }
-        if cached.as_ref().is_some_and(|entry| {
-            entry.credential_version == credential_version
-                && bool::from(entry.fingerprint.ct_eq(&fingerprint))
-        }) {
+        let _slot = self.admin_auth_cache.queue.enter().await?;
+
+        // Whoever held the slot may have just verified this same token.
+        let credential_version = self.admin_credential_version.load(Ordering::Acquire);
+        if self.admin_auth_cache.hit(&fingerprint, credential_version) {
             return Some(credential_version);
+        }
+
+        let credential = self.admin_credential.read().await.clone();
+        if credential.credential_version != credential_version {
+            return None;
         }
 
         #[cfg(test)]
         self.admin_auth_cache
             .argon2_verifications
             .fetch_add(1, Ordering::Relaxed);
-        if !verify_admin_token(credential, token).await
-            || self.admin_credential_version.load(Ordering::Acquire) != credential_version
-        {
+        if !verify_admin_token(credential, token).await {
+            self.admin_throttle.record_failure(client).await;
+            return None;
+        }
+        // A rotation that landed mid-verification is not the caller's failure,
+        // so it costs them nothing but this request.
+        if self.admin_credential_version.load(Ordering::Acquire) != credential_version {
             return None;
         }
 
-        *cached = Some(CachedAdminToken {
-            credential_version,
-            fingerprint,
-        });
+        self.admin_auth_cache.store(fingerprint, credential_version);
+        self.admin_throttle.record_success(client).await;
         Some(credential_version)
     }
 
@@ -423,7 +471,7 @@ impl AppState {
                 *snapshot = credential;
             }
         }
-        self.admin_auth_cache.clear().await;
+        self.admin_auth_cache.clear();
     }
 }
 

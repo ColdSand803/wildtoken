@@ -1,0 +1,8 @@
+{
+  "id": "railgun",
+  "label": "学园都市",
+  "css": "theme.css",
+  "swatch": ["#f4f6f8", "#0ea5e9"],
+  "version": "2.1.0",
+  "description": "Academy City in daylight: white concrete and glass, a Tokiwadai clearance plate on a narrow operator rail, a turbine skyline, and arc blue kept back for whatever is live."
+}

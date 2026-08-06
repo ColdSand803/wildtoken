@@ -74,6 +74,7 @@ async fn test_state() -> AppState {
         })),
         admin_credential_version: Arc::new(AtomicI64::new(1)),
         admin_auth_cache: Arc::new(AdminAuthCache::new()),
+        admin_throttle: Arc::new(crate::state::AdminAuthThrottle::new()),
         runtime_metrics,
         log_writer,
         log_stats,

@@ -73,7 +73,7 @@ Docker Compose is the easiest way to run WildToken as a local service.
 
 ```bash
 cp .env.example .env
-# Edit .env and set ADMIN_TOKEN to a unique 8-256 byte printable ASCII value.
+# Edit .env and set ADMIN_TOKEN to a unique 24-256 byte printable ASCII value.
 docker compose up -d --build
 curl -fsS http://127.0.0.1:3100/health
 ```
@@ -89,7 +89,7 @@ port `3100`. It also mounts `./themes` read-only into the container so theme
 changes do not require an image rebuild.
 
 For a brand-new database listening beyond localhost, WildToken refuses to start
-unless `ADMIN_TOKEN` is explicitly set. The token must be 8-256 bytes, printable
+unless `ADMIN_TOKEN` is explicitly set. The token must be 24-256 bytes, printable
 ASCII, contain no spaces, and not be `change-me`.
 
 ### 🛠️ From Source
@@ -350,6 +350,16 @@ theme packs.
   never be distributed to downstream clients.
 - Admin APIs are same-origin and require `x-admin-token`; compatibility `/v1/*`
   APIs are intentionally CORS-enabled for downstream clients.
+- Admin authentication is rate limited: a single source backs off exponentially
+  after 5 consecutive failures (1s, doubling to 60s), and more than 100 failures
+  per minute puts every remote caller into a 30s cooldown. Already-verified
+  tokens are answered from cache and are never throttled. Loopback callers are
+  always exempt, so an operator cannot be locked out of their own console.
+- Behind a reverse proxy, set `admin.client_ip_header` to the header your proxy
+  overwrites (e.g. `x-forwarded-for`); otherwise every request looks like one
+  source. **Only set it when a proxy really does overwrite that header** — it is
+  caller-controlled, so trusting an unwritten one lets every caller pick its own
+  identity and shed its failure history.
 
 ## 🧪 Development Checks
 

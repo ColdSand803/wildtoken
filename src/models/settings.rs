@@ -109,10 +109,17 @@ impl AdminTokenRotateIn {
     }
 }
 
+/// Minimum admin token length.
+///
+/// Throttling bounds how fast a token can be guessed; length is what makes the
+/// bound irrelevant. Existing credentials are unaffected — only bootstrap and
+/// rotation pass through here.
+pub const ADMIN_TOKEN_MIN_LEN: usize = 24;
+
 pub fn validate_admin_token_value(value: &str) -> Result<&str, &'static str> {
     let token = value.trim();
-    if !(8..=256).contains(&token.len()) {
-        return Err("admin token must be between 8 and 256 bytes");
+    if !(ADMIN_TOKEN_MIN_LEN..=256).contains(&token.len()) {
+        return Err("admin token must be between 24 and 256 bytes");
     }
     if !token.bytes().all(|byte| byte.is_ascii_graphic()) {
         return Err("admin token must contain only printable ASCII characters without spaces");
@@ -411,9 +418,26 @@ mod tests {
     fn validates_user_supplied_admin_tokens() {
         let input = AdminTokenRotateIn {
             confirm: true,
-            token: "  user-chosen-admin-token  ".into(),
+            token: "  user-chosen-admin-token-value  ".into(),
         };
-        assert_eq!(input.validated_token().unwrap(), "user-chosen-admin-token");
+        assert_eq!(
+            input.validated_token().unwrap(),
+            "user-chosen-admin-token-value"
+        );
+
+        // The length floor is exact: one byte short is rejected.
+        assert!(AdminTokenRotateIn {
+            confirm: true,
+            token: "x".repeat(ADMIN_TOKEN_MIN_LEN),
+        }
+        .validated_token()
+        .is_ok());
+        assert!(AdminTokenRotateIn {
+            confirm: true,
+            token: "x".repeat(ADMIN_TOKEN_MIN_LEN - 1),
+        }
+        .validated_token()
+        .is_err());
 
         for token in ["short", "change-me", "contains space", "含中文的管理员令牌"] {
             assert!(AdminTokenRotateIn {

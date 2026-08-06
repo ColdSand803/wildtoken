@@ -1,11 +1,16 @@
+use std::net::{IpAddr, SocketAddr};
+
 use axum::{
-    extract::FromRequestParts,
+    extract::{ConnectInfo, FromRequestParts},
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
 
-use crate::{db::token as token_db, state::AppState};
+use crate::{
+    db::token as token_db,
+    state::{AdminClient, AppState},
+};
 
 // ── AdminAuth ────────────────────────────────────────────────────────────────
 
@@ -25,6 +30,52 @@ fn unauthorized() -> (StatusCode, Json<serde_json::Value>) {
     )
 }
 
+/// Parse a forwarded-header address, accepting the `host:port` and `[v6]:port`
+/// forms proxies sometimes emit.
+fn parse_forwarded_addr(value: &str) -> Option<IpAddr> {
+    let value = value.trim();
+    if let Ok(ip) = value.parse::<IpAddr>() {
+        return Some(ip);
+    }
+    if let Ok(addr) = value.parse::<SocketAddr>() {
+        return Some(addr.ip());
+    }
+    let host = value.strip_prefix('[').and_then(|rest| {
+        rest.split_once(']')
+            .map(|(inner, _)| inner)
+            .or(Some(rest.trim_end_matches(']')))
+    });
+    match host {
+        Some(host) => host.parse().ok(),
+        None => value.rsplit_once(':')?.0.parse().ok(),
+    }
+}
+
+/// Identify the caller for throttling purposes.
+///
+/// A forwarded header is only consulted when the operator has named one, and
+/// an address learned that way is always treated as remote — otherwise anyone
+/// could claim `127.0.0.1` and inherit the loopback exemption.
+fn admin_client(parts: &Parts, state: &AppState) -> AdminClient {
+    if let Some(header) = state.settings.admin.client_ip_header.as_deref() {
+        let forwarded = parts
+            .headers
+            .get(header)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(',').next())
+            .and_then(parse_forwarded_addr);
+        if let Some(ip) = forwarded {
+            return AdminClient::Remote(ip);
+        }
+    }
+
+    parts
+        .extensions
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| AdminClient::from_ip(addr.ip()))
+        .unwrap_or(AdminClient::Unknown)
+}
+
 impl FromRequestParts<AppState> for AdminAuth {
     type Rejection = (StatusCode, Json<serde_json::Value>);
 
@@ -41,8 +92,9 @@ impl FromRequestParts<AppState> for AdminAuth {
             _ => return Err(unauthorized()),
         };
 
+        let client = admin_client(parts, state);
         let credential_version = state
-            .authenticate_admin_token(token)
+            .authenticate_admin_token(token, client)
             .await
             .ok_or_else(unauthorized)?;
 
