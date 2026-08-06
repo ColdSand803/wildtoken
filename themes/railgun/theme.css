@@ -184,6 +184,70 @@
   }
 }
 
+/* コイン — the round leaving the barrel, when a metric first goes bad.
+
+   Copper means exactly one thing in this pack: something just fired. A KPI
+   crossing into warn or danger is the only event in the console that earns it,
+   and it has to be an *event* — the dashboard is rebuilt with `innerHTML =`
+   every five seconds, so a rule keyed on `.tone-danger` alone would re-run this
+   on every poll for as long as the metric stayed bad. `data-tone-escalated` is
+   set by renderDashboardKpiCards for the single render where the tone gets
+   worse than it was, and never on first paint: arriving at a console that is
+   already failing is a state, not something that just happened.
+
+   Ring, not fill. The value's own colour already carries the level; this only
+   marks the moment it changed. */
+@keyframes rg-escalate {
+  0% {
+    box-shadow:
+      inset 0 0 0 1px rgb(240 163 57 / 85%),
+      0 0 0 0 rgb(240 163 57 / 55%);
+  }
+
+  70% {
+    box-shadow:
+      inset 0 0 0 1px rgb(240 163 57 / 55%),
+      0 0 0 7px rgb(240 163 57 / 0%);
+  }
+
+  100% {
+    box-shadow:
+      inset 0 0 0 1px rgb(240 163 57 / 0%),
+      0 0 0 7px rgb(240 163 57 / 0%);
+  }
+}
+
+html[data-theme="railgun"] .dashboard-kpi[data-tone-escalated] {
+  animation: rg-escalate 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* 放電 — the discharge crossing the head of a view as it arrives.
+
+   `.view` is persistent DOM: switchView() only toggles `hidden` on it, so an
+   animation declared here plays on each arrival and then stops. That is the
+   same property the active-tab bolt relies on, and it is the *only* safe hook
+   in this console — the dashboard and log bodies are rebuilt with
+   `innerHTML =` every five seconds, and an entrance animation anywhere inside
+   them would not play on arrival, it would play forever.
+
+   One pass, left to right, gone in half a second. It reads as the rail
+   energising for the view you just selected. */
+@keyframes rg-view-arc {
+  from {
+    opacity: 1;
+    transform: scaleX(0);
+  }
+
+  70% {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+    transform: scaleX(1);
+  }
+}
+
 html[data-theme="railgun"] {
   color-scheme: light;
 
@@ -384,10 +448,41 @@ html[data-theme="railgun"] body::before {
     linear-gradient(90deg, rgb(37 99 156 / 7%) 1px, transparent 1px),
     linear-gradient(var(--rg-grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--rg-grid) 1px, transparent 1px);
-  background-position: 0 0;
+  /* Only the arc tile moves; the engineering paper under it does not.
+
+     `--pointer-x/y` are published by events.js as 0–1 fractions of the
+     viewport, for any pack that wants them. The offset here is
+     `(p - 0.5) × 14px`, so ±7px about centre, and it runs *against* the
+     pointer: a magnetic field is displaced by a charge moving through it, and
+     graph paper bolted to a desk is not. That split is the whole reason this
+     is on one layer instead of the element — it keeps a physical reading, and
+     it keeps the fine 14px grid from sliding half its own period.
+
+     The mask deliberately does not move with it. Making the hole follow the
+     pointer was the obvious version and it is wrong: the hole is what keeps
+     grid lines out from behind body text, so parking it under the cursor puts
+     them back behind the middle of the page the moment anyone reaches for a
+     corner.
+
+     The transition is what makes this passable under this pack's own rule that
+     nothing may pulse in the reader's peripheral vision. Retargeted every
+     frame, 900ms of ease-out means the field never moves faster than a drift
+     no matter how fast the pointer is thrown across the screen — it has
+     inertia, and a flick of the mouse does not flick the page.
+
+     Both vars fall back to 0.5, which resolves to a 0px offset. That is the
+     reduced-motion path too: events.js never publishes them on that setting,
+     so the field simply sits still with no rule here needed. */
+  background-position:
+    calc((0.5 - var(--pointer-x, 0.5)) * 14px) calc((0.5 - var(--pointer-y, 0.5)) * 14px),
+    0 0,
+    0 0,
+    0 0,
+    0 0;
   background-size: 56px 56px, 14px 14px, 14px 14px, 56px 56px, 56px 56px;
   content: "";
   inset: 0;
+  transition: background-position 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
   /* The hole in the middle stays — grid lines behind body text hurt at any
      opacity you can still see them at — but it is smaller and shallower than
      it was, because a field nobody can find is not a field. */
@@ -423,8 +518,44 @@ html[data-theme="railgun"] body::before {
    The rail covers its own share of it and paints over the top, so this reads
    as the view out of the operator's window rather than as a banner. */
 html[data-theme="railgun"] body::after {
+  /* The rotors turn here too.
+
+     They did not, and the pack claimed they did: the establishing shot was
+     moved out of the login box and onto the console, but the animation that
+     drives it stayed behind on `.admin-token-panel::after`. So the version
+     almost nobody sees — four seconds on a login screen — had turning
+     turbines, and the one people work in all day had a still photograph of
+     them. Three speeds, out of phase, same as the login sky: turbines on a
+     skyline are never in step, and three in lockstep read as a spinner.
+
+     This is affordable where a moving highlight in the data region would not
+     be, because it is above the horizon, behind the masthead, and 62px of
+     blade at 22–42% alpha. The rule the pack set itself is that nothing may
+     pulse in the reader's peripheral vision; a rotor at 7s is not a pulse, it
+     is weather. Switched off with everything else under reduced-motion. */
+  animation:
+    rg-turbine-a 7s linear infinite,
+    rg-turbine-b 9.5s linear infinite,
+    rg-turbine-c 12s linear infinite;
   background:
-    /* turbine rotors, struck from their hubs */
+    /* turbine rotors, struck from their hubs.
+
+       Rotor and tower are given the *same* background-size, and that is what
+       keeps them together — it is not cosmetic, it is the only reason the
+       arithmetic cancels.
+
+       A percentage in background-position does not mean "N% across the box".
+       It aligns that percentage point of the *image* with the same point of
+       the box, resolving to `(boxW - imgW) × N%`. The rotors were 62/44/34px
+       images at a bare `N%`, and their towers were 1px images at
+       `calc(N% + halfW)` — different image widths, so the same percentage
+       resolved to different offsets and each turbine was off by a different
+       amount: 8px, 24px, 27px. Three different errors, which is why it read as
+       sloppy rather than as an intentional offset.
+
+       Now each tower is declared at the rotor's own size and centred inside
+       that box with a 1px-wide gradient, so both layers resolve `(boxW - S) ×
+       N%` against the same S and stay locked at any width. */
     conic-gradient(
         from var(--rg-rotor-a, 22deg),
         rgb(52 76 102 / 42%) 0 4deg,
@@ -455,13 +586,35 @@ html[data-theme="railgun"] body::after {
         transparent 246deg
       )
       78% 120px / 34px 34px no-repeat,
-    /* towers, dropped from each hub to the horizon */
-    linear-gradient(rgb(52 76 102 / 38%), rgb(52 76 102 / 8%)) calc(13% + 31px) 119px / 1px 111px
-      no-repeat,
-    linear-gradient(rgb(52 76 102 / 28%), rgb(52 76 102 / 6%)) calc(54% + 22px) 128px / 1px 102px
-      no-repeat,
-    linear-gradient(rgb(52 76 102 / 20%), rgb(52 76 102 / 5%)) calc(78% + 17px) 137px / 1px 93px
-      no-repeat,
+    /* towers, dropped from each hub to the horizon.
+
+       The px term on each is a correction, not a nudge by eye, and it is the
+       whole reason the blades used to float clear of their masts.
+
+       A percentage in background-position does not mean "N% across the box".
+       It aligns that percentage point of the *image* with the same point of
+       the box, resolving to `(boxW - imgW) × N%` — so it depends on the image
+       width. The rotors are 62/44/34px images and the towers are 1px, which
+       means the same `13%` landed in two different places. Each turbine was
+       out by a different amount (~8, ~24, ~26px), which is why it read as
+       sloppy rather than as a deliberate offset.
+
+       Setting hub == mast and solving for the offset gives `p × (1 - S) +
+       S/2`: +23.07, -1.22, -8.74. Exact at any viewport width — verified
+       against the resolved geometry at 1024/1440/1920/2560. Change a rotor's
+       size or percentage and its tower's term has to be recomputed from that
+       formula; it cannot be eyeballed back into place at one width.
+
+       SVG rather than a gradient, for the same reason the clouds are: one
+       background layer is one image, and a mast needs to vary on both axes —
+       1px wide across, fading out down its length. `preserveAspectRatio="none"`
+       lets one 1×100 tile stretch to all three tower heights. */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='100' preserveAspectRatio='none'%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23344c66' stop-opacity='0.38'/%3E%3Cstop offset='1' stop-color='%23344c66' stop-opacity='0.08'/%3E%3C/linearGradient%3E%3Crect width='1' height='100' fill='url(%23g)'/%3E%3C/svg%3E")
+      calc(13% + 23.07px) 119px / 1px 111px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='100' preserveAspectRatio='none'%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23344c66' stop-opacity='0.28'/%3E%3Cstop offset='1' stop-color='%23344c66' stop-opacity='0.06'/%3E%3C/linearGradient%3E%3Crect width='1' height='100' fill='url(%23g)'/%3E%3C/svg%3E")
+      calc(54% - 1.22px) 128px / 1px 102px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1' height='100' preserveAspectRatio='none'%3E%3ClinearGradient id='g' x1='0' y1='0' x2='0' y2='1'%3E%3Cstop offset='0' stop-color='%23344c66' stop-opacity='0.20'/%3E%3Cstop offset='1' stop-color='%23344c66' stop-opacity='0.05'/%3E%3C/linearGradient%3E%3Crect width='1' height='100' fill='url(%23g)'/%3E%3C/svg%3E")
+      calc(78% - 8.74px) 137px / 1px 93px no-repeat,
     /* horizon */
     linear-gradient(90deg, transparent, rgb(3 105 161 / 26%) 8% 92%, transparent) 0 230px / 100% 1px
       no-repeat,
@@ -1763,6 +1916,43 @@ html[data-theme="railgun"] .view > .panel {
   position: relative;
 }
 
+/* The discharge across the head of a view, on arrival.
+
+   Carried on `.view` rather than on anything inside it. The view element is
+   persistent and only has `hidden` toggled, so the animation runs once per
+   arrival; everything below it in the dashboard and the log is replaced
+   wholesale every five seconds, where a one-shot entrance would restart on
+   every poll and never stop.
+
+   `transform-origin: left` with a scaleX from 0 makes it travel rather than
+   fade in place — the rail energising for the view just selected. It is above
+   the panel but `pointer-events: none`, and it is 2px tall, so nothing under
+   it moves or becomes unclickable while it plays. */
+html[data-theme="railgun"] .view {
+  position: relative;
+}
+
+html[data-theme="railgun"] .view:not([hidden])::before {
+  animation: rg-view-arc 520ms cubic-bezier(0.16, 0.84, 0.3, 1) both;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--rg-arc) 12%,
+    var(--rg-arc-ink) 46%,
+    var(--rg-arc) 74%,
+    transparent
+  );
+  content: "";
+  height: 2px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  transform-origin: left center;
+  z-index: 3;
+}
+
 @media (min-width: 1100px) {
   html[data-theme="railgun"] .view > .panel::before {
     background: linear-gradient(
@@ -2950,7 +3140,7 @@ html[data-theme="railgun"] .model-test-template-item:hover {
       auto, auto;
     background-position:
       13% 88px, 54% 106px, 78% 120px,
-      calc(13% + 31px) 119px, calc(54% + 22px) 128px, calc(78% + 17px) 137px,
+      calc(13% + 23.07px) 119px, calc(54% - 1.22px) 128px, calc(78% - 8.74px) 137px,
       0 230px,
       4% 22px, 60% 52px, 92% 18px,
       0 0, 0 0;
@@ -2988,6 +3178,9 @@ html[data-theme="railgun"] .model-test-template-item:hover {
    ring keeps its final gradient and simply stands still. */
 
 @media (prefers-reduced-motion: reduce) {
+  html[data-theme="railgun"] body::after,
+  html[data-theme="railgun"] .view:not([hidden])::before,
+  html[data-theme="railgun"] .dashboard-kpi[data-tone-escalated],
   html[data-theme="railgun"] .topbar::after,
   html[data-theme="railgun"] .live-dot,
   html[data-theme="railgun"] .skeleton-block,
@@ -3005,6 +3198,29 @@ html[data-theme="railgun"] .model-test-template-item:hover {
   html[data-theme="railgun"] .dashboard-kpi:hover,
   html[data-theme="railgun"] .kpi-card:hover {
     transform: none;
+  }
+
+  /* The view arc is declared `both`, so cancelling its animation would leave
+     it parked on the from-keyframe — scaleX(0) and invisible, which happens to
+     be right. Said outright rather than relied on. */
+  html[data-theme="railgun"] .view:not([hidden])::before {
+    content: none;
+  }
+
+  /* The escalation ring is `both` too, and there the from-keyframe is the ring
+     at full strength — cancelling the animation would weld it on permanently.
+     It has to be cleared explicitly. The tone colour on the value still
+     reports the level; only the flash that marked the moment is dropped. */
+  html[data-theme="railgun"] .dashboard-kpi[data-tone-escalated] {
+    box-shadow: none;
+  }
+
+  /* The field's pointer drift, off. events.js already stops publishing the
+     variables under this setting, so the offset resolves to 0 through the
+     fallbacks — but the transition would still be live for the one frame
+     between the setting changing and the properties being removed. */
+  html[data-theme="railgun"] body::before {
+    transition: none;
   }
 
   /* Park the arc mid-rail rather than at its default 0 0, which would leave

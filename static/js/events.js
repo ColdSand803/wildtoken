@@ -914,6 +914,64 @@ document.addEventListener("click", (event) => {
   toggleDialogMaximized(dialog);
 });
 
+// ── Pointer position, published for themes that want it ──
+//
+// Writes --pointer-x / --pointer-y on <html> as 0–1 fractions of the viewport.
+// Nothing here knows about any particular theme: a pack that wants to react to
+// the pointer reads the two variables, and for every other pack they are two
+// custom properties nobody looks at. No layout is read and nothing is written
+// outside the rAF, so this cannot force a reflow no matter how fast the pointer
+// moves.
+//
+// Throttled to one write per frame. A raw mousemove handler fires far more
+// often than the compositor can use and is a reliable way to make a page feel
+// worse, not better.
+//
+// Skipped entirely under prefers-reduced-motion: the whole point of the
+// variables is to drive movement, so on that setting they are never published
+// and any rule keyed on them falls back to its declared default.
+(() => {
+  const root = document.documentElement;
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let queued = false;
+  let x = 0.5;
+  let y = 0.5;
+
+  function flush() {
+    queued = false;
+    root.style.setProperty("--pointer-x", x.toFixed(4));
+    root.style.setProperty("--pointer-y", y.toFixed(4));
+  }
+
+  function onMove(event) {
+    if (reduced.matches) return;
+    x = event.clientX / (window.innerWidth || 1);
+    y = event.clientY / (window.innerHeight || 1);
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(flush);
+  }
+
+  window.addEventListener("pointermove", onMove, { passive: true });
+
+  // Leaving the window parks the field at centre rather than freezing it
+  // wherever the pointer happened to exit.
+  window.addEventListener("pointerleave", () => {
+    if (reduced.matches) return;
+    x = 0.5;
+    y = 0.5;
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(flush);
+  }, { passive: true });
+
+  reduced.addEventListener?.("change", (e) => {
+    if (!e.matches) return;
+    root.style.removeProperty("--pointer-x");
+    root.style.removeProperty("--pointer-y");
+  });
+})();
+
 // Start only after every classic script has registered its globals and listeners.
 if (getAdminToken()) {
   initApp();
