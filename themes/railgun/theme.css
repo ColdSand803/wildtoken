@@ -221,88 +221,6 @@ html[data-theme="railgun"] .dashboard-kpi[data-tone-escalated] {
   animation: rg-escalate 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-/* 放電 — the discharge crossing the head of a view as it arrives.
-
-   `.view` is persistent DOM: switchView() only toggles `hidden` on it, so an
-   animation declared here plays on each arrival and then stops. That is the
-   same property the active-tab bolt relies on, and it is the *only* safe hook
-   in this console — the dashboard and log bodies are rebuilt with
-   `innerHTML =` every five seconds, and an entrance animation anywhere inside
-   them would not play on arrival, it would play forever.
-
-   This was a gradient bar stretching left to right, and it read as a wipe,
-   because that is what it was. Anime lightning is not a swept highlight: it
-   is a hard-edged zigzag with forks coming off it, it appears whole rather
-   than growing, and it does not fade — it strikes, cuts out, strikes again
-   fainter, and is gone. The shape is the same 稲妻 the active tab and every
-   eyebrow already use, so the console has one bolt and not two.
-
-   Two animations rather than one, because a real strike does two independent
-   things: the *shape* is revealed left to right along the discharge path
-   (rg-strike-wipe, driving a mask), and the *brightness* flickers in hard
-   steps (rg-strike-flash, driving opacity with `step-end` so nothing tweens
-   between levels — a cross-fade is exactly the soft reading being removed).
-
-   The flicker pattern is deliberately uneven: full, out, full, dim, out. Even
-   spacing reads as a blinking cursor. Total 460ms, which is long enough to
-   register and short enough that it is over before the eye settles on the
-   new view's first row. */
-/* The reveal runs from 100% to 0, which looks backwards and is not.
-
-   `mask-position` resolves the same way `background-position` does: the offset
-   is `(positioningArea - maskSize) × pct`. With `mask-size: 200%` that is
-   `(W - 2W) × pct`, i.e. `-W × pct` — the sign flips, so a *larger* percentage
-   pushes the mask further left. At 100% the opaque half sits entirely off the
-   left edge and nothing is revealed; at 0 it covers the element exactly.
-
-   This is the same trap that had the turbine masts detached from their rotors,
-   in a different property. Any percentage against a layer bigger than its box
-   moves opposite to the intuition. */
-@keyframes rg-strike-wipe {
-  from {
-    -webkit-mask-position: 0 100%;
-    mask-position: 0 100%;
-  }
-
-  to {
-    -webkit-mask-position: 0 0;
-    mask-position: 0 0;
-  }
-}
-
-@keyframes rg-strike-flash {
-  0% {
-    opacity: 1;
-  }
-
-  38% {
-    opacity: 1;
-  }
-
-  44% {
-    opacity: 0;
-  }
-
-  52% {
-    opacity: 1;
-  }
-
-  74% {
-    opacity: 0.55;
-  }
-
-  84% {
-    opacity: 0;
-  }
-
-  92% {
-    opacity: 0.3;
-  }
-
-  100% {
-    opacity: 0;
-  }
-}
 
 html[data-theme="railgun"] {
   color-scheme: light;
@@ -1972,65 +1890,6 @@ html[data-theme="railgun"] .view > .panel {
   position: relative;
 }
 
-/* The discharge, on arrival at a view.
-
-   The previous version was 1258px wide and 40px tall and it was ugly for a
-   structural reason, not a tuning one: at 31:1 a zigzag cannot read as
-   lightning. Lightning is *vertical* — far longer than it is wide — and
-   flattening it into a horizontal band leaves only the other thing that shape
-   means, which is a line chart. No amount of restyling a 31:1 polyline fixes
-   that; it had to stop being horizontal. It also crossed the establishing shot
-   from edge to edge, drawing a dark seam through the sky and the cloud bank,
-   which is the best-looking thing on the page.
-
-   And it was in the wrong place to begin with. What the animation marks is
-   "you switched to this view", and that happens on the *rail* — the tab is
-   what was clicked. So the strike now comes off the active tab: a short,
-   steep bolt in the gutter between the rail and the content, tall rather than
-   wide, gone in half a second. Under 100px of it, nowhere near the sky.
-
-   Carried on `.view` because that element is persistent and only has `hidden`
-   toggled, so the animation runs once per arrival. Everything inside the
-   dashboard and the log is replaced wholesale every five seconds, and a
-   one-shot entrance in there would restart on every poll and never stop.
-
-   Two layers, core first: background layers paint in the order listed, so the
-   dark core has to precede the pale halo or the halo covers it. */
-html[data-theme="railgun"] .view {
-  position: relative;
-}
-
-html[data-theme="railgun"] .view:not([hidden])::before {
-  animation:
-    rg-strike-wipe 90ms cubic-bezier(0.12, 0.9, 0.25, 1) both,
-    rg-strike-flash 420ms step-end both;
-  background:
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='104' viewBox='0 0 26 104'%3E%3Cg fill='none' stroke='%23075985' stroke-width='2.6' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M14 0 L6 31 L16 37 L4 68 L15 73 L9 104'/%3E%3Cpath d='M16 37 L25 46'/%3E%3Cpath d='M4 68 L0 79'/%3E%3C/g%3E%3C/svg%3E")
-      0 0 / 26px 104px no-repeat,
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='26' height='104' viewBox='0 0 26 104'%3E%3Cg fill='none' stroke='%23bae6fd' stroke-width='5' stroke-linecap='square' stroke-linejoin='miter'%3E%3Cpath d='M14 0 L6 31 L16 37 L4 68 L15 73 L9 104'/%3E%3Cpath d='M16 37 L25 46'/%3E%3Cpath d='M4 68 L0 79'/%3E%3C/g%3E%3C/svg%3E")
-      0 0 / 26px 104px no-repeat;
-  content: "";
-  height: 104px;
-  /* In the gutter left of the content column, which the panel rail already
-     uses — so this costs no layout and overlaps nothing. */
-  left: -32px;
-  /* The reveal runs top to bottom now, so the mask is twice the element's
-     *height* and travels on Y. Same sign trap as before: `mask-position`
-     resolves as `(area - maskSize) × pct`, so with a 200% mask a larger
-     percentage moves it further up, and the strike animates 100% → 0. */
-  -webkit-mask-image: linear-gradient(180deg, #000 0 50%, transparent 58% 100%);
-  mask-image: linear-gradient(180deg, #000 0 50%, transparent 58% 100%);
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-size: 100% 200%;
-  mask-size: 100% 200%;
-  pointer-events: none;
-  position: absolute;
-  top: 30px;
-  width: 26px;
-  z-index: 3;
-}
-
 @media (min-width: 1100px) {
   html[data-theme="railgun"] .view > .panel::before {
     background: linear-gradient(
@@ -3241,22 +3100,6 @@ html[data-theme="railgun"] .model-test-template-item:hover {
     padding: 0;
   }
 
-  /* The bolt gets a shorter path on a phone. The desktop one is 21 segments
-     across 1258px; squeezed into 430px they collapse into a band of noise with
-     no zigzag legible in it. Seven segments and two forks, same amplitude, so
-     it still reads as a strike at a fifth of the width. */
-  /* No gutter at this size — the panel rail is withdrawn below 1100px and the
-     content runs to the edge — so there is nowhere beside the column for the
-     bolt to strike without landing on the title and the first field. It goes
-     to the very edge of the viewport and narrows, which is the one strip of
-     this layout with nothing in it. */
-  html[data-theme="railgun"] .view:not([hidden])::before {
-    left: -8px;
-    background-size: 18px 88px, 18px 88px;
-    height: 88px;
-    width: 18px;
-  }
-
   html[data-theme="railgun"] .eyebrow {
     letter-spacing: 0.2em;
   }
@@ -3273,7 +3116,6 @@ html[data-theme="railgun"] .model-test-template-item:hover {
 
 @media (prefers-reduced-motion: reduce) {
   html[data-theme="railgun"] body::after,
-  html[data-theme="railgun"] .view:not([hidden])::before,
   html[data-theme="railgun"] .dashboard-kpi[data-tone-escalated],
   html[data-theme="railgun"] .topbar::after,
   html[data-theme="railgun"] .live-dot,
@@ -3294,14 +3136,7 @@ html[data-theme="railgun"] .model-test-template-item:hover {
     transform: none;
   }
 
-  /* The view arc is declared `both`, so cancelling its animation would leave
-     it parked on the from-keyframe — scaleX(0) and invisible, which happens to
-     be right. Said outright rather than relied on. */
-  html[data-theme="railgun"] .view:not([hidden])::before {
-    content: none;
-  }
-
-  /* The escalation ring is `both` too, and there the from-keyframe is the ring
+  /* The escalation ring is declared `both`, and its from-keyframe is the ring
      at full strength — cancelling the animation would weld it on permanently.
      It has to be cleared explicitly. The tone colour on the value still
      reports the level; only the flash that marked the moment is dropped. */
