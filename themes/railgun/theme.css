@@ -1504,10 +1504,31 @@ html[data-theme="railgun"] summary:focus-visible {
    colour in the console and it carries white type across it, so every stop of
    the gradient has to clear 4.5:1 against white — #16a6e0, which the dark pack
    used through the middle, manages 2.9:1 and would have put the primary action
-   just out of reach of anyone reading it in daylight. The bevel survives: same
-   three stops, a rung lower. */
+   just out of reach of anyone reading it in daylight.
+
+   The bevel is gone and the button is a launcher instead. What was here was a
+   vertical gradient with an inset white top edge and an inset dark bottom one:
+   that is the generic 3D push-button every admin panel has shipped since 2008,
+   and no amount of picking the right blue makes it belong to this pack rather
+   than to that convention. It also contradicted the pack twice over — a lit
+   top bevel is an object emitting on a ground where nothing emits, and a
+   rounded gradient slab is soft in a pack that had every other soft edge
+   removed.
+
+   So: flat fill, square corners, and the two conductors down the left and
+   right edges with the muzzle at the leading one. The rails are the pack's
+   title motif and this is the one control that fires, which makes it the
+   place they belong. `:where()` keeps the whole thing at zero specificity so
+   the base sheet's variants still win — see the note above. */
 :where(html[data-theme="railgun"]) button {
   background:
+    /* muzzle — the bright rail at the leading edge */
+    linear-gradient(180deg, transparent 12%, var(--rg-arc) 22% 78%, transparent 88%) 100% 0 / 2px
+      100% no-repeat,
+    /* breech — the dim rail it is fired from */
+    linear-gradient(180deg, transparent 12%, rgb(186 230 253 / 45%) 22% 78%, transparent 88%) 0 0 /
+      2px 100% no-repeat,
+    /* the sweep that runs the length of it on hover */
     linear-gradient(
       100deg,
       transparent 0 34%,
@@ -1516,11 +1537,8 @@ html[data-theme="railgun"] summary:focus-visible {
     ) -100% 0 / 260% 100% no-repeat,
     linear-gradient(180deg, #0a7ab8 0%, #0369a1 52%, #04537f 100%);
   border-color: rgb(3 105 161 / 60%);
-  border-radius: 3px;
-  box-shadow:
-    inset 0 1px 0 rgb(240 250 255 / 30%),
-    inset 0 -1px 0 rgb(1 20 34 / 28%),
-    0 1px 2px rgb(3 105 161 / 30%);
+  border-radius: 2px;
+  box-shadow: 0 1px 2px rgb(3 105 161 / 30%);
   color: var(--accent-on);
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -1533,11 +1551,45 @@ html[data-theme="railgun"] summary:focus-visible {
     transform var(--transition);
 }
 
+/* The sweep runs the length of the barrel and the muzzle rail brightens.
+
+   Not wrapped in `:where()`, unlike the rest state above, and that asymmetry
+   is load-bearing. The base sheet declares `button:hover { background:
+   var(--accent-strong) }` — one flat colour, one layer. At zero specificity
+   this rule ties with it and loses on source order, which collapsed the whole
+   four-layer stack to a single fill: the rails vanished the moment a pointer
+   touched the button, measured as 17 layers at rest and 1 on hover.
+
+   The images have to be restated, not just repositioned. base.css:323 sets the
+   full `background` *shorthand*, which resets `background-image` along with
+   everything else — so a rule that only moved `background-position` was sliding
+   layers that no longer existed. Confirmed with CSS.getMatchedStylesForNode
+   rather than reasoned about: at rest the button computes 17 background layers,
+   and on hover it computed 1 until these four were written back.
+
+   `:where()` for the same reason the resting rule uses it, and it took a
+   measurement to find out why. Written once as a plain `html[data-theme]
+   button:hover` — an attribute plus an element, which outranks a single class —
+   it beat `.table-sort-button:hover { background: transparent }` and grew the
+   full firing stud on every sort header the pointer touched (0 layers at rest,
+   17 on hover). Inside `:where()` the theme scope weighs nothing, leaving this
+   at plain `button:hover`: still later in the cascade than base.css so it wins
+   there, still below every variant's own class-level hover so they win here. */
 :where(html[data-theme="railgun"]) button:hover {
-  background-position: 200% 0, 0 0;
+  background:
+    linear-gradient(180deg, transparent 12%, var(--rg-arc-halo) 22% 78%, transparent 88%) 100% 0 /
+      2px 100% no-repeat,
+    linear-gradient(180deg, transparent 12%, rgb(186 230 253 / 45%) 22% 78%, transparent 88%) 0 0 /
+      2px 100% no-repeat,
+    linear-gradient(
+      100deg,
+      transparent 0 34%,
+      rgb(224 242 254 / 42%) 50%,
+      transparent 66% 100%
+    ) 200% 0 / 260% 100% no-repeat,
+    linear-gradient(180deg, #0b83c4 0%, #0a72ac 52%, #055c8c 100%);
   border-color: var(--rg-arc-ink);
   box-shadow:
-    inset 0 1px 0 rgb(240 250 255 / 42%),
     0 0 0 1px rgb(3 105 161 / 45%),
     0 2px 6px rgb(3 105 161 / 28%);
   color: var(--accent-on);
@@ -1574,8 +1626,13 @@ html[data-theme="railgun"] summary:focus-visible {
   box-shadow: none;
 }
 
+/* Fired. The press drives the muzzle rail dark and pulls the whole thing down
+   a pixel — the discharge leaves and the rail is momentarily spent. An inset
+   press-shadow would be the bevel logic again, so it is the rail that responds
+   instead of a fake depth. */
 html[data-theme="railgun"] button:active:not(:disabled) {
-  box-shadow: inset 0 2px 5px rgb(1 20 34 / 30%);
+  box-shadow: none;
+  filter: brightness(0.94);
   transform: translateY(1px);
 }
 
@@ -1616,18 +1673,39 @@ html[data-theme="railgun"] button:disabled:not(.secondary):not(.ghost):not(.dang
    flips from a light inset to a dark one — a highlight along the top edge
    reads as a lit bevel on black and as nothing at all on white, where the
    same job is done by a shadow under the top edge instead. */
+/* Secondary is the same launcher with no charge in it: the rails are there,
+   dim, and the housing is empty. That is what makes it read as the unpowered
+   member of a family rather than as a plain outlined button — the previous
+   version was a white-to-grey gradient with an inset white top edge, which is
+   the same 2008 bevel the stud just lost, in reverse.
+
+   The rails hold at the same 2px and the same edges as the primary, so the two
+   line up when they sit side by side in a dialog footer. */
 html[data-theme="railgun"] button.secondary {
-  background: linear-gradient(180deg, #ffffff, #f3f6f9);
+  background:
+    linear-gradient(180deg, transparent 12%, rgb(3 105 161 / 30%) 22% 78%, transparent 88%) 100% 0 /
+      2px 100% no-repeat,
+    linear-gradient(180deg, transparent 12%, rgb(3 105 161 / 18%) 22% 78%, transparent 88%) 0 0 /
+      2px 100% no-repeat,
+    #fbfcfd;
   border-color: var(--line);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%);
+  box-shadow: none;
   color: var(--text-secondary);
   font-weight: 600;
 }
 
+/* Reaching for it brings the rails up to full arc — the charge arriving in a
+   launcher that had none. The fill stays almost white so the hover is the
+   hardware responding rather than the housing changing colour. */
 html[data-theme="railgun"] button.secondary:hover {
-  background: linear-gradient(180deg, #f4fbff, #e7f4fc);
+  background:
+    linear-gradient(180deg, transparent 12%, var(--rg-arc) 22% 78%, transparent 88%) 100% 0 / 2px
+      100% no-repeat,
+    linear-gradient(180deg, transparent 12%, rgb(3 105 161 / 34%) 22% 78%, transparent 88%) 0 0 /
+      2px 100% no-repeat,
+    #f2fafe;
   border-color: var(--accent-border);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 90%);
+  box-shadow: none;
   color: var(--rg-arc-ink);
 }
 
@@ -1666,15 +1744,30 @@ html[data-theme="railgun"] button.ghost:disabled:hover {
   color: var(--muted);
 }
 
+/* Danger carries the rails too, in its own colour. The pack's rule is that the
+   arc means "live" and copper means "just fired"; red is neither, it is the
+   consequence of firing this particular control, so the rails go red rather
+   than borrowing the arc. Without them this was the one button in the family
+   with no hardware on it at all. */
 html[data-theme="railgun"] button.danger {
-  background: rgb(200 30 66 / 7%);
+  background:
+    linear-gradient(180deg, transparent 12%, rgb(200 30 66 / 46%) 22% 78%, transparent 88%) 100% 0 /
+      2px 100% no-repeat,
+    linear-gradient(180deg, transparent 12%, rgb(200 30 66 / 26%) 22% 78%, transparent 88%) 0 0 /
+      2px 100% no-repeat,
+    rgb(200 30 66 / 7%);
   border-color: var(--danger-border);
   box-shadow: none;
   color: var(--danger);
 }
 
 html[data-theme="railgun"] button.danger:hover {
-  background: rgb(200 30 66 / 13%);
+  background:
+    linear-gradient(180deg, transparent 12%, var(--danger) 22% 78%, transparent 88%) 100% 0 / 2px
+      100% no-repeat,
+    linear-gradient(180deg, transparent 12%, rgb(200 30 66 / 44%) 22% 78%, transparent 88%) 0 0 /
+      2px 100% no-repeat,
+    rgb(200 30 66 / 13%);
   border-color: var(--danger);
   box-shadow: none;
   color: var(--danger-strong);
