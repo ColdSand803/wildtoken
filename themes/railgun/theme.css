@@ -1971,37 +1971,37 @@ html[data-theme="railgun"] .field-hint code {
    A knife switch across a live circuit: two terminals, a contact that bridges
    them, and an arc struck between them when it closes.
 
-   The last version got the gloss and the round cap off it, which was the defect
-   — but it left a flat green lozenge, and green is a *colour* saying "healthy",
-   not this pack speaking. This control is the one place in the console whose
-   semantics are already the pack's central metaphor: enabling a channel closes
-   a circuit. So it is drawn as that, and the fill stops carrying the meaning.
+   The housing is the same object in both states and does not change. That was
+   the fault in the first cut of this: measured side by side, the open and
+   closed switches shared almost nothing — border `--line-strong` against
+   `--rg-arc-ink`, a grey slug against a white block with a blue ring, and an
+   inset well that existed in one state only. Two devices that happened to sit
+   in the same column. What may differ is the *circuit*: whether the gap is
+   bridged, whether there is current in the terminals.
 
-   Both terminals are always visible, on the track's ::before and ::after — the
-   hardware does not appear and disappear, it is bolted there. What changes is
-   whether the gap between them is bridged.
+   So the shell — border weight and colour, the recessed well, the contact's
+   shape and ring — is declared once on the base rules and inherited by both.
+   The state carries the arc between the terminals, the terminal colour, the
+   contact's fill, and one hairline of `--ok` at the foot.
 
-   Closed: the contact sits over the right terminal and the channel between them
-   fills with arc, so the current has a path. `--ok` survives as a hairline along
-   the bottom of the closed track, because "healthy" is genuinely semantic and
-   worth one line — but it annotates the state rather than being the state.
-
-   Open: the arc goes, the well is empty and recessed, and the contact is parked
-   at the left terminal with real space in front of it. A shadow here describes
-   the slot cut into the housing, which is the one job this pack allows one.
-
-   Six pseudo-elements were free on this control (track, thumb and the button
-   itself, two each) and none were in use. Two are enough. */
+   Both terminals are always visible, on the track's ::before and ::after; the
+   hardware is bolted there, it does not appear and disappear. Six pseudo-
+   elements were free on this control and none were in use; two are enough. */
 
 html[data-theme="railgun"] .status-switch-track {
   background: #e9eef4;
-  border-color: var(--line-strong);
+  /* One border for both states. It was `--line-strong` open and `--rg-arc-ink`
+     closed, which is most of why they read as different components. */
+  border-color: rgb(3 105 161 / 45%);
+  background-clip: padding-box;
   border-radius: 2px;
-  box-shadow: inset 0 1px 2px rgb(27 36 48 / 14%);
+  /* The well is cut into the housing and stays cut. Declaring it open-only made
+     the closed switch flat and the open one recessed. */
+  box-shadow: inset 0 1px 2px rgb(27 36 48 / 12%);
   position: relative;
 }
 
-/* The two terminals, at the ends of the channel. 3px of conductor standing
+/* The two terminals, at the ends of the channel. 2px of conductor standing
    proud of the well, dim until there is current through them. */
 html[data-theme="railgun"] .status-switch-track::before,
 html[data-theme="railgun"] .status-switch-track::after {
@@ -2022,10 +2022,12 @@ html[data-theme="railgun"] .status-switch-track::after {
   right: 2px;
 }
 
+/* The contact is one machined block in both states — same ring, same radius,
+   only the fill says whether it is carrying. */
 html[data-theme="railgun"] .status-switch-thumb {
-  background: #8a9db2;
+  background: #93a6ba;
   border-radius: 1px;
-  box-shadow: none;
+  box-shadow: inset 0 0 0 1px rgb(3 105 161 / 38%);
   position: relative;
   /* Above the arc fill on the track, so the contact reads as sitting on the
      conductor rather than behind it. */
@@ -2035,11 +2037,24 @@ html[data-theme="railgun"] .status-switch-thumb {
 /* Closed. The channel carries arc between the terminals, and `--ok` is reduced
    to a hairline along the foot: the state is told by the circuit being complete,
    and the colour only annotates it. */
+/* Closed. Only the circuit changes: arc across the channel, current in the
+   terminals, the contact carrying. The border, the well and the contact's ring
+   all come from the base rules — nothing about the housing is restated here,
+   which is what keeps the two states one device.
+
+   `--ok` is a 1px hairline at the foot. "Healthy" is genuinely semantic and
+   worth one line, but it annotates the closed circuit rather than being it.
+
+   The border has to be restated here even though the intent is "unchanged from
+   the base rule". base.css declares `.status-switch.on .status-switch-track {
+   border-color: var(--ok) }` — the old version of this rule was overriding that
+   with `--rg-arc-ink` and I removed the override to unify the two states, which
+   let the green through and turned the hairline into a green frame around the
+   whole switch. Measured with getMatchedStylesForNode; `background-clip` was my
+   first guess and it was wrong, because nothing was bleeding under the border
+   in the first place. */
 html[data-theme="railgun"] .status-switch.on .status-switch-track {
   background:
-    /* `--ok` as a hairline, not a floor. At 2px it read as a green shelf the
-       contact was standing on, which is a second object; at 1px it is an
-       annotation on the circuit and the closed channel carries the meaning. */
     linear-gradient(var(--ok), var(--ok)) 0 100% / 100% 1px no-repeat,
     /* The arc, hard-stopped. Five soft stops fading out top and bottom is the
        same falloff taken out of the clouds and the bolt — a 4px band centred in
@@ -2052,8 +2067,9 @@ html[data-theme="railgun"] .status-switch.on .status-switch-track {
       )
       0 50% / 100% 4px no-repeat,
     #dff0fb;
-  border-color: var(--rg-arc-ink);
-  box-shadow: none;
+  background-clip: padding-box;
+  border-color: rgb(3 105 161 / 45%);
+  box-shadow: inset 0 1px 2px rgb(27 36 48 / 12%);
 }
 
 html[data-theme="railgun"] .status-switch.on .status-switch-track::before,
@@ -2075,17 +2091,23 @@ html[data-theme="railgun"] .status-switch.off .status-switch-track::before {
   z-index: 2;
 }
 
-/* The contact goes pale and hard-edged when it is passing current — it is the
-   brightest thing in the closed circuit, which on this ground means the least
-   coloured rather than the most lit. */
+/* Carrying. Only the fill changes — the ring and the radius are the contact's
+   own, declared once above, so this is the same block with current in it rather
+   than a different object. On this ground "brightest" means least coloured. */
 html[data-theme="railgun"] .status-switch.on .status-switch-thumb {
   background: #ffffff;
-  box-shadow: inset 0 0 0 1px rgb(3 105 161 / 45%);
+}
+
+/* Both states answer a pointer the same way: the housing's border comes up to
+   full arc and the ground shifts one step. Open and closed were reaching for
+   different colours here — `--rg-arc` against `--rg-arc-ink` — which is the
+   same split that made the two look like different components at rest. */
+html[data-theme="railgun"] .status-switch:hover .status-switch-track {
+  border-color: var(--rg-arc-ink);
 }
 
 html[data-theme="railgun"] .status-switch.off:hover .status-switch-track {
   background: #dde5ee;
-  border-color: var(--rg-arc);
 }
 
 html[data-theme="railgun"] .status-switch.off:hover .status-switch-track::before,
@@ -2108,6 +2130,9 @@ html[data-theme="railgun"] .status-switch.on:hover .status-switch-track {
       )
       0 50% / 100% 6px no-repeat,
     #d3ebfa;
+  background-clip: padding-box;
+  /* Same restatement as the resting closed rule: base.css turns this border
+     `--ok-strong` on hover, and the shared housing has to win. */
   border-color: var(--rg-arc-ink);
 }
 
