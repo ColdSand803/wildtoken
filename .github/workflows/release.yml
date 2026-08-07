@@ -134,7 +134,7 @@ jobs:
           test ! -e "$package/README.md"
 
           pushd "$package" >/dev/null
-          APP__SERVER__PORT=3110 ADMIN_TOKEN=ci-admin-token ./wildtoken >"$RUNNER_TEMP/wildtoken-linux.log" 2>&1 &
+          APP__SERVER__PORT=3110 ADMIN_TOKEN=ci-admin-token-for-smoke-test ./wildtoken >"$RUNNER_TEMP/wildtoken-linux.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           for _ in {1..30}; do
@@ -201,7 +201,7 @@ jobs:
           }
 
           $env:APP__SERVER__PORT = "3110"
-          $env:ADMIN_TOKEN = "ci-admin-token"
+          $env:ADMIN_TOKEN = "ci-admin-token-for-smoke-test"
           # Headless CI: skip system tray (no GUI dependency for smoke test)
           $env:WILDTOKEN_NO_TRAY = "1"
           $stdout = Join-Path $env:RUNNER_TEMP "wildtoken-windows.stdout.log"
@@ -288,7 +288,7 @@ jobs:
           BINARY_PATH: target/${{ matrix.target }}/release/wildtoken
         run: |
           set -euo pipefail
-          APP__SERVER__PORT=3110 ADMIN_TOKEN=ci-admin-token "$BINARY_PATH" >"$RUNNER_TEMP/wildtoken-macos-${{ matrix.arch }}.log" 2>&1 &
+          APP__SERVER__PORT=3110 ADMIN_TOKEN=ci-admin-token-for-smoke-test "$BINARY_PATH" >"$RUNNER_TEMP/wildtoken-macos-${{ matrix.arch }}.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           for _ in {1..30}; do
@@ -354,7 +354,7 @@ jobs:
           test ! -e "$package/README.md"
 
           pushd "$package" >/dev/null
-          APP__SERVER__PORT=3110 ADMIN_TOKEN=ci-admin-token ./wildtoken >"$RUNNER_TEMP/wildtoken-macos.log" 2>&1 &
+          APP__SERVER__PORT=3110 ADMIN_TOKEN=ci-admin-token-for-smoke-test ./wildtoken >"$RUNNER_TEMP/wildtoken-macos.log" 2>&1 &
           pid=$!
           trap 'kill "$pid" 2>/dev/null || true' EXIT
           for _ in {1..30}; do

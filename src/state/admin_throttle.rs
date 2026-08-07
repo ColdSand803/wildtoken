@@ -119,10 +119,10 @@ impl AdminAuthThrottle {
             return true;
         };
         let clients = self.clients.lock().await;
-        !clients
+        clients
             .get(&ip)
             .and_then(|state| state.blocked_until)
-            .is_some_and(|deadline| now < deadline)
+            .is_none_or(|deadline| now >= deadline)
     }
 
     /// Clear a client's failure streak. Called only after a real Argon2id
