@@ -1968,49 +1968,119 @@ html[data-theme="railgun"] .field-hint code {
 }
 
 /* ── Switches ────────────────────────────────────────────────
-   A knife switch: a square contact that slides along a channel and closes it.
+   A knife switch across a live circuit: two terminals, a contact that bridges
+   them, and an arc struck between them when it closes.
 
-   The previous version said in its own comment that the thumb "stays round, so
-   the control reads as a contact sliding in a channel", and the on state was a
-   vertical green gradient with an inset white highlight and a soft outer bloom.
-   Those two things do not go together. A round cap on a glossy lozenge is the
-   iOS toggle, and at 36×20 it was the only glossy object and the most saturated
-   colour anywhere in the console — the loudest thing on the page, spent on
-   "this channel is enabled".
+   The last version got the gloss and the round cap off it, which was the defect
+   — but it left a flat green lozenge, and green is a *colour* saying "healthy",
+   not this pack speaking. This control is the one place in the console whose
+   semantics are already the pack's central metaphor: enabling a channel closes
+   a circuit. So it is drawn as that, and the fill stops carrying the meaning.
 
-   So the gloss goes, the bloom goes, and the thumb squares off. Flat fills at
-   both ends, one weight of border, the contact a 2px-radius block. Green stays
-   because green means healthy and that is semantic, but it is the flat token
-   rather than a lit gradient, and it now carries the same visual weight as a
-   badge saying the same thing.
+   Both terminals are always visible, on the track's ::before and ::after — the
+   hardware does not appear and disappear, it is bolted there. What changes is
+   whether the gap between them is bridged.
 
-   The off state keeps its recessed well: an open channel is a slot cut into the
-   housing, and that is the one place a shadow is describing real geometry
-   rather than adding light. */
+   Closed: the contact sits over the right terminal and the channel between them
+   fills with arc, so the current has a path. `--ok` survives as a hairline along
+   the bottom of the closed track, because "healthy" is genuinely semantic and
+   worth one line — but it annotates the state rather than being the state.
+
+   Open: the arc goes, the well is empty and recessed, and the contact is parked
+   at the left terminal with real space in front of it. A shadow here describes
+   the slot cut into the housing, which is the one job this pack allows one.
+
+   Six pseudo-elements were free on this control (track, thumb and the button
+   itself, two each) and none were in use. Two are enough. */
 
 html[data-theme="railgun"] .status-switch-track {
-  background: #e6ecf3;
+  background: #e9eef4;
   border-color: var(--line-strong);
   border-radius: 2px;
   box-shadow: inset 0 1px 2px rgb(27 36 48 / 14%);
+  position: relative;
+}
+
+/* The two terminals, at the ends of the channel. 3px of conductor standing
+   proud of the well, dim until there is current through them. */
+html[data-theme="railgun"] .status-switch-track::before,
+html[data-theme="railgun"] .status-switch-track::after {
+  background: rgb(3 105 161 / 34%);
+  bottom: 3px;
+  content: "";
+  position: absolute;
+  top: 3px;
+  transition: background-color var(--transition);
+  width: 2px;
+}
+
+html[data-theme="railgun"] .status-switch-track::before {
+  left: 2px;
+}
+
+html[data-theme="railgun"] .status-switch-track::after {
+  right: 2px;
 }
 
 html[data-theme="railgun"] .status-switch-thumb {
   background: #8a9db2;
-  border-radius: 2px;
+  border-radius: 1px;
   box-shadow: none;
+  position: relative;
+  /* Above the arc fill on the track, so the contact reads as sitting on the
+     conductor rather than behind it. */
+  z-index: 1;
 }
 
+/* Closed. The channel carries arc between the terminals, and `--ok` is reduced
+   to a hairline along the foot: the state is told by the circuit being complete,
+   and the colour only annotates it. */
 html[data-theme="railgun"] .status-switch.on .status-switch-track {
-  background: var(--ok);
-  border-color: var(--ok-strong, var(--ok));
-  /* Closed: the well fills flush, so the inset goes. No outer ring either — a
-     bloom on white can only fog the edge it is meant to sharpen. */
+  background:
+    /* `--ok` as a hairline, not a floor. At 2px it read as a green shelf the
+       contact was standing on, which is a second object; at 1px it is an
+       annotation on the circuit and the closed channel carries the meaning. */
+    linear-gradient(var(--ok), var(--ok)) 0 100% / 100% 1px no-repeat,
+    /* The arc, hard-stopped. Five soft stops fading out top and bottom is the
+       same falloff taken out of the clouds and the bolt — a 4px band centred in
+       the channel is a conductor with current in it. */
+    linear-gradient(
+        180deg,
+        var(--rg-arc) 0 1px,
+        var(--rg-arc-ink) 1px 3px,
+        var(--rg-arc) 3px 4px
+      )
+      0 50% / 100% 4px no-repeat,
+    #dff0fb;
+  border-color: var(--rg-arc-ink);
   box-shadow: none;
 }
 
+html[data-theme="railgun"] .status-switch.on .status-switch-track::before,
+html[data-theme="railgun"] .status-switch.on .status-switch-track::after {
+  background: var(--rg-arc-ink);
+}
+
+/* Whichever terminal the contact is parked on comes above it. The thumb is
+   raised so it reads as sitting *on* a conductor, but that buried the terminal
+   underneath it: closed, the contact appeared to have swallowed the far one;
+   open, the near one vanished completely and the control read as a grey block
+   with an unexplained bar floating to its right.
+
+   I had written that being covered was the correct reading for the open state —
+   a switch resting on its terminal — and the render disagreed. A knife switch
+   is legible precisely because you can see the blade meeting the post. */
+html[data-theme="railgun"] .status-switch.on .status-switch-track::after,
+html[data-theme="railgun"] .status-switch.off .status-switch-track::before {
+  z-index: 2;
+}
+
+/* The contact goes pale and hard-edged when it is passing current — it is the
+   brightest thing in the closed circuit, which on this ground means the least
+   coloured rather than the most lit. */
 html[data-theme="railgun"] .status-switch.on .status-switch-thumb {
   background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgb(3 105 161 / 45%);
 }
 
 html[data-theme="railgun"] .status-switch.off:hover .status-switch-track {
@@ -2018,9 +2088,27 @@ html[data-theme="railgun"] .status-switch.off:hover .status-switch-track {
   border-color: var(--rg-arc);
 }
 
+html[data-theme="railgun"] .status-switch.off:hover .status-switch-track::before,
+html[data-theme="railgun"] .status-switch.off:hover .status-switch-track::after {
+  background: var(--rg-arc);
+}
+
+/* Reaching for a closed switch widens the arc rather than brightening it — more
+   current through the same conductor, which is also the only change available
+   that does not add light on a ground where nothing emits. */
 html[data-theme="railgun"] .status-switch.on:hover .status-switch-track {
-  background: var(--ok-strong, var(--ok));
-  border-color: var(--ok-strong, var(--ok));
+  background:
+    linear-gradient(var(--ok-strong, var(--ok)), var(--ok-strong, var(--ok))) 0 100% / 100% 1px
+      no-repeat,
+    linear-gradient(
+        180deg,
+        var(--rg-arc) 0 1px,
+        var(--rg-arc-ink) 1px 5px,
+        var(--rg-arc) 5px 6px
+      )
+      0 50% / 100% 6px no-repeat,
+    #d3ebfa;
+  border-color: var(--rg-arc-ink);
 }
 
 html[data-theme="railgun"] .status-switch:focus-visible .status-switch-track {
