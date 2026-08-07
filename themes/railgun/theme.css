@@ -144,6 +144,67 @@
   }
 }
 
+/* ── The cloud bank, drifting ─────────────────────────────────
+   Same problem the turbines had, and the same shape of fix. The drift existed
+   but only ran on the login screen; the console's own sky — the one people
+   look at all day — was a still photograph.
+
+   It cannot be done by animating `background-position` here, because the
+   console's clouds live on `body::after` with the rotors, towers, horizon,
+   sky and ground. A keyframe on that shorthand has to restate all twelve
+   layers, which would drag the turbines along with the clouds. So each cloud
+   gets a
+   registered custom property and the keyframe animates only that; the layer
+   reads it inside a `calc()` on its own x offset and nothing else moves. Same
+   device as `--rg-rotor-a`, for the same reason.
+
+   Three properties rather than one because the three clouds are at three
+   distances and must not travel at the same speed — a bank moving in lockstep
+   reads as one flat sheet sliding past. Nearer is bigger and faster.
+
+   Each drifts by exactly one tile width, so the loop closes on itself with no
+   seam. The periods are deliberately not multiples of each other (202s / 223s
+   / 293s), so the three never realign into a repeating arrangement.
+
+   Speeds are 5.2, 3.8 and 2.3 px/s. The login sky's comment set the standard
+   and it is the right one: slower than the eye tracks, so it is only ever
+   noticed by someone who stopped to look at it. */
+@property --rg-cloud-a {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --rg-cloud-b {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --rg-cloud-c {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@keyframes rg-cloud-a {
+  to {
+    --rg-cloud-a: -1050px;
+  }
+}
+
+@keyframes rg-cloud-b {
+  to {
+    --rg-cloud-b: -840px;
+  }
+}
+
+@keyframes rg-cloud-c {
+  to {
+    --rg-cloud-c: -672px;
+  }
+}
+
 /* The cloud bank crossing the login sky. One tile, repeated on x and shifted
    by exactly its own width, so the loop has no seam. 90 seconds for 420px is
    about 4.5px a second — slower than the eye tracks, which is the point: it
@@ -510,7 +571,10 @@ html[data-theme="railgun"] body::after {
   animation:
     rg-turbine-a 7s linear infinite,
     rg-turbine-b 9.5s linear infinite,
-    rg-turbine-c 12s linear infinite;
+    rg-turbine-c 12s linear infinite,
+    rg-cloud-a 202s linear infinite,
+    rg-cloud-b 223s linear infinite,
+    rg-cloud-c 293s linear infinite;
   background:
     /* turbine rotors, struck from their hubs.
 
@@ -608,13 +672,34 @@ html[data-theme="railgun"] body::after {
 
        Three clouds, two silhouettes, three sizes — the big one appears twice
        at very different scale, which distance already justifies, and a third
-       shape would only be a third thing to get wrong. */
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='86' viewBox='0 0 240 86'%3E%3CclipPath id='c'%3E%3Cpath d='M16 70 C2 70 0 56 12 50 C8 34 30 24 44 34 C50 14 84 10 96 28 C106 12 136 12 144 30 C158 20 180 28 182 46 C198 44 206 58 196 70 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='240' height='86' fill='%23ffffff'/%3E%3Cpath d='M0 52 C30 60 62 48 96 55 C130 62 164 50 200 56 C218 59 232 55 240 52 L240 86 L0 86 Z' fill='%23bcd9f0'/%3E%3C/g%3E%3C/svg%3E")
-      46% 40px / 210px 76px no-repeat,
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='62' viewBox='0 0 160 62'%3E%3CclipPath id='c'%3E%3Cpath d='M12 52 C2 52 0 42 10 37 C7 25 26 18 36 27 C43 11 70 9 80 23 C92 13 116 17 120 31 C137 27 151 37 146 52 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='160' height='62' fill='%23ffffff'/%3E%3Cpath d='M0 39 C24 45 50 35 78 41 C106 47 130 37 160 42 L160 62 L0 62 Z' fill='%23bcd9f0'/%3E%3C/g%3E%3C/svg%3E")
-      72% 92px / 140px 54px no-repeat,
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='86' viewBox='0 0 240 86'%3E%3CclipPath id='c'%3E%3Cpath d='M16 70 C2 70 0 56 12 50 C8 34 30 24 44 34 C50 14 84 10 96 28 C106 12 136 12 144 30 C158 20 180 28 182 46 C198 44 206 58 196 70 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='240' height='86' fill='%23ffffff'/%3E%3Cpath d='M0 52 C30 60 62 48 96 55 C130 62 164 50 200 56 C218 59 232 55 240 52 L240 86 L0 86 Z' fill='%23c7e0f3'/%3E%3C/g%3E%3C/svg%3E")
-      93% 46px / 112px 40px no-repeat,
+       shape would only be a third thing to get wrong.
+
+       Each is a *tile* now rather than a single mark, because they drift and a
+       drifting mark has to come back round. The artwork still occupies the same
+       240 (or 160) units it always did; the canvas around it is widened to a
+       whole multiple of that — 3x, 4x, 6x — and the extra is empty sky. So one
+       tile is one cloud plus the gap before the next, `repeat-x` lays them end
+       to end, and shifting by exactly one tile width returns to an identical
+       frame. The 6x on the far one is what keeps the smallest cloud from
+       appearing three times across a wide viewport.
+
+       `background-size` names the tile, not the cloud: at 630px for a canvas
+       that is 3x the art, the cloud renders 210px wide, which is the size it
+       was before. The heights are unchanged, and setting both axes explicitly
+       means the widened canvas does not scale the cloud vertically.
+
+       The x offset is a px phase rather than a percentage. Percentages resolve
+       against `(box - tile)` and would shift each cloud by a different amount
+       at every viewport width — the trap that detached the turbine masts from
+       their rotors — and with `repeat-x` there is no reason to want that: the
+       phase only decides where in the loop each one starts, and these three are
+       staggered so the bank never lines up. */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1200' height='86' viewBox='0 0 1200 86'%3E%3CclipPath id='c'%3E%3Cpath d='M16 70 C2 70 0 56 12 50 C8 34 30 24 44 34 C50 14 84 10 96 28 C106 12 136 12 144 30 C158 20 180 28 182 46 C198 44 206 58 196 70 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='240' height='86' fill='%23ffffff'/%3E%3Cpath d='M0 52 C30 60 62 48 96 55 C130 62 164 50 200 56 C218 59 232 55 240 52 L240 86 L0 86 Z' fill='%23bcd9f0'/%3E%3C/g%3E%3C/svg%3E")
+      calc(0px + var(--rg-cloud-a, 0px)) 34px / 1050px 76px repeat-x,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='960' height='62' viewBox='0 0 960 62'%3E%3CclipPath id='c'%3E%3Cpath d='M12 52 C2 52 0 42 10 37 C7 25 26 18 36 27 C43 11 70 9 80 23 C92 13 116 17 120 31 C137 27 151 37 146 52 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='160' height='62' fill='%23ffffff'/%3E%3Cpath d='M0 39 C24 45 50 35 78 41 C106 47 130 37 160 42 L160 62 L0 62 Z' fill='%23bcd9f0'/%3E%3C/g%3E%3C/svg%3E")
+      calc(300px + var(--rg-cloud-b, 0px)) 104px / 840px 54px repeat-x,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1440' height='86' viewBox='0 0 1440 86'%3E%3CclipPath id='c'%3E%3Cpath d='M16 70 C2 70 0 56 12 50 C8 34 30 24 44 34 C50 14 84 10 96 28 C106 12 136 12 144 30 C158 20 180 28 182 46 C198 44 206 58 196 70 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='240' height='86' fill='%23ffffff'/%3E%3Cpath d='M0 52 C30 60 62 48 96 55 C130 62 164 50 200 56 C218 59 232 55 240 52 L240 86 L0 86 Z' fill='%23c7e0f3'/%3E%3C/g%3E%3C/svg%3E")
+      calc(90px + var(--rg-cloud-c, 0px)) 46px / 672px 40px repeat-x,
     /* sky, resolving to the page at the horizon.
 
        Banded, not blended. A continuous gradient is a photograph of a sky; a
@@ -3255,19 +3340,44 @@ html[data-theme="railgun"] .model-test-template-item:hover {
      repeats cyclically rather than leaving the rest alone, which would drag
      the turbines around with the clouds. Only entries 8–10 differ from the
      values declared up there; the rest are restatements. Add a layer to the
-     establishing shot and these two lists have to grow with it. */
+     establishing shot and these two lists have to grow with it.
+
+     The three cloud entries have to keep their `var()`s. Restating them as
+     plain offsets is the obvious way to write this list and it silently pins
+     the clouds — the keyframes would still run, the property would still
+     animate, and nothing would move, because this list wins on cascade order
+     and no longer mentions the variable.
+
+     The tile widths are exact halves of the desktop ones (1050/840/672 →
+     525/420/336). That is not cosmetic: each keyframe drifts by one desktop
+     tile, so a narrow tile only loops seamlessly if it divides that distance a
+     whole number of times. Half means two tiles pass per cycle and the frame at
+     the end is identical to the frame at the start. Pick a width that is not a
+     divisor and the bank jumps once per period.
+
+     The y offsets are the other half of the narrow-layout problem, and they
+     are why the numbers here look unrelated to the ones above. A drifting
+     cloud cannot be tucked into a gap the way a static one could: it sweeps
+     the full width, so any altitude that touches the type will eventually put
+     a cloud behind every line of it. At this width the type runs 64–153
+     (eyebrow, title, standfirst) and the first card starts at 213, so the
+     clouds go in the 60px of open sky between them. Above the type is not
+     available — the bar ends at 52 and the eyebrow starts at 64, and clouds
+     parked in those 12px are simply hidden behind the bar. */
   html[data-theme="railgun"] body::after {
     background-size:
       62px 62px, 44px 44px, 34px 34px,
       1px 111px, 1px 102px, 1px 93px,
       100% 1px,
-      124px 45px, 88px 34px, 74px 26px,
+      525px 45px, 420px 34px, 336px 26px,
       auto, auto;
     background-position:
       13% 88px, 54% 106px, 78% 120px,
       calc(13% + 23.07px) 119px, calc(54% - 1.22px) 128px, calc(78% - 8.74px) 137px,
       0 230px,
-      4% 22px, 60% 52px, 92% 18px,
+      calc(0px + var(--rg-cloud-a, 0px)) 160px,
+      calc(120px + var(--rg-cloud-b, 0px)) 172px,
+      calc(60px + var(--rg-cloud-c, 0px)) 182px,
       0 0, 0 0;
   }
 
