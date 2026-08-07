@@ -2562,19 +2562,35 @@ html[data-theme="railgun"] .weight-stack strong {
   font-variant-numeric: tabular-nums;
 }
 
-/* The same problem the KPI grid had, one level further down: six token
-   readings per row, each in its own filled and bordered box, eight rows on
-   screen — forty-eight boxes in a table that is itself already a surface.
-   Boxes are how you group things that have nothing else holding them
-   together. These have plenty: the number sits directly above its label, the
-   figures are tabular mono so they align down the column on their own, and
-   the grid gap does the separating. Widening the column gap and deleting the
-   boxes leaves exactly the same information and takes ninety-six borders off
-   a screen of logs.
+/* Six readings, three facts, one instrument.
 
-   The timing pills next door keep theirs. Those are tinted by tone, and the
-   tint is the reading — it is the one place in this table where a fill means
-   something. */
+   The boxes came off here a while ago and the reasoning still holds — see
+   below — but flat removal left six numbers at identical weight in a 3×2 grid,
+   which is the opposite failure: nothing marks which one matters, and the
+   relationships between them are invisible. They are not six independent
+   figures. Checked against eight live rows: 輸入 + 輸出 == 總計 on every one,
+   and 緩存命中 / 輸入 == 緩存率. So the cell contains a split, its total, and a
+   ratio — and the grid was presenting that as six equals.
+
+   `--rg-font-display` is the pack's readout face and this is a readout, so the
+   figures take it. Weight is what carries the structure: the total is the
+   figure you scan a log for, so it takes the arc's ink and a heavier cut; the
+   two operands sit at normal weight because they explain the total rather than
+   competing with it; and the three secondary readings step back to muted.
+   `nth-child` is safe to key on — formatTokens() builds this list in a fixed
+   order from a literal array, so position is stable.
+
+   Nothing is added to the DOM and no fills come back. The hierarchy is entirely
+   typographic, which is what the pack's own 'level' motif says it should be:
+   mono for every figure, so a KPI and a latency and a token count are one
+   instrument speaking rather than three.
+
+   The original note, still true: six readings per row in filled bordered boxes,
+   eight rows on screen, is forty-eight boxes in a table that is itself already
+   a surface. Boxes group things that have nothing else holding them together;
+   these have the number directly above its label, tabular mono aligning them
+   down the column, and the grid gap separating them. The timing pills next
+   door keep theirs — those are tinted by tone and the tint is the reading. */
 html[data-theme="railgun"] .token-triple {
   gap: 3px 15px;
 }
@@ -2586,8 +2602,69 @@ html[data-theme="railgun"] .token-triple span {
   padding: 2px 0;
 }
 
+html[data-theme="railgun"] .token-triple b {
+  font-family: var(--rg-font-display);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* 總計 — the figure a log is scanned for. */
+html[data-theme="railgun"] .token-triple span:nth-child(3) b {
+  color: var(--rg-arc-ink);
+  font-weight: 700;
+}
+
+/* 緩存命中, 緩存率, 思考 — present, subordinate. */
+html[data-theme="railgun"] .token-triple span:nth-child(n + 4) b {
+  color: var(--muted-strong);
+  font-weight: 500;
+}
+
 html[data-theme="railgun"] .token-triple small {
   letter-spacing: 0.02em;
+}
+
+/* 緩存率 gets a real meter, because it is the one reading here that is a
+   proportion and the only one worth comparing down the column at a glance.
+   100 / 99 / 78 / 73 all read as "a number ending in a percent sign" as text;
+   as a bar the difference is pre-attentive.
+
+   The fill width comes from `--rg-cache-rate`, which formatTokens() sets on the
+   element — the percentage is already computed there for the label, so this
+   publishes the number it had rather than deriving anything new. Themes that
+   do not use it get an unread custom property.
+
+   The first version of this was a full-width bar tinted the same regardless of
+   value. That is decoration implying a reading it does not carry, which is the
+   thing this pack's own header calls "decoration you paid for and did not take
+   delivery of" — a bar identical at 100% and at 73% is worse than no bar.
+
+   Drawn on the existing grid item, so nothing is added to the DOM. The ramp is
+   the one the dashboard's ranking bars use, so "how much of a whole" looks the
+   same in both places. */
+html[data-theme="railgun"] .tokens-cell .token-triple span:nth-child(5) {
+  padding-bottom: 5px;
+  position: relative;
+}
+
+html[data-theme="railgun"] .tokens-cell .token-triple span:nth-child(5)::before {
+  background: rgb(3 105 161 / 12%);
+  bottom: 0;
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+html[data-theme="railgun"] .tokens-cell .token-triple span:nth-child(5)::after {
+  background: linear-gradient(90deg, var(--rg-arc-ink), var(--rg-arc) 72%, var(--rg-coin));
+  bottom: 0;
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  width: calc(var(--cache-rate, 0) * 1%);
 }
 
 html[data-theme="railgun"] .time-cell > span:first-child {

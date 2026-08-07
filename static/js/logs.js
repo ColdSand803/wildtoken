@@ -192,10 +192,23 @@ function formatTokens(log) {
     ["缓存率", cacheHitRate],
     ["思考", log.completion_reasoning_tokens],
   ];
+  /* The cache rate as a number as well as a label, so a theme can draw it as a
+     meter instead of only printing it. formatCacheHitRate() has already done
+     the arithmetic for the text; this publishes what it computed rather than
+     deriving anything new, and clamps it because a stray value outside 0–100
+     would push a fill past its track.
+
+     Theme-agnostic on purpose: without a rule reading --cache-rate this is an
+     unset custom property and nothing changes. Same arrangement as
+     --pointer-x/y in events.js and data-tone-escalated in dashboard.js. */
+  const rateMatch = /^(\d+(?:\.\d+)?)%$/.exec(String(cacheHitRate));
+  const rateStyle = rateMatch
+    ? ` style="--cache-rate:${Math.min(100, Math.max(0, Number(rateMatch[1])))}"`
+    : "";
   return `
     <span class="token-triple" aria-label="输入 输出 总计 缓存命中 缓存率 思考 tokens">
       ${metrics.map(([label, value]) => `
-        <span><b>${escapeHtml(String(part(value)))}</b><small>${escapeHtml(label)}</small></span>
+        <span${label === "缓存率" ? rateStyle : ""}><b>${escapeHtml(String(part(value)))}</b><small>${escapeHtml(label)}</small></span>
       `).join("")}
     </span>
   `;
