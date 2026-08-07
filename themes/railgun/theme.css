@@ -1467,11 +1467,36 @@ html[data-theme="railgun"] button:active:not(:disabled) {
   transform: translateY(1px);
 }
 
-html[data-theme="railgun"] button:disabled,
-html[data-theme="railgun"] button:disabled:hover {
-  background-position: -100% 0, 0 0;
+/* Unpowered, not desaturated. `filter: saturate(0.35)` took the stud to a flat
+   grey slab belonging to no palette — the one control in the console with no
+   arc in it at all, which made "disabled" read as "broken" rather than as "not
+   available yet". A launcher with no charge in it is still made of the same
+   metal, so the fill drops to the pale end of the arc instead.
+
+   `opacity` is overridden rather than inherited, and that is the part that
+   matters. base.css sets `opacity: 0.45` on every disabled button, which
+   composites the whole control toward the page — with a pale fill underneath it
+   that puts the label at 1.5:1, unreadable, and no choice of colours fixes it
+   because the opacity caps the achievable contrast near 2:1. Declaring the
+   disabled state as explicit colours at full opacity gets the same "switched
+   off" reading at 3.3:1, which is legible. Disabled text is exempt from the
+   4.5:1 minimum, but 1.5:1 is not a dimmed label, it is an invisible one.
+
+   Dropping the opacity means every variant now has to state its own disabled
+   colours, because that one declaration was what made all four look disabled.
+   Left as a bare `button:disabled` it reached the secondary, ghost and danger
+   buttons too and made them identical to their enabled selves — they keep
+   their own fills from the rules below, and without the dimming there was
+   nothing left to say the control was unavailable. So this rule is scoped to
+   the stud, and the other three are handled after each variant is defined. */
+html[data-theme="railgun"] button:disabled:not(.secondary):not(.ghost):not(.danger),
+html[data-theme="railgun"] button:disabled:not(.secondary):not(.ghost):not(.danger):hover {
+  background:
+    linear-gradient(180deg, #e4ecf3 0%, #dbe6ef 52%, #d2dfea 100%);
+  border-color: rgb(3 105 161 / 22%);
   box-shadow: none;
-  filter: saturate(0.35);
+  color: #6a7f95;
+  opacity: 1;
 }
 
 /* Secondary is the unpowered state of the same housing: milled panel, thin
@@ -1494,11 +1519,17 @@ html[data-theme="railgun"] button.secondary:hover {
   color: var(--rg-arc-ink);
 }
 
+/* Unpowered secondary: the housing goes flat and the type drops to muted. It
+   keeps the base sheet's 0.45 opacity, because on an almost-white button that
+   opacity is only fading a thin border and a mid-grey label — it lands at
+   3.1:1 rather than the 1.5:1 the filled stud was reaching, so there is nothing
+   to correct. Only the stud needed rescuing. */
+html[data-theme="railgun"] button.secondary:disabled,
 html[data-theme="railgun"] button.secondary:disabled:hover {
-  background: linear-gradient(180deg, #ffffff, #f3f6f9);
+  background: #f6f8fa;
   border-color: var(--line);
   box-shadow: none;
-  color: var(--text-secondary);
+  color: var(--muted);
 }
 
 html[data-theme="railgun"] button.ghost {
@@ -1516,6 +1547,7 @@ html[data-theme="railgun"] button.ghost:hover {
   color: var(--rg-arc-ink);
 }
 
+html[data-theme="railgun"] button.ghost:disabled,
 html[data-theme="railgun"] button.ghost:disabled:hover {
   background: transparent;
   border-color: transparent;
@@ -1534,6 +1566,18 @@ html[data-theme="railgun"] button.danger:hover {
   border-color: var(--danger);
   box-shadow: none;
   color: var(--danger-strong);
+}
+
+/* A disabled destructive control has to stop looking destructive. Red is a
+   warning, and a warning on a control that cannot be operated is a false one —
+   so the danger tint comes out entirely and it goes to the same flat housing
+   as a disabled secondary. Keeps the base sheet's opacity, same as that one. */
+html[data-theme="railgun"] button.danger:disabled,
+html[data-theme="railgun"] button.danger:disabled:hover {
+  background: #f6f8fa;
+  border-color: var(--line);
+  box-shadow: none;
+  color: var(--muted);
 }
 
 /* ── Inputs ──────────────────────────────────────────────────
@@ -1582,9 +1626,117 @@ html[data-theme="railgun"] button.danger:hover {
   color: var(--text);
 }
 
+/* Checkbox and radio, drawn rather than tinted.
+
+   These were one line — `accent-color` — which recolours the native control
+   and changes nothing else. The native control on every platform is a rounded
+   rect with a soft-edged tick, so the two smallest controls in the console
+   were the only round things in a pack where nothing is round, and the
+   unchecked state was a grey OS box with no relationship to the theme at all.
+
+   `appearance: none` is the whole fix; everything below is what a native
+   control was providing and now has to be declared. A checkbox is a milled
+   square with the arc struck through it; the tick is a clip-path so it has the
+   hard corners the pack uses everywhere and no anti-aliased curve. A radio
+   stays circular — it is the one shape in an interface that means "exactly one
+   of these", and squaring it off would make it a checkbox that behaves
+   strangely. It gets a square well and a round contact inside it instead.
+
+   `flex: 0 0 auto` because several of these sit in flex rows next to a label,
+   where a fixed-size box with no flex declaration gets compressed.
+
+   The `!important`s are not specificity padding. base.css:544 declares
+   `background`, `border`, `box-shadow`, `min-height`, `padding` and `width` as
+   `!important` on exactly this selector pair, on purpose and with a comment
+   saying so: every theme's generic `input` rule would otherwise wrap the
+   native control in a full-width bordered box, and that rule has to win
+   regardless of cascade order. It cannot be outranked, only matched — a theme
+   that draws these controls itself has to re-declare the same six properties
+   at the same weight. Any pack doing this needs the same six. */
 html[data-theme="railgun"] input[type="checkbox"],
 html[data-theme="railgun"] input[type="radio"] {
-  accent-color: var(--rg-arc-ink);
+  appearance: none;
+  -webkit-appearance: none;
+  background: #ffffff !important;
+  border: 1px solid var(--line-strong) !important;
+  box-shadow: inset 0 1px 2px rgb(27 36 48 / 10%) !important;
+  cursor: pointer;
+  display: inline-grid;
+  flex: 0 0 auto;
+  height: 15px;
+  margin: 0;
+  min-height: 15px !important;
+  padding: 0 !important;
+  place-content: center;
+  position: relative;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    box-shadow var(--transition);
+  width: 15px !important;
+}
+
+html[data-theme="railgun"] input[type="checkbox"] {
+  border-radius: 2px;
+}
+
+html[data-theme="railgun"] input[type="radio"] {
+  border-radius: 50%;
+}
+
+/* Every state below re-declares `background`, `border` or `box-shadow`, so each
+   one needs the same `!important` as the base rule — against base.css:544 a
+   plain declaration loses no matter how specific the selector. */
+html[data-theme="railgun"] input[type="checkbox"]:hover:not(:disabled),
+html[data-theme="railgun"] input[type="radio"]:hover:not(:disabled) {
+  border-color: var(--rg-arc) !important;
+}
+
+html[data-theme="railgun"] input[type="checkbox"]:checked,
+html[data-theme="railgun"] input[type="radio"]:checked {
+  background: var(--rg-arc-ink) !important;
+  border-color: var(--rg-arc-ink) !important;
+  /* The inset well goes when it fills: a recessed slot that is also lit reads
+     as both at once. Filled means contact made, and contact is flush. */
+  box-shadow: none !important;
+}
+
+/* The tick, as a clipped block rather than a glyph or a border trick. Two
+   strokes at a right angle with square ends — the same hard-cornered geometry
+   as the bolt and the brackets. */
+html[data-theme="railgun"] input[type="checkbox"]::before {
+  background: var(--accent-on);
+  clip-path: polygon(13% 48%, 38% 74%, 87% 20%, 100% 33%, 39% 100%, 0 58%);
+  content: "";
+  height: 9px;
+  width: 10px;
+}
+
+html[data-theme="railgun"] input[type="radio"]::before {
+  background: var(--accent-on);
+  border-radius: 50%;
+  content: "";
+  height: 5px;
+  width: 5px;
+}
+
+html[data-theme="railgun"] input[type="checkbox"]:not(:checked)::before,
+html[data-theme="railgun"] input[type="radio"]:not(:checked)::before {
+  display: none;
+}
+
+html[data-theme="railgun"] input[type="checkbox"]:disabled,
+html[data-theme="railgun"] input[type="radio"]:disabled {
+  background: var(--panel-muted) !important;
+  border-color: var(--line) !important;
+  cursor: not-allowed;
+}
+
+html[data-theme="railgun"] input[type="checkbox"]:focus-visible,
+html[data-theme="railgun"] input[type="radio"]:focus-visible {
+  border-color: var(--rg-arc-ink) !important;
+  box-shadow: 0 0 0 3px rgb(14 165 233 / 22%) !important;
+  outline: none;
 }
 
 /* Labels above fields speak the city's paperwork voice. */
@@ -1611,33 +1763,59 @@ html[data-theme="railgun"] .field-hint code {
 }
 
 /* ── Switches ────────────────────────────────────────────────
-   The track is milled square like everything else; the thumb stays round, so
-   the control reads as a contact sliding in a channel. Colour stays semantic
-   — green is still "healthy" — but the on state picks up the arc's bloom so
-   it belongs to this pack. */
+   A knife switch: a square contact that slides along a channel and closes it.
+
+   The previous version said in its own comment that the thumb "stays round, so
+   the control reads as a contact sliding in a channel", and the on state was a
+   vertical green gradient with an inset white highlight and a soft outer bloom.
+   Those two things do not go together. A round cap on a glossy lozenge is the
+   iOS toggle, and at 36×20 it was the only glossy object and the most saturated
+   colour anywhere in the console — the loudest thing on the page, spent on
+   "this channel is enabled".
+
+   So the gloss goes, the bloom goes, and the thumb squares off. Flat fills at
+   both ends, one weight of border, the contact a 2px-radius block. Green stays
+   because green means healthy and that is semantic, but it is the flat token
+   rather than a lit gradient, and it now carries the same visual weight as a
+   badge saying the same thing.
+
+   The off state keeps its recessed well: an open channel is a slot cut into the
+   housing, and that is the one place a shadow is describing real geometry
+   rather than adding light. */
 
 html[data-theme="railgun"] .status-switch-track {
-  background: #eef2f7;
-  border-color: var(--line);
+  background: #e6ecf3;
+  border-color: var(--line-strong);
   border-radius: 2px;
-  box-shadow: inset 0 1px 2px rgb(27 36 48 / 16%);
+  box-shadow: inset 0 1px 2px rgb(27 36 48 / 14%);
 }
 
 html[data-theme="railgun"] .status-switch-thumb {
-  background: #94a6ba;
-  box-shadow: 0 1px 2px rgb(27 36 48 / 12%);
+  background: #8a9db2;
+  border-radius: 2px;
+  box-shadow: none;
 }
 
 html[data-theme="railgun"] .status-switch.on .status-switch-track {
-  background: linear-gradient(180deg, #22a355, var(--ok));
-  border-color: var(--ok);
-  box-shadow:
-    inset 0 1px 0 rgb(240 255 245 / 45%),
-    0 0 0 3px rgb(21 128 61 / 18%);
+  background: var(--ok);
+  border-color: var(--ok-strong, var(--ok));
+  /* Closed: the well fills flush, so the inset goes. No outer ring either — a
+     bloom on white can only fog the edge it is meant to sharpen. */
+  box-shadow: none;
 }
 
 html[data-theme="railgun"] .status-switch.on .status-switch-thumb {
-  background: #f2fff6;
+  background: #ffffff;
+}
+
+html[data-theme="railgun"] .status-switch.off:hover .status-switch-track {
+  background: #dde5ee;
+  border-color: var(--rg-arc);
+}
+
+html[data-theme="railgun"] .status-switch.on:hover .status-switch-track {
+  background: var(--ok-strong, var(--ok));
+  border-color: var(--ok-strong, var(--ok));
 }
 
 html[data-theme="railgun"] .status-switch:focus-visible .status-switch-track {
@@ -1652,16 +1830,21 @@ html[data-theme="railgun"] .status-switch:focus-visible .status-switch-track {
 /* Shape and voice only. The fill is left to the variants below, because the
    markup stacks them — a 4xx arrives as `badge danger status-4xx` and a 3xx as
    `badge neutral status-3xx` — and a fill on the base rule would win against
-   whichever variant the base sheet was relying on. */
+   whichever variant the base sheet was relying on.
+
+   The cut is 3px, down from 5px. A badge is about 17px tall, so 5px was nearly
+   a third of its height taken off two corners: at that size the shape stops
+   reading as a chamfer and starts reading as a torn label. 3px is a cut you
+   notice on a row of them and never on one. */
 html[data-theme="railgun"] .badge {
   border-radius: 0;
   clip-path: polygon(
-    5px 0,
+    3px 0,
     100% 0,
-    100% calc(100% - 5px),
-    calc(100% - 5px) 100%,
+    100% calc(100% - 3px),
+    calc(100% - 3px) 100%,
     0 100%,
-    0 5px
+    0 3px
   );
   font-family: var(--rg-font-hud);
   font-size: 11px;
@@ -1724,17 +1907,22 @@ html[data-theme="railgun"] .badge.status-other {
   color: var(--muted-strong);
 }
 
+/* Same 3px cut as the badge. These sit in the same table cell as each other
+   and often on the same row as a status badge, so two different chamfer sizes
+   read as two different components rather than one family — and a chip is
+   shorter than a badge, which made 4px proportionally the deeper cut of the
+   two. */
 html[data-theme="railgun"] .model-chip {
   background: rgb(14 165 233 / 10%);
   border-color: rgb(3 105 161 / 30%);
   border-radius: 0;
   clip-path: polygon(
-    4px 0,
+    3px 0,
     100% 0,
-    100% calc(100% - 4px),
-    calc(100% - 4px) 100%,
+    100% calc(100% - 3px),
+    calc(100% - 3px) 100%,
     0 100%,
-    0 4px
+    0 3px
   );
   color: var(--rg-arc-ink);
 }
