@@ -262,6 +262,17 @@ copyTokenButton.addEventListener("click", async () => {
   }
 });
 
+/* Below this a custom token is short enough to be worth stopping for. This is
+   the only place the threshold exists — see the note on API_TOKEN_MIN_BYTES in
+   src/models/token.rs for why the server does not enforce it. Byte length, not
+   character count: the field is ASCII-only, but a pasted multi-byte character
+   would make .length disagree with what the server measures. */
+const TOKEN_WEAK_BYTES = 16;
+
+function customTokenByteLength(value) {
+  return new TextEncoder().encode(value).length;
+}
+
 tokenForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const id = tokenIdInput.value;
@@ -275,6 +286,27 @@ tokenForm.addEventListener("submit", async (event) => {
   } else {
     payload.enabled = tokenEnabledCheckbox.checked;
     payload.token = tokenCustomInput.value === "" ? null : tokenCustomInput.value;
+
+    // Short custom tokens are allowed, but not by accident. Only on create —
+    // editing cannot change the token — and only when one was actually typed.
+    if (payload.token !== null) {
+      const bytes = customTokenByteLength(payload.token);
+      if (bytes < TOKEN_WEAK_BYTES) {
+        const accepted = await requestConfirm({
+          title: "令牌偏短",
+          message:
+            `这个自定义令牌只有 ${bytes} 字节，短于建议的 ${TOKEN_WEAK_BYTES} 字节。`
+            + "它可被暴力枚举，任何拿到它的人都能以此调用下游 API。确认要继续创建吗？",
+          confirmLabel: "仍然创建",
+          cancelLabel: "返回修改",
+        });
+        if (!accepted) {
+          tokenCustomInput.focus();
+          tokenCustomInput.select();
+          return;
+        }
+      }
+    }
   }
 
   try {

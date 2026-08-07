@@ -2,7 +2,14 @@ use serde::{Deserialize, Serialize};
 
 pub const API_TOKEN_NAME_MAX_CHARS: usize = 80;
 pub const API_TOKEN_DESCRIPTION_MAX_CHARS: usize = 200;
-pub const API_TOKEN_MIN_BYTES: usize = 16;
+/// A custom token is no longer floored at 16 bytes. The console warns and asks
+/// for a second confirmation below that, and the threshold lives there
+/// (TOKEN_WEAK_BYTES in static/js/tokens.js) rather than here: a stateless
+/// request cannot distinguish an operator who was warned and accepted from one
+/// who never saw the warning, so enforcing it server-side would either refuse
+/// the confirmed case or need a "yes I mean it" flag that any client could set.
+/// What is left here is what is structurally invalid — empty, or too long.
+pub const API_TOKEN_MIN_BYTES: usize = 1;
 pub const API_TOKEN_MAX_BYTES: usize = 256;
 
 // ── DB row ──────────────────────────────────────────────────────────────────────
@@ -67,7 +74,7 @@ impl ApiTokenIn {
             return Ok(());
         };
         if !(API_TOKEN_MIN_BYTES..=API_TOKEN_MAX_BYTES).contains(&token.len()) {
-            return Err("custom token must be between 16 and 256 bytes");
+            return Err("custom token must be between 1 and 256 bytes");
         }
         if !token.bytes().all(|byte| byte.is_ascii_graphic()) {
             return Err("custom token must contain only printable ASCII characters without spaces");
@@ -125,10 +132,20 @@ mod tests {
     fn validates_custom_token_and_metadata_boundaries() {
         assert!(valid_create_input().validate().is_ok());
 
-        for token in ["", "too-short", "contains whitespace"] {
+        for token in ["", "contains whitespace", &"x".repeat(257)] {
             let mut input = valid_create_input();
             input.token = Some(token.into());
             assert!(input.validate().is_err(), "{token:?} must be rejected");
+        }
+
+        // Short custom tokens are accepted here on purpose. The console warns
+        // and asks for a second confirmation below 16 bytes; the server cannot
+        // tell a warned-and-accepted request from an unwarned one, so it only
+        // rejects what is structurally invalid.
+        for token in ["x", "too-short"] {
+            let mut input = valid_create_input();
+            input.token = Some(token.into());
+            assert!(input.validate().is_ok(), "{token:?} must be accepted");
         }
 
         let mut input = valid_create_input();
