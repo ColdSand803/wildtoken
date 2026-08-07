@@ -394,7 +394,34 @@ html[data-theme="railgun"] {
   --radius-full: 3px;
 
   --font-sans: "Space Grotesk", "Noto Sans SC", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", "SFMono-Regular", ui-monospace, Consolas, monospace;
+  /* The CJK mono is named, and it has to be. Every latin face in this stack —
+     JetBrains Mono, Fira Code, SFMono — has no CJK coverage at all, so a
+     channel called 林夕付费站 was never being set by any of them: it fell
+     through the entire list to the browser's last-resort font, whatever that
+     happens to be on the machine. On this one that is Noto Sans Mono CJK SC and
+     it looks acceptable by luck; on a machine without it the same row gets a
+     proportional system sans, and the Top ranking is the one list in the
+     console where that is unmissable, because a mixed string like 林夕 #2 then
+     renders in two different faces at once — the CJK from the fallback, the #2
+     from JetBrains Mono.
+
+     Naming the CJK families makes the pairing deliberate instead of accidental:
+     the same thing `--font-sans` above has done since the pack was written, and
+     the mono token was simply the one that never got it. Position matters and
+     costs nothing — the latin faces stay first, so every figure, hostname and
+     slug in the console is still JetBrains Mono exactly as before. These
+     entries are only ever reached by a character the latin faces cannot draw,
+     which is to say by CJK.
+
+     Several SC families are listed because Noto's CJK monospace ships under
+     different names depending on packaging (the CJK-suffixed one is what is
+     installed here), and Noto Sans SC at the end is a proportional last resort:
+     not monospaced, but the pack's own face rather than an unknown system one.
+     A name is not a figure, and CJK is fixed-width by construction, so nothing
+     in a ranking row depends on those glyphs being mono. */
+  --font-mono: "JetBrains Mono", "Fira Code", "SFMono-Regular", ui-monospace, Consolas,
+    "Noto Sans Mono CJK SC", "Noto Sans Mono SC", "Sarasa Mono SC", "Source Han Mono SC",
+    "Noto Sans SC", monospace;
 
   /* Pack-private tokens. Everything below this line is referenced only by
      rules in this file.
@@ -2831,8 +2858,22 @@ html[data-theme="railgun"] .admin-token-panel {
      The top stop is a real sky blue rather than the tint it started as. White
      cloud on a #a9d9f5 sky is a 1.15:1 difference — the clouds were drawn,
      they were animated, and they were invisible, which is the same thing as
-     not being there. A sky has to be blue enough for weather to happen in. */
-  background: linear-gradient(180deg, #8ecff2 0px, #b6e0f8 64px, #dcf0fc 120px, #ffffff 150px);
+     not being there. A sky has to be blue enough for weather to happen in.
+
+     Banded rather than blended, to match the console's. A continuous gradient
+     is a photograph of a sky; a painted one is laid in as flats with the
+     boundaries between them visible, and this pack is cel-shaded everywhere
+     else. Only the last step softens — that is the haze at the horizon, the
+     one place a hard edge would look wrong, and it is also what lets the sky
+     resolve to the white the form sits on. */
+  background: linear-gradient(
+    180deg,
+    #8ecff2 0px 46px,
+    #a5d9f5 46px 82px,
+    #bde5f9 82px 112px,
+    #daeffc 112px 134px,
+    #ffffff 152px
+  );
   padding-top: 40px;
   position: relative;
 }
@@ -2853,31 +2894,42 @@ html[data-theme="railgun"] .admin-token-panel::after {
   z-index: 0;
 }
 
-/* Cloud bank — three clouds in a 420px tile, repeated on x and drifting by
-   exactly one tile width so the loop has no seam.
+/* Cloud bank — the same cel-shaded clouds the console flies, at login scale.
 
-   Each cloud is built from three overlapping ellipses sharing a baseline
-   rather than one ellipse on its own. A single ellipse with a soft edge is a
-   smudge; what makes the eye read "cloud" is a lumpy top over a flat bottom,
-   and three circles of different sizes sitting on the same line is the
-   cheapest way to get one. The core of each is opaque white to 44% before it
-   falls off, so the cloud has a body and only its edge is vapour. */
+   These were eight soft-edged ellipses, and they were the exact thing the
+   console's clouds were rewritten to stop being: a radial falloff is fog, or a
+   smudge on the glass, not a cloud. The console got hard edges, a flat base and
+   a single band of blue-grey along the underside; this panel kept the old ones,
+   so the pack had two contradictory clouds in it. On this screen you can see
+   both at once — the console sits right behind the dialog — which is what made
+   it obvious.
+
+   Same two silhouettes as `body::after` and the same construction, smaller. One
+   420px tile repeated on x and drifted by exactly its own width, so the loop
+   has no seam. 90 seconds for 420px is about 4.7px a second, near enough the
+   speed the console's nearest cloud runs at.
+
+   Three layers rather than one wide image because each cloud needs its own
+   size, and each names its own tile in px. The old declaration sized the tile
+   `420px 100%`, which was harmless for gradients — they were positioned inside
+   the stretched box — but wrong for artwork: `::before` is `inset: 0`, so 100%
+   is the whole ~396px panel, and an SVG scaled into that draws its cloud at
+   whatever fraction of the panel height it happens to occupy. Every tile is
+   420px wide so the bank scrolls as one; the heights are stated so each cloud
+   lands in the sky band rather than somewhere down on the form. */
 html[data-theme="railgun"] .admin-token-panel::before {
   animation: rg-cloud-drift 90s linear infinite;
   background:
     /* left, the big one */
-    radial-gradient(ellipse 46px 23px at 62px 60px, #ffffff 0 44%, rgb(255 255 255 / 0) 80%),
-    radial-gradient(ellipse 32px 15px at 100px 68px, #ffffff 0 44%, rgb(255 255 255 / 0) 80%),
-    radial-gradient(ellipse 27px 13px at 30px 70px, #ffffff 0 44%, rgb(255 255 255 / 0) 80%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='86' viewBox='0 0 240 86'%3E%3CclipPath id='c'%3E%3Cpath d='M16 70 C2 70 0 56 12 50 C8 34 30 24 44 34 C50 14 84 10 96 28 C106 12 136 12 144 30 C158 20 180 28 182 46 C198 44 206 58 196 70 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='240' height='86' fill='%23ffffff'/%3E%3Cpath d='M0 52 C30 60 62 48 96 55 C130 62 164 50 200 56 C218 59 232 55 240 52 L240 86 L0 86 Z' fill='%23bcd9f0'/%3E%3C/g%3E%3C/svg%3E")
+      0 24px / 420px 44px,
     /* centre-right, higher and wider */
-    radial-gradient(ellipse 54px 25px at 264px 44px, rgb(255 255 255 / 94%) 0 44%, rgb(255 255 255 / 0) 80%),
-    radial-gradient(ellipse 37px 17px at 306px 52px, rgb(255 255 255 / 94%) 0 44%, rgb(255 255 255 / 0) 80%),
-    radial-gradient(ellipse 30px 14px at 228px 54px, rgb(255 255 255 / 94%) 0 44%, rgb(255 255 255 / 0) 80%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='62' viewBox='0 0 160 62'%3E%3CclipPath id='c'%3E%3Cpath d='M12 52 C2 52 0 42 10 37 C7 25 26 18 36 27 C43 11 70 9 80 23 C92 13 116 17 120 31 C137 27 151 37 146 52 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='160' height='62' fill='%23ffffff'/%3E%3Cpath d='M0 39 C24 45 50 35 78 41 C106 47 130 37 160 42 L160 62 L0 62 Z' fill='%23c7e0f3'/%3E%3C/g%3E%3C/svg%3E")
+      168px 8px / 420px 34px,
     /* right, small and low — the one that reads as further away */
-    radial-gradient(ellipse 34px 16px at 380px 86px, rgb(255 255 255 / 82%) 0 44%, rgb(255 255 255 / 0) 80%),
-    radial-gradient(ellipse 24px 11px at 406px 91px, rgb(255 255 255 / 82%) 0 44%, rgb(255 255 255 / 0) 80%);
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='86' viewBox='0 0 240 86'%3E%3CclipPath id='c'%3E%3Cpath d='M16 70 C2 70 0 56 12 50 C8 34 30 24 44 34 C50 14 84 10 96 28 C106 12 136 12 144 30 C158 20 180 28 182 46 C198 44 206 58 196 70 Z'/%3E%3C/clipPath%3E%3Cg clip-path='url(%23c)'%3E%3Crect width='240' height='86' fill='%23ffffff'/%3E%3Cpath d='M0 52 C30 60 62 48 96 55 C130 62 164 50 200 56 C218 59 232 55 240 52 L240 86 L0 86 Z' fill='%23d3e6f6'/%3E%3C/g%3E%3C/svg%3E")
+      300px 50px / 420px 28px;
   background-repeat: repeat-x;
-  background-size: 420px 100%;
 }
 
 html[data-theme="railgun"] .admin-token-panel::after {
