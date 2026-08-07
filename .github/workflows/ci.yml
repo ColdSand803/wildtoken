@@ -98,7 +98,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          admin_token='ci-smoke-placeholder'
+          admin_token='ci-smoke-placeholder-token'
           docker run --detach \
             --name "$CONTAINER_NAME" \
             --publish 127.0.0.1:3110:3100 \
