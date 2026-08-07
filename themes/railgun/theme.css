@@ -3002,14 +3002,39 @@ html[data-theme="railgun"] .login-brand::after {
   width: 70px;
 }
 
+/* The launcher, as the login mark's furniture: two rails with a round waiting
+   in the left one and a discharge leaving the right.
+
+   Concept was right and the drawing contradicted it twice.
+
+   The discharge was a soft gradient tail under `drop-shadow(0 0 6px)`. This
+   pack opens by stating that on a white ground nothing announces itself by
+   emitting, and that a discharge is the *darkest* thing in frame rather than
+   the brightest — and the clouds and the view bolt were both rewritten to hard
+   edges for exactly that reason. A glowing blurred streak was the last soft
+   version of 放電 left in the pack, so the same motif was being drawn two
+   incompatible ways. It is a hard-edged zigzag now, the same construction as
+   the bolt on the active tab: a stepped polyline, square caps, no blur, no
+   halo. It reads as a strike travelling right, away from the barrel.
+
+   The round sat at x=7px with the rails starting at x=0, which put it on top of
+   the rail end rather than between the rails — a bead stuck to the side of the
+   track instead of a projectile held in it. The rails now start clear of it and
+   run to the end, so the coin sits in the gap they leave. */
 html[data-theme="railgun"] .login-brand::before {
   background:
+    /* the round, held between the rails */
     radial-gradient(
-      circle at 7px 6px,
+      circle at 8px 6px,
       var(--rg-coin-hot) 0 2px,
       var(--rg-coin) 2px 5px,
       transparent 5px
     ),
+    /* the two conductors. They run the full length: the round is *between* the
+       rails, which is where a projectile in a launcher sits, so they pass over
+       its centre rather than stopping short of it. It was at x=7 with the rails
+       from x=0, which put it on the rail end instead — a bead stuck to the side
+       of the track. */
     linear-gradient(var(--rg-rail), var(--rg-rail)) 0 2px / 100% 1px no-repeat,
     linear-gradient(var(--rg-rail), var(--rg-rail)) 0 9px / 100% 1px no-repeat;
   animation: rg-coin-charge 2.6s ease-in-out infinite;
@@ -3017,16 +3042,25 @@ html[data-theme="railgun"] .login-brand::before {
 
 html[data-theme="railgun"] .login-brand::after {
   background:
-    linear-gradient(90deg, var(--rg-arc-ink) 0 12%, rgb(3 105 161 / 55%) 46%, transparent 88%)
-      0 5px / 100% 2px no-repeat,
+    /* The discharge, travelling right, away from the barrel. Vertices are held
+       at y=3 and y=8 rather than on the rails at 2 and 9: a 1.6px stroke with
+       square caps extends ~0.8px past each vertex, so a peak sitting exactly on
+       a rail overshoots it and the bolt reads as escaping the track. */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='70' height='12' viewBox='0 0 70 12'%3E%3Cpath d='M0 6 L12 3.4 L19 8.4 L33 3 L40 8.4 L53 3.4 L60 8.4 L70 5.4' fill='none' stroke='%23075985' stroke-width='1.6' stroke-linecap='square' stroke-linejoin='miter'/%3E%3C/svg%3E")
+      0 0 / 70px 12px no-repeat,
     linear-gradient(var(--rg-rail), var(--rg-rail)) 0 2px / 100% 1px no-repeat,
     linear-gradient(var(--rg-rail), var(--rg-rail)) 0 9px / 100% 1px no-repeat;
-  filter: drop-shadow(0 0 6px rgb(3 105 161 / 55%));
 }
 
+/* Offset cast, not a bloom — the same correction `.brand-mark` on the rail
+   already carries, and the login mark is the same filled tile. A 22px halo at
+   65% was lighting the sky around it, which is the one thing this pack says a
+   mark on white cannot do: it sits *on* the surface rather than emitting into
+   it. Larger offset than the rail's copy because this tile is bigger and sits
+   on sky rather than on the concrete. */
 html[data-theme="railgun"] .login-mark {
   color: var(--rg-arc-ink);
-  filter: drop-shadow(0 0 22px rgb(3 105 161 / 65%));
+  filter: drop-shadow(0 2px 3px rgb(3 105 161 / 34%));
 }
 
 html[data-theme="railgun"] .admin-token-error {
