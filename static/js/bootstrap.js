@@ -98,6 +98,47 @@ function formatLogTimestamp(value) {
   return Number.isFinite(timestamp) ? logTimeFormatter.format(new Date(timestamp)) : "—";
 }
 
+/** The console's timestamp fields, as plain numbers, for a given instant. */
+function consoleZoneFields(timestamp) {
+  const parts = logTimeFormatter.formatToParts(new Date(timestamp));
+  const field = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: field("year"),
+    month: field("month"),
+    day: field("day"),
+    hour: field("hour"),
+    minute: field("minute"),
+    second: field("second"),
+  };
+}
+
+/**
+ * Read a wall-clock time in LOG_TIME_ZONE back into a UTC timestamp.
+ *
+ * The console renders every time in that one zone rather than the browser's,
+ * so a time typed into a form has to be read in it too — otherwise what the
+ * operator types and what the table shows back differ by the zone's offset.
+ *
+ * Two passes: the first offset is sampled at the wrong instant, the second at
+ * one already within an hour of the answer.
+ */
+function consoleWallClockToTimestamp(year, month, day, hour, minute, second) {
+  const naive = Date.UTC(year, month - 1, day, hour, minute, second);
+  const offsetAt = (timestamp) => {
+    const zoned = consoleZoneFields(timestamp);
+    return (
+      Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute, zoned.second) -
+      timestamp
+    );
+  };
+  return naive - offsetAt(naive - offsetAt(naive));
+}
+
+/** Format an instant the way the database stores it: UTC, no offset suffix. */
+function toStoredTimestamp(timestamp) {
+  return new Date(timestamp).toISOString().slice(0, 19).replace("T", " ");
+}
+
 async function copyTextToClipboard(text) {
   if (navigator.clipboard?.writeText) {
     try {
@@ -382,6 +423,9 @@ const tokenNameInput = document.querySelector("#token-name");
 const tokenDescriptionInput = document.querySelector("#token-description");
 const tokenCustomRow = document.querySelector("#token-custom-row");
 const tokenCustomInput = document.querySelector("#token-custom");
+const tokenExpiresInput = document.querySelector("#token-expires");
+const tokenExpiresPresets = document.querySelector("#token-expires-presets");
+const tokenExpiresPreview = document.querySelector("#token-expires-preview");
 const tokenEnabledCheckbox = document.querySelector("#token-enabled");
 const tokenIdInput = document.querySelector("#token-id");
 const tokenValueDisplay = document.querySelector("#token-value-display");

@@ -347,9 +347,8 @@ pub async fn admin_update_token(
     input
         .validate()
         .map_err(|message| AppError::BadRequest(message.into()))?;
-    if token_db::get_token(&state.db, id).await?.is_none() {
-        return Err(AppError::NotFound("token not found".into()));
-    }
+    // update_token reads the existing row to decide whether the expiry changed,
+    // and reports NotFound itself, so no separate existence check is needed.
     let out = token_db::update_token(&state.db, id, &input).await?;
     Ok(Json(out))
 }

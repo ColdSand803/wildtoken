@@ -396,6 +396,13 @@ html:has(dialog:modal) {
   gap: 5px;
 }
 
+/* The grid above outranks the UA stylesheet's [hidden] rule, so fields toggled
+   from script — the created-token readout, the custom-token row while editing —
+   need the hiding spelled out here or they stay on screen. */
+.field[hidden] {
+  display: none;
+}
+
 .field-label {
   color: var(--muted-strong);
   font-size: var(--text-sm);
@@ -414,6 +421,16 @@ html:has(dialog:modal) {
   background: var(--panel-muted);
   border-radius: 3px;
   padding: 0 4px;
+}
+
+.field-hint-error {
+  color: var(--danger);
+}
+
+.expiry-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .model-picker-label-row {

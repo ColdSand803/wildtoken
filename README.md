@@ -39,7 +39,9 @@ an admin console for day-to-day operations.
   channel, while same-channel retries respect the configured delay.
 - 🔐 **Downstream token management:** create client-facing API tokens in the admin
   console; full token values are shown once, and the database stores only
-  hashes plus irreversible previews.
+  hashes plus irreversible previews. Tokens can carry an optional expiry —
+  entered as a duration such as `1d3h` or as a date — after which they stop
+  authenticating while the record stays around to be renewed.
 - 📊 **Admin dashboard:** inspect channel status, request logs, token usage, top
   models/channels, latency, runtime metrics, and request/response snapshots.
 - 🧰 **Channel tools:** fetch model lists, test connectivity, test a selected model,

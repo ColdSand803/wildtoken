@@ -190,10 +190,18 @@ async fn lookup_enabled_downstream_token(
     if token.is_empty() {
         return Ok(None);
     }
-    sqlx::query_as("SELECT id, name FROM api_tokens WHERE token_hash = ? AND enabled = 1")
-        .bind(token_db::token_digest(token))
-        .fetch_optional(pool)
-        .await
+    // A lapsed expiry filters the row out here rather than being reported
+    // separately, so an expired token is indistinguishable from a disabled or
+    // nonexistent one. Anything else would turn the error body into an oracle
+    // for which tokens once existed.
+    sqlx::query_as(
+        r#"SELECT id, name FROM api_tokens
+        WHERE token_hash = ? AND enabled = 1
+          AND (expires_at IS NULL OR expires_at > datetime('now'))"#,
+    )
+    .bind(token_db::token_digest(token))
+    .fetch_optional(pool)
+    .await
 }
 
 impl IntoResponse for DownstreamAuthRejection {
@@ -375,5 +383,64 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn a_lapsed_expiry_stops_authenticating_without_touching_enabled() {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        crate::state::init_db(&pool).await.unwrap();
+
+        // Three enabled rows differing only in expiry: none, future, past.
+        for (name, plaintext, expires_at) in [
+            ("never", "token-never-expires", None),
+            ("future", "token-expires-later", Some("2099-01-01 00:00:00")),
+            (
+                "lapsed",
+                "token-already-expired",
+                Some("2000-01-01 00:00:00"),
+            ),
+        ] {
+            let digest = crate::db::token::token_digest(plaintext);
+            sqlx::query(
+                "INSERT INTO api_tokens (name, token, token_hash, token_preview, expires_at) VALUES (?, ?, ?, '…', ?)",
+            )
+            .bind(name)
+            .bind(&digest)
+            .bind(&digest)
+            .bind(expires_at)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        for plaintext in ["token-never-expires", "token-expires-later"] {
+            assert!(
+                lookup_enabled_downstream_token(&pool, plaintext)
+                    .await
+                    .unwrap()
+                    .is_some(),
+                "{plaintext} must still authenticate"
+            );
+        }
+        assert!(
+            lookup_enabled_downstream_token(&pool, "token-already-expired")
+                .await
+                .unwrap()
+                .is_none(),
+            "an expired token must not authenticate"
+        );
+
+        // The row is still there and still enabled — expiry is a separate axis
+        // from the operator's on/off switch, so it can be renewed in place.
+        let enabled: i64 =
+            sqlx::query_scalar("SELECT enabled FROM api_tokens WHERE name = 'lapsed'")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(enabled, 1);
     }
 }

@@ -14,8 +14,26 @@
   min-width: 190px;
 }
 
+.token-table td.col-expiry {
+  min-width: 170px;
+}
+
 .token-table td.muted {
   display: table-cell;
+}
+
+.token-expiry {
+  align-items: flex-start;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.token-expiry-time {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
 .log-row {

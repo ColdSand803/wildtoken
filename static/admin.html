@@ -517,6 +517,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
                     <th>名称</th>
                     <th>描述</th>
                     <th>令牌预览</th>
+                    <th>有效期</th>
                     <th class="col-status">状态</th>
                     <th class="col-actions">操作</th>
                   </tr>
@@ -1022,6 +1023,17 @@ anthropic: "/theme-packs/anthropic/theme.css",
               <input id="token-custom" autocomplete="off" spellcheck="false" maxlength="256" placeholder="留空则自动生成" />
               <span class="field-hint">需为无空格的可打印 ASCII，最长 256 字节；短于 16 字节会要求二次确认。完整值仅在创建时显示一次。</span>
             </label>
+            <div class="field span-2">
+              <label class="field-label" for="token-expires">有效期（可选）</label>
+              <input id="token-expires" autocomplete="off" spellcheck="false" maxlength="40" placeholder="留空则永不过期，如 30d、1d3h" />
+              <div class="expiry-presets" id="token-expires-presets">
+                <button type="button" class="secondary small" data-expiry-preset="7d">7 天</button>
+                <button type="button" class="secondary small" data-expiry-preset="30d">30 天</button>
+                <button type="button" class="secondary small" data-expiry-preset="90d">90 天</button>
+                <button type="button" class="secondary small" data-expiry-preset="">永不过期</button>
+              </div>
+              <span class="field-hint" id="token-expires-preview"></span>
+            </div>
             <div id="token-value-row" hidden class="field span-2 field-readonly">
               <span class="field-label">令牌</span>
               <div class="token-value-box">

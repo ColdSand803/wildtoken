@@ -682,6 +682,10 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             token_hash  TEXT NOT NULL,
             token_preview TEXT NOT NULL,
             enabled     INTEGER NOT NULL DEFAULT 1,
+            -- NULL means the token never expires. Stored in the same
+            -- 'YYYY-MM-DD HH:MM:SS' UTC shape as created_at so authentication
+            -- can compare it against datetime('now') in SQL.
+            expires_at  TEXT,
             created_at  TEXT NOT NULL DEFAULT (datetime('now')),
             updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
@@ -689,6 +693,7 @@ pub async fn init_db(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+    ensure_column(pool, "api_tokens", "expires_at", "TEXT").await?;
     crate::db::token::migrate_legacy_token_storage(pool).await?;
 
     // ---------- runtime_settings ----------
