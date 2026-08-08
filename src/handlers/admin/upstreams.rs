@@ -19,8 +19,9 @@ use crate::models::upstream::{
     UpstreamUpdate,
 };
 use crate::proxy::client::{
-    apply_header_overrides, is_sensitive_header_name, validate_header_overrides,
+    apply_header_overrides, extract_usage, is_sensitive_header_name, validate_header_overrides,
 };
+use crate::proxy::logging;
 use crate::proxy::matcher::AutoWeightPolicy;
 use crate::state::AppState;
 
@@ -153,7 +154,8 @@ fn extract_model_ids(payload: &serde_json::Value) -> Vec<String> {
 }
 
 async fn fetch_models_for_target(
-    client: &reqwest::Client,
+    state: &AppState,
+    upstream: Option<(i64, &str)>,
     base_url: &str,
     api_key: Option<&str>,
     extra_headers: &HashMap<String, String>,
@@ -161,7 +163,8 @@ async fn fetch_models_for_target(
 ) -> Result<ModelListOut, AppError> {
     validate_overrides(extra_headers)?;
     let target_url = build_url(base_url, "models", "");
-    let mut req = client
+    let mut req = state
+        .http_client
         .get(&target_url)
         .timeout(std::time::Duration::from_secs_f64(timeout_seconds.max(1.0)));
 
@@ -170,25 +173,31 @@ async fn fetch_models_for_target(
         req = req.header(k.as_str(), v.as_str());
     }
 
-    let response = req
-        .send()
-        .await
-        .map_err(|e| AppError::UpstreamError(format!("upstream request failed: {e}")))?;
+    let outcome = send_and_log(
+        state,
+        ConsoleProbe {
+            client_type: PROBE_MODEL_LIST,
+            method: "GET",
+            url: &target_url,
+            headers: &request_headers,
+            body: None,
+            upstream,
+            model: None,
+        },
+        req,
+    )
+    .await
+    .map_err(|e| AppError::UpstreamError(format!("upstream request failed: {e}")))?;
 
-    let status = response.status();
-    let text = response
-        .text()
-        .await
-        .map_err(|e| AppError::UpstreamError(format!("upstream body read failed: {e}")))?;
-
-    if !status.is_success() {
-        let preview: String = text.chars().take(300).collect();
+    if !(200..300).contains(&outcome.status) {
+        let preview: String = outcome.body.chars().take(300).collect();
+        let status = outcome.status;
         return Err(AppError::UpstreamError(format!(
             "upstream returned HTTP {status}: {preview}"
         )));
     }
 
-    let payload: serde_json::Value = serde_json::from_str(&text)
+    let payload: serde_json::Value = serde_json::from_str(&outcome.body)
         .map_err(|_| AppError::UpstreamError("upstream did not return JSON".into()))?;
 
     let models = extract_model_ids(&payload);
@@ -242,6 +251,168 @@ fn build_json_channel_request(
 
 fn validate_overrides(overrides: &HashMap<String, String>) -> Result<(), AppError> {
     validate_header_overrides(overrides).map_err(AppError::BadRequest)
+}
+
+// ── Console probes ───────────────────────────────────────────────────────────
+
+/// `client_type` values for requests the console makes on an operator's behalf.
+///
+/// These share the column with real downstream clients rather than getting a
+/// column of their own: the log page's client filter then picks them up for
+/// free. `downstream_token_id` being NULL would also mark them, but that column
+/// is cleared when a token is deleted (`ON DELETE SET NULL`), so it cannot be
+/// trusted as the marker.
+///
+/// The log page's filter is a hardcoded list; `tests/console-probe-logging.test.mjs`
+/// holds it to this set.
+pub(crate) const PROBE_MODEL_TEST: &str = "model-test";
+pub(crate) const PROBE_CHANNEL_TEST: &str = "channel-test";
+pub(crate) const PROBE_MODEL_LIST: &str = "model-list";
+pub(crate) const PROBE_BALANCE: &str = "balance";
+
+/// One outbound request the console makes on an operator's behalf.
+struct ConsoleProbe<'a> {
+    client_type: &'a str,
+    method: &'a str,
+    url: &'a str,
+    headers: &'a HashMap<String, String>,
+    body: Option<&'a serde_json::Value>,
+    /// Absent for the channel form's preview, which probes a typed-in base URL
+    /// that has no channel row behind it.
+    upstream: Option<(i64, &'a str)>,
+    /// Only the model test carries one.
+    model: Option<&'a str>,
+}
+
+struct ProbeOutcome {
+    status: u16,
+    /// Unredacted, for callers that build their own preview. The copy written
+    /// to the log is redacted by `snapshot_response`.
+    headers: HashMap<String, String>,
+    body: String,
+}
+
+/// The path component of a probe URL, for the log's `path` column.
+///
+/// Falls back to the whole URL when it does not parse — a log row with an odd
+/// path beats one with none.
+fn probe_log_path(url: &str) -> String {
+    reqwest::Url::parse(url)
+        .map(|parsed| parsed.path().to_owned())
+        .unwrap_or_else(|_| url.to_owned())
+}
+
+/// Send a console probe and record it in the request log.
+///
+/// Transport failures are logged too, with no status code and the error
+/// attached. Leaving those out would drop exactly the case most worth having a
+/// record of — the channel that could not be reached at all.
+async fn send_and_log(
+    state: &AppState,
+    probe: ConsoleProbe<'_>,
+    request: reqwest::RequestBuilder,
+) -> Result<ProbeOutcome, reqwest::Error> {
+    let log_body_max_bytes = state.runtime_settings.read().await.log_body_max_bytes as usize;
+    let request_body = probe.body.and_then(|body| serde_json::to_vec(body).ok());
+    let request_snapshot = logging::snapshot_request(
+        probe.method,
+        probe.url,
+        probe.headers,
+        request_body.as_deref(),
+        log_body_max_bytes,
+    );
+
+    let base_entry = logging::LogEntry {
+        method: probe.method.to_owned(),
+        path: probe_log_path(probe.url),
+        client_type: Some(probe.client_type.to_owned()),
+        upstream_id: probe.upstream.map(|(id, _)| id),
+        upstream_name: probe.upstream.map(|(_, name)| name.to_owned()),
+        model: probe.model.map(str::to_owned),
+        request_model: probe.model.map(str::to_owned),
+        upstream_model: probe.model.map(str::to_owned),
+        downstream_request: Some(request_snapshot.clone()),
+        upstream_request: Some(request_snapshot),
+        ..Default::default()
+    };
+
+    let started = std::time::Instant::now();
+    let response = match request.send().await {
+        Ok(response) => response,
+        Err(error) => {
+            logging::schedule_log(
+                &state.log_writer,
+                logging::LogEntry {
+                    duration_ms: Some(started.elapsed().as_millis() as i32),
+                    error: Some(error.to_string()),
+                    ..base_entry
+                },
+            );
+            return Err(error);
+        }
+    };
+
+    let status = response.status().as_u16();
+    let headers: HashMap<String, String> = response
+        .headers()
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.to_string(),
+                value.to_str().unwrap_or("[binary]").to_owned(),
+            )
+        })
+        .collect();
+    let content_type = headers.get("content-type").cloned().unwrap_or_default();
+
+    let body = match response.text().await {
+        Ok(body) => body,
+        Err(error) => {
+            logging::schedule_log(
+                &state.log_writer,
+                logging::LogEntry {
+                    status_code: Some(status as i32),
+                    duration_ms: Some(started.elapsed().as_millis() as i32),
+                    error: Some(error.to_string()),
+                    ..base_entry
+                },
+            );
+            return Err(error);
+        }
+    };
+
+    // Only an inference probe can have token usage. Running the extractor over
+    // a model list or a billing payload could read unrelated numbers as usage,
+    // and these rows count toward the dashboard's token totals.
+    let usage = match probe.model {
+        Some(_) => extract_usage(body.as_bytes(), &content_type),
+        None => Default::default(),
+    };
+    let response_snapshot =
+        logging::snapshot_response(status, &headers, Some(body.as_bytes()), log_body_max_bytes);
+
+    logging::schedule_log(
+        &state.log_writer,
+        logging::LogEntry {
+            status_code: Some(status as i32),
+            duration_ms: Some(started.elapsed().as_millis() as i32),
+            prompt_tokens: usage.prompt_tokens,
+            completion_tokens: usage.completion_tokens,
+            total_tokens: usage.total_tokens,
+            prompt_cached_tokens: usage.prompt_cached_tokens,
+            cache_creation_tokens: usage.cache_creation_tokens,
+            completion_reasoning_tokens: usage.completion_reasoning_tokens,
+            upstream_response: Some(response_snapshot.clone()),
+            downstream_response: Some(response_snapshot),
+            ..base_entry
+        },
+    );
+
+    Ok(ProbeOutcome {
+        status,
+        headers,
+        body,
+    })
 }
 
 fn json_number(value: Option<&serde_json::Value>) -> Option<f64> {
@@ -542,20 +713,27 @@ pub async fn admin_test_upstream(
         req = req.header(k.as_str(), v.as_str());
     }
 
-    match req.send().await {
-        Ok(response) => {
-            let status = response.status().as_u16();
-            let content_type = response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .map(|s| s.to_string());
-            let text = response.text().await.unwrap_or_default();
-            let preview: String = text.chars().take(1000).collect();
+    match send_and_log(
+        &state,
+        ConsoleProbe {
+            client_type: PROBE_CHANNEL_TEST,
+            method: "GET",
+            url: &target_url,
+            headers: &request_headers,
+            body: None,
+            upstream: Some((row.id, row.name.as_str())),
+            model: None,
+        },
+        req,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            let preview: String = outcome.body.chars().take(1000).collect();
             Ok(Json(serde_json::json!({
-                "ok": status < 400,
-                "status_code": status,
-                "content_type": content_type,
+                "ok": outcome.status < 400,
+                "status_code": outcome.status,
+                "content_type": outcome.headers.get("content-type"),
                 "preview": preview,
             })))
         }
@@ -650,38 +828,44 @@ pub async fn admin_test_upstream_model(
         &request_headers,
     )?;
     let request_headers_preview = redact_header_preview(&request_headers);
-    match req.send().await {
-        Ok(response) => {
-            let status = response.status().as_u16();
-            let content_type = response
-                .headers()
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|value| value.to_str().ok())
-                .map(str::to_owned);
-            let response_headers: HashMap<String, String> = response
-                .headers()
+    match send_and_log(
+        &state,
+        ConsoleProbe {
+            client_type: PROBE_MODEL_TEST,
+            method: "POST",
+            url: &target_url,
+            headers: &request_headers,
+            body: Some(&payload),
+            upstream: Some((row.id, row.name.as_str())),
+            model: Some(data.model.trim()),
+        },
+        req,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            let content_type = outcome.headers.get("content-type").cloned();
+            let response_headers: HashMap<String, String> = outcome
+                .headers
                 .iter()
                 .map(|(name, value)| {
                     let sensitive =
                         matches!(name.as_str(), "set-cookie" | "authorization" | "x-api-key");
-                    (
-                        name.to_string(),
-                        if sensitive {
-                            "[redacted]".into()
-                        } else {
-                            value.to_str().unwrap_or("[binary]").to_string()
-                        },
-                    )
+                    let shown = if sensitive {
+                        "[redacted]".to_owned()
+                    } else {
+                        value.clone()
+                    };
+                    (name.clone(), shown)
                 })
                 .collect();
-            let response_body = response.text().await.unwrap_or_default();
-            let reply = serde_json::from_str::<serde_json::Value>(&response_body)
+            let reply = serde_json::from_str::<serde_json::Value>(&outcome.body)
                 .ok()
                 .and_then(|payload| extract_model_test_reply(&payload));
-            let preview: String = response_body.chars().take(10_000).collect();
+            let preview: String = outcome.body.chars().take(10_000).collect();
             Ok(Json(serde_json::json!({
-                "ok": status < 400,
-                "status_code": status,
+                "ok": outcome.status < 400,
+                "status_code": outcome.status,
                 "content_type": content_type,
                 "response_headers": response_headers,
                 "prompt": prompt,
@@ -708,7 +892,8 @@ pub async fn admin_fetch_upstream_models(
         .ok_or_else(|| AppError::NotFound("upstream not found".into()))?;
     let extra = parse_extra_headers(&row.extra_headers)?;
     let out = fetch_models_for_target(
-        &state.http_client,
+        &state,
+        Some((row.id, row.name.as_str())),
         &row.base_url,
         row.api_key.as_deref(),
         &extra,
@@ -729,8 +914,11 @@ pub async fn admin_fetch_models_preview(
     let timeout = data
         .timeout_seconds
         .unwrap_or(state.settings.upstream.default_timeout_seconds);
+    // The channel form's preview probes a typed-in base URL, so there is no
+    // channel row to attribute the log row to.
     let out = fetch_models_for_target(
-        &state.http_client,
+        &state,
+        None,
         &data.base_url,
         data.api_key.as_deref(),
         extra,
@@ -766,8 +954,22 @@ pub async fn admin_fetch_upstream_balance(
         sub_req = sub_req.header(k.as_str(), v.as_str());
     }
 
-    let sub_response = match sub_req.send().await {
-        Ok(r) => r,
+    let sub_outcome = match send_and_log(
+        &state,
+        ConsoleProbe {
+            client_type: PROBE_BALANCE,
+            method: "GET",
+            url: &subscription_url,
+            headers: &request_headers,
+            body: None,
+            upstream: Some((row.id, row.name.as_str())),
+            model: None,
+        },
+        sub_req,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
         Err(e) => {
             return Ok(Json(serde_json::json!({
                 "ok": false,
@@ -776,14 +978,14 @@ pub async fn admin_fetch_upstream_balance(
         }
     };
 
-    if sub_response.status().as_u16() != 200 {
+    if sub_outcome.status != 200 {
         return Ok(Json(serde_json::json!({
             "ok": false,
-            "message": format!("渠道返回 HTTP {}", sub_response.status().as_u16())
+            "message": format!("渠道返回 HTTP {}", sub_outcome.status)
         })));
     }
 
-    let sub_payload: serde_json::Value = match sub_response.json().await {
+    let sub_payload: serde_json::Value = match serde_json::from_str(&sub_outcome.body) {
         Ok(v) => v,
         Err(_) => {
             return Ok(Json(serde_json::json!({
@@ -798,9 +1000,25 @@ pub async fn admin_fetch_upstream_balance(
     for (k, v) in &request_headers {
         usage_req = usage_req.header(k.as_str(), v.as_str());
     }
-    if let Ok(usage_response) = usage_req.send().await {
-        if usage_response.status().as_u16() == 200 {
-            if let Ok(usage_payload) = usage_response.json::<serde_json::Value>().await {
+    let usage_outcome = send_and_log(
+        &state,
+        ConsoleProbe {
+            client_type: PROBE_BALANCE,
+            method: "GET",
+            url: &usage_url,
+            headers: &request_headers,
+            body: None,
+            upstream: Some((row.id, row.name.as_str())),
+            model: None,
+        },
+        usage_req,
+    )
+    .await;
+    if let Ok(usage_outcome) = usage_outcome {
+        if usage_outcome.status == 200 {
+            if let Ok(usage_payload) =
+                serde_json::from_str::<serde_json::Value>(&usage_outcome.body)
+            {
                 if let Some(total_usage) = usage_payload.get("total_usage").and_then(|v| v.as_f64())
                 {
                     used_usd = Some(total_usage / 100.0);
@@ -868,8 +1086,22 @@ pub async fn admin_fetch_upstream_sub2api_balance(
         request = request.header(name.as_str(), value.as_str());
     }
 
-    let response = match request.send().await {
-        Ok(response) => response,
+    let outcome = match send_and_log(
+        &state,
+        ConsoleProbe {
+            client_type: PROBE_BALANCE,
+            method: "GET",
+            url: &usage_url,
+            headers: &request_headers,
+            body: None,
+            upstream: Some((row.id, row.name.as_str())),
+            model: None,
+        },
+        request,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
         Err(error) => {
             return Ok(Json(serde_json::json!({
                 "ok": false,
@@ -879,27 +1111,18 @@ pub async fn admin_fetch_upstream_sub2api_balance(
         }
     };
 
-    let status = response.status();
-    let text = match response.text().await {
-        Ok(text) => text,
-        Err(error) => {
-            return Ok(Json(serde_json::json!({
-                "ok": false,
-                "provider": "sub2api",
-                "message": format!("读取响应失败: {error}")
-            })));
-        }
-    };
+    let status = outcome.status;
+    let text = outcome.body;
 
-    if !status.is_success() {
+    if !(200..300).contains(&status) {
         let preview: String = text.chars().take(160).collect();
         return Ok(Json(serde_json::json!({
             "ok": false,
             "provider": "sub2api",
             "message": if preview.is_empty() {
-                format!("渠道返回 HTTP {}", status.as_u16())
+                format!("渠道返回 HTTP {status}")
             } else {
-                format!("渠道返回 HTTP {}: {}", status.as_u16(), preview)
+                format!("渠道返回 HTTP {status}: {preview}")
             }
         })));
     }
@@ -930,9 +1153,266 @@ pub async fn admin_fetch_upstream_sub2api_balance(
 mod tests {
     use super::{
         build_channel_request_headers, build_json_channel_request, extract_model_test_reply,
-        parse_sub2api_balance_payload, redact_header_preview,
+        parse_sub2api_balance_payload, probe_log_path, redact_header_preview, send_and_log,
+        ConsoleProbe, PROBE_MODEL_TEST,
     };
+    use crate::{
+        config::Settings,
+        models::settings::{AdminCredential, RuntimeSettings},
+        proxy::matcher::AutoWeightManager,
+        state::{init_db, AdminAuthCache, AppState, RuntimeMetrics},
+    };
+    use axum::{routing::post, Json, Router};
+    use sqlx::sqlite::SqlitePoolOptions;
     use std::collections::HashMap;
+    use std::{
+        sync::{atomic::AtomicI64, Arc},
+        time::{Duration, Instant},
+    };
+    use tokio::sync::RwLock;
+
+    async fn probe_test_state() -> AppState {
+        let db = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        init_db(&db).await.unwrap();
+
+        let runtime_metrics = Arc::new(RuntimeMetrics::new());
+        let log_stats = Arc::new(crate::db::log_stats::LogStatsCache::empty());
+        let log_writer = crate::proxy::logging::spawn_log_writer(
+            db.clone(),
+            runtime_metrics.clone(),
+            log_stats.clone(),
+            Settings::default().logging.log_queue_capacity,
+        );
+        AppState {
+            db,
+            http_client: reqwest::Client::new(),
+            settings: Settings::default(),
+            auto_weight: Arc::new(AutoWeightManager::new()),
+            runtime_settings: Arc::new(RwLock::new(RuntimeSettings::default())),
+            admin_credential: Arc::new(RwLock::new(AdminCredential {
+                credential_hash: "test".into(),
+                credential_version: 1,
+            })),
+            admin_credential_version: Arc::new(AtomicI64::new(1)),
+            admin_auth_cache: Arc::new(AdminAuthCache::new()),
+            admin_throttle: Arc::new(crate::state::AdminAuthThrottle::new()),
+            runtime_metrics,
+            log_writer,
+            log_stats,
+            models_list_cache: Arc::new(crate::state::ModelsListCache::new()),
+            routing_cache: Arc::new(crate::proxy::matcher::UpstreamRoutingCache::new()),
+            started_at: Instant::now(),
+        }
+    }
+
+    /// Seed a channel row and return its id.
+    ///
+    /// `request_logs.upstream_id` is a real foreign key and `init_db` turns
+    /// enforcement on, so a probe naming a channel that does not exist would
+    /// have its log insert rolled back.
+    async fn seed_upstream(db: &sqlx::SqlitePool, name: &str) -> i64 {
+        sqlx::query("INSERT INTO upstreams (name, base_url) VALUES (?, 'http://example.invalid')")
+            .bind(name)
+            .execute(db)
+            .await
+            .unwrap()
+            .last_insert_rowid()
+    }
+
+    /// The single logged row, once the batching writer has committed it.
+    type LoggedProbe = (
+        String,
+        Option<String>,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<i32>,
+        Option<i32>,
+        Option<i64>,
+        Option<String>,
+    );
+
+    async fn only_logged_probe(db: &sqlx::SqlitePool) -> LoggedProbe {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                let row = sqlx::query_as::<_, LoggedProbe>(
+                    r#"SELECT path, client_type, upstream_id, upstream_name, model,
+                              status_code, total_tokens, downstream_token_id, error
+                       FROM request_logs LIMIT 1"#,
+                )
+                .fetch_optional(db)
+                .await
+                .unwrap();
+                if let Some(row) = row {
+                    break row;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("a console probe must reach the request log")
+    }
+
+    #[test]
+    fn probe_path_falls_back_to_the_whole_url_when_it_does_not_parse() {
+        assert_eq!(
+            probe_log_path("https://api.example.com/v1/chat/completions?beta=true"),
+            "/v1/chat/completions"
+        );
+        assert_eq!(probe_log_path("not a url"), "not a url");
+    }
+
+    #[tokio::test]
+    async fn a_console_probe_reaches_the_request_log_with_its_token_usage() {
+        let upstream = Router::new().route(
+            "/v1/chat/completions",
+            post(|| async {
+                Json(serde_json::json!({
+                    "choices": [{"message": {"role": "assistant", "content": "hi"}}],
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+
+        let state = probe_test_state().await;
+        let upstream_id = seed_upstream(&state.db, "probe channel").await;
+        let url = format!("http://{address}/v1/chat/completions");
+        let payload = serde_json::json!({"model": "probe-model", "messages": []});
+        let headers = HashMap::from([("content-type".to_string(), "application/json".to_string())]);
+        let request = state.http_client.post(&url).body(payload.to_string());
+
+        let outcome = send_and_log(
+            &state,
+            ConsoleProbe {
+                client_type: PROBE_MODEL_TEST,
+                method: "POST",
+                url: &url,
+                headers: &headers,
+                body: Some(&payload),
+                upstream: Some((upstream_id, "probe channel")),
+                model: Some("probe-model"),
+            },
+            request,
+        )
+        .await
+        .unwrap();
+        assert_eq!(outcome.status, 200);
+
+        let (
+            path,
+            client_type,
+            upstream_id_logged,
+            upstream_name,
+            model,
+            status,
+            tokens,
+            token_id,
+            error,
+        ) = only_logged_probe(&state.db).await;
+        assert_eq!(path, "/v1/chat/completions");
+        assert_eq!(client_type.as_deref(), Some("model-test"));
+        assert_eq!(upstream_name.as_deref(), Some("probe channel"));
+        assert_eq!(model.as_deref(), Some("probe-model"));
+        assert_eq!(status, Some(200));
+        assert_eq!(tokens, Some(18));
+        assert_eq!(upstream_id_logged, Some(upstream_id));
+        // A console probe has no downstream caller of its own.
+        assert_eq!(token_id, None);
+        assert_eq!(error, None);
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn a_non_inference_probe_records_no_token_usage() {
+        // Some channels answer every path with the same JSON. A billing or
+        // model-list reply that happens to carry a usage block must not land in
+        // the token totals, so usage is only read for probes that name a model.
+        let upstream = Router::new().route(
+            "/v1/dashboard/billing/usage",
+            post(|| async {
+                Json(serde_json::json!({
+                    "usage": {"prompt_tokens": 11, "completion_tokens": 7, "total_tokens": 18},
+                }))
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move { axum::serve(listener, upstream).await.unwrap() });
+
+        let state = probe_test_state().await;
+        let upstream_id = seed_upstream(&state.db, "billing").await;
+        let url = format!("http://{address}/v1/dashboard/billing/usage");
+        let headers = HashMap::new();
+
+        send_and_log(
+            &state,
+            ConsoleProbe {
+                client_type: super::PROBE_BALANCE,
+                method: "POST",
+                url: &url,
+                headers: &headers,
+                body: None,
+                upstream: Some((upstream_id, "billing")),
+                model: None,
+            },
+            state.http_client.post(&url),
+        )
+        .await
+        .unwrap();
+
+        let (_, client_type, _, _, _, status, tokens, _, _) = only_logged_probe(&state.db).await;
+        assert_eq!(client_type.as_deref(), Some("balance"));
+        assert_eq!(status, Some(200));
+        assert_eq!(tokens, None, "a non-inference probe must record no usage");
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_channel_still_leaves_a_log_row() {
+        let state = probe_test_state().await;
+        let upstream_id = seed_upstream(&state.db, "unreachable").await;
+        // Port 1 on loopback refuses connections, so the send fails outright.
+        let url = "http://127.0.0.1:1/v1/models".to_string();
+        let headers = HashMap::new();
+        let request = state
+            .http_client
+            .get(&url)
+            .timeout(Duration::from_millis(500));
+
+        let sent = send_and_log(
+            &state,
+            ConsoleProbe {
+                client_type: PROBE_MODEL_TEST,
+                method: "GET",
+                url: &url,
+                headers: &headers,
+                body: None,
+                upstream: Some((upstream_id, "unreachable")),
+                model: None,
+            },
+            request,
+        )
+        .await;
+        assert!(sent.is_err(), "the probe must surface the transport error");
+
+        let (path, client_type, upstream_id_logged, _, _, status, _, _, error) =
+            only_logged_probe(&state.db).await;
+        assert_eq!(path, "/v1/models");
+        assert_eq!(client_type.as_deref(), Some("model-test"));
+        assert_eq!(upstream_id_logged, Some(upstream_id));
+        // The case most worth a record: no response at all, but still a row.
+        assert_eq!(status, None);
+        assert!(error.is_some_and(|message| !message.is_empty()));
+    }
 
     #[test]
     fn extracts_reply_from_anthropic_messages_response() {
