@@ -1134,8 +1134,12 @@ html[data-theme="railgun"] .aurora {
     content: "04";
   }
 
-  html[data-theme="railgun"] .nav-link[data-view="settings"]::after {
+  html[data-theme="railgun"] .nav-link[data-view="groups"]::after {
     content: "05";
+  }
+
+  html[data-theme="railgun"] .nav-link[data-view="settings"]::after {
+    content: "06";
   }
 
   html[data-theme="railgun"] .nav-link.active::after {

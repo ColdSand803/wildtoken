@@ -857,6 +857,10 @@ html[data-theme="demon-slayer"] .view[data-view="tokens"] {
   --ds-view-kanji: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Ctext x='160' y='274' text-anchor='middle' font-family='serif' font-size='300' font-weight='700' fill='%233fbfa6' fill-opacity='0.09'%3E%E7%AC%A6%3C/text%3E%3C/svg%3E");
 }
 
+html[data-theme="demon-slayer"] .view[data-view="groups"] {
+  --ds-view-kanji: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Ctext x='160' y='274' text-anchor='middle' font-family='serif' font-size='300' font-weight='700' fill='%233fbfa6' fill-opacity='0.09'%3E%E7%B5%84%3C/text%3E%3C/svg%3E");
+}
+
 html[data-theme="demon-slayer"] .view[data-view="settings"] {
   --ds-view-kanji: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='320' height='320' viewBox='0 0 320 320'%3E%3Ctext x='160' y='274' text-anchor='middle' font-family='serif' font-size='300' font-weight='700' fill='%233fbfa6' fill-opacity='0.09'%3E%E8%AA%BF%3C/text%3E%3C/svg%3E");
 }
