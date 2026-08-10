@@ -18,16 +18,16 @@ import (
 )
 
 const (
-	slowDBOperationThreshold  = time.Second
-	logWriteMaxAttempts       = 5
-	logWriteRetryBaseDelay    = 50 * time.Millisecond
-	logWriteBatchSize         = 20
-	logWriteBatchInterval     = 50 * time.Millisecond
-	logEventChannelCapacity   = 1024
-	cleanupStartupDelay       = 120 * time.Second
-	logBodyCleanupInterval    = 60 * time.Second
+	slowDBOperationThreshold    = time.Second
+	logWriteMaxAttempts         = 5
+	logWriteRetryBaseDelay      = 50 * time.Millisecond
+	logWriteBatchSize           = 20
+	logWriteBatchInterval       = 50 * time.Millisecond
+	logEventChannelCapacity     = 1024
+	cleanupStartupDelay         = 120 * time.Second
+	logBodyCleanupInterval      = 60 * time.Second
 	logRetentionCleanupInterval = 3600 * time.Second
-	incrementalVacuumMaxPages = 4096
+	incrementalVacuumMaxPages   = 4096
 )
 
 // LogEntry is a structured record of one proxied request.
@@ -93,10 +93,10 @@ type persistedLogRecord struct {
 // LogWriter batches request logs onto a single background writer, so proxy
 // requests never wait on SQLite's write lock.
 type LogWriter struct {
-	entries  chan LogEntry
-	metrics  LogMetricsRecorder
-	events   *eventBroker
-	done     chan struct{}
+	entries   chan LogEntry
+	metrics   LogMetricsRecorder
+	events    *eventBroker
+	done      chan struct{}
 	closeOnce sync.Once
 }
 
@@ -584,12 +584,13 @@ func truncateBodyWithLength(body []byte, budget, originalByteLength int) map[str
 func validTextPrefix(body, slice []byte, originalByteLength int) (string, bool) {
 	if len(body) == originalByteLength {
 		// The whole body is present, so it can be validated as one string before
-		// the prefix is cut back to a rune boundary.
+		// the prefix is cut back to a rune boundary. An index equal to the length
+		// is already a boundary, which is why the guard stops there.
 		if !utf8.Valid(body) {
 			return "", false
 		}
 		cutoff := len(slice)
-		for cutoff > 0 && !utf8.RuneStart(body[cutoff]) {
+		for cutoff > 0 && cutoff < len(body) && !utf8.RuneStart(body[cutoff]) {
 			cutoff--
 		}
 		return string(body[:cutoff]), true

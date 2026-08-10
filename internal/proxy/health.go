@@ -41,10 +41,10 @@ type healthState struct {
 
 // HealthSnapshot is the routing view of one upstream's health.
 type HealthSnapshot struct {
-	Score                     int64
-	RoutingWeight             uint64
-	EffectiveWeight           float64
-	RecoveryRemainingSeconds  *int64
+	Score                    int64
+	RoutingWeight            uint64
+	EffectiveWeight          float64
+	RecoveryRemainingSeconds *int64
 }
 
 // AutoWeightManager tracks per-upstream health scores in memory.
