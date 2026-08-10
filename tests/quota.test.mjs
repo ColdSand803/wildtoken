@@ -122,3 +122,29 @@ test("新建令牌会清掉上一次的限额残留", () => {
   const source = read("static/js/tokens.js");
   assert.match(source, /tokenLimitInput\.value = "";/);
 });
+
+test("重置用量按钮只出现在设了限额的令牌上", () => {
+  const source = read("static/js/tokens.js");
+  // 不限额的令牌重置计数没有意义，按钮不该出现。
+  assert.match(source, /t\.quota\?\.limit_tokens\s*\n?\s*\?\s*`<button[^`]*data-token-action="reset-usage"/);
+  // 有限额时才渲染，条件为假时渲染空串。
+  assert.match(source, /:\s*""/);
+});
+
+test("重置用量走服务端的重置接口，且要二次确认", () => {
+  const source = read("static/js/tokens.js");
+  assert.match(source, /\/api\/admin\/tokens\/\$\{id\}\/usage\/reset/);
+  assert.match(source, /method: "POST"/);
+  // 清零后已用尽的令牌会立刻恢复可用，值得停一下问一次。
+  const branch = source.slice(
+    source.indexOf('=== "reset-usage"'),
+    source.indexOf('=== "enable"'),
+  );
+  assert.match(branch, /requestConfirm/);
+  assert.match(branch, /title: "重置用量"/);
+});
+
+test("重置接口在路由里注册过", () => {
+  const router = read("internal/app/router.go");
+  assert.match(router, /tokens\.Post\("\/\{id\}\/usage\/reset", handlers\.AdminResetTokenUsage/);
+});

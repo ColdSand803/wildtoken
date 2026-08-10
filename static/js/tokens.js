@@ -197,6 +197,9 @@ function renderTokenRows() {
       </td>
       <td class="action-cell">
         <button type="button" class="secondary small" data-token-action="edit" data-token-id="${t.id}">编辑</button>
+        ${t.quota?.limit_tokens
+          ? `<button type="button" class="secondary small" data-token-action="reset-usage" data-token-id="${t.id}" title="把已用量清零，限额保持不变">重置用量</button>`
+          : ""}
         <button type="button" class="secondary small danger" data-token-action="delete" data-token-id="${t.id}">删除</button>
       </td>
     </tr>`,
@@ -370,6 +373,33 @@ async function handleTokenAction(button) {
 
   if (button.dataset.tokenAction === "edit") {
     await editToken(token);
+    return;
+  }
+
+  if (button.dataset.tokenAction === "reset-usage") {
+    /* 重置只清已用量，不动限额。要二次确认：清零之后原来的消耗记录就对不上了，
+       而且一个已经用尽的令牌会立刻重新可用。 */
+    const used = Number(token.quota?.used_tokens) || 0;
+    const confirmed = await requestConfirm({
+      title: "重置用量",
+      message: `确定把令牌「${token.name}」的已用量 ${used.toLocaleString()} tokens 清零？`
+        + `限额保持不变，该令牌将立即恢复可用。`,
+      confirmLabel: "重置用量",
+    });
+    if (!confirmed) return;
+
+    button.disabled = true;
+    button.classList.add("is-busy");
+    try {
+      const updated = await api(`/api/admin/tokens/${id}/usage/reset`, { method: "POST" });
+      Object.assign(token, updated);
+      renderTokenRows();
+      setStatus(`令牌 ${escapeHtml(updated.name)} 的用量已重置。`, "ok");
+    } catch (error) {
+      button.disabled = false;
+      button.classList.remove("is-busy");
+      setStatus(`重置用量失败：${error.message}`, "error");
+    }
     return;
   }
 
