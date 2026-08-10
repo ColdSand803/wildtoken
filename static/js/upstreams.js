@@ -460,7 +460,8 @@ function renderRows() {
   rows.innerHTML = "";
   renderUpstreamSummary();
 
-  const colCount = 8;
+  // 选择、ID、渠道名、模型匹配、分组、优先级、权重、状态、操作
+  const colCount = 9;
 
   if (upstreamsLoading && !upstreamsLoadedOnce) {
     rows.innerHTML = skeletonRowsMarkup(colCount, 6);
@@ -519,6 +520,7 @@ function renderRows() {
         </div>
       </td>
       <td class="match-cell" data-col="models">${renderModelMatches(upstream)}</td>
+      <td class="match-cell" data-col="groups">${renderUpstreamGroups(upstream)}</td>
       <td class="col-priority" data-col="priority">
         <button
           type="button"

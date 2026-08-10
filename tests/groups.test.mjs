@@ -112,3 +112,57 @@ test("groups.js 在 upstreams.js 与 tokens.js 之后加载", () => {
   assert.ok(order.every((position) => position > 0), "脚本标签缺失");
   assert.deepEqual([...order].sort((a, b) => a - b), order);
 });
+
+test("渠道表的分组列在表头、列菜单与行渲染里三处齐全", () => {
+  const markup = read("static/admin.html");
+  const table = markup.slice(
+    markup.indexOf('id="upstream-table"'),
+    markup.indexOf('<tbody id="upstream-rows">'),
+  );
+  const headerCount = [...table.matchAll(/<th[\s>]/g)].length;
+
+  // 选择、ID、渠道名、模型匹配、分组、优先级、权重、状态、操作
+  assert.equal(headerCount, 9);
+  assert.match(table, /data-col="groups">分组<\/th>/);
+
+  // 空状态和骨架屏的 colspan 跟着表头走，少一列表格就会错位。
+  assert.match(read("static/js/upstreams.js"), /const colCount = 9;/);
+  assert.match(read("static/js/upstreams.js"), /data-col="groups">\$\{renderUpstreamGroups\(upstream\)\}/);
+  // 列菜单靠这两张表驱动，缺一处这列就不能隐藏或没有名字。
+  assert.match(read("static/js/bootstrap.js"), /^\s*groups: true,$/m);
+  assert.match(read("static/js/bootstrap.js"), /groups: "分组",/);
+});
+
+test("分组名未加载时退化成 id，不至于渲染出 undefined", () => {
+  const source = read("static/js/bootstrap.js");
+  const context = vm.createContext({
+    MAX_MODEL_CHIPS: 3,
+    escapeHtml: (value) => String(value),
+    groupById: () => null,
+    Array,
+  });
+  vm.runInContext(extractFunction(source, "renderUpstreamGroups"), context);
+
+  const html = vm.runInContext(
+    "renderUpstreamGroups({ group_ids: [2, 5] })",
+    context,
+  );
+  assert.match(html, /#2/);
+  assert.match(html, /#5/);
+  assert.doesNotMatch(html, /undefined/);
+});
+
+test("渠道不属任何分组时显示占位而不是空白单元格", () => {
+  const source = read("static/js/bootstrap.js");
+  const context = vm.createContext({
+    MAX_MODEL_CHIPS: 3,
+    escapeHtml: (value) => String(value),
+    groupById: () => null,
+    Array,
+  });
+  vm.runInContext(extractFunction(source, "renderUpstreamGroups"), context);
+  assert.match(
+    vm.runInContext("renderUpstreamGroups({ group_ids: [] })", context),
+    /—/,
+  );
+});

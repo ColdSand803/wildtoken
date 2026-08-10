@@ -419,6 +419,13 @@ td.no-match-state {
   color: var(--muted);
 }
 
+/* 分组和模型匹配用的是同一套 chip，配色区分开，免得两列看上去连成一片 */
+.model-chip.group {
+  background: var(--accent-soft, var(--panel-muted));
+  border-color: var(--accent-border, var(--line-strong));
+  color: var(--accent-strong, var(--muted-strong));
+}
+
 .row-actions {
   text-align: right;
   white-space: nowrap;

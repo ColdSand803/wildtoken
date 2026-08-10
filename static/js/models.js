@@ -1155,6 +1155,11 @@ function initApp() {
     logTable,
   );
   resetForm();
+  /* 渠道列表要把 group_ids 翻成分组名，所以先把分组拉回来。失败也不拦着启动，
+     渠道页会退化成显示 #id。 */
+  if (typeof loadGroups === "function") {
+    loadGroups({ render: false }).catch(() => {});
+  }
   switchView(currentViewFromHash());
   if (currentViewFromHash() === "tokens") {
     loadTokens();

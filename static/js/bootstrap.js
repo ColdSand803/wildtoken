@@ -1138,6 +1138,26 @@ function renderModelMatches(upstream) {
   return `<div class="model-chip-list" title="${escapeHtml(title)}">${chips}${more}</div>`;
 }
 
+/* 渠道所属分组。分组名要靠 groupCache 翻译，那份缓存由 groups.js 维护——列表
+   页首次渲染可能还没拉回来，这时只显示 id，等分组页访问过就自动带上名字。 */
+function renderUpstreamGroups(upstream) {
+  const ids = Array.isArray(upstream.group_ids) ? upstream.group_ids : [];
+  if (ids.length === 0) {
+    return '<span class="muted">—</span>';
+  }
+  const labels = ids.map((id) => {
+    const group = typeof groupById === "function" ? groupById(id) : null;
+    return group ? group.name : `#${id}`;
+  });
+  const visible = labels.slice(0, MAX_MODEL_CHIPS);
+  const hiddenCount = labels.length - visible.length;
+  const chips = visible
+    .map((label) => `<span class="model-chip group">${escapeHtml(label)}</span>`)
+    .join("");
+  const more = hiddenCount > 0 ? `<span class="model-chip more">+${hiddenCount}</span>` : "";
+  return `<div class="model-chip-list" title="${escapeHtml(labels.join(", "))}">${chips}${more}</div>`;
+}
+
 function renderUpstreamSummary() {
   scheduleRenderUpstreamSummary();
 }
@@ -1184,6 +1204,7 @@ const DEFAULT_UPSTREAM_COLUMNS = {
   id: true,
   name: true,
   models: true,
+  groups: true,
   priority: true,
   weight: true,
   status: true,
@@ -1210,6 +1231,7 @@ const UPSTREAM_COL_LABELS = {
   id: "ID",
   name: "渠道名",
   models: "模型匹配",
+  groups: "分组",
   priority: "优先级",
   weight: "权重",
   status: "状态",
