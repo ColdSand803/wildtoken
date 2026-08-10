@@ -1,0 +1,551 @@
+// Package handlers implements the HTTP endpoints WildToken serves.
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/wildtoken/wildtoken/internal/apperr"
+	"github.com/wildtoken/wildtoken/internal/appstate"
+	"github.com/wildtoken/wildtoken/internal/db"
+	"github.com/wildtoken/wildtoken/internal/middleware"
+	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/wildtoken/wildtoken/internal/proxy"
+)
+
+// maxDownstreamBodyBytes bounds a downstream request body, so one caller cannot
+// exhaust memory with an unbounded upload.
+const maxDownstreamBodyBytes = 50 * 1024 * 1024
+
+// hopByHopResponseHeaders must not be copied back to the downstream client.
+var hopByHopResponseHeaders = []string{
+	"connection",
+	"keep-alive",
+	"transfer-encoding",
+	"te",
+	"trailer",
+	"upgrade",
+	"proxy-authenticate",
+	"proxy-authorization",
+	"content-encoding",
+	"content-length",
+}
+
+func parseModelFromBody(body []byte) *string {
+	var request map[string]any
+	if err := json.Unmarshal(body, &request); err != nil {
+		return nil
+	}
+	model, ok := request["model"].(string)
+	if !ok || model == "" {
+		return nil
+	}
+	return &model
+}
+
+// upstreamSelector reads an explicit channel hint from the header or query.
+func upstreamSelector(r *http.Request) *string {
+	if value := strings.TrimSpace(r.Header.Get("x-wildtoken-upstream")); value != "" {
+		return &value
+	}
+	if value := r.URL.Query().Get("upstream"); value != "" {
+		return &value
+	}
+	return nil
+}
+
+// writeProtocolError renders an error in the shape the caller's protocol expects.
+func writeProtocolError(w http.ResponseWriter, status int, path, message, errorType string) {
+	if strings.Trim(path, "/") == "messages" {
+		apperr.WriteJSON(w, status, map[string]any{
+			"type":  "error",
+			"error": map[string]string{"type": errorType, "message": message},
+		})
+		return
+	}
+	apperr.WriteJSON(w, status, map[string]any{
+		"error": map[string]any{
+			"message": message,
+			"type":    errorType,
+			"code":    nil,
+		},
+	})
+}
+
+// noRouteReason describes why routing found no upstream.
+//
+// The text goes to both the downstream error body and the request log, so a 503
+// can be traced back to the requested model and channel hint without
+// reproducing the request.
+func noRouteReason(selector, model *string) string {
+	target := "a request without a model"
+	if model != nil {
+		target = "model " + strconv.Quote(*model)
+	}
+	if selector != nil {
+		return "no enabled upstream matches " + target +
+			" on the requested channel " + strconv.Quote(*selector)
+	}
+	return "no enabled upstream matches " + target
+}
+
+// abortLogGuard records a request that ended before the proxy could log it.
+//
+// Rust armed this through Drop. Go has no destructor, so every exit path calls
+// either Disarm or one of the logging methods; the handler defers Finish as the
+// backstop for a panic or an early return that forgets.
+type abortLogGuard struct {
+	logWriter *proxy.LogWriter
+	startedAt time.Time
+	entry     *proxy.LogEntry
+}
+
+func newAbortLogGuard(logWriter *proxy.LogWriter, method, path string) *abortLogGuard {
+	status := int32(499)
+	message := "client disconnected before proxy completed"
+	return &abortLogGuard{
+		logWriter: logWriter,
+		startedAt: time.Now(),
+		entry: &proxy.LogEntry{
+			Method:     method,
+			Path:       path,
+			StatusCode: &status,
+			Error:      &message,
+		},
+	}
+}
+
+func (g *abortLogGuard) setModel(model *string) {
+	if g.entry == nil {
+		return
+	}
+	g.entry.Model = model
+	g.entry.RequestModel = model
+}
+
+func (g *abortLogGuard) setDownstreamToken(tokenID int64, tokenName string) {
+	if g.entry == nil {
+		return
+	}
+	g.entry.DownstreamTokenID = &tokenID
+	g.entry.DownstreamTokenName = &tokenName
+}
+
+func (g *abortLogGuard) setClientType(clientType string) {
+	if g.entry == nil {
+		return
+	}
+	g.entry.ClientType = &clientType
+}
+
+func (g *abortLogGuard) setUpstream(upstreamID int64, upstreamName string, forwardModel *string) {
+	if g.entry == nil {
+		return
+	}
+	g.entry.UpstreamID = &upstreamID
+	g.entry.UpstreamName = &upstreamName
+	g.entry.UpstreamModel = forwardModel
+	if forwardModel != nil {
+		g.entry.Model = forwardModel
+	}
+}
+
+func (g *abortLogGuard) setRequestSnapshots(downstream, upstream json.RawMessage) {
+	if g.entry == nil {
+		return
+	}
+	g.entry.DownstreamRequest = downstream
+	g.entry.UpstreamRequest = upstream
+}
+
+// disarm gives up ownership of the log, because the proxy already wrote one.
+func (g *abortLogGuard) disarm() { g.entry = nil }
+
+// logAndDisarm records a specific failure instead of the default abort.
+func (g *abortLogGuard) logAndDisarm(statusCode int32, message string) {
+	entry := g.entry
+	g.entry = nil
+	if entry == nil {
+		return
+	}
+	entry.StatusCode = &statusCode
+	entry.Error = &message
+	entry.DurationMs = g.elapsed()
+	g.logWriter.Schedule(*entry)
+}
+
+// finish writes the default abort log if no other path claimed it.
+func (g *abortLogGuard) finish() {
+	entry := g.entry
+	g.entry = nil
+	if entry == nil {
+		return
+	}
+	entry.DurationMs = g.elapsed()
+	g.logWriter.Schedule(*entry)
+}
+
+func (g *abortLogGuard) elapsed() *int32 {
+	measured := int32(time.Since(g.startedAt).Milliseconds())
+	return &measured
+}
+
+// ProxyHandler forwards OpenAI-compatible requests to upstream providers.
+func ProxyHandler(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		auth, ok := middleware.DownstreamAuthFrom(r.Context())
+		if !ok {
+			writeProtocolError(w, http.StatusUnauthorized, r.URL.Path,
+				"Incorrect API key provided", "invalid_api_key")
+			return
+		}
+
+		// The path after /v1/, for example "chat/completions".
+		path := strings.TrimLeft(strings.TrimPrefix(
+			strings.TrimPrefix(r.URL.Path, "/v1"), "/"), "/")
+
+		guard := newAbortLogGuard(state.LogWriter, r.Method, path)
+		defer guard.finish()
+		guard.setDownstreamToken(auth.TokenID, auth.TokenName)
+		guard.setClientType(auth.ClientType)
+
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDownstreamBodyBytes))
+		if err != nil {
+			// A body that exceeded the cap is the caller's error; anything else
+			// means the caller went away mid-upload.
+			var maxBytesError *http.MaxBytesError
+			if errors.As(err, &maxBytesError) {
+				guard.logAndDisarm(400, "failed to read downstream request body: "+err.Error())
+				apperr.BadRequest("failed to read body: " + err.Error()).Write(w)
+				return
+			}
+			guard.logAndDisarm(499,
+				"client disconnected while reading downstream request body: "+err.Error())
+			apperr.BadRequest("failed to read body: " + err.Error()).Write(w)
+			return
+		}
+
+		model := parseModelFromBody(body)
+		guard.setModel(model)
+		selector := upstreamSelector(r)
+
+		runtimeSettings := state.Runtime.Get()
+		policy := proxy.NewAutoWeightPolicy(&runtimeSettings)
+
+		// A direct selection is resolved once; the retry loop reuses it rather
+		// than re-running a selector that can only ever pick the same channel.
+		var directSelection *proxy.Selection
+		if selector != nil {
+			directSelection, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
+				state.AutoWeight, policy, selector, model)
+			if err != nil {
+				guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
+				apperr.WriteError(w, err)
+				return
+			}
+		}
+
+		response, err := runProxyAttempts(w, r, state, proxyAttemptConfig{
+			guard:           guard,
+			auth:            auth,
+			path:            path,
+			body:            body,
+			model:           model,
+			selector:        selector,
+			directSelection: directSelection,
+			policy:          policy,
+			runtimeSettings: runtimeSettings,
+		})
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		if response == nil {
+			// Routing found nothing; the reason was already written and logged.
+			return
+		}
+		guard.disarm()
+
+		writeProxiedResponse(w, response)
+	}
+}
+
+type proxyAttemptConfig struct {
+	guard           *abortLogGuard
+	auth            middleware.DownstreamAuth
+	path            string
+	body            []byte
+	model           *string
+	selector        *string
+	directSelection *proxy.Selection
+	policy          proxy.AutoWeightPolicy
+	runtimeSettings models.RuntimeSettings
+}
+
+// runProxyAttempts forwards the request, retrying a failure up to the
+// configured limit. A nil response with a nil error means routing found no
+// upstream and the 503 has already been written.
+func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.State,
+	config proxyAttemptConfig) (*proxy.Response, error) {
+	maxRetries := int(config.runtimeSettings.MaxRetries)
+	logBodyMaxBytes := int(config.runtimeSettings.LogBodyMaxBytes)
+
+	var previousUpstreamID *int64
+	var lastFailure *attemptResult
+
+	for attempt := 0; ; attempt++ {
+		selected := config.directSelection
+		if config.selector == nil {
+			var err error
+			selected, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
+				state.AutoWeight, config.policy, nil, config.model)
+			if err != nil {
+				config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
+				return nil, err
+			}
+		}
+
+		if selected == nil {
+			// Nothing else to try. A buffered failure is the caller's answer.
+			if lastFailure != nil {
+				return lastFailure.response, lastFailure.err
+			}
+			reason := noRouteReason(config.selector, config.model)
+			config.guard.logAndDisarm(503, reason)
+			writeProtocolError(w, http.StatusServiceUnavailable,
+				config.path, reason, "upstream_not_configured")
+			return nil, nil
+		}
+
+		// Retrying the same channel immediately would usually hit the same
+		// condition, so the configured pause applies first.
+		if attempt > 0 && previousUpstreamID != nil &&
+			*previousUpstreamID == selected.Upstream.ID &&
+			config.runtimeSettings.SameUpstreamRetryIntervalMs > 0 {
+			select {
+			case <-r.Context().Done():
+				return nil, apperr.Upstream("client disconnected during retry backoff")
+			case <-time.After(time.Duration(config.runtimeSettings.SameUpstreamRetryIntervalMs) *
+				time.Millisecond):
+			}
+		}
+
+		// Once a new attempt has a route, the previous buffered failure is no
+		// longer needed. Its log was already scheduled by ProxyRequest.
+		lastFailure = nil
+
+		config.guard.setUpstream(selected.Upstream.ID, selected.Upstream.Name, selected.ForwardModel)
+
+		prepared, err := proxy.PrepareRequest(r.Header, &selected.Upstream, r.Method,
+			config.path, r.URL.RawQuery, selected.ForwardModel, config.body, logBodyMaxBytes)
+		if err != nil {
+			config.guard.logAndDisarm(502, err.Error())
+			return nil, err
+		}
+		config.guard.setRequestSnapshots(prepared.DownstreamSnapshot, prepared.UpstreamSnapshot)
+
+		response, err := proxy.ProxyRequest(r.Context(), state.ProxyDeps(), config.policy,
+			&selected.Upstream, proxy.RequestContext{
+				DownstreamTokenID:   config.auth.TokenID,
+				DownstreamTokenName: config.auth.TokenName,
+				ClientType:          config.auth.ClientType,
+				RequestModel:        config.model,
+				ForwardModel:        selected.ForwardModel,
+				Method:              r.Method,
+				Path:                config.path,
+				LogBodyMaxBytes:     logBodyMaxBytes,
+			}, prepared)
+
+		failed := err != nil || response.Status < 200 || response.Status >= 300
+		if !failed || attempt >= maxRetries {
+			return response, err
+		}
+
+		// A failed attempt's body is abandoned, so its connection is released
+		// rather than left for the garbage collector.
+		if response != nil {
+			io.Copy(io.Discard, response.Body)
+			response.Body.Close()
+		}
+
+		upstreamID := selected.Upstream.ID
+		previousUpstreamID = &upstreamID
+		lastFailure = &attemptResult{response: response, err: err}
+	}
+}
+
+type attemptResult struct {
+	response *proxy.Response
+	err      error
+}
+
+// writeProxiedResponse copies an upstream response downstream, streaming it as
+// it arrives so an SSE body is not buffered.
+func writeProxiedResponse(w http.ResponseWriter, response *proxy.Response) {
+	defer response.Body.Close()
+
+	header := w.Header()
+	for name, value := range response.Headers {
+		if containsFold(hopByHopResponseHeaders, name) {
+			continue
+		}
+		header.Set(name, value)
+	}
+	w.WriteHeader(response.Status)
+
+	flusher, canFlush := w.(http.Flusher)
+	buffer := make([]byte, 32*1024)
+	for {
+		read, err := response.Body.Read(buffer)
+		if read > 0 {
+			if _, writeErr := w.Write(buffer[:read]); writeErr != nil {
+				return
+			}
+			if canFlush {
+				flusher.Flush()
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+// AggregateModelIDs collects unique model ids from enabled upstream configs,
+// from their names and mapping keys.
+func AggregateModelIDs(upstreams []models.UpstreamRow) []string {
+	unique := map[string]bool{}
+
+	for _, upstream := range upstreams {
+		var names []string
+		if err := json.Unmarshal([]byte(upstream.ModelNames), &names); err == nil {
+			for _, name := range names {
+				if trimmed := strings.TrimSpace(name); trimmed != "" {
+					unique[trimmed] = true
+				}
+			}
+		}
+
+		var mappings map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(upstream.ModelMappings), &mappings); err == nil {
+			for key := range mappings {
+				if trimmed := strings.TrimSpace(key); trimmed != "" {
+					unique[trimmed] = true
+				}
+			}
+		}
+		// model_prefixes are intentionally ignored: a prefix cannot expand into
+		// concrete ids.
+	}
+
+	ids := make([]string, 0, len(unique))
+	for id := range unique {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// OpenAIModelsListResponse renders ids in the OpenAI list shape.
+func OpenAIModelsListResponse(ids []string) json.RawMessage {
+	data := make([]map[string]any, 0, len(ids))
+	for _, id := range ids {
+		data = append(data, map[string]any{
+			"id":       id,
+			"object":   "model",
+			"created":  0,
+			"owned_by": "wildtoken",
+		})
+	}
+	encoded, err := json.Marshal(map[string]any{"object": "list", "data": data})
+	if err != nil {
+		return json.RawMessage(`{"object":"list","data":[]}`)
+	}
+	return encoded
+}
+
+func resolveEnabledUpstreamForModels(ctx context.Context, state *appstate.State,
+	selector string) (models.UpstreamRow, error) {
+	if id, err := strconv.ParseInt(selector, 10, 64); err == nil {
+		upstream, ok, err := db.GetUpstream(ctx, state.DB, id)
+		if err != nil {
+			return models.UpstreamRow{}, err
+		}
+		if ok && upstream.Enabled == 1 {
+			return upstream, nil
+		}
+	}
+
+	upstream, ok, err := db.GetUpstreamByName(ctx, state.DB, selector)
+	if err != nil {
+		return models.UpstreamRow{}, err
+	}
+	if ok && upstream.Enabled == 1 {
+		return upstream, nil
+	}
+
+	return models.UpstreamRow{}, apperr.NotFound("upstream not found or disabled: " + selector)
+}
+
+// ListModelsHandler serves GET /v1/models, aggregating the model list from the
+// enabled upstream configs.
+//
+// An optional channel filter comes from X-WildToken-Upstream or ?upstream= (a
+// name or an id). A filtered response skips the global models-list cache, and
+// model_prefixes never expand into concrete ids.
+func ListModelsHandler(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if selector := upstreamSelector(r); selector != nil {
+			upstream, err := resolveEnabledUpstreamForModels(r.Context(), state, *selector)
+			if err != nil {
+				apperr.WriteError(w, err)
+				return
+			}
+			writeRawJSON(w, OpenAIModelsListResponse(
+				AggregateModelIDs([]models.UpstreamRow{upstream})))
+			return
+		}
+
+		if cached := state.ModelsCache.Get(); cached != nil {
+			writeRawJSON(w, cached)
+			return
+		}
+
+		upstreams, err := db.ListEnabledUpstreams(r.Context(), state.DB)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		response := OpenAIModelsListResponse(AggregateModelIDs(upstreams))
+
+		// Another concurrent miss may have already filled the cache.
+		if cached := state.ModelsCache.Get(); cached != nil {
+			writeRawJSON(w, cached)
+			return
+		}
+		state.ModelsCache.Set(response)
+		writeRawJSON(w, response)
+	}
+}
+
+func writeRawJSON(w http.ResponseWriter, body json.RawMessage) {
+	w.Header().Set("content-type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(body)
+}
+
+func containsFold(list []string, name string) bool {
+	for _, entry := range list {
+		if strings.EqualFold(entry, name) {
+			return true
+		}
+	}
+	return false
+}

@@ -2,7 +2,7 @@
 
 **🌐 语言：** [English](README.md) | 简体中文
 
-> **使用 Rust 编写的自托管 LLM API 聚合网关。**
+> **使用 Go 编写的自托管 LLM API 聚合网关。**
 >
 > WildToken 向下游暴露 OpenAI 兼容的 `/v1/*` 接口和 Anthropic 兼容的
 > `/v1/messages` 接口，再根据显式渠道、模型规则、优先级、权重和运行时健康状态，
@@ -75,15 +75,15 @@ Compose 会把 SQLite 数据保存到 `wildtoken-data` 卷，并发布 `3100` �
 
 要求：
 
-- Rust 工具链与仓库 lockfile 兼容
-- 通过 `sqlx` 使用 SQLite
+- Go 1.25 或更新版本
+- 无需 C 工具链：SQLite 驱动为纯 Go 实现，所有目标平台均可在 `CGO_ENABLED=0` 下构建
 
 本地运行：
 
 ```bash
 cp .env.example .env
 # 仅本机首次启动时可不设置；暴露服务前必须设置强 Token。
-ADMIN_TOKEN=replace-with-a-long-random-token cargo run
+ADMIN_TOKEN=replace-with-a-long-random-token go run ./cmd/wildtoken
 ```
 
 源码运行默认监听 `127.0.0.1:3100`，数据库为 `sqlite:wildtoken.db?mode=rwc`。
@@ -251,8 +251,7 @@ APP__DATABASE__MAX_CONNECTIONS=3
 APP__LOGGING__LOG_QUEUE_CAPACITY=512
 APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS=300
 WILDTOKEN_THEME_DIR=themes
-TOKIO_WORKER_THREADS=4
-RUST_LOG=info
+WILDTOKEN_LOG=info
 ```
 
 `ADMIN_TOKEN` 只用于初始化新数据库中的管理员凭证。SQLite 里已有管理员凭证后，请在后台的“设置 -> 安全”中更换；修改 `.env` 不会轮换或重置已有凭证。
@@ -296,9 +295,9 @@ RUST_LOG=info
 发布变更前常用检查：
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+gofmt -l cmd internal
+go vet ./...
+go test -race ./...
 docker compose up -d --build
 curl -fsS http://127.0.0.1:3100/health
 docker compose ps
@@ -308,4 +307,4 @@ docker compose ps
 
 ## 📦 发布
 
-推送与 `Cargo.toml` 版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。发布压缩包包含运行所需的 `static/`、`config/`、`themes/` 目录以及 `SHA256SUMS`。当前发布目标包括 Windows x86_64、Linux x86_64 GNU 和 macOS Universal。
+推送与 `internal/handlers/admin.go` 中服务版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。发布压缩包包含运行所需的 `static/`、`config/`、`themes/` 目录以及 `SHA256SUMS`。当前发布目标包括 Windows x86_64、Linux x86_64、Linux aarch64、macOS x86_64 和 macOS aarch64。

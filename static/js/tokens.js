@@ -399,10 +399,10 @@ copyTokenButton.addEventListener("click", async () => {
 });
 
 /* Below this a custom token is short enough to be worth stopping for. This is
-   the only place the threshold exists — see the note on API_TOKEN_MIN_BYTES in
-   src/models/token.rs for why the server does not enforce it. Byte length, not
-   character count: the field is ASCII-only, but a pasted multi-byte character
-   would make .length disagree with what the server measures. */
+   the only place the threshold exists — see the note on APITokenMinBytes in
+   internal/models/token.go for why the server does not enforce it. Byte length,
+   not character count: the field is ASCII-only, but a pasted multi-byte
+   character would make .length disagree with what the server measures. */
 const TOKEN_WEAK_BYTES = 16;
 
 function customTokenByteLength(value) {

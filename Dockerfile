@@ -1,29 +1,18 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
-FROM rust:1.88-bookworm AS builder
+FROM golang:1.25-bookworm AS builder
 
 WORKDIR /src
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        pkg-config \
-        libsqlite3-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Cache module downloads when only application sources change.
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Cache dependency builds when only app sources change.
-COPY Cargo.toml Cargo.lock ./
-RUN mkdir src \
-    && echo 'fn main() {}' > src/main.rs \
-    && cargo build --locked --release \
-    && rm -rf src
+COPY cmd ./cmd
+COPY internal ./internal
 
-COPY src ./src
-COPY static ./static
-COPY config ./config
-
-# Force rebuild of the real binary after the dummy main above.
-RUN touch src/main.rs \
-    && cargo build --locked --release \
-    && strip target/release/wildtoken
+# CGO stays off: the SQLite driver is pure Go, so the runtime image needs no
+# SQLite library and the binary is portable across glibc versions.
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/wildtoken ./cmd/wildtoken
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -32,7 +21,6 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
-        libsqlite3-0 \
         locales \
         tzdata \
     && sed -i 's/^# \(en_US.UTF-8 UTF-8\)/\1/' /etc/locale.gen \
@@ -43,18 +31,18 @@ RUN apt-get update \
 
 WORKDIR /app
 
-COPY --from=builder /src/target/release/wildtoken /usr/local/bin/wildtoken
-COPY --from=builder /src/static ./static
-COPY --from=builder /src/config ./config
+COPY --from=builder /out/wildtoken /usr/local/bin/wildtoken
+COPY static ./static
+COPY config ./config
 
-# Themes are runtime-only, so copy them from the context instead of the builder
-# to keep theme edits from invalidating the compile cache.
+# Themes are runtime-only, so copying them last keeps theme edits from
+# invalidating the compile cache.
 COPY themes ./themes
 
 ENV APP__SERVER__HOST=0.0.0.0 \
     APP__SERVER__PORT=3100 \
     DATABASE_URL=sqlite:/data/wildtoken.db?mode=rwc \
-    RUST_LOG=info \
+    WILDTOKEN_LOG=info \
     LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \
     LC_ALL=en_US.UTF-8 \

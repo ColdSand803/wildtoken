@@ -9,7 +9,7 @@ services:
       APP__SERVER__HOST: 0.0.0.0
       APP__SERVER__PORT: "3100"
       APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS: "300"
-      TOKIO_WORKER_THREADS: "4"
+      WILDTOKEN_LOG: info
       WILDTOKEN_THEME_DIR: /app/themes
     ports:
       - "3100:3100"
