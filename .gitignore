@@ -3,8 +3,9 @@
 .env.*
 !.env.example
 
-# Rust / cargo
-/target
+# Go build output
+/wildtoken
+/wildtoken.exe
 .wildtoken.bin
 
 # Local AI tool state
