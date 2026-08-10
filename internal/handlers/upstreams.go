@@ -409,7 +409,17 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		// The console fills the edit form from this response, so an absent
+		// membership list reads as "no groups" and the form falls back to
+		// default -- silently dropping the channel's real groups on save.
+		groupIDs, err := db.ListUpstreamGroupIDs(r.Context(), state.DB, id)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
 		apperr.WriteJSON(w, http.StatusOK, models.UpstreamDetailOut{
+			GroupIDs:                       groupIDs,
 			ID:                             row.ID,
 			Name:                           row.Name,
 			BaseURL:                        row.BaseURL,
