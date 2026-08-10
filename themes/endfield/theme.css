@@ -145,7 +145,7 @@ html[data-theme="endfield"] .app-shell {
 
 html[data-theme="endfield"] .topbar {
   align-items: stretch;
-  /* Must stay none (as in Ark / Bleach): any non-none backdrop-filter makes
+  /* Must stay none (as in Ark): any non-none backdrop-filter makes
      the bar a containing block for fixed descendants, which would anchor the
      mobile navigation dock to the bar instead of the viewport. */
   backdrop-filter: none;

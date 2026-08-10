@@ -151,7 +151,7 @@ jobs:
           grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-admin.html"
 
           curl --fail --silent --show-error \
-            http://127.0.0.1:3110/theme-packs/bleach/theme.css \
+            http://127.0.0.1:3110/theme-packs/ark/theme.css \
             --output "$RUNNER_TEMP/wildtoken-theme.css"
 
           curl --fail --silent --show-error \

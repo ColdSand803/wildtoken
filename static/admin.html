@@ -12,24 +12,19 @@
           var safeThemeCss = /^\/theme-packs\/[a-z][a-z0-9-]{0,47}\/[A-Za-z0-9._/-]+\.css$/;
           var bundledThemeCss = {
             ark: "/theme-packs/ark/theme.css",
-            win95: "/theme-packs/win95/theme.css",
-            "animal-island": "/theme-packs/animal-island/theme.css",
-            cyberpunk: "/theme-packs/cyberpunk/theme.css",
-            nes: "/theme-packs/nes/theme.css",
-            crt: "/theme-packs/crt/theme.css",
-            minecraft: "/theme-packs/minecraft/theme.css",
-            bleach: "/theme-packs/bleach/theme.css",
             endfield: "/theme-packs/endfield/theme.css",
             "sakura-mist": "/theme-packs/sakura-mist/theme.css",
-anthropic: "/theme-packs/anthropic/theme.css",
+            anthropic: "/theme-packs/anthropic/theme.css",
             "anthropic-dark": "/theme-packs/anthropic-dark/theme.css",
-            "demon-slayer": "/theme-packs/demon-slayer/theme.css",
             gojo: "/theme-packs/gojo/theme.css",
-            railgun: "/theme-packs/railgun/theme.css",
           };
           var t = localStorage.getItem("wildtoken_theme");
-          if (t === "animal") t = "animal-island";
-          if (!safeThemeId.test(t || "")) t = "dark";
+          /* 只校验 id 形状不够：主题包被移除后，老用户 localStorage 里还存着它的 id，
+             形状合法却没有任何主题 CSS 可加载，页面只能吃 base.css 的兜底变量，观感是
+             坏的。events.js 里的 resolveTheme 有同样的兜底，但它在页面底部才加载，中间
+             会露出一段坏样式。所以这里连成员资格一起校验。内置的 dark/light 不是主题包，
+             不在 bundledThemeCss 里，单独放行。 */
+          if (!safeThemeId.test(t || "") || (t !== "dark" && t !== "light" && !bundledThemeCss[t])) t = "dark";
           document.documentElement.setAttribute("data-theme", t);
           var arkThemeFamilies = { ark: "ark", endfield: "endfield" };
           if (arkThemeFamilies[t]) {
@@ -47,9 +42,6 @@ anthropic: "/theme-packs/anthropic/theme.css",
               localStorage.setItem("wildtoken_theme_css", bundledThemeCss[t]);
             } catch (e) {}
           }
-          if (t === "animal-island") {
-            try { localStorage.setItem("wildtoken_theme", t); } catch (e) {}
-          }
         } catch (e) {
           document.documentElement.setAttribute("data-theme", "dark");
         }
@@ -65,7 +57,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@600;700&family=Orbitron:wght@500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&family=Rajdhani:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css" />

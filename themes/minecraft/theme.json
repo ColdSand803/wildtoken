@@ -1,8 +1,0 @@
-{
-  "id": "minecraft",
-  "label": "我的世界",
-  "css": "theme.css",
-  "swatch": ["#38373f", "#5ec639"],
-  "version": "1.0.0",
-  "description": "Blocky deepslate GUI theme with black pixel outlines, stone bevels, and grass accents."
-}

@@ -14,20 +14,11 @@ const BUILT_IN_THEMES = Object.freeze([
 
 const BUNDLED_THEME_PACKS = Object.freeze([
   { id: "ark", label: "Ark", swatch: ["#080a0b", "#18d1ff"], css: "/theme-packs/ark/theme.css", description: "Industrial operations theme with a cyan signal rail and dense technical surfaces." },
-  { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"], css: "/theme-packs/win95/theme.css", description: "Classic desktop chrome theme with teal workspace, hard bevels, and MS-DOS-style code surfaces." },
-  { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"], css: "/theme-packs/animal-island/theme.css", description: "Pastel island theme with parchment surfaces, mint accents, and rounded game-UI controls." },
-  { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"], css: "/theme-packs/cyberpunk/theme.css", description: "Neon HUD theme with black-violet surfaces, magenta accents, and cyan focus states." },
-  { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"], css: "/theme-packs/nes/theme.css", description: "8-bit console theme with chunky shadows, hard borders, and NES red-blue-yellow accents." },
-  { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"], css: "/theme-packs/crt/theme.css", description: "Monochrome phosphor terminal theme with scanlines, green glow, and CRT bezel surfaces." },
-  { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"], css: "/theme-packs/minecraft/theme.css", description: "Blocky deepslate GUI theme with black pixel outlines, stone bevels, and grass accents." },
-  { id: "bleach", label: "Bleach", swatch: ["#fff7ed", "#f97316"], css: "/theme-packs/bleach/theme.css", description: "Manga-paper admin theme with ink rails and orange reiatsu accents." },
   { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"], css: "/theme-packs/endfield/theme.css", description: "Field-engineering admin theme with pale work surfaces, signal yellow, and left-rail operations layout." },
   { id: "sakura-mist", label: "樱雾灰紫", swatch: ["#ffe3ee", "#535369"], css: "/theme-packs/sakura-mist/theme.css", description: "Soft pink surfaces with restrained gray-violet accents." },
-{ id: "anthropic", label: "A/", swatch: ["#faf9f5", "#d97757"], css: "/theme-packs/anthropic/theme.css", description: "Warm ivory paper surfaces with slate ink, a single clay accent, and serif display type." },
+  { id: "anthropic", label: "A/", swatch: ["#faf9f5", "#d97757"], css: "/theme-packs/anthropic/theme.css", description: "Warm ivory paper surfaces with slate ink, a single clay accent, and serif display type." },
   { id: "anthropic-dark", label: "A/ dark", swatch: ["#141413", "#d97757"], css: "/theme-packs/anthropic-dark/theme.css", description: "Slate ground with warm ivory ink, the same single clay accent, and serif display type." },
-  { id: "demon-slayer", label: "鬼灭之刃", swatch: ["#0b0d0c", "#3fbfa6"], css: "/theme-packs/demon-slayer/theme.css", description: "Sumi-ink console theme with a checkered haori rail, seigaiha wave field, and water-breathing teal accents." },
   { id: "gojo", label: "五条悟", swatch: ["#070910", "#63dcff"], css: "/theme-packs/gojo/theme.css", description: "Satoru Gojo character theme with a blindfold rail, Six Eyes focus states, and blue-red-violet Limitless fields." },
-  { id: "railgun", label: "学园都市", swatch: ["#f4f6f8", "#0ea5e9"], css: "/theme-packs/railgun/theme.css", description: "Academy City in daylight: white concrete and glass, a Tokiwadai clearance plate on a narrow operator rail, a turbine skyline, and arc blue kept back for whatever is live." },
 ]);
 let THEMES = [...BUILT_IN_THEMES, ...BUNDLED_THEME_PACKS];
 
@@ -35,11 +26,6 @@ const ARK_THEME_CONFIG = {
   ark: { family: "ark", depth: "complex", optionLabel: "OPS SYSTEM / 03" },
   endfield: { family: "endfield", depth: "complex", optionLabel: "FIELD SYSTEM / 03" },
 };
-
-// 旧 id "animal" 迁移为 "animal-island"
-function normalizeThemeId(value) {
-  return value === "animal" ? "animal-island" : value;
-}
 
 function isSafeThemeId(value) {
   return typeof value === "string" && /^[a-z][a-z0-9-]{0,47}$/.test(value);
@@ -52,8 +38,7 @@ function isSafeThemeCssHref(value) {
 }
 
 function findTheme(value) {
-  const id = normalizeThemeId(value);
-  return THEMES.find((theme) => theme.id === id) || null;
+  return THEMES.find((theme) => theme.id === value) || null;
 }
 
 function isKnownTheme(value) {
@@ -93,7 +78,7 @@ function focusThemeMenuChoice(position = "selected") {
 
 function getStoredTheme() {
   try {
-    const value = normalizeThemeId(localStorage.getItem(THEME_KEY));
+    const value = localStorage.getItem(THEME_KEY);
     return isKnownTheme(value) ? value : "dark";
   } catch {
     return "dark";
@@ -223,7 +208,7 @@ function normalizeThemeDescription(value) {
 
 function normalizeExternalTheme(theme) {
   if (!theme || typeof theme !== "object") return null;
-  const id = normalizeThemeId(String(theme.id || "").trim());
+  const id = String(theme.id || "").trim();
   const css = String(theme.css || "").trim();
   if (!isSafeThemeId(id) || !isSafeThemeCssHref(css)) return null;
 

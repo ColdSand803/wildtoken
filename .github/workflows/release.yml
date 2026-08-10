@@ -199,7 +199,7 @@ jobs:
           curl -fsS 'http://127.0.0.1:3110/health' >/dev/null
           curl -fsS 'http://127.0.0.1:3110/admin' -o "$RUNNER_TEMP/wildtoken-admin.html"
           grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-admin.html"
-          curl -fsS 'http://127.0.0.1:3110/theme-packs/bleach/theme.css' >/dev/null
+          curl -fsS 'http://127.0.0.1:3110/theme-packs/ark/theme.css' >/dev/null
           kill "$pid"
           wait "$pid" || true
           trap - EXIT

@@ -82,22 +82,6 @@ test("编号型主题的序号连续且不重复", () => {
   }
 });
 
-test("demon-slayer 给每个视图配了不同的水印汉字", () => {
-  const css = read("themes/demon-slayer/theme.css");
-  const blocks = [...css.matchAll(
-    /\[data-view="([a-z-]+)"\][^{]*\{[^}]*?fill-opacity='0\.09'%3E([^%]*(?:%[0-9A-F]{2})*)%3C\/text/g,
-  )];
-  assert.notEqual(blocks.length, 0, "水印规则解析失败");
-
-  const byView = new Map(blocks.map((match) => [match[1], match[2]]));
-  for (const view of consoleViews()) {
-    assert.ok(byView.has(view), `demon-slayer 缺少 ${view} 的水印`);
-  }
-  // 汉字重复说明是从别处复制过来忘了改。
-  const kanji = [...byView.values()];
-  assert.equal(new Set(kanji).size, kanji.length, "水印汉字有重复");
-});
-
 test("每个导航项都有对应的轨道图标", () => {
   const css = read("static/css/console-rail.css");
   for (const view of consoleViews()) {

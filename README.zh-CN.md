@@ -42,11 +42,11 @@
 | --- | --- |
 | ![内置浅色主题下的数据看板](screenshots/screenshot-light.png) | ![内置深色主题下的数据看板](screenshots/screenshot-dark.png) |
 
-使用 [`themes/`](themes/) 下 CSS-only 主题包渲染的使用日志页：
+使用 [`themes/`](themes/) 下某个 CSS-only 主题包渲染的使用日志页：
 
-| Ark | Bleach |
-| --- | --- |
-| ![Ark 主题下的使用日志页](screenshots/screenshot-ark.png) | ![Bleach 主题下的使用日志页](screenshots/screenshot-bleach.png) |
+| Ark |
+| --- |
+| ![Ark 主题下的使用日志页](screenshots/screenshot-ark.png) |
 
 ## 🚀 快速启动
 

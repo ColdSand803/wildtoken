@@ -61,11 +61,11 @@ Dashboard with the built-in light and dark themes:
 | --- | --- |
 | ![Dashboard in the built-in light theme](screenshots/screenshot-light.png) | ![Dashboard in the built-in dark theme](screenshots/screenshot-dark.png) |
 
-Request log page rendered by two CSS-only theme packs from [`themes/`](themes/):
+Request log page rendered by a CSS-only theme pack from [`themes/`](themes/):
 
-| Ark | Bleach |
-| --- | --- |
-| ![Request logs with the Ark theme](screenshots/screenshot-ark.png) | ![Request logs with the Bleach theme](screenshots/screenshot-bleach.png) |
+| Ark |
+| --- |
+| ![Request logs with the Ark theme](screenshots/screenshot-ark.png) |
 
 ## 🚀 Quick Start
 
