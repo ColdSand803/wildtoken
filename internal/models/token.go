@@ -74,6 +74,8 @@ type APITokenRow struct {
 	CreatedAt    string
 	UpdatedAt    string
 	GroupID      int64
+	UsedTokens   int64
+	LimitTokens  *int64
 }
 
 // APITokenIn is the create payload. A nil Token means "generate one".
@@ -87,6 +89,8 @@ type APITokenIn struct {
 	// GroupID scopes which channels this token may reach. Absent means the
 	// default group.
 	GroupID *int64 `json:"group_id"`
+	// LimitExpression is a token limit such as 100M or 1B. Blank means no limit.
+	LimitExpression string `json:"limit_expression"`
 }
 
 // APITokenUpdateIn is a full replacement, so an absent `expires_at` clears the
@@ -96,6 +100,8 @@ type APITokenUpdateIn struct {
 	Description string  `json:"description"`
 	ExpiresAt   *string `json:"expires_at"`
 	GroupID     *int64  `json:"group_id"`
+	// LimitExpression is a token limit such as 100M or 1B. Blank means no limit.
+	LimitExpression string `json:"limit_expression"`
 }
 
 func validateTokenMetadata(name, description string) error {
@@ -131,6 +137,9 @@ func (t *APITokenIn) Validate() error {
 	if _, err := t.NormalizedExpiresAt(); err != nil {
 		return err
 	}
+	if _, err := t.ParsedLimit(); err != nil {
+		return err
+	}
 	if t.Token == nil {
 		return nil
 	}
@@ -148,11 +157,19 @@ func (t *APITokenIn) NormalizedExpiresAt() (*string, error) {
 	return NormalizeExpiresAt(t.ExpiresAt)
 }
 
+// ParsedLimit resolves the limit expression into a stored token count.
+func (t *APITokenIn) ParsedLimit() (*int64, error) {
+	return ParseQuotaExpression(t.LimitExpression)
+}
+
 func (t *APITokenUpdateIn) Validate() error {
 	if err := validateTokenMetadata(t.Name, t.Description); err != nil {
 		return err
 	}
-	_, err := t.NormalizedExpiresAt()
+	if _, err := t.NormalizedExpiresAt(); err != nil {
+		return err
+	}
+	_, err := t.ParsedLimit()
 	return err
 }
 
@@ -160,32 +177,39 @@ func (t *APITokenUpdateIn) NormalizedExpiresAt() (*string, error) {
 	return NormalizeExpiresAt(t.ExpiresAt)
 }
 
+// ParsedLimit resolves the limit expression into a stored token count.
+func (t *APITokenUpdateIn) ParsedLimit() (*int64, error) {
+	return ParseQuotaExpression(t.LimitExpression)
+}
+
 // APITokenOut never carries the full token value.
 type APITokenOut struct {
-	ID           int64   `json:"id"`
-	Name         string  `json:"name"`
-	Description  string  `json:"description"`
-	TokenPreview string  `json:"token_preview"`
-	Enabled      bool    `json:"enabled"`
-	ExpiresAt    *string `json:"expires_at"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
-	GroupID      int64   `json:"group_id"`
-	GroupName    string  `json:"group_name"`
+	ID           int64      `json:"id"`
+	Name         string     `json:"name"`
+	Description  string     `json:"description"`
+	TokenPreview string     `json:"token_preview"`
+	Enabled      bool       `json:"enabled"`
+	ExpiresAt    *string    `json:"expires_at"`
+	CreatedAt    string     `json:"created_at"`
+	UpdatedAt    string     `json:"updated_at"`
+	GroupID      int64      `json:"group_id"`
+	GroupName    string     `json:"group_name"`
+	Quota        QuotaState `json:"quota"`
 }
 
 // APITokenCreatedOut is returned only by the creation endpoint, so the full
 // token can be shown once.
 type APITokenCreatedOut struct {
-	ID           int64   `json:"id"`
-	Name         string  `json:"name"`
-	Description  string  `json:"description"`
-	Token        string  `json:"token"`
-	TokenPreview string  `json:"token_preview"`
-	Enabled      bool    `json:"enabled"`
-	ExpiresAt    *string `json:"expires_at"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
-	GroupID      int64   `json:"group_id"`
-	GroupName    string  `json:"group_name"`
+	ID           int64      `json:"id"`
+	Name         string     `json:"name"`
+	Description  string     `json:"description"`
+	Token        string     `json:"token"`
+	TokenPreview string     `json:"token_preview"`
+	Enabled      bool       `json:"enabled"`
+	ExpiresAt    *string    `json:"expires_at"`
+	CreatedAt    string     `json:"created_at"`
+	UpdatedAt    string     `json:"updated_at"`
+	GroupID      int64      `json:"group_id"`
+	GroupName    string     `json:"group_name"`
+	Quota        QuotaState `json:"quota"`
 }

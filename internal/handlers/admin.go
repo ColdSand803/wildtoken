@@ -557,6 +557,23 @@ func AdminSetTokenEnabled(state *appstate.State) http.HandlerFunc {
 	}
 }
 
+// AdminResetTokenUsage clears a token's consumed total.
+func AdminResetTokenUsage(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathID(r)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		updated, err := db.ResetTokenUsage(r.Context(), state.DB, id)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		apperr.WriteJSON(w, http.StatusOK, updated)
+	}
+}
+
 func AdminDeleteToken(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathID(r)

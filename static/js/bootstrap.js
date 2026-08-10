@@ -424,6 +424,7 @@ const tokenDescriptionInput = document.querySelector("#token-description");
 const tokenCustomRow = document.querySelector("#token-custom-row");
 const tokenCustomInput = document.querySelector("#token-custom");
 const tokenExpiresInput = document.querySelector("#token-expires");
+const tokenLimitInput = document.querySelector("#token-limit");
 const tokenExpiresPresets = document.querySelector("#token-expires-presets");
 const tokenExpiresPreview = document.querySelector("#token-expires-preview");
 const tokenEnabledCheckbox = document.querySelector("#token-enabled");

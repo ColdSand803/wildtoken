@@ -106,6 +106,12 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     -- 'YYYY-MM-DD HH:MM:SS' UTC shape as created_at so authentication
     -- can compare it against datetime('now') in SQL.
     expires_at  TEXT,
+    -- Running total of tokens this credential has consumed. Maintained here
+    -- rather than aggregated from request_logs, because those are pruned by the
+    -- retention policy and a quota must not refill when its usage ages out.
+    used_tokens  INTEGER NOT NULL DEFAULT 0,
+    -- NULL means no limit.
+    limit_tokens INTEGER,
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );`

@@ -329,6 +329,18 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 			return nil, apperr.Database(err)
 		}
 
+		// The quota counter advances with the log row, so a committed request is
+		// always accounted for exactly once. A request that carried no usage, or
+		// came from a deleted token, contributes nothing.
+		if entry.DownstreamTokenID != nil && entry.TotalTokens != nil && *entry.TotalTokens > 0 {
+			_, err := tx.ExecContext(ctx,
+				"UPDATE api_tokens SET used_tokens = used_tokens + ? WHERE id = ?",
+				int64(*entry.TotalTokens), *entry.DownstreamTokenID)
+			if err != nil {
+				return nil, apperr.Database(err)
+			}
+		}
+
 		records = append(records, persistedLogRecord{
 			stats: db.PersistedLogStats{
 				ID:                   logID,

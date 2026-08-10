@@ -83,6 +83,17 @@ func Init(ctx context.Context, db *sql.DB) error {
 	if err := ensureColumn(ctx, db, "api_tokens", "group_id", "INTEGER"); err != nil {
 		return err
 	}
+	// The running total is kept on the token rather than aggregated from
+	// request_logs: logs are pruned by the retention policy, which would make a
+	// quota silently refill once its usage aged out.
+	for _, column := range []struct{ name, definition string }{
+		{"used_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"limit_tokens", "INTEGER"},
+	} {
+		if err := ensureColumn(ctx, db, "api_tokens", column.name, column.definition); err != nil {
+			return err
+		}
+	}
 	if err := MigrateLegacyTokenStorage(ctx, db); err != nil {
 		return err
 	}

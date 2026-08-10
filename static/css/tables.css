@@ -1015,3 +1015,34 @@ td.no-match-state {
     transform: translateY(-8px) scale(0.98);
   }
 }
+
+/* 限额列：已用 / 剩余 / 限额。用尽标红、接近用尽标黄，好在一列里扫出该处理哪个 */
+.quota-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.quota-sep {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.quota-used {
+  font-weight: 600;
+}
+
+.quota-limit {
+  color: var(--muted-strong);
+}
+
+.quota-cell.warn .quota-used {
+  color: var(--warn, #d97706);
+}
+
+.quota-cell.danger .quota-used,
+.quota-cell.danger .quota-remaining {
+  color: var(--danger, #dc2626);
+}

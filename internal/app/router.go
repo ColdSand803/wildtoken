@@ -107,6 +107,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			tokens.Put("/{id}", handlers.AdminUpdateToken(state))
 			tokens.Delete("/{id}", handlers.AdminDeleteToken(state))
 			tokens.Patch("/{id}/enabled", handlers.AdminSetTokenEnabled(state))
+			tokens.Post("/{id}/usage/reset", handlers.AdminResetTokenUsage(state))
 		})
 
 		admin.Route("/logs", func(logs chi.Router) {

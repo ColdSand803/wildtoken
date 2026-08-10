@@ -21,7 +21,8 @@ const tokenPreviewChars = 8
 const tokenColumns = `t.id, t.name, t.description, t.token_preview, t.enabled,
     t.expires_at, t.created_at, t.updated_at,
     COALESCE(t.group_id, 1),
-    COALESCE((SELECT g.name FROM groups g WHERE g.id = t.group_id), 'default')`
+    COALESCE((SELECT g.name FROM groups g WHERE g.id = t.group_id), 'default'),
+    COALESCE(t.used_tokens, 0), t.limit_tokens`
 
 // tokenFrom is the FROM clause matching tokenColumns.
 const tokenFrom = " FROM api_tokens AS t"
@@ -55,14 +56,18 @@ func scanTokenRow(row interface{ Scan(...any) error }) (models.APITokenRow, stri
 	var token models.APITokenRow
 	var expiresAt sql.NullString
 	var groupName string
+	var limitTokens sql.NullInt64
 	err := row.Scan(&token.ID, &token.Name, &token.Description, &token.TokenPreview,
 		&token.Enabled, &expiresAt, &token.CreatedAt, &token.UpdatedAt,
-		&token.GroupID, &groupName)
+		&token.GroupID, &groupName, &token.UsedTokens, &limitTokens)
 	if err != nil {
 		return token, "", err
 	}
 	if expiresAt.Valid {
 		token.ExpiresAt = &expiresAt.String
+	}
+	if limitTokens.Valid && limitTokens.Int64 > 0 {
+		token.LimitTokens = &limitTokens.Int64
 	}
 	return token, groupName, nil
 }
@@ -79,6 +84,7 @@ func tokenOut(row models.APITokenRow, groupName string) models.APITokenOut {
 		UpdatedAt:    row.UpdatedAt,
 		GroupID:      row.GroupID,
 		GroupName:    groupName,
+		Quota:        models.NewQuotaState(row.UsedTokens, row.LimitTokens),
 	}
 }
 
@@ -298,11 +304,16 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 		return models.APITokenCreatedOut{}, err
 	}
 
+	limitTokens, err := input.ParsedLimit()
+	if err != nil {
+		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
+	}
+
 	result, err := db.ExecContext(ctx, `INSERT INTO api_tokens
-        (name, description, token, token_hash, token_preview, enabled, expires_at, group_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        (name, description, token, token_hash, token_preview, enabled, expires_at, group_id, limit_tokens, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		trimSpace(input.Name), trimSpace(input.Description), digest, digest, preview,
-		boolToInt64(input.Enabled), expiresAt, groupID)
+		boolToInt64(input.Enabled), expiresAt, groupID, limitTokens)
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.Database(err)
 	}
@@ -331,6 +342,7 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 		UpdatedAt:    created.UpdatedAt,
 		GroupID:      created.GroupID,
 		GroupName:    created.GroupName,
+		Quota:        created.Quota,
 	}, nil
 }
 
@@ -384,9 +396,14 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
 		return models.APITokenOut{}, err
 	}
 
+	limitTokens, err := input.ParsedLimit()
+	if err != nil {
+		return models.APITokenOut{}, apperr.BadRequest(err.Error())
+	}
+
 	_, err = db.ExecContext(ctx,
-		"UPDATE api_tokens SET name = ?, description = ?, expires_at = ?, group_id = ?, updated_at = datetime('now') WHERE id = ?",
-		trimSpace(input.Name), trimSpace(input.Description), expiresAt, groupID, id)
+		"UPDATE api_tokens SET name = ?, description = ?, expires_at = ?, group_id = ?, limit_tokens = ?, updated_at = datetime('now') WHERE id = ?",
+		trimSpace(input.Name), trimSpace(input.Description), expiresAt, groupID, limitTokens, id)
 	if err != nil {
 		return models.APITokenOut{}, apperr.Database(err)
 	}
@@ -424,4 +441,22 @@ func equalOptionalString(left, right *string) bool {
 		return left == nil && right == nil
 	}
 	return *left == *right
+}
+
+// ResetTokenUsage clears a token's running total, so an operator can hand the
+// same credential a fresh budget without reissuing it.
+func ResetTokenUsage(ctx context.Context, db *sql.DB, id int64) (models.APITokenOut, error) {
+	result, err := db.ExecContext(ctx,
+		"UPDATE api_tokens SET used_tokens = 0, updated_at = datetime('now') WHERE id = ?", id)
+	if err != nil {
+		return models.APITokenOut{}, apperr.Database(err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return models.APITokenOut{}, apperr.Database(err)
+	}
+	if affected == 0 {
+		return models.APITokenOut{}, apperr.NotFound("token not found")
+	}
+	return reloadToken(ctx, db, id)
 }

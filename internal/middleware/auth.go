@@ -44,6 +44,10 @@ type DownstreamAuth struct {
 	ClientType string
 	// GroupID scopes which channels this token may reach.
 	GroupID int64
+	// UsedTokens and LimitTokens carry the quota state this request was admitted
+	// under. LimitTokens is nil when the token is unlimited.
+	UsedTokens  int64
+	LimitTokens *int64
 }
 
 // DownstreamAuthFrom returns the downstream authentication attached to an
@@ -156,8 +160,7 @@ func RequireDownstream(database *sql.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			tokenID, tokenName, groupID, found, err := LookupEnabledDownstreamToken(
-				r.Context(), database, token)
+			credential, found, err := LookupEnabledDownstreamToken(r.Context(), database, token)
 			if err != nil {
 				writeDownstreamRejection(w, anthropic, http.StatusInternalServerError,
 					"database error")
@@ -169,11 +172,23 @@ func RequireDownstream(database *sql.DB) func(http.Handler) http.Handler {
 				return
 			}
 
+			/* An exhausted quota is refused before the request reaches an
+			   upstream. The check is on the total recorded so far, so the request
+			   that crosses the limit is allowed to finish: its cost is only known
+			   once the response completes. */
+			if credential.LimitTokens != nil && credential.UsedTokens >= *credential.LimitTokens {
+				writeDownstreamQuotaRejection(w, anthropic,
+					models.QuotaExceededMessage(credential.UsedTokens, *credential.LimitTokens))
+				return
+			}
+
 			ctx := context.WithValue(r.Context(), downstreamAuthKey, DownstreamAuth{
-				TokenID:    tokenID,
-				TokenName:  tokenName,
-				ClientType: DetectClientType(r, anthropic),
-				GroupID:    groupID,
+				TokenID:     credential.TokenID,
+				TokenName:   credential.TokenName,
+				ClientType:  DetectClientType(r, anthropic),
+				GroupID:     credential.GroupID,
+				UsedTokens:  credential.UsedTokens,
+				LimitTokens: credential.LimitTokens,
 			})
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -181,18 +196,34 @@ func RequireDownstream(database *sql.DB) func(http.Handler) http.Handler {
 }
 
 func writeDownstreamRejection(w http.ResponseWriter, anthropic bool, status int, message string) {
+	writeDownstreamError(w, anthropic, status, message, "invalid_api_key", "authentication_error")
+}
+
+// writeDownstreamQuotaRejection reports an exhausted quota.
+//
+// The error type deliberately differs from a bad credential: a client that reads
+// invalid_api_key is expected to stop and have its key replaced, whereas a quota
+// refusal is resolved by raising the limit or resetting usage. Both vendors have
+// a rate-limit shape for exactly this, so it is reused.
+func writeDownstreamQuotaRejection(w http.ResponseWriter, anthropic bool, message string) {
+	writeDownstreamError(w, anthropic, http.StatusTooManyRequests, message,
+		"insufficient_quota", "rate_limit_error")
+}
+
+func writeDownstreamError(w http.ResponseWriter, anthropic bool, status int,
+	message, openAIType, anthropicType string) {
 	if anthropic {
 		apperr.WriteJSON(w, status, map[string]any{
 			"type":  "error",
-			"error": map[string]string{"type": "authentication_error", "message": message},
+			"error": map[string]string{"type": anthropicType, "message": message},
 		})
 		return
 	}
 	apperr.WriteJSON(w, status, map[string]any{
 		"error": map[string]string{
 			"message": message,
-			"type":    "invalid_api_key",
-			"code":    "invalid_api_key",
+			"type":    openAIType,
+			"code":    openAIType,
 		},
 	})
 }
@@ -241,36 +272,56 @@ func extractDownstreamToken(r *http.Request, anthropic bool) (string, bool) {
 	return "", false
 }
 
+// DownstreamCredential is the authenticated token's routing and quota state.
+type DownstreamCredential struct {
+	TokenID     int64
+	TokenName   string
+	GroupID     int64
+	UsedTokens  int64
+	LimitTokens *int64
+}
+
 // LookupEnabledDownstreamToken resolves a token to its row.
 //
 // A lapsed expiry filters the row out here rather than being reported
 // separately, so an expired token is indistinguishable from a disabled or
 // nonexistent one. Anything else would turn the error body into an oracle for
 // which tokens once existed.
+//
+// An exhausted quota is deliberately not filtered here: the caller reports it
+// separately, because a credential that is merely out of budget should say so
+// rather than look like a wrong key.
 func LookupEnabledDownstreamToken(ctx context.Context, database *sql.DB,
-	token string) (tokenID int64, tokenName string, groupID int64, found bool, err error) {
+	token string) (DownstreamCredential, bool, error) {
 	if token == "" {
-		return 0, "", 0, false, nil
+		return DownstreamCredential{}, false, nil
 	}
 
 	// A row predating groups, or one whose group was removed out of band, reads
 	// as the default group rather than as no group: a token that reaches nothing
 	// would look like a routing bug rather than a configuration choice.
-	var storedGroupID sql.NullInt64
-	err = database.QueryRowContext(ctx, `SELECT id, name, group_id FROM api_tokens
+	var credential DownstreamCredential
+	var storedGroupID, storedLimit sql.NullInt64
+	err := database.QueryRowContext(ctx,
+		`SELECT id, name, group_id, COALESCE(used_tokens, 0), limit_tokens FROM api_tokens
         WHERE token_hash = ? AND enabled = 1
           AND (expires_at IS NULL OR expires_at > datetime('now'))`,
-		db.TokenDigest(token)).Scan(&tokenID, &tokenName, &storedGroupID)
+		db.TokenDigest(token)).
+		Scan(&credential.TokenID, &credential.TokenName, &storedGroupID,
+			&credential.UsedTokens, &storedLimit)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, "", 0, false, nil
+		return DownstreamCredential{}, false, nil
 	}
 	if err != nil {
-		return 0, "", 0, false, err
+		return DownstreamCredential{}, false, err
 	}
 
-	groupID = models.DefaultGroupID
+	credential.GroupID = models.DefaultGroupID
 	if storedGroupID.Valid && storedGroupID.Int64 > 0 {
-		groupID = storedGroupID.Int64
+		credential.GroupID = storedGroupID.Int64
 	}
-	return tokenID, tokenName, groupID, true, nil
+	if storedLimit.Valid && storedLimit.Int64 > 0 {
+		credential.LimitTokens = &storedLimit.Int64
+	}
+	return credential, true, nil
 }

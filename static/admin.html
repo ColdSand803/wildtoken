@@ -553,6 +553,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
                     <th>描述</th>
                     <th>令牌预览</th>
                     <th>分组</th>
+                    <th>限额</th>
                     <th>有效期</th>
                     <th class="col-status">状态</th>
                     <th class="col-actions">操作</th>
@@ -1102,6 +1103,11 @@ anthropic: "/theme-packs/anthropic/theme.css",
               <span class="field-label">分组</span>
               <select id="token-group"></select>
               <span class="field-hint">令牌只能路由到同分组的渠道。</span>
+            </label>
+            <label class="field span-2">
+              <span class="field-label">限额（可选）</span>
+              <input id="token-limit" autocomplete="off" spellcheck="false" maxlength="24" placeholder="留空则不限额，如 100M、1B、1000K" />
+              <span class="field-hint">按累计 token 总量计算，不会自动重置。支持 K/M/B/T 后缀。</span>
             </label>
             <div class="field span-2">
               <label class="field-label" for="token-expires">有效期（可选）</label>

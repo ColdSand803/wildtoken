@@ -380,3 +380,67 @@ func TestCleanupPassClearsBodiesBeyondTheKeepCount(t *testing.T) {
 		t.Errorf("cleanup metrics = %+v, want one finished run clearing 3 rows", snapshot)
 	}
 }
+
+func TestCommittedLogsAdvanceTheTokenQuotaCounter(t *testing.T) {
+	database := loggingTestDB(t)
+	ctx := context.Background()
+
+	created, err := db.CreateToken(ctx, database, &models.APITokenIn{
+		Name: "quota-client", Enabled: true, LimitExpression: "1M",
+	})
+	if err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+
+	total := int32(1500)
+	entry := LogEntry{
+		Method: "POST", Path: "/v1/responses",
+		DownstreamTokenID: &created.ID,
+		TotalTokens:       &total,
+	}
+	if _, err := insertLogBatch(ctx, database, []LogEntry{entry, entry}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// The counter advances in the same transaction as the log row, so two
+	// committed requests are counted exactly once each.
+	reloaded, _, err := db.GetToken(ctx, database, created.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Quota.UsedTokens != 3000 {
+		t.Errorf("used = %d, want 3000", reloaded.Quota.UsedTokens)
+	}
+}
+
+func TestARequestWithoutUsageLeavesTheQuotaUntouched(t *testing.T) {
+	database := loggingTestDB(t)
+	ctx := context.Background()
+
+	created, err := db.CreateToken(ctx, database, &models.APITokenIn{
+		Name: "quota-client", Enabled: true, LimitExpression: "1M",
+	})
+	if err != nil {
+		t.Fatalf("create token: %v", err)
+	}
+
+	// A failed request reports no usage, so it must not consume budget.
+	message := "upstream unreachable"
+	status := int32(502)
+	if _, err := insertLogBatch(ctx, database, []LogEntry{{
+		Method: "POST", Path: "/v1/responses",
+		DownstreamTokenID: &created.ID,
+		StatusCode:        &status,
+		Error:             &message,
+	}}); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	reloaded, _, err := db.GetToken(ctx, database, created.ID)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded.Quota.UsedTokens != 0 {
+		t.Errorf("used = %d, want 0 for a request with no usage", reloaded.Quota.UsedTokens)
+	}
+}

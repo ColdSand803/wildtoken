@@ -139,12 +139,12 @@ function stopTokenRefresh() {
 
 function renderTokenRows() {
   if (tokensLoading && !tokensLoadedOnce) {
-    tokenRows.innerHTML = skeletonRowsMarkup(7, 5);
+    tokenRows.innerHTML = skeletonRowsMarkup(8, 5);
     return;
   }
 
   if (tokensLoadedOnce && tokens.length === 0 && !tokenFiltersActive()) {
-    tokenRows.innerHTML = emptyStateCell(7, {
+    tokenRows.innerHTML = emptyStateCell(8, {
       title: "暂无令牌",
       copy: "还没有创建下游 API 访问令牌。",
       actionLabel: "新增令牌",
@@ -155,7 +155,7 @@ function renderTokenRows() {
 
   const filtered = getFilteredTokens();
   if (tokensLoadedOnce && filtered.length === 0) {
-    tokenRows.innerHTML = noMatchStateCell(7, {
+    tokenRows.innerHTML = noMatchStateCell(8, {
       title: "无匹配令牌",
       copy: "当前搜索条件下没有结果。",
       actionLabel: "清除筛选",
@@ -177,6 +177,7 @@ function renderTokenRows() {
         <code class="token-preview-code" title="完整令牌仅在创建时显示一次">${escapeHtml(t.token_preview)}</code>
       </td>
       <td>${escapeHtml(t.group_name || "default")}</td>
+      <td class="col-quota">${quotaCellMarkup(t)}</td>
       <td class="col-expiry">${expiryCellMarkup(t.expires_at, nowMs)}</td>
       <td class="col-status">
         <button
@@ -258,6 +259,60 @@ function resetTokenForm() {
   tokenValueDisplay.textContent = "";
   tokenFormTitle.textContent = "新增令牌";
   delete tokenGroupSelect?.dataset.pendingGroupId;
+  if (tokenLimitInput) {
+    tokenLimitInput.value = "";
+  }
+}
+
+/* 限额展示成「已用 / 剩余 / 限额」。数字按 K/M/B 缩写，免得一列全是长数字看不清；
+   完整数值放 title 里。不限额的令牌只显示已用量，不编造一个剩余值出来。 */
+const QUOTA_UNITS = [
+  { suffix: "T", value: 1e12 },
+  { suffix: "B", value: 1e9 },
+  { suffix: "M", value: 1e6 },
+  { suffix: "K", value: 1e3 },
+];
+
+function formatTokenCount(count) {
+  const amount = Number(count) || 0;
+  for (const unit of QUOTA_UNITS) {
+    if (amount >= unit.value) {
+      const scaled = amount / unit.value;
+      // 整数就不带小数点，2.5M 这种保留一位足够看清量级。
+      const text = scaled >= 100 || Number.isInteger(scaled)
+        ? String(Math.round(scaled))
+        : scaled.toFixed(1);
+      return `${text}${unit.suffix}`;
+    }
+  }
+  return String(amount);
+}
+
+function quotaCellMarkup(token) {
+  const quota = token.quota || {};
+  const used = Number(quota.used_tokens) || 0;
+
+  if (quota.limit_tokens === null || quota.limit_tokens === undefined) {
+    return `<span class="quota-cell" title="已用 ${used.toLocaleString()} tokens，未设限额">`
+      + `<span class="quota-used">${formatTokenCount(used)}</span>`
+      + `<span class="quota-sep">/</span><span class="muted">不限</span></span>`;
+  }
+
+  const limit = Number(quota.limit_tokens) || 0;
+  const remaining = Number(quota.remaining_tokens) || 0;
+  const ratio = limit > 0 ? used / limit : 0;
+  // 用尽标红、接近用尽标黄，好在一列里扫出该处理哪个。
+  const tone = quota.exhausted ? "danger" : ratio >= 0.8 ? "warn" : "";
+  const title = `已用 ${used.toLocaleString()} / 剩余 ${remaining.toLocaleString()}`
+    + ` / 限额 ${limit.toLocaleString()} tokens`;
+
+  return `<span class="quota-cell ${tone}" title="${escapeHtml(title)}">`
+    + `<span class="quota-used">${formatTokenCount(used)}</span>`
+    + `<span class="quota-sep">/</span>`
+    + `<span class="quota-remaining">${formatTokenCount(remaining)}</span>`
+    + `<span class="quota-sep">/</span>`
+    + `<span class="quota-limit">${escapeHtml(quota.limit_expression || formatTokenCount(limit))}</span>`
+    + `</span>`;
 }
 
 function openTokenDialog(mode = "new") {
@@ -291,6 +346,10 @@ async function editToken(token) {
   tokenCustomInput.value = "";
   tokenCustomRow.hidden = true;
   tokenExpiresInput.value = expiryInputValue(token.expires_at);
+  if (tokenLimitInput) {
+    // 回填服务端算好的最短表达式，这样不动表单再保存不会改变限额。
+    tokenLimitInput.value = token.quota?.limit_expression || "";
+  }
   renderExpiryPreview();
   tokenEnabledCheckbox.checked = token.enabled;
   tokenValueRow.hidden = true;
@@ -435,6 +494,7 @@ tokenForm.addEventListener("submit", async (event) => {
     // against this machine's clock and sent as the instant it lands on.
     expires_at: expiry.expiresAtMs === null ? null : toStoredTimestamp(expiry.expiresAtMs),
     group_id: Number(tokenGroupSelect?.value) || 1,
+    limit_expression: tokenLimitInput?.value.trim() || "",
   };
   if (id) {
     // 编辑时不要 enabled（由单独的 enabled toggle 控制）
