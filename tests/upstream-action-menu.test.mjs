@@ -71,6 +71,8 @@ test("fixed weight checkbox maps to the existing dynamic-weight API field", () =
     parseModelMappings: () => ({}),
     getFormModels: () => [],
     splitList: () => [],
+    // 分组选择由 groups.js 提供，这里只验证权重字段，给个空选择即可。
+    readUpstreamGroupSelection: () => [],
   });
   vm.runInContext(extractFunction(source, "payloadFromForm"), context);
 

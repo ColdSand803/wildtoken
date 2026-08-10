@@ -13,6 +13,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/apperr"
 	"github.com/liguangsheng/wildtoken/internal/authstate"
 	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 type contextKey int
@@ -41,6 +42,8 @@ type DownstreamAuth struct {
 	TokenID    int64
 	TokenName  string
 	ClientType string
+	// GroupID scopes which channels this token may reach.
+	GroupID int64
 }
 
 // DownstreamAuthFrom returns the downstream authentication attached to an
@@ -153,7 +156,8 @@ func RequireDownstream(database *sql.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			tokenID, tokenName, found, err := LookupEnabledDownstreamToken(r.Context(), database, token)
+			tokenID, tokenName, groupID, found, err := LookupEnabledDownstreamToken(
+				r.Context(), database, token)
 			if err != nil {
 				writeDownstreamRejection(w, anthropic, http.StatusInternalServerError,
 					"database error")
@@ -169,6 +173,7 @@ func RequireDownstream(database *sql.DB) func(http.Handler) http.Handler {
 				TokenID:    tokenID,
 				TokenName:  tokenName,
 				ClientType: DetectClientType(r, anthropic),
+				GroupID:    groupID,
 			})
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -242,22 +247,30 @@ func extractDownstreamToken(r *http.Request, anthropic bool) (string, bool) {
 // separately, so an expired token is indistinguishable from a disabled or
 // nonexistent one. Anything else would turn the error body into an oracle for
 // which tokens once existed.
-func LookupEnabledDownstreamToken(ctx context.Context, database *sql.DB, token string) (int64, string, bool, error) {
+func LookupEnabledDownstreamToken(ctx context.Context, database *sql.DB,
+	token string) (tokenID int64, tokenName string, groupID int64, found bool, err error) {
 	if token == "" {
-		return 0, "", false, nil
+		return 0, "", 0, false, nil
 	}
 
-	var id int64
-	var name string
-	err := database.QueryRowContext(ctx, `SELECT id, name FROM api_tokens
+	// A row predating groups, or one whose group was removed out of band, reads
+	// as the default group rather than as no group: a token that reaches nothing
+	// would look like a routing bug rather than a configuration choice.
+	var storedGroupID sql.NullInt64
+	err = database.QueryRowContext(ctx, `SELECT id, name, group_id FROM api_tokens
         WHERE token_hash = ? AND enabled = 1
           AND (expires_at IS NULL OR expires_at > datetime('now'))`,
-		db.TokenDigest(token)).Scan(&id, &name)
+		db.TokenDigest(token)).Scan(&tokenID, &tokenName, &storedGroupID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, "", false, nil
+		return 0, "", 0, false, nil
 	}
 	if err != nil {
-		return 0, "", false, err
+		return 0, "", 0, false, err
 	}
-	return id, name, true, nil
+
+	groupID = models.DefaultGroupID
+	if storedGroupID.Valid && storedGroupID.Int64 > 0 {
+		groupID = storedGroupID.Int64
+	}
+	return tokenID, tokenName, groupID, true, nil
 }

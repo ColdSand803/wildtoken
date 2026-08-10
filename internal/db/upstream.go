@@ -116,11 +116,20 @@ func ListUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamOut, error
 	if err != nil {
 		return nil, err
 	}
+	membership, err := UpstreamGroupMembership(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+
 	upstreams := make([]models.UpstreamOut, 0, len(rows))
 	for i := range rows {
 		out, err := RowToUpstreamOut(&rows[i])
 		if err != nil {
 			return nil, err
+		}
+		out.GroupIDs = membership[out.ID]
+		if out.GroupIDs == nil {
+			out.GroupIDs = []int64{}
 		}
 		upstreams = append(upstreams, out)
 	}
@@ -196,7 +205,13 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 		return models.UpstreamOut{}, err
 	}
 
-	result, err := db.ExecContext(ctx, `INSERT INTO upstreams
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.UpstreamOut{}, apperr.Database(err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx, `INSERT INTO upstreams
         (name, base_url, api_key, model_names, model_prefixes, model_mappings,
          priority, weight, auto_weight_enabled, enabled, extra_headers, timeout_seconds,
          created_at, updated_at)
@@ -212,6 +227,15 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 		return models.UpstreamOut{}, apperr.Database(err)
 	}
 
+	// Membership commits with the channel, so a channel can never exist without
+	// belonging to a group and therefore being unreachable.
+	if err := ReplaceUpstreamGroups(ctx, tx, id, input.GroupIDs); err != nil {
+		return models.UpstreamOut{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.UpstreamOut{}, apperr.Database(err)
+	}
+
 	row, ok, err := GetUpstream(ctx, db, id)
 	if err != nil {
 		return models.UpstreamOut{}, err
@@ -219,7 +243,12 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 	if !ok {
 		return models.UpstreamOut{}, apperr.Internal("upstream was not persisted")
 	}
-	return RowToUpstreamOut(&row)
+	out, err := RowToUpstreamOut(&row)
+	if err != nil {
+		return out, err
+	}
+	out.GroupIDs, err = ListUpstreamGroupIDs(ctx, db, id)
+	return out, err
 }
 
 func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.UpstreamUpdate) (models.UpstreamOut, error) {
@@ -249,7 +278,13 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 		return models.UpstreamOut{}, err
 	}
 
-	_, err = db.ExecContext(ctx, `UPDATE upstreams
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.UpstreamOut{}, apperr.Database(err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.ExecContext(ctx, `UPDATE upstreams
         SET name = ?, base_url = ?, api_key = ?,
             model_names = ?, model_prefixes = ?, model_mappings = ?,
             priority = ?, weight = ?, auto_weight_enabled = ?, enabled = ?, extra_headers = ?,
@@ -259,6 +294,12 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 		input.Priority, input.Weight, boolToInt64(input.AutoWeightEnabled),
 		boolToInt64(input.Enabled), extraHeaders, timeout, id)
 	if err != nil {
+		return models.UpstreamOut{}, apperr.Database(err)
+	}
+	if err := ReplaceUpstreamGroups(ctx, tx, id, input.GroupIDs); err != nil {
+		return models.UpstreamOut{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return models.UpstreamOut{}, apperr.Database(err)
 	}
 
@@ -293,7 +334,12 @@ func reloadUpstreamOut(ctx context.Context, db *sql.DB, id int64) (models.Upstre
 	if !ok {
 		return models.UpstreamOut{}, apperr.NotFound(fmt.Sprintf("upstream %d not found", id))
 	}
-	return RowToUpstreamOut(&row)
+	out, err := RowToUpstreamOut(&row)
+	if err != nil {
+		return out, err
+	}
+	out.GroupIDs, err = ListUpstreamGroupIDs(ctx, db, id)
+	return out, err
 }
 
 func DeleteUpstream(ctx context.Context, db *sql.DB, id int64) (bool, error) {

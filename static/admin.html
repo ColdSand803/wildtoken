@@ -106,6 +106,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
           <button type="button" class="nav-link" data-view="upstreams">渠道</button>
           <button type="button" class="nav-link" data-view="logs">日志</button>
           <button type="button" class="nav-link" data-view="tokens">令牌</button>
+          <button type="button" class="nav-link" data-view="groups">分组</button>
           <button type="button" class="nav-link" data-view="settings">设置</button>
         </div>
         <div class="topbar-actions">
@@ -491,6 +492,35 @@ anthropic: "/theme-packs/anthropic/theme.css",
           </section>
         </section>
 
+        <section class="view" data-view="groups" hidden>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">ROUTING SCOPES</span>
+                <h2>分组</h2>
+                <p>令牌只能路由到同分组的渠道。</p>
+              </div>
+              <div class="panel-actions">
+                <button type="button" id="group-create" class="primary">新增分组</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="admin-table" id="group-table">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>描述</th>
+                    <th class="numeric">渠道</th>
+                    <th class="numeric">令牌</th>
+                    <th class="actions-col">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="group-rows"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
         <section class="view" data-view="tokens" hidden>
           <section class="panel">
             <div class="panel-head">
@@ -521,6 +551,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
                     <th>名称</th>
                     <th>描述</th>
                     <th>令牌预览</th>
+                    <th>分组</th>
                     <th>有效期</th>
                     <th class="col-status">状态</th>
                     <th class="col-actions">操作</th>
@@ -650,6 +681,11 @@ anthropic: "/theme-packs/anthropic/theme.css",
                 <input id="api-key" autocomplete="off" spellcheck="false" placeholder="未配置时留空" />
                 <span class="field-hint">编辑时会显示当前密钥；复制渠道需重新填写。</span>
               </label>
+              <div class="field span-2">
+                <span class="field-label">分组</span>
+                <div id="upstream-groups" class="group-checklist"></div>
+                <span class="field-hint">可同时加入多个分组；不选则归入 default。只有同分组的令牌能路由到本渠道。</span>
+              </div>
               <div class="toggle-list span-2">
                 <label class="toggle-row span-2">
                   <input id="clear-api-key" type="checkbox" />
@@ -1002,6 +1038,40 @@ anthropic: "/theme-packs/anthropic/theme.css",
         <div class="modal-actions"><button id="model-test-template-cancel" type="button" class="secondary">取消</button><button type="submit">保存模板</button></div>
       </form>
     </dialog>
+    <dialog id="group-dialog" class="upstream-dialog">
+      <form id="group-form" class="upstream-dialog-panel">
+        <header class="modal-head">
+          <div>
+            <h2 id="group-dialog-title">新增分组</h2>
+            <p class="modal-sub">分组用于隔离令牌可访问的渠道范围。</p>
+          </div>
+          <div class="modal-head-actions">
+            <button id="group-dialog-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button>
+          </div>
+        </header>
+        <input id="group-id" type="hidden" />
+        <div class="upstream-dialog-body">
+          <section class="form-section">
+            <div class="form-grid">
+              <label class="field span-2">
+                <span class="field-label">名称</span>
+                <input id="group-name" required maxlength="60" placeholder="例如：team-a" />
+                <span class="field-hint">default 分组不可重命名或删除。</span>
+              </label>
+              <label class="field span-2">
+                <span class="field-label">描述</span>
+                <input id="group-description" maxlength="200" placeholder="可选备注" />
+              </label>
+            </div>
+          </section>
+        </div>
+        <footer class="modal-foot">
+          <button type="button" id="group-cancel" class="secondary">取消</button>
+          <button type="submit" class="primary">保存</button>
+        </footer>
+      </form>
+    </dialog>
+
     <dialog id="token-dialog" class="upstream-dialog">
       <form id="token-form" class="upstream-dialog-panel">
         <div class="modal-head upstream-modal-head">
@@ -1026,6 +1096,11 @@ anthropic: "/theme-packs/anthropic/theme.css",
               <span class="field-label">自定义令牌（可选）</span>
               <input id="token-custom" autocomplete="off" spellcheck="false" maxlength="256" placeholder="留空则自动生成" />
               <span class="field-hint">需为无空格的可打印 ASCII，最长 256 字节；短于 16 字节会要求二次确认。完整值仅在创建时显示一次。</span>
+            </label>
+            <label class="field span-2">
+              <span class="field-label">分组</span>
+              <select id="token-group"></select>
+              <span class="field-hint">令牌只能路由到同分组的渠道。</span>
             </label>
             <div class="field span-2">
               <label class="field-label" for="token-expires">有效期（可选）</label>
@@ -1135,6 +1210,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
     <script src="/static/js/logs.js"></script>
     <script src="/static/js/models.js"></script>
     <script src="/static/js/tokens.js"></script>
+    <script src="/static/js/groups.js"></script>
     <script src="/static/js/events.js"></script>
   </body>
 </html>

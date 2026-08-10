@@ -73,6 +73,7 @@ type APITokenRow struct {
 	ExpiresAt    *string
 	CreatedAt    string
 	UpdatedAt    string
+	GroupID      int64
 }
 
 // APITokenIn is the create payload. A nil Token means "generate one".
@@ -83,6 +84,9 @@ type APITokenIn struct {
 	Enabled     bool    `json:"enabled"`
 	// ExpiresAt absent, null or blank means the token never expires.
 	ExpiresAt *string `json:"expires_at"`
+	// GroupID scopes which channels this token may reach. Absent means the
+	// default group.
+	GroupID *int64 `json:"group_id"`
 }
 
 // APITokenUpdateIn is a full replacement, so an absent `expires_at` clears the
@@ -91,6 +95,7 @@ type APITokenUpdateIn struct {
 	Name        string  `json:"name"`
 	Description string  `json:"description"`
 	ExpiresAt   *string `json:"expires_at"`
+	GroupID     *int64  `json:"group_id"`
 }
 
 func validateTokenMetadata(name, description string) error {
@@ -165,6 +170,8 @@ type APITokenOut struct {
 	ExpiresAt    *string `json:"expires_at"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
+	GroupID      int64   `json:"group_id"`
+	GroupName    string  `json:"group_name"`
 }
 
 // APITokenCreatedOut is returned only by the creation endpoint, so the full
@@ -179,4 +186,6 @@ type APITokenCreatedOut struct {
 	ExpiresAt    *string `json:"expires_at"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
+	GroupID      int64   `json:"group_id"`
+	GroupName    string  `json:"group_name"`
 }

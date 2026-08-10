@@ -37,10 +37,16 @@ type parsedUpstream struct {
 	modelNames    []parsedModelName
 	modelPrefixes []string
 	modelMappings []parsedModelMapping
+	// groupIDs are the groups this channel serves. A token may only reach a
+	// channel that shares its group.
+	groupIDs map[int64]bool
 }
 
-func newParsedUpstream(row models.UpstreamRow) *parsedUpstream {
-	upstream := &parsedUpstream{row: row}
+func newParsedUpstream(row models.UpstreamRow, groupIDs []int64) *parsedUpstream {
+	upstream := &parsedUpstream{row: row, groupIDs: make(map[int64]bool, len(groupIDs))}
+	for _, groupID := range groupIDs {
+		upstream.groupIDs[groupID] = true
+	}
 
 	var names []string
 	if err := json.Unmarshal([]byte(row.ModelNames), &names); err == nil {
@@ -88,7 +94,7 @@ type routingSnapshot struct {
 	byName    map[string]*parsedUpstream
 }
 
-func newRoutingSnapshot(rows []models.UpstreamRow) *routingSnapshot {
+func newRoutingSnapshot(rows []models.UpstreamRow, membership map[int64][]int64) *routingSnapshot {
 	snapshot := &routingSnapshot{
 		byID:   make(map[int64]*parsedUpstream, len(rows)),
 		byName: make(map[string]*parsedUpstream, len(rows)),
@@ -97,7 +103,7 @@ func newRoutingSnapshot(rows []models.UpstreamRow) *routingSnapshot {
 		if row.Enabled != 1 {
 			continue
 		}
-		upstream := newParsedUpstream(row)
+		upstream := newParsedUpstream(row, membership[row.ID])
 		snapshot.upstreams = append(snapshot.upstreams, upstream)
 		snapshot.byID[row.ID] = upstream
 		snapshot.byName[row.Name] = upstream
@@ -144,7 +150,11 @@ func (c *RoutingCache) getOrLoad(ctx context.Context, database *sql.DB) (*routin
 		if err != nil {
 			return nil, err
 		}
-		loaded := newRoutingSnapshot(rows)
+		membership, err := db.UpstreamGroupMembership(ctx, database)
+		if err != nil {
+			return nil, err
+		}
+		loaded := newRoutingSnapshot(rows, membership)
 
 		c.mu.Lock()
 		if c.value != nil {
@@ -264,12 +274,13 @@ func SelectUpstream(
 	policy AutoWeightPolicy,
 	upstreamSelector *string,
 	model *string,
+	groupID int64,
 ) (*Selection, error) {
 	snapshot, err := cache.getOrLoad(ctx, database)
 	if err != nil {
 		return nil, err
 	}
-	return selectFromSnapshot(snapshot, autoWeight, policy, upstreamSelector, model), nil
+	return selectFromSnapshot(snapshot, autoWeight, policy, upstreamSelector, model, groupID), nil
 }
 
 func selectFromSnapshot(
@@ -278,15 +289,24 @@ func selectFromSnapshot(
 	policy AutoWeightPolicy,
 	upstreamSelector *string,
 	model *string,
+	groupID int64,
 ) *Selection {
 	if upstreamSelector != nil {
-		return selectDirect(snapshot, *upstreamSelector, model)
+		return selectDirect(snapshot, *upstreamSelector, model, groupID)
 	}
 	if len(snapshot.upstreams) == 0 {
 		return nil
 	}
 
-	candidates := filterByBestModelScore(snapshot.upstreams, model)
+	// Group isolation is applied before model matching, so a token can never
+	// reach a channel outside its group, and a model served only elsewhere reads
+	// as "no route" rather than leaking that the channel exists.
+	reachable := filterByGroup(snapshot.upstreams, groupID)
+	if len(reachable) == 0 {
+		return nil
+	}
+
+	candidates := filterByBestModelScore(reachable, model)
 	if len(candidates) == 0 {
 		return nil
 	}
@@ -295,18 +315,37 @@ func selectFromSnapshot(
 }
 
 // selectDirect resolves an explicit selector, which may be an id or a name.
-// Model matching still applies, so a selector cannot route a model an upstream
-// does not serve.
-func selectDirect(snapshot *routingSnapshot, selector string, model *string) *Selection {
+//
+// Model matching and group membership both still apply: a selector is a routing
+// hint, not a way around the isolation a token's group establishes.
+func selectDirect(snapshot *routingSnapshot, selector string, model *string, groupID int64) *Selection {
 	if id, err := strconv.ParseInt(selector, 10, 64); err == nil {
-		if upstream, ok := snapshot.byID[id]; ok && matchesModel(upstream, model) {
+		if upstream, ok := snapshot.byID[id]; ok &&
+			upstream.servesGroup(groupID) && matchesModel(upstream, model) {
 			return &Selection{Upstream: upstream.row, ForwardModel: selectForwardModel(upstream, model)}
 		}
 	}
-	if upstream, ok := snapshot.byName[selector]; ok && matchesModel(upstream, model) {
+	if upstream, ok := snapshot.byName[selector]; ok &&
+		upstream.servesGroup(groupID) && matchesModel(upstream, model) {
 		return &Selection{Upstream: upstream.row, ForwardModel: selectForwardModel(upstream, model)}
 	}
 	return nil
+}
+
+// servesGroup reports whether a channel is reachable from a group.
+func (u *parsedUpstream) servesGroup(groupID int64) bool {
+	return u.groupIDs[groupID]
+}
+
+// filterByGroup keeps only the channels a group can reach.
+func filterByGroup(upstreams []*parsedUpstream, groupID int64) []*parsedUpstream {
+	reachable := make([]*parsedUpstream, 0, len(upstreams))
+	for _, upstream := range upstreams {
+		if upstream.servesGroup(groupID) {
+			reachable = append(reachable, upstream)
+		}
+	}
+	return reachable
 }
 
 // filterByBestModelScore keeps only the upstreams tied at the highest score.

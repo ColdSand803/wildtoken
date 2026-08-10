@@ -1048,3 +1048,25 @@ dialog.is-maximized .log-detail-panel {
 .modal-actions {
   justify-content: flex-end;
 }
+
+/* 分组多选：横向排列的复选框，数量多时自动换行 */
+.group-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-muted, transparent);
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.group-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9em;
+  white-space: nowrap;
+  cursor: pointer;
+}

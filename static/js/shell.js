@@ -364,6 +364,9 @@ function switchView(name) {
   } else {
     stopTokenRefresh();
   }
+  if (name === "groups") {
+    loadGroups();
+  }
   if (name === "settings") {
     loadSettingsPage();
     startSystemUptimeTicker();

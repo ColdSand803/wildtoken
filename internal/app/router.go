@@ -92,6 +92,14 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			upstreams.Post("/{id}/balance/sub2api", handlers.AdminFetchUpstreamSub2APIBalance(state))
 		})
 
+		admin.Route("/groups", func(groups chi.Router) {
+			groups.Get("/", handlers.AdminListGroups(state))
+			groups.Post("/", handlers.AdminCreateGroup(state))
+			groups.Get("/{id}", handlers.AdminGetGroup(state))
+			groups.Put("/{id}", handlers.AdminUpdateGroup(state))
+			groups.Delete("/{id}", handlers.AdminDeleteGroup(state))
+		})
+
 		admin.Route("/tokens", func(tokens chi.Router) {
 			tokens.Get("/", handlers.AdminListTokens(state))
 			tokens.Post("/", handlers.AdminCreateToken(state))

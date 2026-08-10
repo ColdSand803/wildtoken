@@ -139,12 +139,12 @@ function stopTokenRefresh() {
 
 function renderTokenRows() {
   if (tokensLoading && !tokensLoadedOnce) {
-    tokenRows.innerHTML = skeletonRowsMarkup(6, 5);
+    tokenRows.innerHTML = skeletonRowsMarkup(7, 5);
     return;
   }
 
   if (tokensLoadedOnce && tokens.length === 0 && !tokenFiltersActive()) {
-    tokenRows.innerHTML = emptyStateCell(6, {
+    tokenRows.innerHTML = emptyStateCell(7, {
       title: "暂无令牌",
       copy: "还没有创建下游 API 访问令牌。",
       actionLabel: "新增令牌",
@@ -155,7 +155,7 @@ function renderTokenRows() {
 
   const filtered = getFilteredTokens();
   if (tokensLoadedOnce && filtered.length === 0) {
-    tokenRows.innerHTML = noMatchStateCell(6, {
+    tokenRows.innerHTML = noMatchStateCell(7, {
       title: "无匹配令牌",
       copy: "当前搜索条件下没有结果。",
       actionLabel: "清除筛选",
@@ -176,6 +176,7 @@ function renderTokenRows() {
       <td>
         <code class="token-preview-code" title="完整令牌仅在创建时显示一次">${escapeHtml(t.token_preview)}</code>
       </td>
+      <td>${escapeHtml(t.group_name || "default")}</td>
       <td class="col-expiry">${expiryCellMarkup(t.expires_at, nowMs)}</td>
       <td class="col-status">
         <button
@@ -256,12 +257,15 @@ function resetTokenForm() {
   tokenValueRow.hidden = true;
   tokenValueDisplay.textContent = "";
   tokenFormTitle.textContent = "新增令牌";
+  delete tokenGroupSelect?.dataset.pendingGroupId;
 }
 
 function openTokenDialog(mode = "new") {
   if (mode === "new") {
     resetTokenForm();
   }
+  // 分组列表可能在别处被改过，每次开弹窗都重新填一遍。
+  fillTokenGroupOptions(tokenGroupSelect?.dataset.pendingGroupId);
   if (typeof tokenDialog.showModal === "function") {
     tokenDialog.showModal();
   } else {
@@ -291,6 +295,9 @@ async function editToken(token) {
   tokenEnabledCheckbox.checked = token.enabled;
   tokenValueRow.hidden = true;
   tokenFormTitle.textContent = `编辑令牌：${token.name}`;
+  if (tokenGroupSelect) {
+    tokenGroupSelect.dataset.pendingGroupId = String(token.group_id || 1);
+  }
   openTokenDialog("edit");
 }
 
@@ -427,6 +434,7 @@ tokenForm.addEventListener("submit", async (event) => {
     // The server only takes absolute times, so a duration is resolved here
     // against this machine's clock and sent as the instant it lands on.
     expires_at: expiry.expiresAtMs === null ? null : toStoredTimestamp(expiry.expiresAtMs),
+    group_id: Number(tokenGroupSelect?.value) || 1,
   };
   if (id) {
     // 编辑时不要 enabled（由单独的 enabled toggle 控制）

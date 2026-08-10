@@ -18,7 +18,13 @@ const tokenPreviewChars = 8
 
 // tokenColumns lists every column of a token row, in the order APITokenRow
 // declares them.
-const tokenColumns = "id, name, description, token_preview, enabled, expires_at, created_at, updated_at"
+const tokenColumns = `t.id, t.name, t.description, t.token_preview, t.enabled,
+    t.expires_at, t.created_at, t.updated_at,
+    COALESCE(t.group_id, 1),
+    COALESCE((SELECT g.name FROM groups g WHERE g.id = t.group_id), 'default')`
+
+// tokenFrom is the FROM clause matching tokenColumns.
+const tokenFrom = " FROM api_tokens AS t"
 
 // GenerateAPIToken mints a fresh downstream token.
 func GenerateAPIToken() (string, error) {
@@ -45,21 +51,23 @@ func TokenPreview(token string) string {
 	return string(runes[:visible]) + "…"
 }
 
-func scanTokenRow(row interface{ Scan(...any) error }) (models.APITokenRow, error) {
+func scanTokenRow(row interface{ Scan(...any) error }) (models.APITokenRow, string, error) {
 	var token models.APITokenRow
 	var expiresAt sql.NullString
+	var groupName string
 	err := row.Scan(&token.ID, &token.Name, &token.Description, &token.TokenPreview,
-		&token.Enabled, &expiresAt, &token.CreatedAt, &token.UpdatedAt)
+		&token.Enabled, &expiresAt, &token.CreatedAt, &token.UpdatedAt,
+		&token.GroupID, &groupName)
 	if err != nil {
-		return token, err
+		return token, "", err
 	}
 	if expiresAt.Valid {
 		token.ExpiresAt = &expiresAt.String
 	}
-	return token, nil
+	return token, groupName, nil
 }
 
-func tokenOut(row models.APITokenRow) models.APITokenOut {
+func tokenOut(row models.APITokenRow, groupName string) models.APITokenOut {
 	return models.APITokenOut{
 		ID:           row.ID,
 		Name:         row.Name,
@@ -69,6 +77,8 @@ func tokenOut(row models.APITokenRow) models.APITokenOut {
 		ExpiresAt:    row.ExpiresAt,
 		CreatedAt:    row.CreatedAt,
 		UpdatedAt:    row.UpdatedAt,
+		GroupID:      row.GroupID,
+		GroupName:    groupName,
 	}
 }
 
@@ -227,7 +237,7 @@ func uniqueMarkerPrefix[T any](rows []T) (string, error) {
 
 func ListTokens(ctx context.Context, db *sql.DB) ([]models.APITokenOut, error) {
 	rows, err := db.QueryContext(ctx,
-		"SELECT "+tokenColumns+" FROM api_tokens ORDER BY id ASC")
+		"SELECT "+tokenColumns+tokenFrom+" ORDER BY t.id ASC")
 	if err != nil {
 		return nil, apperr.Database(err)
 	}
@@ -235,11 +245,11 @@ func ListTokens(ctx context.Context, db *sql.DB) ([]models.APITokenOut, error) {
 
 	tokens := []models.APITokenOut{}
 	for rows.Next() {
-		row, err := scanTokenRow(rows)
+		row, groupName, err := scanTokenRow(rows)
 		if err != nil {
 			return nil, apperr.Database(err)
 		}
-		tokens = append(tokens, tokenOut(row))
+		tokens = append(tokens, tokenOut(row, groupName))
 	}
 	if err := rows.Err(); err != nil {
 		return nil, apperr.Database(err)
@@ -249,15 +259,15 @@ func ListTokens(ctx context.Context, db *sql.DB) ([]models.APITokenOut, error) {
 
 // GetToken returns ok=false when no row carries the id.
 func GetToken(ctx context.Context, db *sql.DB, id int64) (models.APITokenOut, bool, error) {
-	row := db.QueryRowContext(ctx, "SELECT "+tokenColumns+" FROM api_tokens WHERE id = ?", id)
-	entry, err := scanTokenRow(row)
+	row := db.QueryRowContext(ctx, "SELECT "+tokenColumns+tokenFrom+" WHERE t.id = ?", id)
+	entry, groupName, err := scanTokenRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.APITokenOut{}, false, nil
 	}
 	if err != nil {
 		return models.APITokenOut{}, false, apperr.Database(err)
 	}
-	return tokenOut(entry), true, nil
+	return tokenOut(entry, groupName), true, nil
 }
 
 func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (models.APITokenCreatedOut, error) {
@@ -283,11 +293,16 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 	digest := TokenDigest(tokenValue)
 	preview := TokenPreview(tokenValue)
 
+	groupID, err := resolveTokenGroup(ctx, db, input.GroupID)
+	if err != nil {
+		return models.APITokenCreatedOut{}, err
+	}
+
 	result, err := db.ExecContext(ctx, `INSERT INTO api_tokens
-        (name, description, token, token_hash, token_preview, enabled, expires_at, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        (name, description, token, token_hash, token_preview, enabled, expires_at, group_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		trimSpace(input.Name), trimSpace(input.Description), digest, digest, preview,
-		boolToInt64(input.Enabled), expiresAt)
+		boolToInt64(input.Enabled), expiresAt, groupID)
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.Database(err)
 	}
@@ -314,7 +329,28 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 		ExpiresAt:    created.ExpiresAt,
 		CreatedAt:    created.CreatedAt,
 		UpdatedAt:    created.UpdatedAt,
+		GroupID:      created.GroupID,
+		GroupName:    created.GroupName,
 	}, nil
+}
+
+// resolveTokenGroup validates a requested group, defaulting when absent.
+//
+// A token must always name a group that exists: with no group it would reach no
+// channel, which reads as a routing bug rather than a configuration choice.
+func resolveTokenGroup(ctx context.Context, db *sql.DB, requested *int64) (int64, error) {
+	groupID := models.DefaultGroupID
+	if requested != nil && *requested > 0 {
+		groupID = *requested
+	}
+	exists, err := GroupExists(ctx, db, groupID)
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, apperr.BadRequest("group does not exist")
+	}
+	return groupID, nil
 }
 
 func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITokenUpdateIn) (models.APITokenOut, error) {
@@ -343,9 +379,14 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
 		}
 	}
 
+	groupID, err := resolveTokenGroup(ctx, db, input.GroupID)
+	if err != nil {
+		return models.APITokenOut{}, err
+	}
+
 	_, err = db.ExecContext(ctx,
-		"UPDATE api_tokens SET name = ?, description = ?, expires_at = ?, updated_at = datetime('now') WHERE id = ?",
-		trimSpace(input.Name), trimSpace(input.Description), expiresAt, id)
+		"UPDATE api_tokens SET name = ?, description = ?, expires_at = ?, group_id = ?, updated_at = datetime('now') WHERE id = ?",
+		trimSpace(input.Name), trimSpace(input.Description), expiresAt, groupID, id)
 	if err != nil {
 		return models.APITokenOut{}, apperr.Database(err)
 	}

@@ -43,13 +43,25 @@ func insertUpstream(t *testing.T, database *sql.DB, name string, modelNames []st
 	if autoWeightEnabled {
 		enabled = 1
 	}
-	_, err = database.Exec(`INSERT INTO upstreams
+	result, err := database.Exec(`INSERT INTO upstreams
         (name, base_url, model_names, model_prefixes, model_mappings,
          priority, weight, auto_weight_enabled, enabled, extra_headers, timeout_seconds)
         VALUES (?, 'https://example.test', ?, '[]', '{}', ?, ?, ?, 1, '{}', 300.0)`,
 		name, string(encoded), priority, weight, enabled)
 	if err != nil {
 		t.Fatalf("insert upstream %s: %v", name, err)
+	}
+
+	// The store puts a new channel in the default group; this helper writes the
+	// row directly, so it has to do the same or the channel is unreachable.
+	id, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("upstream id: %v", err)
+	}
+	if _, err := database.Exec(
+		"INSERT INTO upstream_groups (upstream_id, group_id) VALUES (?, ?)",
+		id, models.DefaultGroupID); err != nil {
+		t.Fatalf("join default group: %v", err)
 	}
 }
 
@@ -59,7 +71,7 @@ func selectWithFreshCache(t *testing.T, database *sql.DB, autoWeight *AutoWeight
 	selector, model *string) *Selection {
 	t.Helper()
 	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
-		autoWeight, testPolicy(), selector, model)
+		autoWeight, testPolicy(), selector, model, models.DefaultGroupID)
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}
@@ -128,7 +140,7 @@ func TestRoutingCacheReusesSnapshotUntilInvalidated(t *testing.T) {
 	selectVia := func(model string) *Selection {
 		t.Helper()
 		selection, err := SelectUpstream(context.Background(), database, cache,
-			autoWeight, testPolicy(), nil, &model)
+			autoWeight, testPolicy(), nil, &model, models.DefaultGroupID)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -225,7 +237,7 @@ func TestExactModelNameAndMappingTieBeforePriority(t *testing.T) {
 		if err != nil || !ok {
 			t.Fatalf("load %s: %v (ok=%v)", name, err, ok)
 		}
-		if score := modelMatchScore(newParsedUpstream(row), ptr("gpt-test")); score != 4 {
+		if score := modelMatchScore(newParsedUpstream(row, []int64{models.DefaultGroupID}), ptr("gpt-test")); score != 4 {
 			t.Errorf("%s scored %d, want 4", name, score)
 		}
 	}
@@ -320,7 +332,7 @@ func TestWeightedSelectionHonorsWeightRatios(t *testing.T) {
 	const runs = 4000
 	for range runs {
 		selection, err := SelectUpstream(context.Background(), database, cache,
-			autoWeight, testPolicy(), nil, ptr("model"))
+			autoWeight, testPolicy(), nil, ptr("model"), models.DefaultGroupID)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}

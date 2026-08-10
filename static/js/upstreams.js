@@ -92,8 +92,13 @@ function payloadFromForm() {
     enabled: fields.enabled.checked,
     extra_headers: extraHeaders,
     clear_api_key: fields.clearApiKey.checked,
+    group_ids: readUpstreamGroupSelection(),
   };
 }
+
+/* 编辑/复制渠道时先把该渠道的分组记下来，等 openUpstreamDialog 真正打开弹窗时
+   再填进去——填充要等分组列表拉回来，而打开弹窗是同步的。 */
+let pendingUpstreamGroupIds = null;
 
 function hasExtraHeaders(headers) {
   return headers
@@ -109,6 +114,8 @@ function setAdvancedSettingsOpen(open) {
 }
 
 function openUpstreamDialog() {
+  // 分组列表可能在别处被改过，每次开弹窗都重新填一遍。
+  fillUpstreamGroupOptions(pendingUpstreamGroupIds);
   if (typeof upstreamDialog.showModal === "function") {
     upstreamDialog.showModal();
   } else {
@@ -235,6 +242,7 @@ async function editUpstream(upstream) {
     fields.baseUrl.value = detail.base_url;
     fields.apiKey.value = detail.api_key || "";
     persistedFormApiKey = detail.api_key || null;
+    pendingUpstreamGroupIds = detail.group_ids || null;
     formModelManualInput.value = "";
     fields.modelPrefixes.value = joinList(detail.model_prefixes);
     fields.modelMappings.value = joinModelMappings(detail.model_mappings);
@@ -257,6 +265,7 @@ async function editUpstream(upstream) {
 
 function duplicateUpstream(upstream) {
   resetForm();
+  pendingUpstreamGroupIds = upstream.group_ids || null;
   fields.name.value = `${upstream.name} 副本`;
   fields.baseUrl.value = upstream.base_url;
   fields.modelPrefixes.value = joinList(upstream.model_prefixes);
@@ -399,6 +408,8 @@ function resetForm() {
   form.reset();
   fields.id.value = "";
   persistedFormApiKey = null;
+  // 不清掉的话，新建渠道会带上上一次编辑的分组。
+  pendingUpstreamGroupIds = null;
   fields.priority.value = 100;
   fields.weight.value = 100;
   fields.timeoutSeconds.value = 300;

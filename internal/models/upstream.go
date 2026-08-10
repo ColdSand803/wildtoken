@@ -33,6 +33,9 @@ type UpstreamIn struct {
 	Enabled           bool              `json:"enabled"`
 	ExtraHeaders      map[string]string `json:"extra_headers"`
 	TimeoutSeconds    *float64          `json:"timeout_seconds"`
+	// GroupIDs are the groups this channel serves. An empty selection falls
+	// back to the default group, because a channel in no group is unreachable.
+	GroupIDs []int64 `json:"group_ids"`
 }
 
 // DefaultUpstreamIn supplies the field defaults serde applied when a key is absent.
@@ -71,6 +74,9 @@ func (u *UpstreamIn) Normalize() {
 	if u.ExtraHeaders == nil {
 		u.ExtraHeaders = map[string]string{}
 	}
+	if u.GroupIDs == nil {
+		u.GroupIDs = []int64{}
+	}
 }
 
 // UpstreamUpdate is the replace payload; ClearAPIKey removes a stored key.
@@ -107,6 +113,7 @@ type UpstreamOut struct {
 	RuntimeHealthScore             int64             `json:"runtime_health_score"`
 	EffectiveWeight                float64           `json:"effective_weight"`
 	HealthRecoveryRemainingSeconds *int64            `json:"health_recovery_remaining_seconds,omitempty"`
+	GroupIDs                       []int64           `json:"group_ids"`
 }
 
 // UpstreamDetailOut adds the decrypted API key for the single-item endpoint.
@@ -130,4 +137,5 @@ type UpstreamDetailOut struct {
 	RuntimeHealthScore             int64             `json:"runtime_health_score"`
 	EffectiveWeight                float64           `json:"effective_weight"`
 	HealthRecoveryRemainingSeconds *int64            `json:"health_recovery_remaining_seconds,omitempty"`
+	GroupIDs                       []int64           `json:"group_ids"`
 }

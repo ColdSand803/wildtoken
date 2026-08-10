@@ -42,6 +42,10 @@ func Init(ctx context.Context, db *sql.DB) error {
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_upstream_created_at_id_desc ON request_logs(upstream_id, created_at DESC, id DESC);",
 		"CREATE INDEX IF NOT EXISTS idx_request_log_payloads_bodies_cleared ON request_log_payloads(bodies_cleared, request_log_id);",
 		createAPITokens,
+		createGroups,
+		seedDefaultGroup,
+		createUpstreamGroups,
+		createUpstreamGroupsIndex,
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -73,8 +77,22 @@ func Init(ctx context.Context, db *sql.DB) error {
 	if err := ensureColumn(ctx, db, "api_tokens", "expires_at", "TEXT"); err != nil {
 		return err
 	}
+	// A token reaches only its own group's channels. The column is added without
+	// a foreign key because SQLite cannot attach one to an existing table; the
+	// stores enforce the reference instead.
+	if err := ensureColumn(ctx, db, "api_tokens", "group_id", "INTEGER"); err != nil {
+		return err
+	}
 	if err := MigrateLegacyTokenStorage(ctx, db); err != nil {
 		return err
+	}
+
+	// Existing rows join the default group, so an upgraded database keeps
+	// routing exactly as it did before groups existed.
+	for _, statement := range []string{backfillUpstreamGroups, backfillTokenGroups} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
 	}
 
 	if _, err := db.ExecContext(ctx, createRuntimeSettings); err != nil {

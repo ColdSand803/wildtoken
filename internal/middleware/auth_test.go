@@ -122,7 +122,7 @@ func TestAnEmptyTokenNeverAuthenticates(t *testing.T) {
 	// absent credential into a valid one.
 	insertToken(t, database, "empty", "", nil)
 
-	if _, _, found, err := LookupEnabledDownstreamToken(
+	if _, _, _, found, err := LookupEnabledDownstreamToken(
 		context.Background(), database, ""); err != nil || found {
 		t.Errorf("an empty token authenticated: found=%v err=%v", found, err)
 	}
@@ -138,13 +138,13 @@ func TestALapsedExpiryStopsAuthenticatingWithoutTouchingEnabled(t *testing.T) {
 	insertToken(t, database, "lapsed", "token-already-expired", "2000-01-01 00:00:00")
 
 	for _, plaintext := range []string{"token-never-expires", "token-expires-later"} {
-		_, _, found, err := LookupEnabledDownstreamToken(ctx, database, plaintext)
+		_, _, _, found, err := LookupEnabledDownstreamToken(ctx, database, plaintext)
 		if err != nil || !found {
 			t.Errorf("%s must still authenticate: found=%v err=%v", plaintext, found, err)
 		}
 	}
 
-	if _, _, found, err := LookupEnabledDownstreamToken(
+	if _, _, _, found, err := LookupEnabledDownstreamToken(
 		ctx, database, "token-already-expired"); err != nil || found {
 		t.Errorf("an expired token authenticated: found=%v err=%v", found, err)
 	}
@@ -169,7 +169,7 @@ func TestADisabledTokenDoesNotAuthenticate(t *testing.T) {
 		t.Fatalf("disable: %v", err)
 	}
 
-	if _, _, found, err := LookupEnabledDownstreamToken(
+	if _, _, _, found, err := LookupEnabledDownstreamToken(
 		context.Background(), database, "token-disabled"); err != nil || found {
 		t.Errorf("a disabled token authenticated: found=%v err=%v", found, err)
 	}

@@ -110,6 +110,49 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );`
 
+// Groups scope which channels a downstream token may reach.
+//
+// The default group is seeded and protected: a token whose group was deleted
+// would otherwise silently reach nothing, so the schema keeps one group that
+// always exists.
+const createGroups = `
+CREATE TABLE IF NOT EXISTS groups (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);`
+
+// DefaultGroupName is the group every channel and token falls back to.
+const DefaultGroupName = "default"
+
+const seedDefaultGroup = `INSERT INTO groups (id, name, description)
+    VALUES (1, 'default', '默认分组')
+    ON CONFLICT(name) DO NOTHING`
+
+// A channel may serve several groups, so membership is a join table. A token
+// belongs to exactly one group, which is a column on api_tokens instead.
+const createUpstreamGroups = `
+CREATE TABLE IF NOT EXISTS upstream_groups (
+    upstream_id INTEGER NOT NULL REFERENCES upstreams(id) ON DELETE CASCADE,
+    group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (upstream_id, group_id)
+);`
+
+const createUpstreamGroupsIndex = `CREATE INDEX IF NOT EXISTS idx_upstream_groups_group
+    ON upstream_groups(group_id, upstream_id);`
+
+// Existing channels join the default group, so an upgraded database routes
+// exactly as it did before groups existed.
+const backfillUpstreamGroups = `INSERT INTO upstream_groups (upstream_id, group_id)
+    SELECT id, 1 FROM upstreams
+    WHERE id NOT IN (SELECT upstream_id FROM upstream_groups)`
+
+// A token with no group would reach no channel at all, so the column is
+// backfilled to the default group and kept NOT NULL by the application.
+const backfillTokenGroups = `UPDATE api_tokens SET group_id = 1 WHERE group_id IS NULL`
+
 const createRuntimeSettings = `
 CREATE TABLE IF NOT EXISTS runtime_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),

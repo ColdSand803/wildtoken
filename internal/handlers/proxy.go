@@ -84,16 +84,20 @@ func writeProtocolError(w http.ResponseWriter, status int, path, message, errorT
 // The text goes to both the downstream error body and the request log, so a 503
 // can be traced back to the requested model and channel hint without
 // reproducing the request.
-func noRouteReason(selector, model *string) string {
+// noRouteReason names the group as well, because with group isolation the same
+// model can be routable for one token and not for another; without it a 503
+// would be indistinguishable from a misconfigured channel.
+func noRouteReason(selector, model *string, groupName string) string {
 	target := "a request without a model"
 	if model != nil {
 		target = "model " + strconv.Quote(*model)
 	}
+	scope := " in group " + strconv.Quote(groupName)
 	if selector != nil {
-		return "no enabled upstream matches " + target +
+		return "no enabled upstream matches " + target + scope +
 			" on the requested channel " + strconv.Quote(*selector)
 	}
-	return "no enabled upstream matches " + target
+	return "no enabled upstream matches " + target + scope
 }
 
 // abortLogGuard records a request that ended before the proxy could log it.
@@ -244,7 +248,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		var directSelection *proxy.Selection
 		if selector != nil {
 			directSelection, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
-				state.AutoWeight, policy, selector, model)
+				state.AutoWeight, policy, selector, model, auth.GroupID)
 			if err != nil {
 				guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
 				apperr.WriteError(w, err)
@@ -255,6 +259,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		response, err := runProxyAttempts(w, r, state, proxyAttemptConfig{
 			guard:           guard,
 			auth:            auth,
+			groupName:       resolveGroupName(r.Context(), state, auth.GroupID),
 			path:            path,
 			body:            body,
 			model:           model,
@@ -278,8 +283,11 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 }
 
 type proxyAttemptConfig struct {
-	guard           *abortLogGuard
-	auth            middleware.DownstreamAuth
+	guard *abortLogGuard
+	auth  middleware.DownstreamAuth
+	// groupName is resolved once for the error message, so the retry loop does
+	// not query it per attempt.
+	groupName       string
 	path            string
 	body            []byte
 	model           *string
@@ -305,7 +313,7 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		if config.selector == nil {
 			var err error
 			selected, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
-				state.AutoWeight, config.policy, nil, config.model)
+				state.AutoWeight, config.policy, nil, config.model, config.auth.GroupID)
 			if err != nil {
 				config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
 				return nil, err
@@ -317,7 +325,7 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			if lastFailure != nil {
 				return lastFailure.response, lastFailure.err
 			}
-			reason := noRouteReason(config.selector, config.model)
+			reason := noRouteReason(config.selector, config.model, config.groupName)
 			config.guard.logAndDisarm(503, reason)
 			writeProtocolError(w, http.StatusServiceUnavailable,
 				config.path, reason, "upstream_not_configured")
@@ -471,15 +479,39 @@ func OpenAIModelsListResponse(ids []string) json.RawMessage {
 	return encoded
 }
 
+// resolveEnabledUpstreamForModels resolves a channel hint, refusing one the
+// caller's group cannot reach so the filter cannot enumerate other groups.
 func resolveEnabledUpstreamForModels(ctx context.Context, state *appstate.State,
-	selector string) (models.UpstreamRow, error) {
+	selector string, groupID int64) (models.UpstreamRow, error) {
+	reachable := func(upstream models.UpstreamRow) (bool, error) {
+		if upstream.Enabled != 1 {
+			return false, nil
+		}
+		groupIDs, err := db.ListUpstreamGroupIDs(ctx, state.DB, upstream.ID)
+		if err != nil {
+			return false, err
+		}
+		for _, candidate := range groupIDs {
+			if candidate == groupID {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+
 	if id, err := strconv.ParseInt(selector, 10, 64); err == nil {
 		upstream, ok, err := db.GetUpstream(ctx, state.DB, id)
 		if err != nil {
 			return models.UpstreamRow{}, err
 		}
-		if ok && upstream.Enabled == 1 {
-			return upstream, nil
+		if ok {
+			allowed, err := reachable(upstream)
+			if err != nil {
+				return models.UpstreamRow{}, err
+			}
+			if allowed {
+				return upstream, nil
+			}
 		}
 	}
 
@@ -487,23 +519,39 @@ func resolveEnabledUpstreamForModels(ctx context.Context, state *appstate.State,
 	if err != nil {
 		return models.UpstreamRow{}, err
 	}
-	if ok && upstream.Enabled == 1 {
-		return upstream, nil
+	if ok {
+		allowed, err := reachable(upstream)
+		if err != nil {
+			return models.UpstreamRow{}, err
+		}
+		if allowed {
+			return upstream, nil
+		}
 	}
 
+	// The message does not distinguish "does not exist" from "not in your
+	// group", so the filter cannot be used to probe other groups.
 	return models.UpstreamRow{}, apperr.NotFound("upstream not found or disabled: " + selector)
 }
 
 // ListModelsHandler serves GET /v1/models, aggregating the model list from the
-// enabled upstream configs.
+// channels the caller's group can reach.
 //
 // An optional channel filter comes from X-WildToken-Upstream or ?upstream= (a
-// name or an id). A filtered response skips the global models-list cache, and
-// model_prefixes never expand into concrete ids.
+// name or an id). A filtered response skips the cache, and model_prefixes never
+// expand into concrete ids.
 func ListModelsHandler(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		auth, ok := middleware.DownstreamAuthFrom(r.Context())
+		if !ok {
+			writeProtocolError(w, http.StatusUnauthorized, r.URL.Path,
+				"Incorrect API key provided", "invalid_api_key")
+			return
+		}
+
 		if selector := upstreamSelector(r); selector != nil {
-			upstream, err := resolveEnabledUpstreamForModels(r.Context(), state, *selector)
+			upstream, err := resolveEnabledUpstreamForModels(r.Context(), state,
+				*selector, auth.GroupID)
 			if err != nil {
 				apperr.WriteError(w, err)
 				return
@@ -513,12 +561,12 @@ func ListModelsHandler(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		if cached := state.ModelsCache.Get(); cached != nil {
+		if cached := state.ModelsCache.Get(auth.GroupID); cached != nil {
 			writeRawJSON(w, cached)
 			return
 		}
 
-		upstreams, err := db.ListEnabledUpstreams(r.Context(), state.DB)
+		upstreams, err := db.ListEnabledUpstreamsInGroup(r.Context(), state.DB, auth.GroupID)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -526,11 +574,11 @@ func ListModelsHandler(state *appstate.State) http.HandlerFunc {
 		response := OpenAIModelsListResponse(AggregateModelIDs(upstreams))
 
 		// Another concurrent miss may have already filled the cache.
-		if cached := state.ModelsCache.Get(); cached != nil {
+		if cached := state.ModelsCache.Get(auth.GroupID); cached != nil {
 			writeRawJSON(w, cached)
 			return
 		}
-		state.ModelsCache.Set(response)
+		state.ModelsCache.Set(auth.GroupID, response)
 		writeRawJSON(w, response)
 	}
 }
@@ -548,4 +596,14 @@ func containsFold(list []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// resolveGroupName reads a group's name for an error message, falling back to
+// its id when the row is gone. Routing already decided; this only labels it.
+func resolveGroupName(ctx context.Context, state *appstate.State, groupID int64) string {
+	group, ok, err := db.GetGroup(ctx, state.DB, groupID)
+	if err != nil || !ok {
+		return "#" + strconv.FormatInt(groupID, 10)
+	}
+	return group.Name
 }

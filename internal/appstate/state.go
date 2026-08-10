@@ -43,33 +43,40 @@ func (s *SettingsStore) Set(settings models.RuntimeSettings) {
 	s.current = settings
 }
 
-// ModelsListCache caches the aggregated GET /v1/models response.
+// ModelsListCache caches the aggregated GET /v1/models response per group.
 //
-// It is invalidated explicitly on upstream write operations. Concurrent misses
-// may reload the same value, which is intentional and harmless.
+// The response is keyed by group because a token only reaches its own group's
+// channels: one shared entry would advertise models a caller cannot route to.
+//
+// It is invalidated explicitly on upstream and group write operations.
+// Concurrent misses may reload the same value, which is intentional and harmless.
 type ModelsListCache struct {
-	mu    sync.RWMutex
-	value json.RawMessage
+	mu      sync.RWMutex
+	byGroup map[int64]json.RawMessage
 }
 
-func NewModelsListCache() *ModelsListCache { return &ModelsListCache{} }
+func NewModelsListCache() *ModelsListCache {
+	return &ModelsListCache{byGroup: map[int64]json.RawMessage{}}
+}
 
-func (c *ModelsListCache) Get() json.RawMessage {
+func (c *ModelsListCache) Get(groupID int64) json.RawMessage {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.value
+	return c.byGroup[groupID]
 }
 
-func (c *ModelsListCache) Set(value json.RawMessage) {
+func (c *ModelsListCache) Set(groupID int64, value json.RawMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.value = value
+	c.byGroup[groupID] = value
 }
 
+// Invalidate drops every group's entry, because one channel edit can change
+// what several groups advertise.
 func (c *ModelsListCache) Invalidate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.value = nil
+	clear(c.byGroup)
 }
 
 // State is the shared application state every handler receives.
