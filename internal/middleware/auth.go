@@ -199,15 +199,41 @@ func writeDownstreamRejection(w http.ResponseWriter, anthropic bool, status int,
 	writeDownstreamError(w, anthropic, status, message, "invalid_api_key", "authentication_error")
 }
 
+// QuotaExhaustedCode identifies an exhausted token quota at the top level of the
+// refusal, where a caller that does not speak either vendor's error shape can
+// branch on it.
+const QuotaExhaustedCode = "API_KEY_QUOTA_EXHAUSTED"
+
+// QuotaExhaustedMessage is the operator-facing summary carried alongside the
+// code. The detailed figures stay in the nested error a vendor SDK reads.
+const QuotaExhaustedMessage = "API key 额度已用完"
+
 // writeDownstreamQuotaRejection reports an exhausted quota.
 //
 // The error type deliberately differs from a bad credential: a client that reads
 // invalid_api_key is expected to stop and have its key replaced, whereas a quota
 // refusal is resolved by raising the limit or resetting usage. Both vendors have
 // a rate-limit shape for exactly this, so it is reused.
-func writeDownstreamQuotaRejection(w http.ResponseWriter, anthropic bool, message string) {
-	writeDownstreamError(w, anthropic, http.StatusTooManyRequests, message,
-		"insufficient_quota", "rate_limit_error")
+//
+// The body carries the refusal twice. A vendor SDK only looks inside `error`, so
+// that shape has to stay; a caller written against this proxy reads the top-level
+// code instead, without having to know which vendor dialect the route speaks.
+func writeDownstreamQuotaRejection(w http.ResponseWriter, anthropic bool, detail string) {
+	body := map[string]any{
+		"code":    QuotaExhaustedCode,
+		"message": QuotaExhaustedMessage,
+	}
+	if anthropic {
+		body["type"] = "error"
+		body["error"] = map[string]string{"type": "rate_limit_error", "message": detail}
+	} else {
+		body["error"] = map[string]string{
+			"message": detail,
+			"type":    "insufficient_quota",
+			"code":    "insufficient_quota",
+		}
+	}
+	apperr.WriteJSON(w, http.StatusTooManyRequests, body)
 }
 
 func writeDownstreamError(w http.ResponseWriter, anthropic bool, status int,

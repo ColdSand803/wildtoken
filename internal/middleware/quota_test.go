@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/liguangsheng/wildtoken/internal/db"
@@ -58,6 +59,69 @@ func TestAnExhaustedQuotaIsRefusedBeforeReachingAnUpstream(t *testing.T) {
 	}
 	if errorType, _ := errorObject["type"].(string); errorType != "insufficient_quota" {
 		t.Errorf("error type = %q, want insufficient_quota", errorType)
+	}
+}
+
+func TestAQuotaRefusalCarriesBothATopLevelCodeAndTheVendorShape(t *testing.T) {
+	database := authTestDB(t)
+	ctx := context.Background()
+
+	created, err := db.CreateToken(ctx, database, &models.APITokenIn{
+		Name: "limited", Enabled: true, LimitExpression: "1K",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := database.Exec(
+		"UPDATE api_tokens SET used_tokens = 1000 WHERE id = ?", created.ID); err != nil {
+		t.Fatalf("seed usage: %v", err)
+	}
+
+	for _, route := range []struct {
+		name, path, wantNestedType string
+	}{
+		{"openai", "/v1/chat/completions", "insufficient_quota"},
+		{"anthropic", "/v1/messages", "rate_limit_error"},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			handler := RequireDownstream(database)(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+			request := httptest.NewRequest(http.MethodPost, route.path, nil)
+			request.Header.Set("authorization", "Bearer "+created.Token)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusTooManyRequests {
+				t.Fatalf("status = %d, want 429", recorder.Code)
+			}
+
+			var decoded map[string]any
+			if err := json.Unmarshal(recorder.Body.Bytes(), &decoded); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+
+			// A caller written against this proxy branches on the top level and
+			// does not need to know which vendor dialect the route speaks.
+			if decoded["code"] != QuotaExhaustedCode {
+				t.Errorf("top-level code = %v, want %s", decoded["code"], QuotaExhaustedCode)
+			}
+			if decoded["message"] != QuotaExhaustedMessage {
+				t.Errorf("top-level message = %v, want %s", decoded["message"], QuotaExhaustedMessage)
+			}
+
+			// A vendor SDK only looks inside error, so that shape has to survive.
+			nested, ok := decoded["error"].(map[string]any)
+			if !ok {
+				t.Fatalf("error object missing: %s", recorder.Body.String())
+			}
+			if nested["type"] != route.wantNestedType {
+				t.Errorf("nested type = %v, want %s", nested["type"], route.wantNestedType)
+			}
+			// The figures stay in the nested message where they were before.
+			if message, _ := nested["message"].(string); !strings.Contains(message, "1K") {
+				t.Errorf("nested message = %q, want the usage figures", message)
+			}
+		})
 	}
 }
 
