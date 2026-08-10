@@ -62,8 +62,8 @@ type Runtime struct {
 	cleanupLastDurationMs          atomic.Uint64
 	cleanupLastRowsCleared         atomic.Uint64
 
-	recentMu               sync.Mutex
-	recentSSEDisconnects   []time.Time
+	recentMu             sync.Mutex
+	recentSSEDisconnects []time.Time
 }
 
 func New() *Runtime { return &Runtime{} }

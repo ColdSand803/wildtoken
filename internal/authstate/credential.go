@@ -152,8 +152,8 @@ func (c *authCache) clear() {
 
 // Credentials authenticates admin tokens against the current credential.
 type Credentials struct {
-	mu       sync.RWMutex
-	current  models.AdminCredential
+	mu      sync.RWMutex
+	current models.AdminCredential
 	// version is the commit generation, advanced before publishing a newly
 	// committed snapshot. This closes the commit-to-publication window for
 	// newly-started requests.

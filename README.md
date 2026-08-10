@@ -2,7 +2,7 @@
 
 **🌐 Language:** English | [简体中文](README.zh-CN.md)
 
-> **Self-hosted LLM API aggregation gateway in Rust.**
+> **Self-hosted LLM API aggregation gateway in Go.**
 >
 > WildToken exposes OpenAI-compatible `/v1/*` endpoints and an
 > Anthropic-compatible `/v1/messages` endpoint, then routes each downstream
@@ -98,15 +98,16 @@ ASCII, contain no spaces, and not be `change-me`.
 
 Requirements:
 
-- Rust toolchain compatible with the repository lockfile
-- SQLite support through `sqlx`
+- Go 1.25 or newer
+- No C toolchain: the SQLite driver is pure Go, so `CGO_ENABLED=0` builds work
+  on every supported target
 
 Run locally:
 
 ```bash
 cp .env.example .env
 # Optional for localhost-only first boot, required before exposing the service.
-ADMIN_TOKEN=replace-with-a-long-random-token cargo run
+ADMIN_TOKEN=replace-with-a-long-random-token go run ./cmd/wildtoken
 ```
 
 By default, source runs bind to `127.0.0.1:3100` and use
@@ -302,8 +303,7 @@ APP__DATABASE__MAX_CONNECTIONS=3
 APP__LOGGING__LOG_QUEUE_CAPACITY=512
 APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS=300
 WILDTOKEN_THEME_DIR=themes
-TOKIO_WORKER_THREADS=4
-RUST_LOG=info
+WILDTOKEN_LOG=info
 ```
 
 `ADMIN_TOKEN` is used only to initialize a new database credential. After the
@@ -368,9 +368,9 @@ theme packs.
 Useful local checks before shipping a change:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+gofmt -l cmd internal
+go vet ./...
+go test -race ./...
 docker compose up -d --build
 curl -fsS http://127.0.0.1:3100/health
 docker compose ps
@@ -382,7 +382,8 @@ the theme contract tests under `tests/*.mjs`.
 
 ## 📦 Releases
 
-Pushing a `v*` tag matching the `Cargo.toml` version creates a GitHub Release
-through Actions. Release archives include the required `static/`, `config/`, and
-`themes/` directories plus `SHA256SUMS`. Current release targets are Windows
-x86_64, Linux x86_64 GNU, and macOS Universal.
+Pushing a `v*` tag matching the service version in `internal/handlers/admin.go`
+creates a GitHub Release through Actions. Release archives include the required
+`static/`, `config/`, and `themes/` directories plus `SHA256SUMS`. Current
+release targets are Windows x86_64, Linux x86_64, Linux aarch64, macOS x86_64,
+and macOS aarch64.

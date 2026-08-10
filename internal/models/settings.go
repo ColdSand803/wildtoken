@@ -123,17 +123,17 @@ type RuntimeLogSettingsSummary struct {
 }
 
 type RuntimeCleanupMetricsOut struct {
-	Active                  bool   `json:"active"`
-	RunsTotal               uint64 `json:"runs_total"`
-	ErrorsTotal             uint64 `json:"errors_total"`
-	RowsClearedTotal        uint64 `json:"rows_cleared_total"`
-	BatchesTotal            uint64 `json:"batches_total"`
-	CurrentRowsCleared      uint64 `json:"current_rows_cleared"`
-	CurrentBatches          uint64 `json:"current_batches"`
-	LastStartedUnixSeconds  *int64 `json:"last_started_unix_seconds,omitempty"`
-	LastFinishedUnixSeconds *int64 `json:"last_finished_unix_seconds,omitempty"`
+	Active                  bool    `json:"active"`
+	RunsTotal               uint64  `json:"runs_total"`
+	ErrorsTotal             uint64  `json:"errors_total"`
+	RowsClearedTotal        uint64  `json:"rows_cleared_total"`
+	BatchesTotal            uint64  `json:"batches_total"`
+	CurrentRowsCleared      uint64  `json:"current_rows_cleared"`
+	CurrentBatches          uint64  `json:"current_batches"`
+	LastStartedUnixSeconds  *int64  `json:"last_started_unix_seconds,omitempty"`
+	LastFinishedUnixSeconds *int64  `json:"last_finished_unix_seconds,omitempty"`
 	LastDurationMs          *uint64 `json:"last_duration_ms,omitempty"`
-	LastRowsCleared         uint64 `json:"last_rows_cleared"`
+	LastRowsCleared         uint64  `json:"last_rows_cleared"`
 }
 
 type RuntimeMetricsOut struct {
@@ -152,31 +152,31 @@ type RuntimeMetricsOut struct {
 }
 
 type SystemInfoOut struct {
-	Service                      string                    `json:"service"`
-	Version                      string                    `json:"version"`
-	DefaultUpstreamTimeoutSeconds float64                  `json:"default_upstream_timeout_seconds"`
-	UptimeSeconds                uint64                    `json:"uptime_seconds"`
-	CurrentServerTime            string                    `json:"current_server_time"`
-	DatabaseOK                   bool                      `json:"database_ok"`
-	DatabaseAllocatedBytes       *int64                    `json:"database_allocated_bytes,omitempty"`
-	TotalLogCount                int64                     `json:"total_log_count"`
-	LogCount24h                  int64                     `json:"log_count_24h"`
-	EnabledUpstreamCount         int64                     `json:"enabled_upstream_count"`
-	TotalUpstreamCount           int64                     `json:"total_upstream_count"`
-	RecentOneMinuteLogCount      int64                     `json:"recent_one_minute_log_count"`
-	RuntimeLogSettings           RuntimeLogSettingsSummary `json:"runtime_log_settings"`
-	RuntimeMetrics               RuntimeMetricsOut         `json:"runtime_metrics"`
+	Service                       string                    `json:"service"`
+	Version                       string                    `json:"version"`
+	DefaultUpstreamTimeoutSeconds float64                   `json:"default_upstream_timeout_seconds"`
+	UptimeSeconds                 uint64                    `json:"uptime_seconds"`
+	CurrentServerTime             string                    `json:"current_server_time"`
+	DatabaseOK                    bool                      `json:"database_ok"`
+	DatabaseAllocatedBytes        *int64                    `json:"database_allocated_bytes,omitempty"`
+	TotalLogCount                 int64                     `json:"total_log_count"`
+	LogCount24h                   int64                     `json:"log_count_24h"`
+	EnabledUpstreamCount          int64                     `json:"enabled_upstream_count"`
+	TotalUpstreamCount            int64                     `json:"total_upstream_count"`
+	RecentOneMinuteLogCount       int64                     `json:"recent_one_minute_log_count"`
+	RuntimeLogSettings            RuntimeLogSettingsSummary `json:"runtime_log_settings"`
+	RuntimeMetrics                RuntimeMetricsOut         `json:"runtime_metrics"`
 }
 
 const (
-	DefaultLogBodyKeepCount                 int64 = 100
-	DefaultLogRetentionDays                 int64 = 30
-	DefaultLogBodyMaxBytes                  int64 = 200000
-	DefaultMaxRetries                       int64 = 1
-	DefaultSameUpstreamRetryIntervalMs      int64 = 1000
-	DefaultAutoWeightFailurePenalty         int64 = 20
-	DefaultAutoWeightSuccessIncrement       int64 = 5
-	DefaultAutoWeightRecoveryIncrement      int64 = 10
+	DefaultLogBodyKeepCount                  int64 = 100
+	DefaultLogRetentionDays                  int64 = 30
+	DefaultLogBodyMaxBytes                   int64 = 200000
+	DefaultMaxRetries                        int64 = 1
+	DefaultSameUpstreamRetryIntervalMs       int64 = 1000
+	DefaultAutoWeightFailurePenalty          int64 = 20
+	DefaultAutoWeightSuccessIncrement        int64 = 5
+	DefaultAutoWeightRecoveryIncrement       int64 = 10
 	DefaultAutoWeightRecoveryIntervalSeconds int64 = 60
 )
 

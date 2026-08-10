@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	logStatsWindowDays        = 30
-	slowDBOperationThreshold  = time.Second
+	logStatsWindowDays       = 30
+	slowDBOperationThreshold = time.Second
 	// LogStatsRefreshInterval is how often the cache is rebuilt from SQLite.
 	LogStatsRefreshInterval = 60 * time.Second
 )
@@ -37,10 +37,10 @@ type LogStatsSnapshot struct {
 }
 
 type logStatsBucket struct {
-	requestCount      int64
-	tokenRequestCount int64
-	totalTokens       int64
-	promptTokens      int64
+	requestCount       int64
+	tokenRequestCount  int64
+	totalTokens        int64
+	promptTokens       int64
 	promptCachedTokens int64
 }
 
