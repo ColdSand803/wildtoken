@@ -21,7 +21,10 @@ import (
 )
 
 // Version is the service version reported by the system endpoint.
-const Version = "0.1.10"
+//
+// The release workflow parses this line to check that a tag matches, so its
+// shape must stay `const Version = "..."`.
+const Version = "0.2.0"
 
 // decodeJSON reads a JSON request body, ignoring fields the target does not
 // declare.
