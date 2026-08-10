@@ -26,6 +26,7 @@ const BUNDLED_THEME_PACKS = Object.freeze([
 { id: "anthropic", label: "A/", swatch: ["#faf9f5", "#d97757"], css: "/theme-packs/anthropic/theme.css", description: "Warm ivory paper surfaces with slate ink, a single clay accent, and serif display type." },
   { id: "anthropic-dark", label: "A/ dark", swatch: ["#141413", "#d97757"], css: "/theme-packs/anthropic-dark/theme.css", description: "Slate ground with warm ivory ink, the same single clay accent, and serif display type." },
   { id: "demon-slayer", label: "鬼灭之刃", swatch: ["#0b0d0c", "#3fbfa6"], css: "/theme-packs/demon-slayer/theme.css", description: "Sumi-ink console theme with a checkered haori rail, seigaiha wave field, and water-breathing teal accents." },
+  { id: "gojo", label: "五条悟", swatch: ["#070910", "#63dcff"], css: "/theme-packs/gojo/theme.css", description: "Satoru Gojo character theme with a blindfold rail, Six Eyes focus states, and blue-red-violet Limitless fields." },
   { id: "railgun", label: "学园都市", swatch: ["#f4f6f8", "#0ea5e9"], css: "/theme-packs/railgun/theme.css", description: "Academy City in daylight: white concrete and glass, a Tokiwadai clearance plate on a narrow operator rail, a turbine skyline, and arc blue kept back for whatever is live." },
 ]);
 let THEMES = [...BUILT_IN_THEMES, ...BUNDLED_THEME_PACKS];
