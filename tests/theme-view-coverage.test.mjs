@@ -97,3 +97,35 @@ test("demon-slayer 给每个视图配了不同的水印汉字", () => {
   const kanji = [...byView.values()];
   assert.equal(new Set(kanji).size, kanji.length, "水印汉字有重复");
 });
+
+test("每个导航项都有对应的轨道图标", () => {
+  const css = read("static/css/console-rail.css");
+  for (const view of consoleViews()) {
+    /* 图标靠 --rail-icon-<view> 变量 + mask-image 规则两处配合。少任何一处，
+       那个页签左边就是空白——加导航项时最容易漏的正是这里。 */
+    assert.match(
+      css,
+      new RegExp(`--rail-icon-${view}:\\s*url\\("data:image/svg\\+xml,`),
+      `缺少 --rail-icon-${view} 变量`,
+    );
+    assert.match(
+      css,
+      new RegExp(`\\.nav-link\\[data-view="${view}"\\]::before[\\s\\S]{0,200}?mask-image:\\s*var\\(--rail-icon-${view}\\)`),
+      `缺少 ${view} 的 mask-image 绑定`,
+    );
+  }
+});
+
+test("轨道图标的线稿风格保持一致", () => {
+  const css = read("static/css/console-rail.css");
+  const icons = [...css.matchAll(/--rail-icon-([a-z]+):\s*url\("data:image\/svg\+xml,([^"]+)"\)/g)];
+  assert.ok(icons.length >= 6, "图标数量异常");
+
+  for (const [, name, encoded] of icons) {
+    const svg = decodeURIComponent(encoded);
+    // 混进不同的画布尺寸或线宽，图标在同一行里会明显轻重不一。
+    assert.match(svg, /viewBox='0 0 24 24'/, `${name} 画布尺寸不一致`);
+    assert.match(svg, /stroke-width='1\.8'/, `${name} 线宽不一致`);
+    assert.match(svg, /stroke-linecap='round'/, `${name} 线端样式不一致`);
+  }
+});
