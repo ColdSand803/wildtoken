@@ -23,11 +23,29 @@ import (
 // Version is the service version reported by the system endpoint.
 const Version = "0.1.10"
 
-// decodeJSON reads a JSON request body, rejecting unknown fields so a typo in
-// the console is reported instead of silently ignored.
+// decodeJSON reads a JSON request body, ignoring fields the target does not
+// declare.
+//
+// This is the lenient default because several console forms post a superset of
+// what an endpoint reads. The channel form is the clearest case: it serves both
+// create and update, so it always sends `clear_api_key`, which only the update
+// payload declares.
 func decodeJSON(r *http.Request, target any) error {
+	return decodeBody(r, target, false)
+}
+
+// decodeStrictJSON additionally rejects unknown fields, so a typo is reported
+// rather than silently ignored. It is reserved for payloads whose clients send
+// exactly the declared shape.
+func decodeStrictJSON(r *http.Request, target any) error {
+	return decodeBody(r, target, true)
+}
+
+func decodeBody(r *http.Request, target any, rejectUnknown bool) error {
 	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4*1024*1024))
-	decoder.DisallowUnknownFields()
+	if rejectUnknown {
+		decoder.DisallowUnknownFields()
+	}
 	if err := decoder.Decode(target); err != nil {
 		return apperr.BadRequest("invalid request body: " + err.Error())
 	}
@@ -86,7 +104,7 @@ func AdminGetRuntimeSettings(state *appstate.State) http.HandlerFunc {
 func AdminUpdateRuntimeSettings(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.RuntimeSettingsIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -125,7 +143,7 @@ func AdminListModelTestTemplates(state *appstate.State) http.HandlerFunc {
 func AdminCreateModelTestTemplate(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.ModelTestTemplateIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -155,7 +173,7 @@ func AdminUpdateModelTestTemplate(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.ModelTestTemplateIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -211,7 +229,7 @@ func AdminListModelTestPromptTemplates(state *appstate.State) http.HandlerFunc {
 func AdminCreateModelTestPromptTemplate(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.ModelTestPromptTemplateIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -241,7 +259,7 @@ func AdminUpdateModelTestPromptTemplate(state *appstate.State) http.HandlerFunc 
 			return
 		}
 		var input models.ModelTestPromptTemplateIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -293,7 +311,7 @@ func AdminRotateAdminToken(state *appstate.State) http.HandlerFunc {
 		}
 
 		var input models.AdminTokenRotateIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -456,7 +474,7 @@ func AdminGetToken(state *appstate.State) http.HandlerFunc {
 func AdminCreateToken(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		input := models.APITokenIn{Enabled: true}
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -486,7 +504,7 @@ func AdminUpdateToken(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.APITokenUpdateIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}

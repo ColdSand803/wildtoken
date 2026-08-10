@@ -708,7 +708,7 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.ModelTestRequest
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
