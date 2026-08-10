@@ -60,7 +60,7 @@ function renderGroups() {
       const badge = group.is_default ? ` <span class="badge">默认</span>` : "";
       return `<tr>
         <td><strong>${escapeHtml(group.name)}</strong>${badge}</td>
-        <td class="muted">${escapeHtml(group.description || "—")}</td>
+        ${renderDescriptionCell(group.description)}
         <td class="numeric">${group.upstream_count}</td>
         <td class="numeric">${group.token_count}</td>
         <td class="actions-col">${actions}</td>

@@ -300,6 +300,26 @@ td.no-match-state {
   white-space: nowrap;
 }
 
+/* 描述是自由填写的长文本。给上下界而不是放任它撑宽：不设上界，一条 200 字的
+   描述会把同表其它列挤扁；不设下界，全是空描述时这列又会缩成一条缝。截断在
+   内层 span 上做，td 只负责给出宽度——单元格自己 overflow: hidden 会连粘性
+   表头和阴影一起裁掉。 */
+.desc-cell {
+  max-width: 320px;
+  min-width: 180px;
+}
+
+.desc-cell .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 没填描述时的占位符要明显弱于真描述，否则一列破折号和正文一样抢眼 */
+.desc-cell .muted.is-empty {
+  opacity: 0.55;
+}
+
 .url-cell-inner {
   align-items: center;
   background: transparent;

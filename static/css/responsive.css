@@ -273,6 +273,12 @@
     display: none;
   }
 
+  /* 窄屏上横向滚动已经够长了，描述让位给名称和状态那几列 */
+  .desc-cell {
+    max-width: 200px;
+    min-width: 140px;
+  }
+
   th,
   td {
     padding: 9px 10px;

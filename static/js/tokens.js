@@ -172,7 +172,7 @@ function renderTokenRows() {
       (t) => `
     <tr>
       <td><strong>${escapeHtml(t.name)}</strong></td>
-      <td class="muted">${escapeHtml(t.description || "—")}</td>
+      ${renderDescriptionCell(t.description)}
       <td>
         <code class="token-preview-code" title="完整令牌仅在创建时显示一次">${escapeHtml(t.token_preview)}</code>
       </td>

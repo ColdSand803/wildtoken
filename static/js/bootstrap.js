@@ -1159,6 +1159,20 @@ function renderUpstreamGroups(upstream) {
   return `<div class="model-chip-list" title="${escapeHtml(labels.join(", "))}">${chips}${more}</div>`;
 }
 
+/* 分组表和令牌表的描述列共用这一个渲染。`.muted` 必须挂在内层 span 上：
+   tables.css 给 .muted 设了 display: block，落在 td 上会把单元格从表格布局里
+   摘出去，那一格就不再参与行高、vertical-align 也失效，看着跟同行对不齐。
+   描述服务端限 200 字且拒控制符，一定是单行，所以截断比换行更贴表格的节奏，
+   全文放 title 里。空值单独标 is-empty，让占位符比真描述更淡。 */
+function renderDescriptionCell(description) {
+  const text = String(description || "").trim();
+  if (!text) {
+    return '<td class="desc-cell"><span class="muted is-empty">—</span></td>';
+  }
+  const safe = escapeHtml(text);
+  return `<td class="desc-cell"><span class="muted" title="${safe}">${safe}</span></td>`;
+}
+
 function renderUpstreamSummary() {
   scheduleRenderUpstreamSummary();
 }
