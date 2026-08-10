@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 // Argon2id parameters, matching the defaults of the Rust `argon2` crate this

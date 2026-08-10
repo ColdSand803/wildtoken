@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wildtoken/wildtoken/internal/apperr"
-	"github.com/wildtoken/wildtoken/internal/metrics"
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/apperr"
+	"github.com/liguangsheng/wildtoken/internal/metrics"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 // BuildUpstreamURL builds the full upstream URL for a proxied path.

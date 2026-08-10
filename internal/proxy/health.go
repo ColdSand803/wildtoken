@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 // MaxHealthScore is the score an upstream holds while it has no recent failures.

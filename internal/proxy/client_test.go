@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 func int32Value(t *testing.T, value *int32) any {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 func postJSON(body string) *http.Request {

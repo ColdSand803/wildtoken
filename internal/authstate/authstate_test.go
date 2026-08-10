@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 // These fixtures were produced by the Rust `argon2` crate v0.5.3 with

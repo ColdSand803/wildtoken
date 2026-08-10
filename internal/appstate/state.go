@@ -10,12 +10,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wildtoken/wildtoken/internal/authstate"
-	"github.com/wildtoken/wildtoken/internal/config"
-	"github.com/wildtoken/wildtoken/internal/db"
-	"github.com/wildtoken/wildtoken/internal/metrics"
-	"github.com/wildtoken/wildtoken/internal/models"
-	"github.com/wildtoken/wildtoken/internal/proxy"
+	"github.com/liguangsheng/wildtoken/internal/authstate"
+	"github.com/liguangsheng/wildtoken/internal/config"
+	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/metrics"
+	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/proxy"
 )
 
 // SettingsStore holds the operator-editable runtime policy.

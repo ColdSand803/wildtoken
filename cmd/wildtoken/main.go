@@ -12,7 +12,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/wildtoken/wildtoken/internal/app"
+	"github.com/liguangsheng/wildtoken/internal/app"
 )
 
 func main() {

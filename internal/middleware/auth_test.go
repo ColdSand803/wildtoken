@@ -10,8 +10,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/wildtoken/wildtoken/internal/authstate"
-	"github.com/wildtoken/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/authstate"
+	"github.com/liguangsheng/wildtoken/internal/db"
 )
 
 func requestWithHeaders(headers map[string]string) *http.Request {

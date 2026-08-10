@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 func itoa(value int) string { return strconv.Itoa(value) }

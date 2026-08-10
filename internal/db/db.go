@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"strings"
 
-	"github.com/wildtoken/wildtoken/internal/apperr"
+	"github.com/liguangsheng/wildtoken/internal/apperr"
 )
 
 // Queryer is the subset of *sql.DB and *sql.Tx the stores need, so a query can

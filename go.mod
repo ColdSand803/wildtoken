@@ -1,4 +1,4 @@
-module github.com/wildtoken/wildtoken
+module github.com/liguangsheng/wildtoken
 
 go 1.25.0
 

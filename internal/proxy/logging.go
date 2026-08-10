@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/wildtoken/wildtoken/internal/apperr"
-	"github.com/wildtoken/wildtoken/internal/db"
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/apperr"
+	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 const (

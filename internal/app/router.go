@@ -10,9 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/wildtoken/wildtoken/internal/appstate"
-	"github.com/wildtoken/wildtoken/internal/handlers"
-	"github.com/wildtoken/wildtoken/internal/middleware"
+	"github.com/liguangsheng/wildtoken/internal/appstate"
+	"github.com/liguangsheng/wildtoken/internal/handlers"
+	"github.com/liguangsheng/wildtoken/internal/middleware"
 )
 
 // noStoreCacheControl keeps the console and its assets from being cached, so an

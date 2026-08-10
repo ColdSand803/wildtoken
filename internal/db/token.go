@@ -10,8 +10,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/wildtoken/wildtoken/internal/apperr"
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/apperr"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 const tokenPreviewChars = 8

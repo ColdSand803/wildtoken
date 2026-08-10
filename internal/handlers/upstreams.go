@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wildtoken/wildtoken/internal/apperr"
-	"github.com/wildtoken/wildtoken/internal/appstate"
-	"github.com/wildtoken/wildtoken/internal/db"
-	"github.com/wildtoken/wildtoken/internal/models"
-	"github.com/wildtoken/wildtoken/internal/proxy"
+	"github.com/liguangsheng/wildtoken/internal/apperr"
+	"github.com/liguangsheng/wildtoken/internal/appstate"
+	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/proxy"
 )
 
 // Client types for requests the console makes on an operator's behalf.

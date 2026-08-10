@@ -11,8 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/wildtoken/wildtoken/internal/db"
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 // normalizeModelMatch trims whitespace and lowercases a model name.

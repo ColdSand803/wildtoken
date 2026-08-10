@@ -13,7 +13,7 @@ import (
 
 	"fyne.io/systray"
 
-	"github.com/wildtoken/wildtoken/internal/app"
+	"github.com/liguangsheng/wildtoken/internal/app"
 )
 
 // runTray starts the tray UI with a background HTTP server, unless the operator

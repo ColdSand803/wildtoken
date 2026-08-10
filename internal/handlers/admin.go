@@ -10,14 +10,14 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/wildtoken/wildtoken/internal/apperr"
-	"github.com/wildtoken/wildtoken/internal/appstate"
-	"github.com/wildtoken/wildtoken/internal/authstate"
-	"github.com/wildtoken/wildtoken/internal/db"
-	"github.com/wildtoken/wildtoken/internal/metrics"
-	"github.com/wildtoken/wildtoken/internal/middleware"
-	"github.com/wildtoken/wildtoken/internal/models"
-	"github.com/wildtoken/wildtoken/internal/themes"
+	"github.com/liguangsheng/wildtoken/internal/apperr"
+	"github.com/liguangsheng/wildtoken/internal/appstate"
+	"github.com/liguangsheng/wildtoken/internal/authstate"
+	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/metrics"
+	"github.com/liguangsheng/wildtoken/internal/middleware"
+	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/themes"
 )
 
 // Version is the service version reported by the system endpoint.

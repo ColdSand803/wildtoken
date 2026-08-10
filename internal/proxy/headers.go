@@ -7,8 +7,8 @@ import (
 	"net/textproto"
 	"strings"
 
-	"github.com/wildtoken/wildtoken/internal/apperr"
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/apperr"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 // HopByHopHeaders must not be forwarded to the upstream.

@@ -9,9 +9,9 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/wildtoken/wildtoken/internal/db"
-	"github.com/wildtoken/wildtoken/internal/metrics"
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/metrics"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 func decodeSnapshotMap(t *testing.T, raw json.RawMessage) map[string]any {

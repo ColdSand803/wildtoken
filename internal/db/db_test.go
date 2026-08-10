@@ -7,7 +7,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/wildtoken/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 // memoryDB returns an initialized in-memory database. A shared cache keeps the
