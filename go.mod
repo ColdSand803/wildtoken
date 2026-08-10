@@ -1,6 +1,6 @@
 module github.com/wildtoken/wildtoken
 
-go 1.27rc2
+go 1.25.0
 
 require (
 	fyne.io/systray v1.12.2
