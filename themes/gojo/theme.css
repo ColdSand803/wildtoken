@@ -117,7 +117,12 @@ html[data-theme="gojo"] {
   --radius-full: 999px;
 
   --font-sans: "Space Grotesk", "Noto Sans SC", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", "SFMono-Regular", ui-monospace, Consolas, monospace;
+  /* The Latin mono faces carry no CJK, so a Chinese channel or model name fell
+     through to whatever generic `monospace` resolves to — Songti on Windows,
+     WenQuanYi on Linux — and landed next to the Latin glyphs at a different
+     weight and width. Noto Sans SC is already loaded for --font-sans and takes
+     the CJK run; the Latin faces still win for the identifiers that matter. */
+  --font-mono: "JetBrains Mono", "Fira Code", "SFMono-Regular", ui-monospace, Consolas, "Noto Sans SC", monospace;
   --font-secret: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", ui-monospace, Consolas, monospace;
   --transition: 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --blur: 0px;
