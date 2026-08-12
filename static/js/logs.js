@@ -586,6 +586,7 @@ function logMatchesSearchFilter(log, search) {
     log.request_model,
     log.upstream_model,
     log.upstream_name,
+    log.downstream_token_name,
     log.error,
     log.id,
     log.status_code,

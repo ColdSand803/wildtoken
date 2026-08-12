@@ -116,10 +116,11 @@ func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
 			` OR LOWER(request_model) LIKE LOWER(?) ESCAPE '\'` +
 			` OR LOWER(upstream_model) LIKE LOWER(?) ESCAPE '\'` +
 			` OR LOWER(upstream_name) LIKE LOWER(?) ESCAPE '\'` +
+			` OR LOWER(downstream_token_name) LIKE LOWER(?) ESCAPE '\'` +
 			` OR LOWER(error) LIKE LOWER(?) ESCAPE '\'` +
 			` OR CAST(id AS TEXT) LIKE ? ESCAPE '\'` +
 			` OR CAST(status_code AS TEXT) LIKE ? ESCAPE '\')`)
-		for range 7 {
+		for range 8 {
 			args = append(args, pattern)
 		}
 	}

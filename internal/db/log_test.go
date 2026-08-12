@@ -44,12 +44,18 @@ func TestListLogsPaginatesByCursorAndAppliesFilters(t *testing.T) {
 		if i == 3 {
 			status = 500
 		}
+		// Only one row carries a token name, so a search for it has to narrow
+		// rather than match everything the way the shared model name does.
+		tokenName := "customer-a"
+		if i != 2 {
+			tokenName = "customer-b"
+		}
 		_, err := database.Exec(`INSERT INTO request_logs
             (id, created_at, method, path, client_type, upstream_id, upstream_name,
-             model, stream, status_code, total_tokens)
+             downstream_token_name, model, stream, status_code, total_tokens)
             VALUES (?, datetime('now', ?), 'POST', '/v1/responses', 'codex',
-                    1, 'primary', 'gpt-test', 0, ?, 10)`,
-			i, "-"+itoa(5-i)+" minutes", status)
+                    1, 'primary', ?, 'gpt-test', 0, ?, 10)`,
+			i, "-"+itoa(5-i)+" minutes", tokenName, status)
 		if err != nil {
 			t.Fatalf("insert log %d: %v", i, err)
 		}
@@ -88,6 +94,15 @@ func TestListLogsPaginatesByCursorAndAppliesFilters(t *testing.T) {
 	}
 	if len(matches) != 5 {
 		t.Errorf("search matched %d rows, want all 5", len(matches))
+	}
+
+	tokenSearch := "customer-a"
+	byToken, err := ListLogs(ctx, database, 10, 0, nil, LogFilter{Search: &tokenSearch})
+	if err != nil {
+		t.Fatalf("token name search: %v", err)
+	}
+	if len(byToken) != 1 || byToken[0].ID != 2 {
+		t.Errorf("token name search = %v, want only row 2", logIDs(byToken))
 	}
 
 	// A search for a literal wildcard must not match every row.
