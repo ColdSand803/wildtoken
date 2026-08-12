@@ -293,6 +293,28 @@ td.no-match-state {
   min-width: 0;
 }
 
+/* A name with a marker riding beside it. Flex rather than a bare space so the
+   two align on their box centres — the badge is inline-flex with its own
+   padding, and baseline-aligning that against <strong> sits it a hair low.
+   The name takes the slack and truncates; the badge never shrinks or wraps
+   away from the name it belongs to. */
+.name-inline {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.name-inline strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name-inline .badge {
+  flex: 0 0 auto;
+}
+
 .name-stack strong,
 .channel-cell strong {
   overflow: hidden;

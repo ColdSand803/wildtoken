@@ -57,9 +57,12 @@ function renderGroups() {
         ? `<button type="button" class="secondary ghost" data-group-edit="${group.id}">编辑</button>`
         : `<button type="button" class="secondary ghost" data-group-edit="${group.id}">编辑</button>
            <button type="button" class="secondary ghost danger" data-group-delete="${group.id}">删除</button>`;
-      const badge = group.is_default ? ` <span class="badge">默认</span>` : "";
+      /* 「默认」是名称的附注，不是状态，所以用中性徽章：比名称小一号、灰调填充，
+         扫一眼能认出兜底分组，又不会盖过名称本身。 */
+      const badge = group.is_default ? `<span class="badge neutral">默认</span>` : "";
+      const name = escapeHtml(group.name);
       return `<tr>
-        <td><strong>${escapeHtml(group.name)}</strong>${badge}</td>
+        <td><div class="name-inline"><strong title="${name}">${name}</strong>${badge}</div></td>
         ${renderDescriptionCell(group.description)}
         <td class="numeric">${group.upstream_count}</td>
         <td class="numeric">${group.token_count}</td>
