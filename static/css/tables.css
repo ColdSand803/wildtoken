@@ -1081,7 +1081,7 @@ td.no-match-state {
 }
 
 .quota-cell.warn .quota-used {
-  color: var(--warn, #d97706);
+  color: var(--warning, #d97706);
 }
 
 .quota-cell.danger .quota-used,
