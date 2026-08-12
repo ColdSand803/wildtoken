@@ -501,6 +501,53 @@ if (dashboardTopWindowSelect) {
     loadDashboardData();
   });
 }
+
+// Dashboard time range filter
+const dashboardTimePreset = document.getElementById("dashboard-time-preset");
+const dashboardCustomRange = document.getElementById("dashboard-custom-range");
+const dashboardStartDate = document.getElementById("dashboard-start-date");
+const dashboardEndDate = document.getElementById("dashboard-end-date");
+const dashboardApplyCustom = document.getElementById("dashboard-apply-custom");
+
+if (dashboardTimePreset) {
+  dashboardTimePreset.addEventListener("change", () => {
+    const value = dashboardTimePreset.value;
+    if (value === "custom") {
+      if (dashboardCustomRange) {
+        dashboardCustomRange.style.display = "flex";
+      }
+      // Don't reload yet - wait for user to select dates and click apply
+    } else {
+      if (dashboardCustomRange) {
+        dashboardCustomRange.style.display = "none";
+      }
+      dashboardTimeRange = value;
+      loadDashboardData();
+    }
+  });
+}
+
+if (dashboardApplyCustom && dashboardStartDate && dashboardEndDate) {
+  dashboardApplyCustom.addEventListener("click", () => {
+    const start = dashboardStartDate.value;
+    const end = dashboardEndDate.value;
+
+    if (!start || !end) {
+      setStatus("请选择开始和结束日期", "error");
+      return;
+    }
+
+    if (start > end) {
+      setStatus("开始日期不能晚于结束日期", "error");
+      return;
+    }
+
+    dashboardTimeRange = "custom";
+    dashboardCustomStartDate = start;
+    dashboardCustomEndDate = end;
+    loadDashboardData();
+  });
+}
 if (dashboardErrorRows) {
   dashboardErrorRows.addEventListener("click", (event) => {
     const row = event.target.closest("tr[data-log-id]");

@@ -402,6 +402,16 @@ pub struct LogTopQuery {
     limit: Option<i64>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TokenUsageQuery {
+    /// Time range filter: "today", "1d", "7d", "30d", "all", or "custom"
+    range: Option<String>,
+    /// Start date for custom range (ISO 8601: YYYY-MM-DD)
+    start_date: Option<String>,
+    /// End date for custom range (ISO 8601: YYYY-MM-DD)
+    end_date: Option<String>,
+}
+
 fn default_limit() -> i32 {
     50
 }
@@ -528,8 +538,47 @@ pub async fn admin_stream_logs(
 pub async fn admin_token_usage_stats(
     State(state): State<AppState>,
     _auth: AdminAuth,
+    Query(query): Query<TokenUsageQuery>,
 ) -> Result<Json<TokenUsageStatsOut>, AppError> {
-    Ok(Json(state.log_stats.snapshot().token_usage))
+    let range = query.range.as_deref().unwrap_or("default");
+
+    match range {
+        "custom" => {
+            // Custom date range
+            let start_date = query.start_date.as_deref()
+                .ok_or_else(|| AppError::BadRequest("start_date required for custom range".into()))?;
+            let end_date = query.end_date.as_deref()
+                .ok_or_else(|| AppError::BadRequest("end_date required for custom range".into()))?;
+
+            let custom_usage = log_stats_db::custom_range_token_usage(&state.db, start_date, end_date).await?;
+
+            Ok(Json(TokenUsageStatsOut {
+                today: custom_usage.clone(),
+                one_day: Default::default(),
+                seven_days: Default::default(),
+                thirty_days: Default::default(),
+                all_time: Default::default(),
+            }))
+        }
+        "all" => {
+            // All time only
+            let all_time_usage = log_stats_db::all_time_token_usage(&state.db).await?;
+
+            Ok(Json(TokenUsageStatsOut {
+                today: all_time_usage.clone(),
+                one_day: Default::default(),
+                seven_days: Default::default(),
+                thirty_days: Default::default(),
+                all_time: all_time_usage,
+            }))
+        }
+        _ => {
+            // Default: return all standard windows
+            let mut stats = state.log_stats.snapshot().token_usage;
+            stats.all_time = log_stats_db::all_time_token_usage(&state.db).await?;
+            Ok(Json(stats))
+        }
+    }
 }
 
 pub async fn admin_top_log_stats(

@@ -220,6 +220,82 @@ pub async fn recent_one_minute_log_rate(pool: &SqlitePool) -> Result<RecentLogRa
     .await?)
 }
 
+/// Query all-time token usage statistics directly from the database.
+/// This is not cached and should be called sparingly.
+pub async fn all_time_token_usage(pool: &SqlitePool) -> Result<TokenUsageWindowOut, AppError> {
+    #[derive(Debug, FromRow)]
+    struct AllTimeRow {
+        request_count: i64,
+        token_request_count: i64,
+        total_tokens: i64,
+        prompt_tokens: i64,
+        prompt_cached_tokens: i64,
+    }
+
+    let row: AllTimeRow = sqlx::query_as(
+        r#"SELECT
+               COUNT(*) AS request_count,
+               COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END), 0)
+                   AS token_request_count,
+               COALESCE(SUM(total_tokens), 0) AS total_tokens,
+               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+               COALESCE(SUM(prompt_cached_tokens), 0) AS prompt_cached_tokens
+           FROM request_logs"#,
+    )
+    .fetch_one(pool)
+    .await?;
+
+    Ok(TokenUsageWindowOut {
+        total_tokens: row.total_tokens,
+        prompt_tokens: row.prompt_tokens,
+        prompt_cached_tokens: row.prompt_cached_tokens,
+        request_count: row.token_request_count,
+        all_request_count: row.request_count,
+    })
+}
+
+/// Query token usage statistics for a custom date range.
+/// Start and end dates should be in ISO 8601 format (YYYY-MM-DD).
+pub async fn custom_range_token_usage(
+    pool: &SqlitePool,
+    start_date: &str,
+    end_date: &str,
+) -> Result<TokenUsageWindowOut, AppError> {
+    #[derive(Debug, FromRow)]
+    struct CustomRangeRow {
+        request_count: i64,
+        token_request_count: i64,
+        total_tokens: i64,
+        prompt_tokens: i64,
+        prompt_cached_tokens: i64,
+    }
+
+    let row: CustomRangeRow = sqlx::query_as(
+        r#"SELECT
+               COUNT(*) AS request_count,
+               COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END), 0)
+                   AS token_request_count,
+               COALESCE(SUM(total_tokens), 0) AS total_tokens,
+               COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+               COALESCE(SUM(prompt_cached_tokens), 0) AS prompt_cached_tokens
+           FROM request_logs
+           WHERE created_at >= datetime(?)
+             AND created_at < datetime(?, '+1 day')"#,
+    )
+    .bind(start_date)
+    .bind(end_date)
+    .fetch_one(pool)
+    .await?;
+
+    Ok(TokenUsageWindowOut {
+        total_tokens: row.total_tokens,
+        prompt_tokens: row.prompt_tokens,
+        prompt_cached_tokens: row.prompt_cached_tokens,
+        request_count: row.token_request_count,
+        all_request_count: row.request_count,
+    })
+}
+
 impl LogStatsState {
     fn apply_persisted_entry(&mut self, entry: PersistedLogStats, now: DateTime<Utc>) {
         self.total_log_count = self.total_log_count.saturating_add(1);
@@ -292,6 +368,8 @@ impl LogStatsState {
                 one_day: one_day.into_window(),
                 seven_days: seven_days.into_window(),
                 thirty_days: thirty_days.into_window(),
+                // all_time will be populated by the handler from a direct DB query
+                all_time: TokenUsageWindowOut::default(),
             },
         }
     }
@@ -317,6 +395,18 @@ impl LogStatsBucket {
             prompt_cached_tokens: self.prompt_cached_tokens,
             request_count: self.token_request_count,
             all_request_count: self.request_count,
+        }
+    }
+}
+
+impl Default for TokenUsageWindowOut {
+    fn default() -> Self {
+        Self {
+            total_tokens: 0,
+            prompt_tokens: 0,
+            prompt_cached_tokens: 0,
+            request_count: 0,
+            all_request_count: 0,
         }
     }
 }

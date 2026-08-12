@@ -75,6 +75,7 @@ pub struct TokenUsageStatsOut {
     pub one_day: TokenUsageWindowOut,
     pub seven_days: TokenUsageWindowOut,
     pub thirty_days: TokenUsageWindowOut,
+    pub all_time: TokenUsageWindowOut,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

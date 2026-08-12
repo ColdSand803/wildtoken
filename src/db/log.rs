@@ -627,6 +627,7 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
             request_count: row.thirty_days_requests,
             all_request_count: row.thirty_days_all_requests,
         },
+        all_time: TokenUsageWindowOut::default(),
     })
 }
 

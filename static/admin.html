@@ -168,7 +168,22 @@ anthropic: "/theme-packs/anthropic/theme.css",
                   <h3 id="dashboard-token-title">Tokens 统计</h3>
                   <p class="dashboard-card-sub">按请求日志中的 token 用量汇总</p>
                 </div>
-                <span class="dashboard-card-meta">全库统计</span>
+                <div class="dashboard-time-filter">
+                  <select id="dashboard-time-preset" aria-label="时间范围预设">
+                    <option value="today">今天</option>
+                    <option value="1d">最近 24 小时</option>
+                    <option value="7d">最近 7 天</option>
+                    <option value="30d" selected>最近 30 天</option>
+                    <option value="all">全部时间</option>
+                    <option value="custom">自定义...</option>
+                  </select>
+                  <div id="dashboard-custom-range" class="dashboard-custom-range" style="display: none;">
+                    <input type="date" id="dashboard-start-date" aria-label="开始日期" />
+                    <span>至</span>
+                    <input type="date" id="dashboard-end-date" aria-label="结束日期" />
+                    <button type="button" id="dashboard-apply-custom" class="btn-sm">应用</button>
+                  </div>
+                </div>
               </div>
               <div id="dashboard-token-kpis" class="dashboard-window-kpis" aria-live="polite"></div>
             </section>
@@ -179,7 +194,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
                   <h3 id="dashboard-request-title">请求统计</h3>
                   <p class="dashboard-card-sub">按全部请求日志条数汇总</p>
                 </div>
-                <span class="dashboard-card-meta">全库统计</span>
+                <span class="dashboard-card-meta" id="dashboard-selected-range">最近 30 天</span>
               </div>
               <div id="dashboard-request-kpis" class="dashboard-window-kpis" aria-live="polite"></div>
             </section>

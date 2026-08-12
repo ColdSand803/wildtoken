@@ -1,5 +1,9 @@
 // ── Dashboard ────────────────────────────────────────────
 
+let dashboardTimeRange = "default";
+let dashboardCustomStartDate = null;
+let dashboardCustomEndDate = null;
+
 function formatCompactNumber(value) {
   if (!Number.isFinite(value)) return "—";
   if (Math.abs(value) >= 1_000_000) {
@@ -24,6 +28,28 @@ function tokenUsageCard(label, usage, scopeLabel) {
       : `${scopeLabel} · 暂无 token 记录`,
     tone: "",
   };
+}
+
+function getTimeRangeLabel(range) {
+  switch (range) {
+    case "today":
+      return "今天";
+    case "1d":
+      return "最近 24 小时";
+    case "7d":
+      return "最近 7 天";
+    case "30d":
+      return "最近 30 天";
+    case "all":
+      return "全部时间";
+    case "custom":
+      if (dashboardCustomStartDate && dashboardCustomEndDate) {
+        return `${dashboardCustomStartDate} 至 ${dashboardCustomEndDate}`;
+      }
+      return "自定义时间";
+    default:
+      return "多个时间窗口";
+  }
 }
 
 function formatDashboardCacheHitRate(cacheHitTokens, inputTokens) {
@@ -311,22 +337,47 @@ function renderDashboard() {
       tone: "",
     },
   ]);
-  renderDashboardKpiCards(dashboardTokenKpis, [
-    tokenUsageCard("今天 Tokens", dashboardTokenUsage?.today, "本地日累计"),
-    tokenUsageCard("1d Tokens", dashboardTokenUsage?.one_day, "最近 24 小时"),
-    tokenUsageCard("7d Tokens", dashboardTokenUsage?.seven_days, "最近 7 天"),
-    tokenUsageCard("30d Tokens", dashboardTokenUsage?.thirty_days, "最近 30 天"),
-    cacheHitRateCard("今天缓存率", dashboardTokenUsage?.today, "本地日累计"),
-    cacheHitRateCard("1d 缓存率", dashboardTokenUsage?.one_day, "最近 24 小时"),
-    cacheHitRateCard("7d 缓存率", dashboardTokenUsage?.seven_days, "最近 7 天"),
-    cacheHitRateCard("30d 缓存率", dashboardTokenUsage?.thirty_days, "最近 30 天"),
-  ]);
-  renderDashboardKpiCards(dashboardRequestKpis, [
-    requestCountCard("今天请求", dashboardTokenUsage?.today, "本地日累计"),
-    requestCountCard("1d 请求", dashboardTokenUsage?.one_day, "最近 24 小时"),
-    requestCountCard("7d 请求", dashboardTokenUsage?.seven_days, "最近 7 天"),
-    requestCountCard("30d 请求", dashboardTokenUsage?.thirty_days, "最近 30 天"),
-  ]);
+
+  // Update the displayed range label
+  const rangeLabel = getTimeRangeLabel(dashboardTimeRange);
+  const selectedRangeMeta = document.getElementById("dashboard-selected-range");
+  if (selectedRangeMeta) {
+    selectedRangeMeta.textContent = rangeLabel;
+  }
+
+  // Render token usage based on selected range
+  if (dashboardTimeRange === "custom" || dashboardTimeRange === "all") {
+    // Show only the selected range data in the first card
+    const usage = dashboardTokenUsage?.today; // API returns the filtered data in 'today' field
+    renderDashboardKpiCards(dashboardTokenKpis, [
+      tokenUsageCard("Tokens", usage, rangeLabel),
+      cacheHitRateCard("缓存率", usage, rangeLabel),
+    ]);
+    renderDashboardKpiCards(dashboardRequestKpis, [
+      requestCountCard("请求", usage, rangeLabel),
+    ]);
+  } else {
+    // Default: show all windows
+    renderDashboardKpiCards(dashboardTokenKpis, [
+      tokenUsageCard("今天 Tokens", dashboardTokenUsage?.today, "本地日累计"),
+      tokenUsageCard("1d Tokens", dashboardTokenUsage?.one_day, "最近 24 小时"),
+      tokenUsageCard("7d Tokens", dashboardTokenUsage?.seven_days, "最近 7 天"),
+      tokenUsageCard("30d Tokens", dashboardTokenUsage?.thirty_days, "最近 30 天"),
+      tokenUsageCard("全部 Tokens", dashboardTokenUsage?.all_time, "全部时间统计"),
+      cacheHitRateCard("今天缓存率", dashboardTokenUsage?.today, "本地日累计"),
+      cacheHitRateCard("1d 缓存率", dashboardTokenUsage?.one_day, "最近 24 小时"),
+      cacheHitRateCard("7d 缓存率", dashboardTokenUsage?.seven_days, "最近 7 天"),
+      cacheHitRateCard("30d 缓存率", dashboardTokenUsage?.thirty_days, "最近 30 天"),
+      cacheHitRateCard("全部缓存率", dashboardTokenUsage?.all_time, "全部时间统计"),
+    ]);
+    renderDashboardKpiCards(dashboardRequestKpis, [
+      requestCountCard("今天请求", dashboardTokenUsage?.today, "本地日累计"),
+      requestCountCard("1d 请求", dashboardTokenUsage?.one_day, "最近 24 小时"),
+      requestCountCard("7d 请求", dashboardTokenUsage?.seven_days, "最近 7 天"),
+      requestCountCard("30d 请求", dashboardTokenUsage?.thirty_days, "最近 30 天"),
+      requestCountCard("全部请求", dashboardTokenUsage?.all_time, "全部时间统计"),
+    ]);
+  }
   const metrics = dashboardRuntimeMetrics || {};
   const cleanup = metrics.cleanup || {};
   const activeSse = Number(metrics.active_sse_streams || 0);
@@ -511,9 +562,22 @@ async function loadDashboardData() {
       window: dashboardTopWindow,
       limit: String(DASHBOARD_TOP_LIMIT),
     });
+
+    // Build token usage query params based on selected range
+    const tokenUsageParams = new URLSearchParams();
+    if (dashboardTimeRange === "custom" && dashboardCustomStartDate && dashboardCustomEndDate) {
+      tokenUsageParams.set("range", "custom");
+      tokenUsageParams.set("start_date", dashboardCustomStartDate);
+      tokenUsageParams.set("end_date", dashboardCustomEndDate);
+    } else if (dashboardTimeRange === "all") {
+      tokenUsageParams.set("range", "all");
+    } else {
+      tokenUsageParams.set("range", "default");
+    }
+
     const [page, tokenUsage, runtimeMetrics, topStats] = await Promise.all([
       api(`/api/admin/logs?${params}`),
-      api("/api/admin/logs/token-usage"),
+      api(`/api/admin/logs/token-usage?${tokenUsageParams}`),
       api("/api/admin/system/metrics"),
       api(`/api/admin/logs/top?${topParams}`),
     ]);
