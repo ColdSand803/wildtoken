@@ -149,7 +149,7 @@ html[data-theme="gojo"] .aurora {
 
 html[data-theme="gojo"] ::selection {
   background: var(--gojo-purple);
-  color: #ffffff;
+  color: #0a0514;
   text-shadow: none;
 }
 
@@ -438,7 +438,7 @@ html[data-theme="gojo"] .nav-link::before {
 
 html[data-theme="gojo"] .nav-link::after {
   bottom: 4px;
-  color: rgb(143 154 177 / 62%);
+  color: #7a8599;
   content: counter(gojo-nav, decimal-leading-zero);
   font-family: var(--font-mono);
   font-size: 8px;
@@ -605,10 +605,6 @@ html[data-theme="gojo"] .live-indicator {
   padding: 0 8px 9px;
 }
 
-html[data-theme="gojo"] .live-label {
-  display: none;
-}
-
 html[data-theme="gojo"] .live-dot,
 html[data-theme="gojo"] .stream-state-dot {
   background: var(--gojo-blue);
@@ -752,7 +748,7 @@ html[data-theme="gojo"] .form-section-head h3 {
 
 html[data-theme="gojo"] .dashboard-card-head h3,
 html[data-theme="gojo"] .dashboard-metric-head h3 {
-  border-left-color: rgb(169 131 255 / 62%);
+  border-left-color: rgb(99 220 255 / 58%);
 }
 
 html[data-theme="gojo"] .eyebrow {
@@ -848,6 +844,7 @@ html[data-theme="gojo"] button:not(:where(
   .token-preview-button,
   .model-selection-remove,
   .toast-close,
+  .field-action,
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
@@ -880,6 +877,7 @@ html[data-theme="gojo"] button:not(:where(
   .token-preview-button,
   .model-selection-remove,
   .toast-close,
+  .field-action,
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
@@ -908,6 +906,7 @@ html[data-theme="gojo"] button:not(:where(
   .token-preview-button,
   .model-selection-remove,
   .toast-close,
+  .field-action,
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
@@ -930,6 +929,7 @@ html[data-theme="gojo"] button:not(:where(
   .token-preview-button,
   .model-selection-remove,
   .toast-close,
+  .field-action,
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
@@ -948,6 +948,7 @@ html[data-theme="gojo"] button:not(:where(
   .token-preview-button,
   .model-selection-remove,
   .toast-close,
+  .field-action,
   .action-menu-trigger,
   .icon-close,
   .icon-maximize,
@@ -961,7 +962,7 @@ html[data-theme="gojo"] button:not(:where(
   background: rgb(40 47 65 / 82%);
   border-color: rgb(139 156 187 / 22%);
   box-shadow: none;
-  color: #6f7b90;
+  color: #8a95ab;
   transform: none;
 }
 
