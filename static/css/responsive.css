@@ -528,19 +528,6 @@
   .action-cell button {
     margin: 0 4px 4px 0;
   }
-
-  .token-value-box {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .token-value-box code {
-    min-width: 0;
-  }
-
-  .token-copy-btn {
-    width: 100%;
-  }
 }
 
 @media (max-width: 420px) {

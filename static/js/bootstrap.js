@@ -139,6 +139,22 @@ function toStoredTimestamp(timestamp) {
   return new Date(timestamp).toISOString().slice(0, 19).replace("T", " ");
 }
 
+// A modal <dialog> is promoted to the top layer and the rest of the document
+// goes inert behind it, so a scratch node parked on <body> can never hold a
+// selection and execCommand finds nothing to copy. Hand the fallback the
+// topmost modal instead. This is the common path, not the rare one: the async
+// Clipboard API is gated on secure contexts, and this console is usually
+// reached over plain http on a LAN address.
+function clipboardScratchHost() {
+  let openModals;
+  try {
+    openModals = document.querySelectorAll("dialog[open]:modal");
+  } catch {
+    openModals = document.querySelectorAll("dialog[open]");
+  }
+  return openModals[openModals.length - 1] || document.body;
+}
+
 async function copyTextToClipboard(text) {
   if (navigator.clipboard?.writeText) {
     try {
@@ -149,15 +165,24 @@ async function copyTextToClipboard(text) {
     }
   }
 
+  const previouslyFocused = document.activeElement;
   const textarea = document.createElement("textarea");
   textarea.value = text;
   textarea.setAttribute("readonly", "");
   textarea.style.position = "fixed";
   textarea.style.left = "-9999px";
-  document.body.append(textarea);
+  clipboardScratchHost().append(textarea);
   textarea.select();
-  const copied = document.execCommand("copy");
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
   textarea.remove();
+  // Removing the scratch node drops focus to the document; put it back so the
+  // caller's button keeps the keyboard.
+  previouslyFocused?.focus?.({ preventScroll: true });
   return copied;
 }
 
@@ -417,19 +442,18 @@ const tokenFormTitle = document.querySelector("#token-form-title");
 const tokenDialogClose = document.querySelector("#token-dialog-close");
 const newTokenButton = document.querySelector("#new-token");
 const tokenResetButton = document.querySelector("#token-reset-form");
-const copyTokenButton = document.querySelector("#copy-token");
-const tokenValueRow = document.querySelector("#token-value-row");
 const tokenNameInput = document.querySelector("#token-name");
 const tokenDescriptionInput = document.querySelector("#token-description");
-const tokenCustomRow = document.querySelector("#token-custom-row");
+const tokenCustomLabel = document.querySelector("#token-custom-label");
 const tokenCustomInput = document.querySelector("#token-custom");
+const tokenCustomHint = document.querySelector("#token-custom-hint");
+const tokenCustomCopy = document.querySelector("#token-custom-copy");
 const tokenExpiresInput = document.querySelector("#token-expires");
 const tokenLimitInput = document.querySelector("#token-limit");
 const tokenExpiresPresets = document.querySelector("#token-expires-presets");
 const tokenExpiresPreview = document.querySelector("#token-expires-preview");
 const tokenEnabledCheckbox = document.querySelector("#token-enabled");
 const tokenIdInput = document.querySelector("#token-id");
-const tokenValueDisplay = document.querySelector("#token-value-display");
 
 let tokenRefreshTimer = null;
 let tokens = [];

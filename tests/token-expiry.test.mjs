@@ -180,13 +180,13 @@ test("the expiry badge warns before the token lapses, not after", () => {
 
 test("a form field toggled hidden from script actually disappears", () => {
   // `.field { display: grid }` outranks the UA stylesheet's [hidden] rule, so
-  // without an explicit override the created-token readout and the
-  // custom-token row stay on screen in every dialog that hides them.
+  // without an explicit override the custom-token row stays on screen in every
+  // dialog that hides it.
   const css = read("static/css/forms-dialogs.css");
   assert.match(css, /\.field\[hidden\]\s*\{\s*display:\s*none;/);
 
   const markup = read("static/admin.html");
-  for (const id of ["token-value-row", "token-custom-row"]) {
+  for (const id of ["token-custom-row"]) {
     const tag = new RegExp(`<[a-z]+ id="${id}"[^>]*>`).exec(markup)?.[0];
     assert.notEqual(tag, undefined, `${id} must exist`);
     assert.match(tag, /class="[^"]*\bfield\b/, `${id} relies on the .field rule`);

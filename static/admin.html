@@ -1087,11 +1087,17 @@
               <span class="field-label">描述</span>
               <input id="token-description" maxlength="200" placeholder="可选备注" />
             </label>
-            <label id="token-custom-row" class="field span-2">
-              <span class="field-label">自定义令牌（可选）</span>
-              <input id="token-custom" autocomplete="off" spellcheck="false" maxlength="256" placeholder="留空则自动生成" />
-              <span class="field-hint">需为无空格的可打印 ASCII，最长 256 字节；短于 16 字节会要求二次确认。完整值仅在创建时显示一次。</span>
-            </label>
+            <div id="token-custom-row" class="field span-2">
+              <label class="field-label" id="token-custom-label" for="token-custom">自定义令牌（可选）</label>
+              <div class="field-with-action">
+                <input id="token-custom" autocomplete="off" spellcheck="false" maxlength="256" placeholder="留空则自动生成" />
+                <button id="token-custom-copy" type="button" class="secondary field-action" aria-label="复制令牌" title="复制令牌" disabled>
+                  <svg class="field-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M5 15V7a2 2 0 0 1 2-2h8"></path></svg>
+                  <svg class="field-action-done" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>
+                </button>
+              </div>
+              <span class="field-hint" id="token-custom-hint">需为无空格的可打印 ASCII，最长 256 字节；短于 16 字节会要求二次确认。</span>
+            </div>
             <label class="field span-2">
               <span class="field-label">分组</span>
               <select id="token-group"></select>
@@ -1112,14 +1118,6 @@
                 <button type="button" class="secondary small" data-expiry-preset="">永不过期</button>
               </div>
               <span class="field-hint" id="token-expires-preview"></span>
-            </div>
-            <div id="token-value-row" hidden class="field span-2 field-readonly">
-              <span class="field-label">令牌</span>
-              <div class="token-value-box">
-                <code id="token-value-display"></code>
-                <button id="copy-token" type="button" class="secondary token-copy-btn">复制</button>
-              </div>
-              <span class="field-hint">请立即保存。关闭后不再完整显示。</span>
             </div>
             <div class="toggle-list span-2">
               <label class="toggle-row">

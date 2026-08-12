@@ -12,7 +12,6 @@
 @import url("./css/settings.css");
 
 html[data-theme] .token-preview-code,
-html[data-theme] .token-value-box code,
 html[data-theme] #api-key,
 html[data-theme] #quick-import-apikey,
 html[data-theme] #token-custom {

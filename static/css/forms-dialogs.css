@@ -396,9 +396,8 @@ html:has(dialog:modal) {
   gap: 5px;
 }
 
-/* The grid above outranks the UA stylesheet's [hidden] rule, so fields toggled
-   from script — the created-token readout, the custom-token row while editing —
-   need the hiding spelled out here or they stay on screen. */
+/* The grid above outranks the UA stylesheet's [hidden] rule, so any field a
+   script hides needs the hiding spelled out here or it stays on screen. */
 .field[hidden] {
   display: none;
 }
@@ -408,6 +407,49 @@ html:has(dialog:modal) {
   font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+/* An input with a control riding alongside it. The input takes the slack so the
+   button keeps its square footprint at any dialog width. */
+.field-with-action {
+  display: flex;
+  gap: 6px;
+}
+
+.field-with-action input {
+  flex: 1 1 auto;
+}
+
+.field-action {
+  flex: 0 0 auto;
+  padding: 0;
+  width: var(--control-h);
+}
+
+.field-action svg {
+  fill: none;
+  height: 14px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 14px;
+}
+
+/* Same green confirmation the tables use for an inline copy. */
+.field-action.is-confirmed {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok);
+}
+
+.field-action-done,
+.field-action.is-confirmed .field-action-icon {
+  display: none;
+}
+
+.field-action.is-confirmed .field-action-done {
+  display: block;
 }
 
 .field-hint {
