@@ -198,6 +198,11 @@ html[data-theme="light"] .theme-menu {
   top: auto;
 }
 
+/* Text selection answers in the console's teal instead of the browser blue. */
+html[data-theme="light"] ::selection {
+  background: rgb(14 116 144 / 18%);
+}
+
 html[data-theme="light"] .content {
   grid-column: 2;
   grid-row: 1;
@@ -469,7 +474,7 @@ html[data-theme="light"] textarea {
 }
 
 /* ── Mobile ──────────────────────────────────────────────────
-   The rail unfolds into a five-slot dock pinned to the bottom of the
+   The rail unfolds into a six-slot dock pinned to the bottom of the
    viewport. Theme and density stay reachable from Settings. */
 @media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
   html[data-theme="light"] .app-shell {
@@ -563,7 +568,7 @@ html[data-theme="light"] textarea {
     box-shadow: 0 6px 20px rgb(29 48 75 / 12%), inset 0 1px 0 rgb(255 255 255 / 85%);
     display: grid;
     gap: 3px;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     left: 10px;
     padding: 4px;
     position: fixed;
@@ -579,7 +584,7 @@ html[data-theme="light"] textarea {
     text-align: center;
   }
 
-  /* No gutter to mark in a five-column dock; the fill and the accented icon
+  /* No gutter to mark in a six-column dock; the fill and the accented icon
      carry the selection. */
   html[data-theme="light"] .nav-link.active::after {
     display: none;

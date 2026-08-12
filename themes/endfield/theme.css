@@ -1055,7 +1055,7 @@ html[data-theme="endfield"] .live-dot {
     box-shadow: 0 5px 0 rgb(25 25 25 / 22%);
     display: grid;
     gap: 1px;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     left: 8px;
     padding: 3px;
     position: fixed;
