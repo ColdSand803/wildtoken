@@ -425,6 +425,7 @@ const fields = {
   weight: document.querySelector("#weight"),
   timeoutSeconds: document.querySelector("#timeout-seconds"),
   extraHeaders: document.querySelector("#extra-headers"),
+  rateLimit: document.querySelector("#upstream-rate-limit"),
   enabled: document.querySelector("#enabled"),
   fixedWeightEnabled: document.querySelector("#auto-weight-enabled"),
   clearApiKey: document.querySelector("#clear-api-key"),
@@ -447,6 +448,7 @@ const tokenCustomHint = document.querySelector("#token-custom-hint");
 const tokenCustomCopy = document.querySelector("#token-custom-copy");
 const tokenExpiresInput = document.querySelector("#token-expires");
 const tokenLimitInput = document.querySelector("#token-limit");
+const tokenRateLimitInput = document.querySelector("#token-rate-limit");
 const tokenExpiresPresets = document.querySelector("#token-expires-presets");
 const tokenExpiresPreview = document.querySelector("#token-expires-preview");
 const tokenEnabledCheckbox = document.querySelector("#token-enabled");

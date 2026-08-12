@@ -263,8 +263,10 @@ type Selection struct {
 //  1. Direct selection via `x-wildtoken-upstream` header or `upstream` query
 //     parameter (the value can be an id or a name).
 //  2. Otherwise every enabled upstream is considered.
-//  3. Candidates are filtered by model match score, keeping only the highest.
-//  4. Priority groups are visited from highest to lowest. Within the first group
+//  3. Channels in `exclude` are dropped as if disabled — the caller found their
+//     rate limit full this round, so re-selection falls over to the rest.
+//  4. Candidates are filtered by model match score, keeping only the highest.
+//  5. Priority groups are visited from highest to lowest. Within the first group
 //     whose total effective weight is positive, one is chosen by weighted random.
 func SelectUpstream(
 	ctx context.Context,
@@ -275,12 +277,14 @@ func SelectUpstream(
 	upstreamSelector *string,
 	model *string,
 	groupID int64,
+	exclude map[int64]bool,
 ) (*Selection, error) {
 	snapshot, err := cache.getOrLoad(ctx, database)
 	if err != nil {
 		return nil, err
 	}
-	return selectFromSnapshot(snapshot, autoWeight, policy, upstreamSelector, model, groupID), nil
+	return selectFromSnapshot(snapshot, autoWeight, policy, upstreamSelector, model,
+		groupID, exclude), nil
 }
 
 func selectFromSnapshot(
@@ -290,9 +294,10 @@ func selectFromSnapshot(
 	upstreamSelector *string,
 	model *string,
 	groupID int64,
+	exclude map[int64]bool,
 ) *Selection {
 	if upstreamSelector != nil {
-		return selectDirect(snapshot, *upstreamSelector, model, groupID)
+		return selectDirect(snapshot, *upstreamSelector, model, groupID, exclude)
 	}
 	if len(snapshot.upstreams) == 0 {
 		return nil
@@ -302,6 +307,11 @@ func selectFromSnapshot(
 	// reach a channel outside its group, and a model served only elsewhere reads
 	// as "no route" rather than leaking that the channel exists.
 	reachable := filterByGroup(snapshot.upstreams, groupID)
+	// Exclusion is applied before model scoring for the same reason a disabled
+	// channel is: a rate-limited exact match must not shadow a routable prefix
+	// match, or skipping the channel would turn into "no route" instead of a
+	// failover.
+	reachable = filterExcluded(reachable, exclude)
 	if len(reachable) == 0 {
 		return nil
 	}
@@ -317,19 +327,36 @@ func selectFromSnapshot(
 // selectDirect resolves an explicit selector, which may be an id or a name.
 //
 // Model matching and group membership both still apply: a selector is a routing
-// hint, not a way around the isolation a token's group establishes.
-func selectDirect(snapshot *routingSnapshot, selector string, model *string, groupID int64) *Selection {
+// hint, not a way around the isolation a token's group establishes. Unlike zero
+// weight and zero health, an exclusion is honored even here, because it means
+// the channel's rate limit already refused this request.
+func selectDirect(snapshot *routingSnapshot, selector string, model *string,
+	groupID int64, exclude map[int64]bool) *Selection {
 	if id, err := strconv.ParseInt(selector, 10, 64); err == nil {
-		if upstream, ok := snapshot.byID[id]; ok &&
+		if upstream, ok := snapshot.byID[id]; ok && !exclude[id] &&
 			upstream.servesGroup(groupID) && matchesModel(upstream, model) {
 			return &Selection{Upstream: upstream.row, ForwardModel: selectForwardModel(upstream, model)}
 		}
 	}
-	if upstream, ok := snapshot.byName[selector]; ok &&
+	if upstream, ok := snapshot.byName[selector]; ok && !exclude[upstream.row.ID] &&
 		upstream.servesGroup(groupID) && matchesModel(upstream, model) {
 		return &Selection{Upstream: upstream.row, ForwardModel: selectForwardModel(upstream, model)}
 	}
 	return nil
+}
+
+// filterExcluded drops the channels the caller has ruled out for this request.
+func filterExcluded(upstreams []*parsedUpstream, exclude map[int64]bool) []*parsedUpstream {
+	if len(exclude) == 0 {
+		return upstreams
+	}
+	kept := make([]*parsedUpstream, 0, len(upstreams))
+	for _, upstream := range upstreams {
+		if !exclude[upstream.row.ID] {
+			kept = append(kept, upstream)
+		}
+	}
+	return kept
 }
 
 // servesGroup reports whether a channel is reachable from a group.

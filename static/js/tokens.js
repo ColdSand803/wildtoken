@@ -341,6 +341,9 @@ function resetTokenForm() {
   if (tokenLimitInput) {
     tokenLimitInput.value = "";
   }
+  if (tokenRateLimitInput) {
+    tokenRateLimitInput.value = "";
+  }
 }
 
 /* 限额展示成「已用 / 剩余 / 限额」。数字按 K/M/B 缩写，免得一列全是长数字看不清；
@@ -370,11 +373,15 @@ function formatTokenCount(count) {
 function quotaCellMarkup(token) {
   const quota = token.quota || {};
   const used = Number(quota.used_tokens) || 0;
+  // 限速和限额挤同一列：限速命中率低，单独占列大多数行都是空的。
+  const rateNote = token.rate_limit
+    ? `<span class="muted quota-rate-note" title="限速 ${escapeHtml(token.rate_limit)}">${escapeHtml(token.rate_limit)}</span>`
+    : "";
 
   if (quota.limit_tokens === null || quota.limit_tokens === undefined) {
     return `<span class="quota-cell" title="已用 ${used.toLocaleString()} tokens，未设限额">`
       + `<span class="quota-used">${formatTokenCount(used)}</span>`
-      + `<span class="quota-sep">/</span><span class="muted">不限</span></span>`;
+      + `<span class="quota-sep">/</span><span class="muted">不限</span></span>${rateNote}`;
   }
 
   const limit = Number(quota.limit_tokens) || 0;
@@ -391,7 +398,7 @@ function quotaCellMarkup(token) {
     + `<span class="quota-remaining">${formatTokenCount(remaining)}</span>`
     + `<span class="quota-sep">/</span>`
     + `<span class="quota-limit">${escapeHtml(quota.limit_expression || formatTokenCount(limit))}</span>`
-    + `</span>`;
+    + `</span>${rateNote}`;
 }
 
 function openTokenDialog(mode = "new") {
@@ -428,6 +435,10 @@ async function editToken(token) {
   if (tokenLimitInput) {
     // 回填服务端算好的最短表达式，这样不动表单再保存不会改变限额。
     tokenLimitInput.value = token.quota?.limit_expression || "";
+  }
+  if (tokenRateLimitInput) {
+    // 限速存的就是操作员写的表达式原文，原样回显。
+    tokenRateLimitInput.value = token.rate_limit || "";
   }
   renderExpiryPreview();
   tokenEnabledCheckbox.checked = token.enabled;
@@ -657,6 +668,8 @@ tokenForm.addEventListener("submit", async (event) => {
     expires_at: expiry.expiresAtMs === null ? null : toStoredTimestamp(expiry.expiresAtMs),
     group_id: Number(tokenGroupSelect?.value) || 1,
     limit_expression: tokenLimitInput?.value.trim() || "",
+    // 空串等价「不限速」，后端把空白归一成 NULL，这里不用区分 null 和 ""。
+    rate_limit: tokenRateLimitInput?.value.trim() || "",
   };
   const customToken = tokenCustomInput.value;
   if (id) {

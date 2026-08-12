@@ -71,7 +71,7 @@ func selectWithFreshCache(t *testing.T, database *sql.DB, autoWeight *AutoWeight
 	selector, model *string) *Selection {
 	t.Helper()
 	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
-		autoWeight, testPolicy(), selector, model, models.DefaultGroupID)
+		autoWeight, testPolicy(), selector, model, models.DefaultGroupID, nil)
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestRoutingCacheReusesSnapshotUntilInvalidated(t *testing.T) {
 	selectVia := func(model string) *Selection {
 		t.Helper()
 		selection, err := SelectUpstream(context.Background(), database, cache,
-			autoWeight, testPolicy(), nil, &model, models.DefaultGroupID)
+			autoWeight, testPolicy(), nil, &model, models.DefaultGroupID, nil)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -170,6 +170,58 @@ func TestRoutingCacheReusesSnapshotUntilInvalidated(t *testing.T) {
 	}
 	if selection := selectVia("second-model"); selection == nil || selection.Upstream.Name != "cached" {
 		t.Fatalf("reloaded selection = %+v, want cached", selection)
+	}
+}
+
+func TestSelectionSkipsExcludedChannels(t *testing.T) {
+	database := testDB(t)
+	insertUpstream(t, database, "first", []string{"model"}, 999, 100, true)
+	insertUpstream(t, database, "second", []string{"model"}, 100, 100, true)
+
+	// Excluding the higher-priority channel falls over to the next candidate,
+	// even across a priority boundary.
+	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
+		NewAutoWeightManager(), testPolicy(), nil, ptr("model"), models.DefaultGroupID,
+		map[int64]bool{1: true})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if selection == nil || selection.Upstream.Name != "second" {
+		t.Fatalf("selection = %+v, want second", selection)
+	}
+
+	// A direct selector honors the exclusion too: the caller has already found
+	// this channel's rate limit full, so there is nothing left to pick.
+	selection, err = SelectUpstream(context.Background(), database, NewRoutingCache(),
+		NewAutoWeightManager(), testPolicy(), ptr("first"), ptr("model"),
+		models.DefaultGroupID, map[int64]bool{1: true})
+	if err != nil {
+		t.Fatalf("direct select: %v", err)
+	}
+	if selection != nil {
+		t.Errorf("direct selection returned %q despite the exclusion", selection.Upstream.Name)
+	}
+}
+
+func TestAnExcludedExactMatchDoesNotShadowAPrefixMatch(t *testing.T) {
+	database := testDB(t)
+	insertUpstream(t, database, "exact", []string{"gpt-test"}, 100, 100, true)
+	insertUpstream(t, database, "prefix", nil, 100, 100, true)
+	if _, err := database.Exec(
+		`UPDATE upstreams SET model_prefixes = '["gpt-"]' WHERE name = 'prefix'`); err != nil {
+		t.Fatalf("set prefixes: %v", err)
+	}
+
+	// Exclusion is applied before model scoring: with the exact match gone, the
+	// prefix match must become routable rather than reading as "no route".
+	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
+		NewAutoWeightManager(), testPolicy(), nil, ptr("gpt-test"), models.DefaultGroupID,
+		map[int64]bool{1: true})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if selection == nil || selection.Upstream.Name != "prefix" {
+		t.Fatalf("selection = %+v, want the prefix channel", selection)
 	}
 }
 
@@ -332,7 +384,7 @@ func TestWeightedSelectionHonorsWeightRatios(t *testing.T) {
 	const runs = 4000
 	for range runs {
 		selection, err := SelectUpstream(context.Background(), database, cache,
-			autoWeight, testPolicy(), nil, ptr("model"), models.DefaultGroupID)
+			autoWeight, testPolicy(), nil, ptr("model"), models.DefaultGroupID, nil)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}

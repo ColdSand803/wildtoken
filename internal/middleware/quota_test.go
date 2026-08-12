@@ -11,6 +11,7 @@ import (
 
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
 func TestAnExhaustedQuotaIsRefusedBeforeReachingAnUpstream(t *testing.T) {
@@ -84,7 +85,8 @@ func TestAQuotaRefusalCarriesBothATopLevelCodeAndTheVendorShape(t *testing.T) {
 		{"anthropic", "/v1/messages", "rate_limit_error"},
 	} {
 		t.Run(route.name, func(t *testing.T) {
-			handler := RequireDownstream(database)(http.HandlerFunc(
+			limiter := ratelimit.NewLimiter()
+			handler := RequireDownstream(database, limiter)(http.HandlerFunc(
 				func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 			request := httptest.NewRequest(http.MethodPost, route.path, nil)
 			request.Header.Set("authorization", "Bearer "+created.Token)
@@ -190,7 +192,8 @@ func TestTheAdmittedRequestCarriesItsQuotaState(t *testing.T) {
 	}
 
 	var seen DownstreamAuth
-	handler := RequireDownstream(database)(http.HandlerFunc(
+	limiter := ratelimit.NewLimiter()
+	handler := RequireDownstream(database, limiter)(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			seen, _ = DownstreamAuthFrom(r.Context())
 		}))
@@ -211,7 +214,8 @@ func TestTheAdmittedRequestCarriesItsQuotaState(t *testing.T) {
 // caller would have seen.
 func probeDownstream(t *testing.T, database *sql.DB, token string) (int, []byte) {
 	t.Helper()
-	handler := RequireDownstream(database)(http.HandlerFunc(
+	limiter := ratelimit.NewLimiter()
+	handler := RequireDownstream(database, limiter)(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)

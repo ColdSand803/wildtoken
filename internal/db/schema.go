@@ -55,6 +55,9 @@ func Init(ctx context.Context, db *sql.DB) error {
 	for _, column := range []struct{ name, definition string }{
 		{"weight", "INTEGER NOT NULL DEFAULT 100 CHECK (weight BETWEEN 0 AND 10000)"},
 		{"auto_weight_enabled", "INTEGER NOT NULL DEFAULT 1 CHECK (auto_weight_enabled IN (0, 1))"},
+		// NULL means the channel is not rate-limited; the stored shape is the
+		// operator's expression ("100/m"), mirroring api_tokens.rate_limit.
+		{"rate_limit", "TEXT"},
 	} {
 		if err := ensureColumn(ctx, db, "upstreams", column.name, column.definition); err != nil {
 			return err
@@ -88,6 +91,7 @@ func Init(ctx context.Context, db *sql.DB) error {
 	for _, column := range []struct{ name, definition string }{
 		{"used_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"limit_tokens", "INTEGER"},
+		{"rate_limit", "TEXT"},
 	} {
 		if err := ensureColumn(ctx, db, "api_tokens", column.name, column.definition); err != nil {
 			return err

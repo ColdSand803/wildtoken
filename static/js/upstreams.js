@@ -91,6 +91,7 @@ function payloadFromForm() {
     timeout_seconds: Number(fields.timeoutSeconds.value || 300),
     enabled: fields.enabled.checked,
     extra_headers: extraHeaders,
+    rate_limit: fields.rateLimit.value.trim() || null,
     clear_api_key: fields.clearApiKey.checked,
     group_ids: readUpstreamGroupSelection(),
   };
@@ -252,9 +253,11 @@ async function editUpstream(upstream) {
     fields.fixedWeightEnabled.checked = !detail.auto_weight_enabled;
     fields.timeoutSeconds.value = detail.timeout_seconds;
     fields.extraHeaders.value = JSON.stringify(detail.extra_headers || {}, null, 2);
+    fields.rateLimit.value = detail.rate_limit || "";
     fields.enabled.checked = detail.enabled;
     fields.clearApiKey.checked = false;
-    setAdvancedSettingsOpen(hasExtraHeaders(detail.extra_headers));
+    // 限速也在高级设置里，配置过就展开，不然编辑时看不到已有的值。
+    setAdvancedSettingsOpen(hasExtraHeaders(detail.extra_headers) || Boolean(detail.rate_limit));
     fetchModelsButton.disabled = false;
     formTitle.textContent = `编辑渠道：${detail.name}`;
     openUpstreamDialog();
@@ -276,8 +279,9 @@ function duplicateUpstream(upstream) {
   fields.fixedWeightEnabled.checked = !upstream.auto_weight_enabled;
   fields.timeoutSeconds.value = upstream.timeout_seconds;
   fields.extraHeaders.value = JSON.stringify(upstream.extra_headers || {}, null, 2);
+  fields.rateLimit.value = upstream.rate_limit || "";
   fields.enabled.checked = upstream.enabled;
-  setAdvancedSettingsOpen(hasExtraHeaders(upstream.extra_headers));
+  setAdvancedSettingsOpen(hasExtraHeaders(upstream.extra_headers) || Boolean(upstream.rate_limit));
   formTitle.textContent = `复制渠道：${upstream.name}`;
   openUpstreamDialog();
   setStatus("已复制渠道配置，API Key 需要重新填写后再保存。", "ok");
@@ -417,6 +421,7 @@ function resetForm() {
   fields.modelMappings.value = "";
   setFormModels([]);
   fields.extraHeaders.value = "{}";
+  fields.rateLimit.value = "";
   fields.enabled.checked = true;
   fields.fixedWeightEnabled.checked = false;
   setAdvancedSettingsOpen(false);

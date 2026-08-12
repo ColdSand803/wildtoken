@@ -1014,3 +1014,53 @@ func TestUpstreamRoundTripsItsJSONColumns(t *testing.T) {
 		t.Error("clear_api_key did not remove the stored key")
 	}
 }
+
+func TestUpstreamRateLimitRoundTrips(t *testing.T) {
+	db := memoryDB(t)
+	ctx := context.Background()
+
+	input := models.DefaultUpstreamIn()
+	input.Name = "limited"
+	input.BaseURL = "https://api.example.com"
+	raw := "  100/m  "
+	input.RateLimit = &raw
+
+	// The stored shape is the trimmed expression, so the console echoes back
+	// exactly what the operator wrote.
+	created, err := CreateUpstream(ctx, db, &input, 300)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if created.RateLimit == nil || *created.RateLimit != "100/m" {
+		t.Errorf("rate_limit = %v, want 100/m", created.RateLimit)
+	}
+
+	changed := "50/10s"
+	update := models.UpstreamUpdate{UpstreamIn: input}
+	update.RateLimit = &changed
+	updated, err := UpdateUpstream(ctx, db, created.ID, &update)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if updated.RateLimit == nil || *updated.RateLimit != "50/10s" {
+		t.Errorf("rate_limit = %v, want 50/10s", updated.RateLimit)
+	}
+
+	// A blank expression stores NULL — the update endpoint is a full replacement.
+	blank := "   "
+	update.RateLimit = &blank
+	cleared, err := UpdateUpstream(ctx, db, created.ID, &update)
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if cleared.RateLimit != nil {
+		t.Errorf("rate_limit = %q, want nil", *cleared.RateLimit)
+	}
+
+	// An invalid expression never reaches storage.
+	invalid := "not-a-rate"
+	update.RateLimit = &invalid
+	if _, err := UpdateUpstream(ctx, db, created.ID, &update); err == nil {
+		t.Error("an invalid rate limit expression was accepted")
+	}
+}

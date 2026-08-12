@@ -64,6 +64,7 @@ test("fixed weight checkbox maps to the existing dynamic-weight API field", () =
       weight: { value: "25" },
       fixedWeightEnabled: { checked: true },
       timeoutSeconds: { value: "300" },
+      rateLimit: { value: "" },
       enabled: { checked: true },
       clearApiKey: { checked: false },
     },

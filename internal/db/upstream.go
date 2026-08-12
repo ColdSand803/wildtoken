@@ -13,7 +13,7 @@ import (
 
 const upstreamColumns = `id, name, base_url, api_key, model_names, model_prefixes,
     model_mappings, priority, weight, auto_weight_enabled, enabled, extra_headers,
-    timeout_seconds, created_at, updated_at`
+    timeout_seconds, rate_limit, created_at, updated_at`
 
 func parseJSONArray(value string) ([]string, error) {
 	parsed := []string{}
@@ -33,17 +33,20 @@ func parseJSONMap(value string) (map[string]string, error) {
 
 func scanUpstreamRow(row interface{ Scan(...any) error }) (models.UpstreamRow, error) {
 	var upstream models.UpstreamRow
-	var apiKey sql.NullString
+	var apiKey, rateLimit sql.NullString
 	err := row.Scan(&upstream.ID, &upstream.Name, &upstream.BaseURL, &apiKey,
 		&upstream.ModelNames, &upstream.ModelPrefixes, &upstream.ModelMappings,
 		&upstream.Priority, &upstream.Weight, &upstream.AutoWeightEnabled,
 		&upstream.Enabled, &upstream.ExtraHeaders, &upstream.TimeoutSeconds,
-		&upstream.CreatedAt, &upstream.UpdatedAt)
+		&rateLimit, &upstream.CreatedAt, &upstream.UpdatedAt)
 	if err != nil {
 		return upstream, err
 	}
 	if apiKey.Valid {
 		upstream.APIKey = &apiKey.String
+	}
+	if rateLimit.Valid && rateLimit.String != "" {
+		upstream.RateLimit = &rateLimit.String
 	}
 	return upstream, nil
 }
@@ -82,6 +85,7 @@ func RowToUpstreamOut(row *models.UpstreamRow) (models.UpstreamOut, error) {
 		Enabled:            row.Enabled == 1,
 		ExtraHeaders:       extraHeaders,
 		TimeoutSeconds:     row.TimeoutSeconds,
+		RateLimit:          row.RateLimit,
 		CreatedAt:          row.CreatedAt,
 		UpdatedAt:          row.UpdatedAt,
 		RuntimeHealthScore: 100,
@@ -204,6 +208,10 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 	if err != nil {
 		return models.UpstreamOut{}, err
 	}
+	rateLimit, err := input.NormalizedRateLimit()
+	if err != nil {
+		return models.UpstreamOut{}, apperr.BadRequest(err.Error())
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -214,11 +222,11 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 	result, err := tx.ExecContext(ctx, `INSERT INTO upstreams
         (name, base_url, api_key, model_names, model_prefixes, model_mappings,
          priority, weight, auto_weight_enabled, enabled, extra_headers, timeout_seconds,
-         created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+         rate_limit, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		input.Name, input.BaseURL, input.APIKey, modelNames, modelPrefixes, modelMappings,
 		input.Priority, input.Weight, boolToInt64(input.AutoWeightEnabled),
-		boolToInt64(input.Enabled), extraHeaders, timeout)
+		boolToInt64(input.Enabled), extraHeaders, timeout, rateLimit)
 	if err != nil {
 		return models.UpstreamOut{}, apperr.Database(err)
 	}
@@ -277,6 +285,10 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 	if err != nil {
 		return models.UpstreamOut{}, err
 	}
+	rateLimit, err := input.NormalizedRateLimit()
+	if err != nil {
+		return models.UpstreamOut{}, apperr.BadRequest(err.Error())
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -288,11 +300,11 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
         SET name = ?, base_url = ?, api_key = ?,
             model_names = ?, model_prefixes = ?, model_mappings = ?,
             priority = ?, weight = ?, auto_weight_enabled = ?, enabled = ?, extra_headers = ?,
-            timeout_seconds = ?, updated_at = datetime('now')
+            timeout_seconds = ?, rate_limit = ?, updated_at = datetime('now')
         WHERE id = ?`,
 		input.Name, input.BaseURL, apiKey, modelNames, modelPrefixes, modelMappings,
 		input.Priority, input.Weight, boolToInt64(input.AutoWeightEnabled),
-		boolToInt64(input.Enabled), extraHeaders, timeout, id)
+		boolToInt64(input.Enabled), extraHeaders, timeout, rateLimit, id)
 	if err != nil {
 		return models.UpstreamOut{}, apperr.Database(err)
 	}

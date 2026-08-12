@@ -434,6 +434,7 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 			Enabled:                        row.Enabled == 1,
 			ExtraHeaders:                   extraHeaders,
 			TimeoutSeconds:                 row.TimeoutSeconds,
+			RateLimit:                      row.RateLimit,
 			CreatedAt:                      row.CreatedAt,
 			UpdatedAt:                      row.UpdatedAt,
 			RuntimeHealthScore:             health.Score,

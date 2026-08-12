@@ -79,6 +79,43 @@ func writeProtocolError(w http.ResponseWriter, status int, path, message, errorT
 	})
 }
 
+// UpstreamRateLimitedCode identifies "every routable channel is rate-limited"
+// at the top level of the refusal, mirroring the API-key rejections in
+// middleware: a caller that does not speak either vendor's error shape can
+// branch on it.
+const UpstreamRateLimitedCode = "UPSTREAM_RATE_LIMITED"
+
+// UpstreamRateLimitedMessage is the operator-facing summary carried alongside
+// the code.
+const UpstreamRateLimitedMessage = "渠道请求频率超限"
+
+// writeUpstreamRateLimitRejection reports that routing found candidates, but
+// every one of them is currently rate-limited.
+//
+// The refusal heals itself once a window slides, so both vendor dialects use
+// their rate-limit shape, which is what SDK retry logic keys on. The body
+// carries the refusal twice for the same reason the token-side rejections do: a
+// vendor SDK only looks inside `error`, while a caller written against this
+// proxy reads the top-level code.
+func writeUpstreamRateLimitRejection(w http.ResponseWriter, path string) {
+	detail := "所有可路由渠道均已达到限速，请稍后重试"
+	body := map[string]any{
+		"code":    UpstreamRateLimitedCode,
+		"message": UpstreamRateLimitedMessage,
+	}
+	if strings.Trim(path, "/") == "messages" {
+		body["type"] = "error"
+		body["error"] = map[string]string{"type": "rate_limit_error", "message": detail}
+	} else {
+		body["error"] = map[string]string{
+			"message": detail,
+			"type":    "rate_limit_exceeded",
+			"code":    "rate_limit_exceeded",
+		}
+	}
+	apperr.WriteJSON(w, http.StatusTooManyRequests, body)
+}
+
 // noRouteReason describes why routing found no upstream.
 //
 // The text goes to both the downstream error body and the request log, so a 503
@@ -248,7 +285,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		var directSelection *proxy.Selection
 		if selector != nil {
 			directSelection, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
-				state.AutoWeight, policy, selector, model, auth.GroupID)
+				state.AutoWeight, policy, selector, model, auth.GroupID, nil)
 			if err != nil {
 				guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
 				apperr.WriteError(w, err)
@@ -308,22 +345,54 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 	var previousUpstreamID *int64
 	var lastFailure *attemptResult
 
+	// rateLimited collects the channels whose rate limit refused this request.
+	// A refused channel stays out of routing for the rest of the request, so
+	// re-selection falls over to the remaining candidates instead of drawing the
+	// same channel again. Nil until the first refusal.
+	var rateLimited map[int64]bool
+
 	for attempt := 0; ; attempt++ {
-		selected := config.directSelection
-		if config.selector == nil {
-			var err error
-			selected, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
-				state.AutoWeight, config.policy, nil, config.model, config.auth.GroupID)
-			if err != nil {
-				config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
-				return nil, err
+		// Selection repeats until a channel's rate limit admits the request;
+		// admission records the request, refusal excludes the channel. The loop
+		// terminates because every refusal shrinks the candidate set.
+		var selected *proxy.Selection
+		for {
+			selected = config.directSelection
+			if config.selector == nil {
+				var err error
+				selected, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
+					state.AutoWeight, config.policy, nil, config.model, config.auth.GroupID,
+					rateLimited)
+				if err != nil {
+					config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
+					return nil, err
+				}
+			} else if selected != nil && rateLimited[selected.Upstream.ID] {
+				// A direct selector has no other candidate behind it.
+				selected = nil
 			}
+			if selected == nil ||
+				proxy.UpstreamRateLimitAdmits(state.UpstreamRateLimiter, &selected.Upstream) {
+				break
+			}
+			if rateLimited == nil {
+				rateLimited = map[int64]bool{}
+			}
+			rateLimited[selected.Upstream.ID] = true
 		}
 
 		if selected == nil {
 			// Nothing else to try. A buffered failure is the caller's answer.
 			if lastFailure != nil {
 				return lastFailure.response, lastFailure.err
+			}
+			if len(rateLimited) > 0 {
+				// Routing had candidates, but every one of them refused: the
+				// request is only deferred, not unroutable, so the answer is a
+				// 429 rather than the no-route 503.
+				config.guard.logAndDisarm(429, "all candidate channels are rate limited")
+				writeUpstreamRateLimitRejection(w, config.path)
+				return nil, nil
 			}
 			reason := noRouteReason(config.selector, config.model, config.groupName)
 			config.guard.logAndDisarm(503, reason)

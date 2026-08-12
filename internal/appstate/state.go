@@ -16,6 +16,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
+	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
 // SettingsStore holds the operator-editable runtime policy.
@@ -93,7 +94,13 @@ type State struct {
 	LogStats    *db.LogStatsCache
 	ModelsCache *ModelsListCache
 	Routing     *proxy.RoutingCache
-	StartedAt   time.Time
+	// TokenRateLimiter and UpstreamRateLimiter enforce the per-token and
+	// per-channel rate expressions. They must stay separate instances: both key
+	// their windows by an int64 id, so sharing one would let a token and a
+	// channel with the same id count against each other.
+	TokenRateLimiter    *ratelimit.Limiter
+	UpstreamRateLimiter *ratelimit.Limiter
+	StartedAt           time.Time
 }
 
 // ProxyDeps assembles the dependencies one forwarded request needs.

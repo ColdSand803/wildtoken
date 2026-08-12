@@ -779,7 +779,7 @@
             <summary>
               <span>
                 <span class="section-title">高级设置</span>
-                <span class="section-copy">Header 覆盖 JSON</span>
+                <span class="section-copy">Header 覆盖 JSON 与限速</span>
               </span>
               <span class="section-summary-state" aria-hidden="true"></span>
             </summary>
@@ -795,6 +795,11 @@
               <span id="extra-headers-hint" class="field-hint">
                 Header 名大小写不敏感；这里的值最后写入，可覆盖下游请求头和渠道 API Key 生成的认证头。用 {client_header:User-Agent} 可读取同名下游 Header。Host、Content-Length 等传输头不可覆盖。
               </span>
+            </label>
+            <label class="field">
+              <span class="field-label">限速（可选）</span>
+              <input id="upstream-rate-limit" autocomplete="off" spellcheck="false" maxlength="24" placeholder="留空则不限速，如 100/m、1000/h、50/10s" />
+              <span class="field-hint">按请求次数限速，格式为 次数/时间窗口，单位支持 s/m/h/d，可带倍数如 50/10s。被限速的渠道会在路由时被跳过。</span>
             </label>
           </details>
         </div>
@@ -1106,6 +1111,11 @@
               <span class="field-label">限额（可选）</span>
               <input id="token-limit" autocomplete="off" spellcheck="false" maxlength="24" placeholder="留空则不限额，如 100M、1B、1000K" />
               <span class="field-hint">按累计 token 总量计算，不会自动重置。支持 K/M/B/T 后缀。</span>
+            </label>
+            <label class="field span-2">
+              <span class="field-label">限速（可选）</span>
+              <input id="token-rate-limit" autocomplete="off" spellcheck="false" maxlength="24" placeholder="留空则不限速，如 100/m、1000/h、50/10s" />
+              <span class="field-hint">按请求次数限速，格式为 次数/时间窗口，单位支持 s/m/h/d，可带倍数如 50/10s。</span>
             </label>
             <div class="field span-2">
               <label class="field-label" for="token-expires">有效期（可选）</label>

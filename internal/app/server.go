@@ -21,6 +21,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
+	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
 // ReadyInfo reports the bound port and console URL once the server is listening.
@@ -90,19 +91,21 @@ func New(ctx context.Context) (*Server, error) {
 		settings.Logging.LogQueueCapacity)
 
 	state := &appstate.State{
-		DB:          database,
-		HTTPClient:  newHTTPClient(settings.Upstream.DefaultTimeoutSeconds),
-		Settings:    settings,
-		AutoWeight:  proxy.NewAutoWeightManager(),
-		Runtime:     appstate.NewSettingsStore(appstate.LoadRuntimeSettings(ctx, database)),
-		Credentials: credentials,
-		Throttle:    throttle,
-		Metrics:     runtimeMetrics,
-		LogWriter:   logWriter,
-		LogStats:    logStats,
-		ModelsCache: appstate.NewModelsListCache(),
-		Routing:     proxy.NewRoutingCache(),
-		StartedAt:   time.Now(),
+		DB:                  database,
+		HTTPClient:          newHTTPClient(settings.Upstream.DefaultTimeoutSeconds),
+		Settings:            settings,
+		AutoWeight:          proxy.NewAutoWeightManager(),
+		Runtime:             appstate.NewSettingsStore(appstate.LoadRuntimeSettings(ctx, database)),
+		Credentials:         credentials,
+		Throttle:            throttle,
+		Metrics:             runtimeMetrics,
+		LogWriter:           logWriter,
+		LogStats:            logStats,
+		ModelsCache:         appstate.NewModelsListCache(),
+		Routing:             proxy.NewRoutingCache(),
+		TokenRateLimiter:    ratelimit.NewLimiter(),
+		UpstreamRateLimiter: ratelimit.NewLimiter(),
+		StartedAt:           time.Now(),
 	}
 
 	go db.RunLogStatsRefreshLoop(jobsCtx, database, logStats, runtimeMetrics)
@@ -166,6 +169,8 @@ func (s *Server) Serve(ctx context.Context) error {
 func (s *Server) shutdownResources() {
 	s.cancelJobs()
 	s.logWriter.Close()
+	s.state.TokenRateLimiter.Close()
+	s.state.UpstreamRateLimiter.Close()
 	s.state.DB.Close()
 }
 

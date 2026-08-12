@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
@@ -14,6 +15,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/authstate"
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
 type contextKey int
@@ -146,7 +148,7 @@ func parseForwardedAddr(value string) (netip.Addr, bool) {
 
 // RequireDownstream validates the caller's API token against the api_tokens
 // table, accepting only enabled and unexpired rows.
-func RequireDownstream(database *sql.DB) func(http.Handler) http.Handler {
+func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Anthropic clients authenticate with x-api-key and expect their own
@@ -180,6 +182,22 @@ func RequireDownstream(database *sql.DB) func(http.Handler) http.Handler {
 				writeDownstreamQuotaRejection(w, anthropic,
 					models.QuotaExceededMessage(credential.UsedTokens, *credential.LimitTokens))
 				return
+			}
+
+			/* The rate limit is enforced after the quota so an exhausted token
+			   reports its quota, not its rate: the quota message tells the caller
+			   the credential itself is out of budget, which is the more permanent
+			   condition. The expression is parsed on every request — it survived
+			   validation at write time, so a parse failure here means the row was
+			   edited out of band, and the request is admitted rather than refused
+			   on a config error the caller cannot fix. */
+			if credential.RateLimit != nil {
+				if parsed, err := ratelimit.ParseRateLimit(*credential.RateLimit); err == nil {
+					if !limiter.Check(credential.TokenID, parsed) {
+						writeDownstreamRateLimitRejection(w, anthropic, *credential.RateLimit)
+						return
+					}
+				}
 			}
 
 			ctx := context.WithValue(r.Context(), downstreamAuthKey, DownstreamAuth{
@@ -231,6 +249,40 @@ func writeDownstreamQuotaRejection(w http.ResponseWriter, anthropic bool, detail
 			"message": detail,
 			"type":    "insufficient_quota",
 			"code":    "insufficient_quota",
+		}
+	}
+	apperr.WriteJSON(w, http.StatusTooManyRequests, body)
+}
+
+// RateLimitedCode identifies a rate-limited request at the top level of the
+// refusal, mirroring QuotaExhaustedCode: a caller that does not speak either
+// vendor's error shape can branch on it.
+const RateLimitedCode = "API_KEY_RATE_LIMITED"
+
+// RateLimitedMessage is the operator-facing summary carried alongside the code.
+const RateLimitedMessage = "API key 请求频率超限"
+
+// writeDownstreamRateLimitRejection reports a request refused for exceeding the
+// token's configured rate.
+//
+// Unlike a quota refusal this one heals itself: the caller only has to wait for
+// the window to slide. The nested message names the configured rate so a client
+// can decide how long that is likely to be. Both vendor dialects use their
+// rate-limit shape, which is exactly what SDK retry logic keys on.
+func writeDownstreamRateLimitRejection(w http.ResponseWriter, anthropic bool, rateLimit string) {
+	detail := fmt.Sprintf("请求频率超过限制（%s），请稍后重试", rateLimit)
+	body := map[string]any{
+		"code":    RateLimitedCode,
+		"message": RateLimitedMessage,
+	}
+	if anthropic {
+		body["type"] = "error"
+		body["error"] = map[string]string{"type": "rate_limit_error", "message": detail}
+	} else {
+		body["error"] = map[string]string{
+			"message": detail,
+			"type":    "rate_limit_exceeded",
+			"code":    "rate_limit_exceeded",
 		}
 	}
 	apperr.WriteJSON(w, http.StatusTooManyRequests, body)
@@ -305,6 +357,8 @@ type DownstreamCredential struct {
 	GroupID     int64
 	UsedTokens  int64
 	LimitTokens *int64
+	// RateLimit is the stored rate expression ("100/m"), nil when unlimited.
+	RateLimit *string
 }
 
 // LookupEnabledDownstreamToken resolves a token to its row.
@@ -332,13 +386,15 @@ func LookupEnabledDownstreamToken(ctx context.Context, database *sql.DB,
 	// would look like a routing bug rather than a configuration choice.
 	var credential DownstreamCredential
 	var storedGroupID, storedLimit sql.NullInt64
+	var storedRateLimit sql.NullString
 	err := database.QueryRowContext(ctx,
-		`SELECT id, name, group_id, COALESCE(used_tokens, 0), limit_tokens FROM api_tokens
+		`SELECT id, name, group_id, COALESCE(used_tokens, 0), limit_tokens, rate_limit
+		FROM api_tokens
         WHERE token_hash = ? AND enabled = 1
           AND (expires_at IS NULL OR expires_at > datetime('now'))`,
 		db.TokenDigest(token)).
 		Scan(&credential.TokenID, &credential.TokenName, &storedGroupID,
-			&credential.UsedTokens, &storedLimit)
+			&credential.UsedTokens, &storedLimit, &storedRateLimit)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DownstreamCredential{}, false, nil
 	}
@@ -352,6 +408,9 @@ func LookupEnabledDownstreamToken(ctx context.Context, database *sql.DB,
 	}
 	if storedLimit.Valid && storedLimit.Int64 > 0 {
 		credential.LimitTokens = &storedLimit.Int64
+	}
+	if storedRateLimit.Valid && storedRateLimit.String != "" {
+		credential.RateLimit = &storedRateLimit.String
 	}
 	return credential, true, nil
 }

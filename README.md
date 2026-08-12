@@ -44,6 +44,12 @@ an admin console for day-to-day operations.
   can carry an optional expiry — entered as a duration such as `1d3h` or as a
   date — after which they stop authenticating while the record stays around to be
   renewed.
+- 🚦 **Token and channel rate limits:** both tokens and channels accept an optional
+  rate expression such as `100/m`, `1000/h` or `50/10s` (requests per window,
+  units s/m/h/d with an optional multiplier). A rate-limited token is refused
+  with 429; a rate-limited channel is skipped during routing so traffic fails
+  over to the next candidate, and 429 is returned only when every candidate is
+  exhausted. Counting uses in-memory sliding windows, so limits reset on restart.
 - 📊 **Admin dashboard:** inspect channel status, request logs, token usage, top
   models/channels, latency, runtime metrics, and request/response snapshots.
 - 🧰 **Channel tools:** fetch model lists, test connectivity, test a selected model,

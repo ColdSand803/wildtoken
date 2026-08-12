@@ -39,7 +39,7 @@ const tokenColumns = `t.id, t.name, t.description, t.token_preview,
     t.expires_at, t.created_at, t.updated_at,
     COALESCE(t.group_id, 1),
     COALESCE((SELECT g.name FROM groups g WHERE g.id = t.group_id), 'default'),
-    COALESCE(t.used_tokens, 0), t.limit_tokens`
+    COALESCE(t.used_tokens, 0), t.limit_tokens, t.rate_limit`
 
 // tokenFrom is the FROM clause matching tokenColumns.
 const tokenFrom = " FROM api_tokens AS t"
@@ -95,9 +95,10 @@ func scanTokenRow(row interface{ Scan(...any) error }) (models.APITokenRow, stri
 	var expiresAt sql.NullString
 	var groupName string
 	var limitTokens sql.NullInt64
+	var rateLimit sql.NullString
 	err := row.Scan(&token.ID, &token.Name, &token.Description, &token.TokenPreview,
 		&token.Token, &token.Enabled, &expiresAt, &token.CreatedAt, &token.UpdatedAt,
-		&token.GroupID, &groupName, &token.UsedTokens, &limitTokens)
+		&token.GroupID, &groupName, &token.UsedTokens, &limitTokens, &rateLimit)
 	if err != nil {
 		return token, "", err
 	}
@@ -106,6 +107,9 @@ func scanTokenRow(row interface{ Scan(...any) error }) (models.APITokenRow, stri
 	}
 	if limitTokens.Valid && limitTokens.Int64 > 0 {
 		token.LimitTokens = &limitTokens.Int64
+	}
+	if rateLimit.Valid && rateLimit.String != "" {
+		token.RateLimit = &rateLimit.String
 	}
 	return token, groupName, nil
 }
@@ -124,6 +128,7 @@ func tokenOut(row models.APITokenRow, groupName string) models.APITokenOut {
 		GroupID:      row.GroupID,
 		GroupName:    groupName,
 		Quota:        models.NewQuotaState(row.UsedTokens, row.LimitTokens),
+		RateLimit:    row.RateLimit,
 	}
 }
 
@@ -361,12 +366,16 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
 	}
+	rateLimit, err := input.NormalizedRateLimit()
+	if err != nil {
+		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
+	}
 
 	result, err := db.ExecContext(ctx, `INSERT INTO api_tokens
-        (name, description, token, token_hash, token_preview, token_plain, enabled, expires_at, group_id, limit_tokens, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        (name, description, token, token_hash, token_preview, token_plain, enabled, expires_at, group_id, limit_tokens, rate_limit, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		trimSpace(input.Name), trimSpace(input.Description), digest, digest, preview,
-		tokenValue, boolToInt64(input.Enabled), expiresAt, groupID, limitTokens)
+		tokenValue, boolToInt64(input.Enabled), expiresAt, groupID, limitTokens, rateLimit)
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.Database(err)
 	}
@@ -396,6 +405,7 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 		GroupID:      created.GroupID,
 		GroupName:    created.GroupName,
 		Quota:        created.Quota,
+		RateLimit:    created.RateLimit,
 	}, nil
 }
 
@@ -474,10 +484,15 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
 		return models.APITokenOut{}, err
 	}
 
+	rateLimit, err := input.NormalizedRateLimit()
+	if err != nil {
+		return models.APITokenOut{}, apperr.BadRequest(err.Error())
+	}
+
 	query := `UPDATE api_tokens SET name = ?, description = ?, expires_at = ?,
-        group_id = ?, limit_tokens = ?, updated_at = datetime('now')`
+        group_id = ?, limit_tokens = ?, rate_limit = ?, updated_at = datetime('now')`
 	args := []any{trimSpace(input.Name), trimSpace(input.Description),
-		expiresAt, groupID, limitTokens}
+		expiresAt, groupID, limitTokens, rateLimit}
 	if replacement != "" {
 		// The same four columns CreateToken writes, kept in step: the legacy
 		// `token` column takes the digest because the startup migration

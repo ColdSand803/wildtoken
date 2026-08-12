@@ -15,8 +15,10 @@ type UpstreamRow struct {
 	Enabled           int64 // 0 or 1
 	ExtraHeaders      string
 	TimeoutSeconds    float64
-	CreatedAt         string
-	UpdatedAt         string
+	// RateLimit is the stored rate expression ("100/m"), nil when unlimited.
+	RateLimit *string
+	CreatedAt string
+	UpdatedAt string
 }
 
 // UpstreamIn is the create payload for an upstream.
@@ -33,6 +35,7 @@ type UpstreamIn struct {
 	Enabled           bool              `json:"enabled"`
 	ExtraHeaders      map[string]string `json:"extra_headers"`
 	TimeoutSeconds    *float64          `json:"timeout_seconds"`
+	RateLimit         *string           `json:"rate_limit"`
 	// GroupIDs are the groups this channel serves. An empty selection falls
 	// back to the default group, because a channel in no group is unreachable.
 	GroupIDs []int64 `json:"group_ids"`
@@ -57,7 +60,15 @@ func (u *UpstreamIn) Validate() error {
 	if u.Weight < 0 || u.Weight > 10000 {
 		return ErrString("weight must be between 0 and 10000")
 	}
+	if _, err := u.NormalizedRateLimit(); err != nil {
+		return err
+	}
 	return nil
+}
+
+// NormalizedRateLimit validates the rate limit expression for storage.
+func (u *UpstreamIn) NormalizedRateLimit() (*string, error) {
+	return NormalizeRateLimit(u.RateLimit)
 }
 
 // Normalize replaces nil collections so callers can index them freely.
@@ -108,6 +119,7 @@ type UpstreamOut struct {
 	Enabled                        bool              `json:"enabled"`
 	ExtraHeaders                   map[string]string `json:"extra_headers"`
 	TimeoutSeconds                 float64           `json:"timeout_seconds"`
+	RateLimit                      *string           `json:"rate_limit"`
 	CreatedAt                      string            `json:"created_at"`
 	UpdatedAt                      string            `json:"updated_at"`
 	RuntimeHealthScore             int64             `json:"runtime_health_score"`
@@ -132,6 +144,7 @@ type UpstreamDetailOut struct {
 	Enabled                        bool              `json:"enabled"`
 	ExtraHeaders                   map[string]string `json:"extra_headers"`
 	TimeoutSeconds                 float64           `json:"timeout_seconds"`
+	RateLimit                      *string           `json:"rate_limit"`
 	CreatedAt                      string            `json:"created_at"`
 	UpdatedAt                      string            `json:"updated_at"`
 	RuntimeHealthScore             int64             `json:"runtime_health_score"`

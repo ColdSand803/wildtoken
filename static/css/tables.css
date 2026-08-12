@@ -1088,3 +1088,11 @@ td.no-match-state {
 .quota-cell.danger .quota-remaining {
   color: var(--danger, #dc2626);
 }
+
+/* 限速标记：挂在限额后面的小字，如 100/m。设了限速的令牌是少数，单独占列不值 */
+.quota-rate-note {
+  display: block;
+  font-size: 0.78em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}

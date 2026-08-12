@@ -5,6 +5,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
 const (
@@ -78,6 +80,7 @@ type APITokenRow struct {
 	GroupID     int64
 	UsedTokens  int64
 	LimitTokens *int64
+	RateLimit   *string
 }
 
 // APITokenIn is the create payload. A nil Token means "generate one".
@@ -93,6 +96,8 @@ type APITokenIn struct {
 	GroupID *int64 `json:"group_id"`
 	// LimitExpression is a token limit such as 100M or 1B. Blank means no limit.
 	LimitExpression string `json:"limit_expression"`
+	// RateLimit is a rate limit expression such as "100/m" or "1000/h". Blank means no limit.
+	RateLimit *string `json:"rate_limit"`
 }
 
 // APITokenUpdateIn is a full replacement, so an absent `expires_at` clears the
@@ -109,6 +114,8 @@ type APITokenUpdateIn struct {
 	Token *string `json:"token"`
 	// LimitExpression is a token limit such as 100M or 1B. Blank means no limit.
 	LimitExpression string `json:"limit_expression"`
+	// RateLimit is a rate limit expression such as "100/m" or "1000/h". Blank means no limit.
+	RateLimit *string `json:"rate_limit"`
 }
 
 // RequestedToken is the replacement value, or "" when this edit keeps the
@@ -118,6 +125,26 @@ func (t *APITokenUpdateIn) RequestedToken() string {
 		return ""
 	}
 	return *t.Token
+}
+
+// NormalizeRateLimit validates and trims a rate limit expression.
+//
+// A nil or blank value means "no rate limit" and is reported as nil, matching
+// how the expiry field treats absence. The parsed form is discarded here — the
+// stored shape is the expression itself, so the console can echo back exactly
+// what the operator wrote.
+func NormalizeRateLimit(raw *string) (*string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	value := strings.TrimSpace(*raw)
+	if value == "" {
+		return nil, nil
+	}
+	if _, err := ratelimit.ParseRateLimit(value); err != nil {
+		return nil, ErrString("rate limit must look like 100/m, 1000/h or 50/10s")
+	}
+	return &value, nil
 }
 
 func validateTokenMetadata(name, description string) error {
@@ -169,6 +196,9 @@ func (t *APITokenIn) Validate() error {
 	if _, err := t.ParsedLimit(); err != nil {
 		return err
 	}
+	if _, err := t.NormalizedRateLimit(); err != nil {
+		return err
+	}
 	if t.Token == nil {
 		return nil
 	}
@@ -184,6 +214,11 @@ func (t *APITokenIn) ParsedLimit() (*int64, error) {
 	return ParseQuotaExpression(t.LimitExpression)
 }
 
+// NormalizedRateLimit validates the rate limit expression for storage.
+func (t *APITokenIn) NormalizedRateLimit() (*string, error) {
+	return NormalizeRateLimit(t.RateLimit)
+}
+
 func (t *APITokenUpdateIn) Validate() error {
 	if err := validateTokenMetadata(t.Name, t.Description); err != nil {
 		return err
@@ -192,6 +227,9 @@ func (t *APITokenUpdateIn) Validate() error {
 		return err
 	}
 	if _, err := t.ParsedLimit(); err != nil {
+		return err
+	}
+	if _, err := t.NormalizedRateLimit(); err != nil {
 		return err
 	}
 	// A blank token means "leave it alone", so it never reaches the value rules.
@@ -208,6 +246,11 @@ func (t *APITokenUpdateIn) NormalizedExpiresAt() (*string, error) {
 // ParsedLimit resolves the limit expression into a stored token count.
 func (t *APITokenUpdateIn) ParsedLimit() (*int64, error) {
 	return ParseQuotaExpression(t.LimitExpression)
+}
+
+// NormalizedRateLimit validates the rate limit expression for storage.
+func (t *APITokenUpdateIn) NormalizedRateLimit() (*string, error) {
+	return NormalizeRateLimit(t.RateLimit)
 }
 
 // APITokenOut carries the full token value so the console can hand a credential
@@ -228,6 +271,7 @@ type APITokenOut struct {
 	GroupID      int64      `json:"group_id"`
 	GroupName    string     `json:"group_name"`
 	Quota        QuotaState `json:"quota"`
+	RateLimit    *string    `json:"rate_limit"`
 }
 
 // APITokenCreatedOut is returned only by the creation endpoint, so the full
@@ -245,4 +289,5 @@ type APITokenCreatedOut struct {
 	GroupID      int64      `json:"group_id"`
 	GroupName    string     `json:"group_name"`
 	Quota        QuotaState `json:"quota"`
+	RateLimit    *string    `json:"rate_limit"`
 }
