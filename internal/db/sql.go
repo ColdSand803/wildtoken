@@ -101,6 +101,11 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     token       TEXT NOT NULL UNIQUE,
     token_hash  TEXT NOT NULL,
     token_preview TEXT NOT NULL,
+    -- The token in the clear, so the console can hand an operator back a
+    -- credential it already issued. Nullable and without a UNIQUE constraint
+    -- because rows written before this column existed keep it NULL forever —
+    -- their plaintext was never kept and cannot be recovered from the digest.
+    token_plain TEXT,
     enabled     INTEGER NOT NULL DEFAULT 1,
     -- NULL means the token never expires. Stored in the same
     -- 'YYYY-MM-DD HH:MM:SS' UTC shape as created_at so authentication

@@ -69,13 +69,15 @@ type APITokenRow struct {
 	Name         string
 	Description  string
 	TokenPreview string
-	Enabled      int64
-	ExpiresAt    *string
-	CreatedAt    string
-	UpdatedAt    string
-	GroupID      int64
-	UsedTokens   int64
-	LimitTokens  *int64
+	// Token is the stored plaintext, empty for rows written before it was kept.
+	Token       string
+	Enabled     int64
+	ExpiresAt   *string
+	CreatedAt   string
+	UpdatedAt   string
+	GroupID     int64
+	UsedTokens  int64
+	LimitTokens *int64
 }
 
 // APITokenIn is the create payload. A nil Token means "generate one".
@@ -100,8 +102,22 @@ type APITokenUpdateIn struct {
 	Description string  `json:"description"`
 	ExpiresAt   *string `json:"expires_at"`
 	GroupID     *int64  `json:"group_id"`
+	// Token replaces the credential itself. Unlike ExpiresAt this is not a full
+	// replacement: absent, null and blank all leave the current value alone. The
+	// console echoes the token back on every save, and reading a blank field as
+	// "erase it" would leave a row nobody can authenticate with.
+	Token *string `json:"token"`
 	// LimitExpression is a token limit such as 100M or 1B. Blank means no limit.
 	LimitExpression string `json:"limit_expression"`
+}
+
+// RequestedToken is the replacement value, or "" when this edit keeps the
+// current one.
+func (t *APITokenUpdateIn) RequestedToken() string {
+	if t.Token == nil {
+		return ""
+	}
+	return *t.Token
 }
 
 func validateTokenMetadata(name, description string) error {
@@ -130,6 +146,19 @@ func isASCIIGraphic(value string) bool {
 	return true
 }
 
+// validateTokenValue judges an operator-supplied credential. Creation and
+// editing share it so a value the create endpoint refuses cannot be smuggled in
+// through an update.
+func validateTokenValue(token string) error {
+	if len(token) < APITokenMinBytes || len(token) > APITokenMaxBytes {
+		return ErrString("custom token must be between 1 and 256 bytes")
+	}
+	if !isASCIIGraphic(token) {
+		return ErrString("custom token must contain only printable ASCII characters without spaces")
+	}
+	return nil
+}
+
 func (t *APITokenIn) Validate() error {
 	if err := validateTokenMetadata(t.Name, t.Description); err != nil {
 		return err
@@ -143,14 +172,7 @@ func (t *APITokenIn) Validate() error {
 	if t.Token == nil {
 		return nil
 	}
-	token := *t.Token
-	if len(token) < APITokenMinBytes || len(token) > APITokenMaxBytes {
-		return ErrString("custom token must be between 1 and 256 bytes")
-	}
-	if !isASCIIGraphic(token) {
-		return ErrString("custom token must contain only printable ASCII characters without spaces")
-	}
-	return nil
+	return validateTokenValue(*t.Token)
 }
 
 func (t *APITokenIn) NormalizedExpiresAt() (*string, error) {
@@ -169,8 +191,14 @@ func (t *APITokenUpdateIn) Validate() error {
 	if _, err := t.NormalizedExpiresAt(); err != nil {
 		return err
 	}
-	_, err := t.ParsedLimit()
-	return err
+	if _, err := t.ParsedLimit(); err != nil {
+		return err
+	}
+	// A blank token means "leave it alone", so it never reaches the value rules.
+	if requested := t.RequestedToken(); requested != "" {
+		return validateTokenValue(requested)
+	}
+	return nil
 }
 
 func (t *APITokenUpdateIn) NormalizedExpiresAt() (*string, error) {
@@ -182,11 +210,16 @@ func (t *APITokenUpdateIn) ParsedLimit() (*int64, error) {
 	return ParseQuotaExpression(t.LimitExpression)
 }
 
-// APITokenOut never carries the full token value.
+// APITokenOut carries the full token value so the console can hand a credential
+// back to the operator who owns it.
 type APITokenOut struct {
-	ID           int64      `json:"id"`
-	Name         string     `json:"name"`
-	Description  string     `json:"description"`
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	// Token is the plaintext, or "" for a row issued before plaintext was
+	// stored — those cannot be recovered. Always serialized, never null, so a
+	// client can test one field instead of distinguishing absent from empty.
+	Token        string     `json:"token"`
 	TokenPreview string     `json:"token_preview"`
 	Enabled      bool       `json:"enabled"`
 	ExpiresAt    *string    `json:"expires_at"`

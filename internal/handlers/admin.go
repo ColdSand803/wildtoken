@@ -66,9 +66,7 @@ func pathID(r *http.Request) (int64, error) {
 
 // isUniqueViolation reports a UNIQUE constraint failure, which the console
 // should see as a bad request rather than an internal error.
-func isUniqueViolation(err error) bool {
-	return err != nil && strings.Contains(strings.ToUpper(err.Error()), "UNIQUE")
-}
+func isUniqueViolation(err error) bool { return db.IsUniqueViolation(err) }
 
 // HealthCheck reports that the service and its database are reachable.
 func HealthCheck(state *appstate.State) http.HandlerFunc {

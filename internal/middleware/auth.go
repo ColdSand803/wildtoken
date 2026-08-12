@@ -317,6 +317,10 @@ type DownstreamCredential struct {
 // An exhausted quota is deliberately not filtered here: the caller reports it
 // separately, because a credential that is merely out of budget should say so
 // rather than look like a wrong key.
+//
+// The digest is resolved on every request with nothing cached in front of it,
+// which is what lets the console rewrite a token's value with no invalidation
+// step: the previous value stops authenticating as soon as the write commits.
 func LookupEnabledDownstreamToken(ctx context.Context, database *sql.DB,
 	token string) (DownstreamCredential, bool, error) {
 	if token == "" {

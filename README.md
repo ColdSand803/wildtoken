@@ -38,10 +38,12 @@ an admin console for day-to-day operations.
 - 🔁 **Retry and failover policy:** failed automatic routes can reselect another
   channel, while same-channel retries respect the configured delay.
 - 🔐 **Downstream token management:** create client-facing API tokens in the admin
-  console; full token values are shown once, and the database stores only
-  hashes plus irreversible previews. Tokens can carry an optional expiry —
-  entered as a duration such as `1d3h` or as a date — after which they stop
-  authenticating while the record stays around to be renewed.
+  console, shaped as an `sk-` prefix followed by 32 random alphanumerics. The full
+  value is kept in the database so it can be copied from the token list at any
+  time, or rewritten while editing — which retires the old value at once. Tokens
+  can carry an optional expiry — entered as a duration such as `1d3h` or as a
+  date — after which they stop authenticating while the record stays around to be
+  renewed.
 - 📊 **Admin dashboard:** inspect channel status, request logs, token usage, top
   models/channels, latency, runtime metrics, and request/response snapshots.
 - 🧰 **Channel tools:** fetch model lists, test connectivity, test a selected model,
@@ -346,8 +348,10 @@ theme packs.
   `change-me` credential before exposure.
 - Keep `.env`, SQLite data, logs, and release archives with live configuration
   out of public repositories.
-- Downstream API tokens are stored as SHA-256 digests plus irreversible previews;
-  the full token is displayed only once at creation time.
+- Downstream API tokens are stored in plaintext so the console can copy them at
+  any time; authentication resolves a SHA-256 digest and the plaintext never
+  enters the request path. Treat access to the SQLite file and to the admin port
+  as access to every downstream token.
 - Provider API keys are injected into upstream requests server-side and should
   never be distributed to downstream clients.
 - Admin APIs are same-origin and require `x-admin-token`; compatibility `/v1/*`

@@ -219,6 +219,9 @@ func sqliteDSN(settings config.DatabaseSettings) (string, error) {
 	for _, pragma := range pragmas {
 		values.Add("_pragma", pragma)
 	}
+	// Stores that read and then write inside one transaction depend on this; see
+	// db.SQLiteTxLock for what deferred locking does to them.
+	values.Set("_txlock", db.SQLiteTxLock)
 
 	return path + "?" + values.Encode(), nil
 }

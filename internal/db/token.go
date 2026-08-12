@@ -16,9 +16,26 @@ import (
 
 const tokenPreviewChars = 8
 
+const (
+	// apiTokenPrefix follows the convention downstream clients already expect
+	// from OpenAI-shaped keys, so a wildtoken value can be pasted anywhere one
+	// of those is accepted.
+	apiTokenPrefix      = "sk-"
+	apiTokenRandomChars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+	apiTokenRandomLen   = 32
+	// apiTokenRandomCutoff is the largest multiple of the alphabet size that
+	// still fits in a byte; see GenerateAPIToken for why it matters.
+	apiTokenRandomCutoff = byte(256 - 256%len(apiTokenRandomChars))
+)
+
 // tokenColumns lists every column of a token row, in the order APITokenRow
 // declares them.
-const tokenColumns = `t.id, t.name, t.description, t.token_preview, t.enabled,
+//
+// token_plain is folded to an empty string here rather than carried as a NULL:
+// a row created before plaintext was stored has no recoverable value, and the
+// console reads the empty string as "cannot be copied".
+const tokenColumns = `t.id, t.name, t.description, t.token_preview,
+    COALESCE(t.token_plain, ''), t.enabled,
     t.expires_at, t.created_at, t.updated_at,
     COALESCE(t.group_id, 1),
     COALESCE((SELECT g.name FROM groups g WHERE g.id = t.group_id), 'default'),
@@ -28,15 +45,36 @@ const tokenColumns = `t.id, t.name, t.description, t.token_preview, t.enabled,
 const tokenFrom = " FROM api_tokens AS t"
 
 // GenerateAPIToken mints a fresh downstream token.
+//
+// The random half is drawn by rejection sampling rather than by folding each
+// byte with a plain modulo: 256 is not a multiple of the 62-character alphabet,
+// so a modulo would hand the first eight characters extra weight and shave
+// entropy off every token. Bytes landing above the last whole multiple are
+// discarded instead, which costs a reroll on roughly 3% of draws.
 func GenerateAPIToken() (string, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
-		return "", apperr.Internal("could not generate an API token")
+	random := make([]byte, 0, apiTokenRandomLen)
+	buffer := make([]byte, apiTokenRandomLen)
+	for len(random) < apiTokenRandomLen {
+		if _, err := rand.Read(buffer); err != nil {
+			return "", apperr.Internal("could not generate an API token")
+		}
+		for _, b := range buffer {
+			if b >= apiTokenRandomCutoff {
+				continue
+			}
+			random = append(random, apiTokenRandomChars[int(b)%len(apiTokenRandomChars)])
+			if len(random) == apiTokenRandomLen {
+				break
+			}
+		}
 	}
-	return "wildtoken_" + base64.RawURLEncoding.EncodeToString(bytes), nil
+	return apiTokenPrefix + string(random), nil
 }
 
-// TokenDigest is the only form of a token that is ever persisted.
+// TokenDigest is the form authentication matches against, and the only form
+// every token row is guaranteed to carry. Rows issued since the console gained
+// a copy button also keep the plaintext in `token_plain`, but nothing on the
+// request path reads it.
 func TokenDigest(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
@@ -58,7 +96,7 @@ func scanTokenRow(row interface{ Scan(...any) error }) (models.APITokenRow, stri
 	var groupName string
 	var limitTokens sql.NullInt64
 	err := row.Scan(&token.ID, &token.Name, &token.Description, &token.TokenPreview,
-		&token.Enabled, &expiresAt, &token.CreatedAt, &token.UpdatedAt,
+		&token.Token, &token.Enabled, &expiresAt, &token.CreatedAt, &token.UpdatedAt,
 		&token.GroupID, &groupName, &token.UsedTokens, &limitTokens)
 	if err != nil {
 		return token, "", err
@@ -78,6 +116,7 @@ func tokenOut(row models.APITokenRow, groupName string) models.APITokenOut {
 		Name:         row.Name,
 		Description:  row.Description,
 		TokenPreview: row.TokenPreview,
+		Token:        row.Token,
 		Enabled:      row.Enabled == 1,
 		ExpiresAt:    row.ExpiresAt,
 		CreatedAt:    row.CreatedAt,
@@ -106,11 +145,15 @@ func rejectPastExpiry(expiresAt *string) error {
 	return nil
 }
 
-// MigrateLegacyTokenStorage upgrades plaintext token rows in one transaction.
+// MigrateLegacyTokenStorage brings a token table up to the current column set
+// in one transaction.
 //
 // The legacy `token` column is retained because its NOT NULL/UNIQUE constraints
 // are part of deployed databases. Its values are overwritten with the same
-// SHA-256 digest stored in `token_hash`, so no plaintext survives the commit.
+// SHA-256 digest stored in `token_hash`, so nothing readable survives the commit
+// in that column — which is exactly why the plaintext the console copies lives
+// in `token_plain` instead. Reusing `token` for it would work until the next
+// startup, when the cleanup below would overwrite it with the digest again.
 func MigrateLegacyTokenStorage(ctx context.Context, db *sql.DB) error {
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -125,6 +168,7 @@ func MigrateLegacyTokenStorage(ctx context.Context, db *sql.DB) error {
 	hasLegacyToken := columns["token"]
 	hasTokenHash := columns["token_hash"]
 	hasTokenPreview := columns["token_preview"]
+	hasTokenPlain := columns["token_plain"]
 
 	if !hasLegacyToken {
 		return errors.New("api_tokens is missing its compatibility token column")
@@ -137,6 +181,14 @@ func MigrateLegacyTokenStorage(ctx context.Context, db *sql.DB) error {
 	if !hasTokenPreview {
 		if _, err := tx.ExecContext(ctx,
 			"ALTER TABLE api_tokens ADD COLUMN token_preview TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	// Nullable and undefaulted: existing rows have no plaintext to backfill, and
+	// NULL says that honestly where '' would read as an empty credential.
+	if !hasTokenPlain {
+		if _, err := tx.ExecContext(ctx,
+			"ALTER TABLE api_tokens ADD COLUMN token_plain TEXT"); err != nil {
 			return err
 		}
 	}
@@ -263,8 +315,9 @@ func ListTokens(ctx context.Context, db *sql.DB) ([]models.APITokenOut, error) {
 	return tokens, nil
 }
 
-// GetToken returns ok=false when no row carries the id.
-func GetToken(ctx context.Context, db *sql.DB, id int64) (models.APITokenOut, bool, error) {
+// GetToken returns ok=false when no row carries the id. It takes a Queryer so an
+// edit can read the row it is about to rewrite from inside its own transaction.
+func GetToken(ctx context.Context, db Queryer, id int64) (models.APITokenOut, bool, error) {
 	row := db.QueryRowContext(ctx, "SELECT "+tokenColumns+tokenFrom+" WHERE t.id = ?", id)
 	entry, groupName, err := scanTokenRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -310,10 +363,10 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 	}
 
 	result, err := db.ExecContext(ctx, `INSERT INTO api_tokens
-        (name, description, token, token_hash, token_preview, enabled, expires_at, group_id, limit_tokens, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        (name, description, token, token_hash, token_preview, token_plain, enabled, expires_at, group_id, limit_tokens, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		trimSpace(input.Name), trimSpace(input.Description), digest, digest, preview,
-		boolToInt64(input.Enabled), expiresAt, groupID, limitTokens)
+		tokenValue, boolToInt64(input.Enabled), expiresAt, groupID, limitTokens)
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.Database(err)
 	}
@@ -350,7 +403,7 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 //
 // A token must always name a group that exists: with no group it would reach no
 // channel, which reads as a routing bug rather than a configuration choice.
-func resolveTokenGroup(ctx context.Context, db *sql.DB, requested *int64) (int64, error) {
+func resolveTokenGroup(ctx context.Context, db Queryer, requested *int64) (int64, error) {
 	groupID := models.DefaultGroupID
 	if requested != nil && *requested > 0 {
 		groupID = *requested
@@ -365,6 +418,15 @@ func resolveTokenGroup(ctx context.Context, db *sql.DB, requested *int64) (int64
 	return groupID, nil
 }
 
+// UpdateToken applies a console edit, replacing the credential itself when the
+// payload carries a new one.
+//
+// Everything from reading the row to reading it back runs in one transaction.
+// The token value is the reason: deciding whether a requested value is free and
+// then claiming it are only sound as one step, and outside a transaction another
+// edit could take the value in between. The write lock is held from BEGIN (see
+// db.SQLiteTxLock), so a concurrent edit waits and then observes the committed
+// state rather than racing this one.
 func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITokenUpdateIn) (models.APITokenOut, error) {
 	if err := input.Validate(); err != nil {
 		return models.APITokenOut{}, apperr.BadRequest(err.Error())
@@ -374,7 +436,13 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
 		return models.APITokenOut{}, apperr.BadRequest(err.Error())
 	}
 
-	existing, ok, err := GetToken(ctx, db, id)
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.APITokenOut{}, apperr.Database(err)
+	}
+	defer tx.Rollback()
+
+	existing, ok, err := GetToken(ctx, tx, id)
 	if err != nil {
 		return models.APITokenOut{}, err
 	}
@@ -391,7 +459,7 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
 		}
 	}
 
-	groupID, err := resolveTokenGroup(ctx, db, input.GroupID)
+	groupID, err := resolveTokenGroup(ctx, tx, input.GroupID)
 	if err != nil {
 		return models.APITokenOut{}, err
 	}
@@ -401,14 +469,85 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
 		return models.APITokenOut{}, apperr.BadRequest(err.Error())
 	}
 
-	_, err = db.ExecContext(ctx,
-		"UPDATE api_tokens SET name = ?, description = ?, expires_at = ?, group_id = ?, limit_tokens = ?, updated_at = datetime('now') WHERE id = ?",
-		trimSpace(input.Name), trimSpace(input.Description), expiresAt, groupID, limitTokens, id)
+	replacement, err := plannedTokenReplacement(ctx, tx, id, existing, input)
 	if err != nil {
+		return models.APITokenOut{}, err
+	}
+
+	query := `UPDATE api_tokens SET name = ?, description = ?, expires_at = ?,
+        group_id = ?, limit_tokens = ?, updated_at = datetime('now')`
+	args := []any{trimSpace(input.Name), trimSpace(input.Description),
+		expiresAt, groupID, limitTokens}
+	if replacement != "" {
+		// The same four columns CreateToken writes, kept in step: the legacy
+		// `token` column takes the digest because the startup migration
+		// overwrites it from token_hash anyway.
+		digest := TokenDigest(replacement)
+		query += ", token = ?, token_hash = ?, token_preview = ?, token_plain = ?"
+		args = append(args, digest, digest, TokenPreview(replacement), replacement)
+	}
+	query += " WHERE id = ?"
+	args = append(args, id)
+
+	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+		// The transaction closes the window against another edit, but the table's
+		// UNIQUE constraints remain the authority: they also cover the name, and
+		// they are what a value inserted by a path this store does not see would
+		// collide with.
+		if IsUniqueViolation(err) {
+			return models.APITokenOut{}, apperr.BadRequest("token name or value already exists")
+		}
 		return models.APITokenOut{}, apperr.Database(err)
 	}
 
-	return reloadToken(ctx, db, id)
+	// Read back inside the transaction: it describes the row this edit produced,
+	// where a read after the commit could pick up the next edit's work and report
+	// it as this one's result.
+	updated, err := reloadToken(ctx, tx, id)
+	if err != nil {
+		return models.APITokenOut{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return models.APITokenOut{}, apperr.Database(err)
+	}
+	return updated, nil
+}
+
+// plannedTokenReplacement returns the credential this edit should store, or ""
+// when the current one stays.
+//
+// The console sends the token back on every save, so "unchanged" is the normal
+// case and must not be treated as an edit: rewriting the row would churn the
+// digest and make a token collide with its own unique index. A real change needs
+// no invalidation beyond the write — authentication resolves token_hash on every
+// request with nothing cached in front of it (see the lookup in the auth
+// middleware), so the old value stops working the moment this commits.
+//
+// It takes a Queryer because the occupancy check below is only meaningful in the
+// same transaction as the write that acts on it.
+func plannedTokenReplacement(ctx context.Context, db Queryer, id int64,
+	existing models.APITokenOut, input *models.APITokenUpdateIn) (string, error) {
+	// The value itself was already judged by input.Validate above, under the
+	// same rules creation applies.
+	requested := input.RequestedToken()
+	if requested == "" || requested == existing.Token {
+		return "", nil
+	}
+
+	// Rows are matched by digest rather than by plaintext: a row that predates
+	// plaintext storage has none, and it still owns the value. Excluding this
+	// row keeps a re-submitted value from colliding with itself.
+	var taken int64
+	err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM api_tokens WHERE token_hash = ? AND id <> ?",
+		TokenDigest(requested), id).Scan(&taken)
+	if err != nil {
+		return "", apperr.Database(err)
+	}
+	if taken != 0 {
+		return "", apperr.BadRequest("token value is already used by another token")
+	}
+	return requested, nil
 }
 
 func SetTokenEnabled(ctx context.Context, db *sql.DB, id int64, enabled bool) (models.APITokenOut, error) {
@@ -421,7 +560,7 @@ func SetTokenEnabled(ctx context.Context, db *sql.DB, id int64, enabled bool) (m
 	return reloadToken(ctx, db, id)
 }
 
-func reloadToken(ctx context.Context, db *sql.DB, id int64) (models.APITokenOut, error) {
+func reloadToken(ctx context.Context, db Queryer, id int64) (models.APITokenOut, error) {
 	token, ok, err := GetToken(ctx, db, id)
 	if err != nil {
 		return models.APITokenOut{}, err
