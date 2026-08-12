@@ -33,15 +33,23 @@ html[data-theme="sakura-mist"] {
   --danger-soft: rgb(201 97 125 / 12%);
   --danger-border: rgb(201 97 125 / 36%);
   --danger-strong: #8f2f4d;
-  --ok: #3f725e;
-  --ok-soft: rgb(63 114 94 / 12%);
-  --ok-border: rgb(63 114 94 / 32%);
-  --ok-strong: #2f5c4a;
-  --warning: #8e5146;
-  --warning-soft: rgb(183 121 107 / 14%);
-  --warning-border: rgb(183 121 107 / 38%);
-  --warning-strong: #754138;
-  --warning-text: #65352e;
+  /* Success leans a livelier green than the first cut: at 12% over white the
+     old wash composited to a near-neutral #e8eaea, so a 200 badge carried no
+     "good" signal. */
+  --ok: #386653;
+  --ok-soft: rgb(52 130 90 / 15%);
+  --ok-border: rgb(52 130 90 / 45%);
+  --ok-strong: #2c5443;
+  /* Warning is dried-flower gold rather than the original terracotta: with
+     danger already a warm berry, terracotta washes composited within a few
+     RGB steps of the danger ones and the two states could not be told apart
+     on the latency and quota chips. Gold keeps the dusty restraint and puts a
+     full hue between them. */
+  --warning: #815c1d;
+  --warning-soft: rgb(176 138 58 / 16%);
+  --warning-border: rgb(176 138 58 / 45%);
+  --warning-strong: #6a4b15;
+  --warning-text: #5c4113;
 
   --focus: #535369;
   --focus-ring: 0 0 0 3px rgb(83 83 105 / 24%);
@@ -68,6 +76,19 @@ html[data-theme="sakura-mist"] {
   --aurora-a: transparent;
   --aurora-b: transparent;
   --aurora-c: transparent;
+
+  /* Native checkboxes, radios and progress bars follow the gray-violet accent
+     instead of the browser's blue, which sat oddly on the pink paper. */
+  accent-color: var(--accent);
+  /* The default scrollbar is a gray box on the pink stage; thin it and tint
+     the thumb from the palette's own line color. Ignored where unsupported. */
+  scrollbar-color: #c9afbd transparent;
+  scrollbar-width: thin;
+}
+
+/* Text selection answers in the theme's own violet instead of browser blue. */
+html[data-theme="sakura-mist"] ::selection {
+  background: rgb(83 83 105 / 24%);
 }
 
 html[data-theme="sakura-mist"] .aurora {
