@@ -62,11 +62,6 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			settings.Put("/", handlers.AdminUpdateRuntimeSettings(state))
 			settings.Post("/admin-token/rotate", handlers.AdminRotateAdminToken(state))
 
-			settings.Get("/model-test-templates", handlers.AdminListModelTestTemplates(state))
-			settings.Post("/model-test-templates", handlers.AdminCreateModelTestTemplate(state))
-			settings.Patch("/model-test-templates/{id}", handlers.AdminUpdateModelTestTemplate(state))
-			settings.Delete("/model-test-templates/{id}", handlers.AdminDeleteModelTestTemplate(state))
-
 			settings.Get("/model-test-prompts", handlers.AdminListModelTestPromptTemplates(state))
 			settings.Post("/model-test-prompts", handlers.AdminCreateModelTestPromptTemplate(state))
 			settings.Patch("/model-test-prompts/{id}", handlers.AdminUpdateModelTestPromptTemplate(state))

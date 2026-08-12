@@ -40,7 +40,7 @@ func TestInitIsIdempotent(t *testing.T) {
 
 	for _, table := range []string{
 		"upstreams", "api_tokens", "request_logs", "request_log_payloads",
-		"runtime_settings", "admin_credential", "model_test_templates",
+		"runtime_settings", "admin_credential",
 		"model_test_prompt_templates",
 	} {
 		var count int64
@@ -68,22 +68,6 @@ func TestSeededDefaultsMatchTheRustSchema(t *testing.T) {
 	if settings.LogBodyKeepCount != 100 || settings.LogRetentionDays != 30 ||
 		settings.LogBodyMaxBytes != 200000 || settings.Revision != 1 {
 		t.Errorf("unexpected seeded runtime settings: %+v", settings)
-	}
-
-	templates, err := ListModelTestTemplates(context.Background(), db)
-	if err != nil {
-		t.Fatalf("list templates: %v", err)
-	}
-	kinds := map[string]string{}
-	for _, template := range templates {
-		kinds[template.Name] = template.RequestKind
-	}
-	for name, kind := range map[string]string{
-		"codex-tui": "responses", "opencode": "chat_completions", "claude-cli": "messages",
-	} {
-		if kinds[name] != kind {
-			t.Errorf("template %s has kind %q, want %q", name, kinds[name], kind)
-		}
 	}
 
 	prompts, err := ListModelTestPromptTemplates(context.Background(), db)

@@ -5,39 +5,14 @@ import (
 	"unicode/utf8"
 )
 
-type ModelTestTemplate struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	RequestKind string `json:"request_kind"`
-	Prompt      string `json:"prompt"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
-}
-
-type ModelTestTemplateIn struct {
-	Name        string `json:"name"`
-	RequestKind string `json:"request_kind"`
-	Prompt      string `json:"prompt"`
-}
-
-func (t *ModelTestTemplateIn) Validate() error {
-	if strings.TrimSpace(t.Name) == "" || utf8.RuneCountInString(t.Name) > 80 {
-		return ErrString("template name must be between 1 and 80 characters")
-	}
-	switch t.RequestKind {
-	case "responses", "chat_completions", "messages":
-	default:
-		return ErrString("request_kind must be responses, chat_completions, or messages")
-	}
-	if strings.TrimSpace(t.Prompt) == "" || len(t.Prompt) > 20000 {
-		return ErrString("template prompt must be between 1 and 20000 bytes")
-	}
-	return nil
-}
-
+// ModelTestRequest is one console-issued inference test.
+//
+// Protocol is the wire format the request is built in. It is a fixed set
+// rather than a stored template, because each value maps to a request shape
+// and header set the gateway already knows how to produce.
 type ModelTestRequest struct {
 	Model            string `json:"model"`
-	WrapperID        int64  `json:"wrapper_id"`
+	Protocol         string `json:"protocol"`
 	PromptTemplateID int64  `json:"prompt_template_id"`
 	Prompt           string `json:"prompt"`
 }
@@ -46,8 +21,13 @@ func (r *ModelTestRequest) Validate() error {
 	if strings.TrimSpace(r.Model) == "" || len(r.Model) > 500 {
 		return ErrString("model must be between 1 and 500 bytes")
 	}
-	if r.WrapperID < 1 || r.PromptTemplateID < 1 {
-		return ErrString("wrapper_id and prompt_template_id must be positive")
+	switch r.Protocol {
+	case "responses", "chat_completions", "messages":
+	default:
+		return ErrString("protocol must be responses, chat_completions, or messages")
+	}
+	if r.PromptTemplateID < 1 {
+		return ErrString("prompt_template_id must be positive")
 	}
 	if len(r.Prompt) > 20000 {
 		return ErrString("prompt must be at most 20000 bytes")

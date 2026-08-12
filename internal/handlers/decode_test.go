@@ -61,8 +61,6 @@ func TestStrictPayloadsStillRejectUnknownFields(t *testing.T) {
 			func() any { return &models.RuntimeSettingsIn{} }},
 		{"AdminTokenRotateIn", `{"token":"x","typo_field":1}`,
 			func() any { return &models.AdminTokenRotateIn{} }},
-		{"ModelTestTemplateIn", `{"name":"n","typo_field":1}`,
-			func() any { return &models.ModelTestTemplateIn{} }},
 		{"ModelTestPromptTemplateIn", `{"name":"n","typo_field":1}`,
 			func() any { return &models.ModelTestPromptTemplateIn{} }},
 		{"ModelTestRequest", `{"model":"m","typo_field":1}`,

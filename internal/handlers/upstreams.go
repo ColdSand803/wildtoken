@@ -737,18 +737,13 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		template, err := findModelTestTemplate(r.Context(), state, input.WrapperID)
-		if err != nil {
-			apperr.WriteError(w, err)
-			return
-		}
 		prompt, err := resolveModelTestPrompt(r.Context(), state, &input)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
 
-		targetPath, payload, err := modelTestRequest(template.RequestKind,
+		targetPath, payload, err := modelTestRequest(input.Protocol,
 			strings.TrimSpace(input.Model), prompt)
 		if err != nil {
 			apperr.WriteError(w, err)
@@ -758,16 +753,18 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 		// The Claude Code CLI appends this query parameter on every
 		// /v1/messages call.
 		targetQuery := ""
-		if template.RequestKind == "messages" {
+		if input.Protocol == "messages" {
 			targetQuery = "beta=true"
 		}
 		targetURL := buildProbeURL(row.BaseURL, targetPath, targetQuery)
 
+		// Each protocol is sent the way its reference client sends it, so a
+		// channel that keys off client headers behaves as it would in practice.
 		defaultHeaders := map[string]string{"content-type": "application/json"}
-		switch template.Name {
-		case "codex-tui":
+		switch input.Protocol {
+		case "responses":
 			defaultHeaders = codexModelTestHeaders()
-		case "claude-cli":
+		case "messages":
 			defaultHeaders = claudeCLIModelTestHeaders()
 		}
 
@@ -814,20 +811,6 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			"preview": truncateRunes(outcome.body, 10000),
 		})
 	}
-}
-
-func findModelTestTemplate(ctx context.Context, state *appstate.State,
-	wrapperID int64) (models.ModelTestTemplate, error) {
-	templates, err := db.ListModelTestTemplates(ctx, state.DB)
-	if err != nil {
-		return models.ModelTestTemplate{}, err
-	}
-	for _, template := range templates {
-		if template.ID == wrapperID {
-			return template, nil
-		}
-	}
-	return models.ModelTestTemplate{}, apperr.NotFound("model test wrapper not found")
 }
 
 func resolveModelTestPrompt(ctx context.Context, state *appstate.State,

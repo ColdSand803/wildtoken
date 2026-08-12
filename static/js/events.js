@@ -378,55 +378,49 @@ settingsDefaultHome?.addEventListener("change", () => {
 });
 serverSettingsForm?.addEventListener("submit", saveServerSettings);
 routingSettingsForm?.addEventListener("submit", saveRoutingSettings);
-newModelTestTemplateButton?.addEventListener("click", () => openModelTestTemplateDialog());
-modelTestTemplateList?.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-model-template-action]");
+newModelTestPromptButton?.addEventListener("click", () => openModelTestPromptDialog());
+modelTestPromptList?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-model-prompt-action]");
   if (!button) return;
-  const template = modelTestTemplates.find((item) => item.id === Number(button.dataset.templateId));
+  const template = modelTestPromptTemplates.find((item) => item.id === Number(button.dataset.promptId));
   if (!template) return;
-  if (button.dataset.modelTemplateAction === "edit") {
-    openModelTestTemplateDialog(template);
+  if (button.dataset.modelPromptAction === "edit") {
+    openModelTestPromptDialog(template);
     return;
   }
-  const confirmed = await requestConfirm({ title: "删除测试模板", message: `确定删除模板「${template.name}」？`, confirmLabel: "删除模板", danger: true });
+  const confirmed = await requestConfirm({ title: "删除 Prompt", message: `确定删除 Prompt「${template.name}」？`, confirmLabel: "删除 Prompt", danger: true });
   if (!confirmed) return;
   try {
-    await api(`/api/admin/settings/model-test-templates/${template.id}`, { method: "DELETE" });
-    modelTestTemplates = modelTestTemplates.filter((item) => item.id !== template.id);
-    renderModelTestTemplates();
-    setStatus("测试模板已删除。", "ok");
+    await api(`/api/admin/settings/model-test-prompts/${template.id}`, { method: "DELETE" });
+    await refreshModelTestPromptDropdown();
+    setStatus("Prompt 已删除。", "ok");
   } catch (error) {
-    setStatus(`删除模板失败：${error.message}`, "error");
+    setStatus(`删除 Prompt 失败：${error.message}`, "error");
   }
 });
-modelTestTemplateForm?.addEventListener("submit", async (event) => {
+modelTestPromptForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const id = modelTestTemplateId.value;
+  const id = modelTestPromptId.value;
   const payload = {
-    name: modelTestTemplateName.value.trim(),
-    request_kind: modelTestTemplateKind.value,
-    prompt: modelTestTemplatePrompt.value.trim(),
+    name: modelTestPromptName.value.trim(),
+    prompt: modelTestPromptContent.value.trim(),
   };
   try {
-    const saved = await api(id ? `/api/admin/settings/model-test-templates/${id}` : "/api/admin/settings/model-test-templates", {
+    await api(id ? `/api/admin/settings/model-test-prompts/${id}` : "/api/admin/settings/model-test-prompts", {
       method: id ? "PATCH" : "POST",
       body: JSON.stringify(payload),
     });
-    modelTestTemplates = id
-      ? modelTestTemplates.map((item) => item.id === saved.id ? saved : item)
-      : [...modelTestTemplates, saved];
-    renderModelTestTemplates();
-    closeModelTestTemplateDialog();
-    setStatus("测试模板已保存。", "ok");
+    await refreshModelTestPromptDropdown();
+    closeModelTestPromptDialog();
+    setStatus("Prompt 已保存。", "ok");
   } catch (error) {
-    setStatus(`保存模板失败：${error.message}`, "error");
+    setStatus(`保存 Prompt 失败：${error.message}`, "error");
   }
 });
-modelTestTemplateClose?.addEventListener("click", closeModelTestTemplateDialog);
-modelTestTemplateCancel?.addEventListener("click", closeModelTestTemplateDialog);
-dismissOnBackdropClick(modelTestTemplateDialog, closeModelTestTemplateDialog);
-modelTestTemplate?.addEventListener("change", updateModelTestTemplateHint);
-modelTestPromptTemplate?.addEventListener("change", updateModelTestTemplateHint);
+modelTestPromptClose?.addEventListener("click", closeModelTestPromptDialog);
+modelTestPromptCancel?.addEventListener("click", closeModelTestPromptDialog);
+dismissOnBackdropClick(modelTestPromptDialog, closeModelTestPromptDialog);
+modelTestPromptTemplate?.addEventListener("change", syncModelTestPrompt);
 modelTestClose?.addEventListener("click", closeModelTestDialog);
 modelTestRefreshModels?.addEventListener("click", refreshModelTestModels);
 modelTestForm?.addEventListener("submit", async (event) => {
@@ -438,7 +432,7 @@ modelTestForm?.addEventListener("submit", async (event) => {
   try {
     const result = await api(`/api/admin/upstreams/${modelTestUpstream.id}/test-model`, {
       method: "POST",
-      body: JSON.stringify({ model: modelTestModel.value, wrapper_id: Number(modelTestTemplate.value), prompt_template_id: Number(modelTestPromptTemplate.value), prompt: modelTestPrompt.value.trim() }),
+      body: JSON.stringify({ model: modelTestModel.value, protocol: modelTestProtocol.value, prompt_template_id: Number(modelTestPromptTemplate.value), prompt: modelTestPrompt.value.trim() }),
     });
     modelTestResult.hidden = false;
     modelTestResultStatus.textContent = result.ok ? `测试成功 · HTTP ${result.status_code}` : `测试失败${result.status_code ? ` · HTTP ${result.status_code}` : ""}`;

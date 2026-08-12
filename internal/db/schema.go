@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
-	"strings"
 )
 
 // ensureColumn adds a column when a database created by an older schema lacks it.
@@ -125,55 +124,6 @@ func Init(ctx context.Context, db *sql.DB) error {
 		return err
 	}
 
-	if _, err := db.ExecContext(ctx, createModelTestTemplates); err != nil {
-		return err
-	}
-	if err := migrateModelTestTemplateKinds(ctx, db); err != nil {
-		return err
-	}
-	for _, statement := range []string{
-		renameCodexTemplate,
-		renameOpenCodeTemplate,
-		seedModelTestTemplates,
-		upgradeShortDefaultTemplates,
-	} {
-		if _, err := db.ExecContext(ctx, statement); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// migrateModelTestTemplateKinds recreates model_test_templates when an older
-// schema predates 'messages' as a valid request_kind. SQLite cannot alter a
-// CHECK constraint in place.
-func migrateModelTestTemplateKinds(ctx context.Context, db *sql.DB) error {
-	var schema sql.NullString
-	err := db.QueryRowContext(ctx,
-		"SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'model_test_templates'").
-		Scan(&schema)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil
-		}
-		return err
-	}
-	if !schema.Valid || strings.Contains(schema.String, "'messages'") {
-		return nil
-	}
-
-	for _, statement := range []string{
-		"ALTER TABLE model_test_templates RENAME TO model_test_templates_old",
-		createModelTestTemplatesTable,
-		`INSERT INTO model_test_templates (id, name, request_kind, prompt, created_at, updated_at)
-		 SELECT id, name, request_kind, prompt, created_at, updated_at FROM model_test_templates_old`,
-		"DROP TABLE model_test_templates_old",
-	} {
-		if _, err := db.ExecContext(ctx, statement); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
