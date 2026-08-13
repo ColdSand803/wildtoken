@@ -48,6 +48,16 @@ pub async fn list_upstreams(pool: &SqlitePool) -> Result<Vec<UpstreamOut>, AppEr
     rows.iter().map(row_to_upstream_out).collect()
 }
 
+/// Raw rows for callers that need the stored API key, which [`UpstreamOut`]
+/// deliberately withholds.
+pub async fn list_upstream_rows(pool: &SqlitePool) -> Result<Vec<UpstreamRow>, AppError> {
+    let rows = sqlx::query_as("SELECT * FROM upstreams ORDER BY priority DESC, id ASC")
+        .fetch_all(pool)
+        .await?;
+
+    Ok(rows)
+}
+
 pub async fn list_enabled_upstreams(pool: &SqlitePool) -> Result<Vec<UpstreamRow>, AppError> {
     let rows =
         sqlx::query_as("SELECT * FROM upstreams WHERE enabled = 1 ORDER BY priority DESC, id ASC")
@@ -235,4 +245,130 @@ pub async fn delete_upstream(pool: &SqlitePool, id: i64) -> Result<bool, AppErro
         .await?;
 
     Ok(result.rows_affected() > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{create_upstream, get_upstream_by_name, list_upstream_rows, update_upstream};
+    use crate::models::upstream::{UpstreamIn, UpstreamUpdate};
+    use crate::state::init_db;
+    use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        init_db(&pool).await.unwrap();
+        pool
+    }
+
+    fn entry(name: &str, api_key: Option<&str>) -> UpstreamIn {
+        UpstreamIn {
+            name: name.into(),
+            base_url: "https://api.example.test/v1".into(),
+            api_key: api_key.map(str::to_owned),
+            model_names: vec!["gpt-4o-mini".into()],
+            model_prefixes: Vec::new(),
+            model_mappings: Default::default(),
+            priority: 100,
+            weight: 100,
+            auto_weight_enabled: true,
+            enabled: true,
+            extra_headers: Default::default(),
+            timeout_seconds: Some(300.0),
+        }
+    }
+
+    /// A channel document exported without keys must be able to refresh routing
+    /// config without wiping the credential already stored on the target.
+    #[tokio::test]
+    async fn overwriting_without_an_api_key_keeps_the_stored_one() {
+        let pool = test_pool().await;
+        create_upstream(&pool, &entry("openai", Some("sk-original")), 300.0)
+            .await
+            .unwrap();
+        let existing = get_upstream_by_name(&pool, "openai")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(existing.api_key.as_deref(), Some("sk-original"));
+
+        let mut keyless = entry("openai", None);
+        keyless.priority = 555;
+        update_upstream(
+            &pool,
+            existing.id,
+            &UpstreamUpdate {
+                base: keyless,
+                clear_api_key: false,
+            },
+            300.0,
+        )
+        .await
+        .unwrap();
+
+        let updated = get_upstream_by_name(&pool, "openai")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.id, existing.id, "overwrite must keep the row id");
+        assert_eq!(updated.priority, 555, "routing config must be refreshed");
+        assert_eq!(
+            updated.api_key.as_deref(),
+            Some("sk-original"),
+            "an omitted api_key must not clear the stored credential"
+        );
+    }
+
+    #[tokio::test]
+    async fn overwriting_with_an_api_key_replaces_it() {
+        let pool = test_pool().await;
+        create_upstream(&pool, &entry("openai", Some("sk-original")), 300.0)
+            .await
+            .unwrap();
+        let existing = get_upstream_by_name(&pool, "openai")
+            .await
+            .unwrap()
+            .unwrap();
+
+        update_upstream(
+            &pool,
+            existing.id,
+            &UpstreamUpdate {
+                base: entry("openai", Some("sk-rotated")),
+                clear_api_key: false,
+            },
+            300.0,
+        )
+        .await
+        .unwrap();
+
+        let updated = get_upstream_by_name(&pool, "openai")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(updated.api_key.as_deref(), Some("sk-rotated"));
+    }
+
+    /// Export reads raw rows because `UpstreamOut` withholds the key.
+    #[tokio::test]
+    async fn raw_row_listing_exposes_keys_for_export() {
+        let pool = test_pool().await;
+        create_upstream(&pool, &entry("a", Some("sk-a")), 300.0)
+            .await
+            .unwrap();
+        create_upstream(&pool, &entry("b", None), 300.0)
+            .await
+            .unwrap();
+
+        let rows = list_upstream_rows(&pool).await.unwrap();
+
+        assert_eq!(rows.len(), 2);
+        let a = rows.iter().find(|row| row.name == "a").unwrap();
+        let b = rows.iter().find(|row| row.name == "b").unwrap();
+        assert_eq!(a.api_key.as_deref(), Some("sk-a"));
+        assert_eq!(b.api_key, None);
+    }
 }

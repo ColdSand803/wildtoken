@@ -829,3 +829,278 @@ async function savePriorityEdit(input) {
     input.select();
   }
 }
+
+// ── 渠道导入导出 ──────────────────────────────────────────────
+
+/// Checked rows win; with no selection the whole list is exported.
+function channelExportScope() {
+  const ids = [...selectedUpstreamIds];
+  if (ids.length > 0) {
+    return { ids, count: ids.length, all: false };
+  }
+  return { ids: null, count: upstreams.length, all: true };
+}
+
+function buildChannelExportFilename(now = new Date()) {
+  const pad = (value) => String(value).padStart(2, "0");
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}`
+    + `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `wildtoken-channels-${stamp}.json`;
+}
+
+function renderChannelExportScope() {
+  if (!channelExportScopeEl) return;
+  const scope = channelExportScope();
+  const detail = scope.all
+    ? `将导出全部 ${scope.count} 个渠道。勾选表格行可只导出选中的渠道。`
+    : `将导出已勾选的 ${scope.count} 个渠道。`;
+  channelExportScopeEl.textContent = detail;
+}
+
+function openChannelExportDialog() {
+  renderChannelExportScope();
+  if (typeof channelExportDialog.showModal === "function") {
+    channelExportDialog.showModal();
+  } else {
+    channelExportDialog.setAttribute("open", "");
+  }
+  channelExportConfirm.focus();
+}
+
+function closeChannelExportDialog() {
+  clearDialogMaximized(channelExportDialog);
+  if (channelExportDialog.open && typeof channelExportDialog.close === "function") {
+    channelExportDialog.close();
+  } else {
+    channelExportDialog.removeAttribute("open");
+  }
+}
+
+function downloadJsonFile(filename, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // Give the navigation a tick before reclaiming the object URL.
+  window.setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+async function runChannelExport() {
+  const scope = channelExportScope();
+  if (scope.count === 0) {
+    setStatus("没有可导出的渠道。", "error");
+    return;
+  }
+  const includeKeys = Boolean(channelExportIncludeKeys?.checked);
+  channelExportConfirm.disabled = true;
+  try {
+    const document_ = await api("/api/admin/upstreams/export", {
+      method: "POST",
+      body: JSON.stringify({ ids: scope.ids, include_api_keys: includeKeys }),
+    });
+    const count = Array.isArray(document_.channels) ? document_.channels.length : 0;
+    downloadJsonFile(buildChannelExportFilename(), JSON.stringify(document_, null, 2));
+    closeChannelExportDialog();
+    setStatus(
+      `已导出 ${count} 个渠道${includeKeys ? "（含 API Key）" : "（不含 API Key）"}。`,
+      "ok",
+    );
+  } catch (error) {
+    setStatus(`导出失败：${error.message}`, "error");
+  } finally {
+    channelExportConfirm.disabled = false;
+  }
+}
+
+/// Parse and shape-check a pasted or uploaded document. Throws a Chinese
+/// message so the caller can surface it directly.
+function parseChannelImportDocument(text) {
+  const raw = String(text || "").trim();
+  if (!raw) {
+    throw new Error("请选择文件或粘贴 JSON 内容。");
+  }
+  if (raw.length > CHANNEL_IMPORT_MAX_BYTES) {
+    throw new Error("文档过大，请拆分后再导入。");
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`不是合法 JSON：${error.message}`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("文档顶层必须是一个 JSON 对象。");
+  }
+  if (parsed.kind !== undefined && parsed.kind !== CHANNEL_DOCUMENT_KIND) {
+    throw new Error(`不是渠道导出文件：kind 应为 ${CHANNEL_DOCUMENT_KIND}。`);
+  }
+  if (typeof parsed.version === "number" && parsed.version > CHANNEL_DOCUMENT_VERSION) {
+    throw new Error(`文档版本 ${parsed.version} 高于当前支持的 ${CHANNEL_DOCUMENT_VERSION}。`);
+  }
+  if (!Array.isArray(parsed.channels)) {
+    throw new Error("文档缺少 channels 数组。");
+  }
+  if (parsed.channels.length === 0) {
+    throw new Error("文档里没有渠道。");
+  }
+  if (parsed.channels.length > CHANNEL_IMPORT_MAX_ENTRIES) {
+    throw new Error(`一次最多导入 ${CHANNEL_IMPORT_MAX_ENTRIES} 个渠道。`);
+  }
+  for (const [index, channel] of parsed.channels.entries()) {
+    if (!channel || typeof channel !== "object" || Array.isArray(channel)) {
+      throw new Error(`第 ${index + 1} 个渠道不是对象。`);
+    }
+    if (typeof channel.name !== "string" || !channel.name.trim()) {
+      throw new Error(`第 ${index + 1} 个渠道缺少 name。`);
+    }
+    if (typeof channel.base_url !== "string" || !channel.base_url.trim()) {
+      throw new Error(`渠道「${channel.name}」缺少 base_url。`);
+    }
+  }
+  return parsed;
+}
+
+function selectedChannelImportMode() {
+  const checked = channelImportDialog?.querySelector(
+    "input[name='channel-import-mode']:checked",
+  );
+  return checked?.value === "overwrite" ? "overwrite" : "skip";
+}
+
+function renderChannelImportPreview(message = "", tone = "") {
+  if (!channelImportPreview) return;
+  channelImportPreview.dataset.tone = tone;
+  channelImportPreview.textContent = message;
+}
+
+/// Re-parse whatever is in the textarea and reflect it in the preview and the
+/// confirm button's enabled state.
+function refreshChannelImportPreview() {
+  const raw = channelImportText.value.trim();
+  if (!raw) {
+    channelImportParsed = null;
+    channelImportConfirm.disabled = true;
+    renderChannelImportPreview();
+    return;
+  }
+  try {
+    channelImportParsed = parseChannelImportDocument(raw);
+    const channels = channelImportParsed.channels;
+    const withKeys = channels.filter((channel) => typeof channel.api_key === "string" && channel.api_key).length;
+    const existing = channels.filter(
+      (channel) => upstreams.some((item) => item.name === String(channel.name).trim()),
+    ).length;
+    const parts = [`共 ${channels.length} 个渠道`];
+    parts.push(withKeys > 0 ? `${withKeys} 个带 API Key` : "均不含 API Key");
+    if (existing > 0) {
+      const mode = selectedChannelImportMode();
+      parts.push(`${existing} 个与现有渠道同名，将被${mode === "overwrite" ? "覆盖" : "跳过"}`);
+    }
+    renderChannelImportPreview(`${parts.join("；")}。`, "ok");
+    channelImportConfirm.disabled = false;
+  } catch (error) {
+    channelImportParsed = null;
+    channelImportConfirm.disabled = true;
+    renderChannelImportPreview(error.message, "error");
+  }
+}
+
+function openChannelImportDialog() {
+  channelImportParsed = null;
+  channelImportText.value = "";
+  if (channelImportFile) {
+    channelImportFile.value = "";
+  }
+  const skipRadio = channelImportDialog?.querySelector(
+    "input[name='channel-import-mode'][value='skip']",
+  );
+  if (skipRadio) {
+    skipRadio.checked = true;
+  }
+  channelImportConfirm.disabled = true;
+  renderChannelImportPreview();
+  if (typeof channelImportDialog.showModal === "function") {
+    channelImportDialog.showModal();
+  } else {
+    channelImportDialog.setAttribute("open", "");
+  }
+  channelImportFile?.focus();
+}
+
+function closeChannelImportDialog() {
+  clearDialogMaximized(channelImportDialog);
+  if (channelImportDialog.open && typeof channelImportDialog.close === "function") {
+    channelImportDialog.close();
+  } else {
+    channelImportDialog.removeAttribute("open");
+  }
+}
+
+async function loadChannelImportFile(file) {
+  if (!file) return;
+  if (file.size > CHANNEL_IMPORT_MAX_BYTES) {
+    renderChannelImportPreview("文件过大，请拆分后再导入。", "error");
+    channelImportConfirm.disabled = true;
+    return;
+  }
+  try {
+    channelImportText.value = await file.text();
+    refreshChannelImportPreview();
+  } catch (error) {
+    renderChannelImportPreview(`读取文件失败：${error.message}`, "error");
+    channelImportConfirm.disabled = true;
+  }
+}
+
+function formatChannelImportResult(result) {
+  const parts = [];
+  if (result.created) parts.push(`新增 ${result.created}`);
+  if (result.updated) parts.push(`覆盖 ${result.updated}`);
+  if (result.skipped) parts.push(`跳过 ${result.skipped}`);
+  if (result.failed) parts.push(`失败 ${result.failed}`);
+  return parts.length > 0 ? parts.join("，") : "没有变更";
+}
+
+async function runChannelImport() {
+  if (!channelImportParsed) {
+    refreshChannelImportPreview();
+    return;
+  }
+  const mode = selectedChannelImportMode();
+  channelImportConfirm.disabled = true;
+  const originalLabel = channelImportConfirm.textContent;
+  channelImportConfirm.textContent = "正在导入";
+  try {
+    const result = await api("/api/admin/upstreams/import", {
+      method: "POST",
+      body: JSON.stringify({
+        kind: channelImportParsed.kind,
+        version: channelImportParsed.version,
+        channels: channelImportParsed.channels,
+        mode,
+      }),
+    });
+    await loadUpstreams();
+    const summary = formatChannelImportResult(result);
+    if (result.failed > 0) {
+      const firstFailure = (result.items || []).find((item) => item.action === "failed");
+      const reason = firstFailure ? `：${firstFailure.name} ${firstFailure.message || ""}`.trim() : "";
+      renderChannelImportPreview(`导入完成，${summary}${reason}`, "error");
+      setStatus(`导入完成：${summary}。`, "error");
+    } else {
+      closeChannelImportDialog();
+      setStatus(`导入完成：${summary}。`, "ok");
+    }
+  } catch (error) {
+    renderChannelImportPreview(`导入失败：${error.message}`, "error");
+    setStatus(`导入失败：${error.message}`, "error");
+  } finally {
+    channelImportConfirm.textContent = originalLabel;
+    channelImportConfirm.disabled = !channelImportParsed;
+  }
+}

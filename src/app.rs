@@ -229,6 +229,16 @@ pub async fn run_server(
             "/api/admin/upstreams/fetch-models",
             post(handlers::admin::admin_fetch_models_preview),
         )
+        // POST for export too: a GET would put channel API keys in the URL,
+        // browser history, and access logs.
+        .route(
+            "/api/admin/upstreams/export",
+            post(handlers::admin::admin_export_upstreams),
+        )
+        .route(
+            "/api/admin/upstreams/import",
+            post(handlers::admin::admin_import_upstreams),
+        )
         .route(
             "/api/admin/upstreams",
             get(handlers::admin::admin_list_upstreams).post(handlers::admin::admin_create_upstream),
