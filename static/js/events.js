@@ -487,18 +487,74 @@ if (dashboardChannelNameToggle) {
   });
 }
 
-if (dashboardTopWindowSelect) {
-  dashboardTopWindowSelect.addEventListener("change", () => {
-    const nextWindow = DASHBOARD_TOP_WINDOW_VALUES.has(dashboardTopWindowSelect.value)
-      ? dashboardTopWindowSelect.value
-      : "today";
-    dashboardTopWindow = nextWindow;
-    dashboardTopWindowSelect.value = nextWindow;
-    try {
-      localStorage.setItem(DASHBOARD_TOP_WINDOW_KEY, nextWindow);
-    } catch {
-      // Ignore storage failures; the selection still applies to the current page.
+// ── Dashboard time range ─────────────────────────────────
+function persistDashboardRange() {
+  try {
+    localStorage.setItem(DASHBOARD_RANGE_KEY, dashboardTimeRange);
+    if (dashboardCustomStartDate && dashboardCustomEndDate) {
+      localStorage.setItem(
+        DASHBOARD_CUSTOM_RANGE_KEY,
+        `${dashboardCustomStartDate}~${dashboardCustomEndDate}`,
+      );
     }
+  } catch {
+    // The selection still applies to the current page without storage.
+  }
+}
+
+if (dashboardTimePreset) {
+  dashboardTimePreset.addEventListener("change", () => {
+    const value = DASHBOARD_RANGE_VALUES.has(dashboardTimePreset.value)
+      ? dashboardTimePreset.value
+      : DASHBOARD_DEFAULT_RANGE;
+    dashboardTimePreset.value = value;
+    if (dashboardCustomRange) {
+      dashboardCustomRange.hidden = value !== "custom";
+    }
+    if (value === "custom") {
+      // Prefill from the last custom range and wait for 应用; querying now would
+      // use whatever half-entered dates are in the pickers.
+      if (dashboardStartDate && !dashboardStartDate.value && dashboardCustomStartDate) {
+        dashboardStartDate.value = dashboardCustomStartDate;
+      }
+      if (dashboardEndDate && !dashboardEndDate.value && dashboardCustomEndDate) {
+        dashboardEndDate.value = dashboardCustomEndDate;
+      }
+      dashboardStartDate?.focus();
+      return;
+    }
+    dashboardTimeRange = value;
+    persistDashboardRange();
+    loadDashboardData();
+  });
+}
+
+if (dashboardApplyCustom && dashboardStartDate && dashboardEndDate) {
+  dashboardApplyCustom.addEventListener("click", () => {
+    const start = dashboardStartDate.value;
+    const end = dashboardEndDate.value;
+
+    // The server validates these too; checking here avoids a round trip and
+    // keeps the message next to the control.
+    if (!start || !end) {
+      setStatus("请选择开始和结束日期", "error");
+      return;
+    }
+    if (start > end) {
+      setStatus("开始日期不能晚于结束日期", "error");
+      return;
+    }
+    const spanDays = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`))
+      / 86_400_000) + 1;
+    if (!Number.isFinite(spanDays) || spanDays > DASHBOARD_MAX_CUSTOM_RANGE_DAYS) {
+      setStatus(`自定义区间最长 ${DASHBOARD_MAX_CUSTOM_RANGE_DAYS} 天`, "error");
+      return;
+    }
+
+    dashboardTimeRange = "custom";
+    dashboardCustomStartDate = start;
+    dashboardCustomEndDate = end;
+    persistDashboardRange();
     loadDashboardData();
   });
 }
@@ -666,6 +722,26 @@ function commandDefinitions() {
         switchView("upstreams");
         resetForm();
         openUpstreamDialog();
+      },
+    },
+    {
+      id: "export-channels",
+      title: "导出渠道",
+      subtitle: "把渠道配置下载为 JSON",
+      keys: "",
+      run: () => {
+        switchView("upstreams");
+        openChannelExportDialog();
+      },
+    },
+    {
+      id: "import-channels",
+      title: "导入渠道",
+      subtitle: "从 JSON 文件恢复或迁移渠道",
+      keys: "",
+      run: () => {
+        switchView("upstreams");
+        openChannelImportDialog();
       },
     },
     {

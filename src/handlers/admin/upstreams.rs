@@ -15,8 +15,10 @@ use crate::middleware::auth::AdminAuth;
 use crate::models::request_log::{ModelFetchIn, ModelListOut, TestRequest};
 use crate::models::settings::ModelTestRequest;
 use crate::models::upstream::{
-    UpstreamDetailOut, UpstreamEnabledIn, UpstreamIn, UpstreamOut, UpstreamPriorityIn,
-    UpstreamUpdate,
+    ChannelExportDocument, ChannelExportItem, ChannelExportRequest, ChannelImportAction,
+    ChannelImportMode, ChannelImportOut, ChannelImportRequest, UpstreamDetailOut,
+    UpstreamEnabledIn, UpstreamIn, UpstreamOut, UpstreamPriorityIn, UpstreamRow, UpstreamUpdate,
+    CHANNEL_DOCUMENT_KIND, CHANNEL_DOCUMENT_VERSION,
 };
 use crate::proxy::client::{
     apply_header_overrides, is_sensitive_header_name, validate_header_overrides,
@@ -926,12 +928,198 @@ pub async fn admin_fetch_upstream_sub2api_balance(
         }))
 }
 
+// ── Import / export ──────────────────────────────────────────────────────────
+
+/// Convert a stored row into an export entry, dropping runtime-only state.
+///
+/// `include_api_keys` decides between carrying the key and omitting the field
+/// entirely; an omitted field is what lets an import update routing config
+/// without clearing the key already on the target server.
+fn row_to_export_item(
+    row: &UpstreamRow,
+    include_api_keys: bool,
+) -> Result<ChannelExportItem, AppError> {
+    let extra_headers = parse_extra_headers(&row.extra_headers)?;
+    Ok(ChannelExportItem {
+        name: row.name.clone(),
+        base_url: row.base_url.clone(),
+        api_key: if include_api_keys {
+            row.api_key.clone().filter(|key| !key.is_empty())
+        } else {
+            None
+        },
+        model_names: serde_json::from_str(&row.model_names).unwrap_or_default(),
+        model_prefixes: serde_json::from_str(&row.model_prefixes).unwrap_or_default(),
+        model_mappings: serde_json::from_str(&row.model_mappings).unwrap_or_default(),
+        priority: row.priority,
+        weight: row.weight,
+        auto_weight_enabled: row.auto_weight_enabled == 1,
+        enabled: row.enabled == 1,
+        extra_headers,
+        timeout_seconds: row.timeout_seconds,
+    })
+}
+
+/// Per-entry checks run before an import touches the database. Length limits
+/// live here rather than in `UpstreamIn::validate` so existing create/edit
+/// behavior is unchanged.
+fn validate_import_entry(entry: &UpstreamIn) -> Result<(), String> {
+    let name = entry.name.trim();
+    if name.is_empty() {
+        return Err("渠道名不能为空".into());
+    }
+    if name.chars().count() > 200 {
+        return Err("渠道名超过 200 个字符".into());
+    }
+    if entry.base_url.trim().is_empty() {
+        return Err("Base URL 不能为空".into());
+    }
+    if entry.base_url.chars().count() > 2000 {
+        return Err("Base URL 超过 2000 个字符".into());
+    }
+    entry.validate().map_err(str::to_owned)?;
+    validate_header_overrides(&entry.extra_headers)
+}
+
+pub async fn admin_export_upstreams(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Json(input): Json<ChannelExportRequest>,
+) -> Result<Json<ChannelExportDocument>, AppError> {
+    let rows = upstream_db::list_upstream_rows(&state.db).await?;
+    let selected: Option<std::collections::HashSet<i64>> = input
+        .ids
+        .as_ref()
+        .filter(|ids| !ids.is_empty())
+        .map(|ids| ids.iter().copied().collect());
+
+    let mut channels = Vec::new();
+    for row in &rows {
+        if selected.as_ref().is_some_and(|ids| !ids.contains(&row.id)) {
+            continue;
+        }
+        channels.push(row_to_export_item(row, input.include_api_keys)?);
+    }
+
+    if channels.is_empty() {
+        return Err(AppError::NotFound("没有可导出的渠道".into()));
+    }
+
+    Ok(Json(ChannelExportDocument {
+        kind: CHANNEL_DOCUMENT_KIND,
+        version: CHANNEL_DOCUMENT_VERSION,
+        exported_at: chrono::Local::now().to_rfc3339(),
+        channels,
+    }))
+}
+
+pub async fn admin_import_upstreams(
+    State(state): State<AppState>,
+    _auth: AdminAuth,
+    Json(input): Json<ChannelImportRequest>,
+) -> Result<Json<ChannelImportOut>, AppError> {
+    input.validate().map_err(AppError::BadRequest)?;
+
+    let mut out = ChannelImportOut::default();
+    let mut changed = false;
+    // Best effort per entry: the shared db helpers take a pool rather than a
+    // transaction, and reusing them keeps import on the same validation and
+    // cache-invalidation path as a normal create or edit. A partial run is
+    // recoverable by re-importing in overwrite mode.
+    for entry in &input.channels {
+        let name = entry.name.trim().to_owned();
+        if let Err(message) = validate_import_entry(entry) {
+            out.record(name, ChannelImportAction::Failed, Some(message));
+            continue;
+        }
+
+        let existing = match upstream_db::get_upstream_by_name(&state.db, &name).await {
+            Ok(existing) => existing,
+            Err(error) => {
+                out.record(name, ChannelImportAction::Failed, Some(error.to_string()));
+                continue;
+            }
+        };
+
+        match existing {
+            Some(_) if input.mode == ChannelImportMode::Skip => {
+                out.record(
+                    name,
+                    ChannelImportAction::Skipped,
+                    Some("已存在同名渠道".into()),
+                );
+            }
+            Some(existing) => {
+                // clear_api_key stays false so a document without a key leaves
+                // the stored credential in place.
+                let update = UpstreamUpdate {
+                    base: entry.clone(),
+                    clear_api_key: false,
+                };
+                match upstream_db::update_upstream(
+                    &state.db,
+                    existing.id,
+                    &update,
+                    state.settings.upstream.default_timeout_seconds,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        changed = true;
+                        if existing.auto_weight_enabled != i64::from(entry.auto_weight_enabled)
+                            || (existing.enabled == 0 && entry.enabled)
+                        {
+                            state.auto_weight.reset(existing.id);
+                        }
+                        out.record(name, ChannelImportAction::Updated, None);
+                    }
+                    Err(error) => {
+                        out.record(name, ChannelImportAction::Failed, Some(error.to_string()))
+                    }
+                }
+            }
+            None => {
+                match upstream_db::create_upstream(
+                    &state.db,
+                    entry,
+                    state.settings.upstream.default_timeout_seconds,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        changed = true;
+                        out.record(name, ChannelImportAction::Created, None);
+                    }
+                    Err(AppError::Database(error)) if error.to_string().contains("UNIQUE") => out
+                        .record(
+                            name,
+                            ChannelImportAction::Failed,
+                            Some("渠道名已存在".into()),
+                        ),
+                    Err(error) => {
+                        out.record(name, ChannelImportAction::Failed, Some(error.to_string()))
+                    }
+                }
+            }
+        }
+    }
+
+    if changed {
+        state.models_list_cache.invalidate().await;
+        state.routing_cache.invalidate().await;
+    }
+
+    Ok(Json(out))
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         build_channel_request_headers, build_json_channel_request, extract_model_test_reply,
-        parse_sub2api_balance_payload, redact_header_preview,
+        parse_sub2api_balance_payload, redact_header_preview, row_to_export_item,
+        validate_import_entry,
     };
+    use crate::models::upstream::{ChannelImportMode, ChannelImportRequest, UpstreamRow};
     use std::collections::HashMap;
 
     #[test]
@@ -1059,5 +1247,146 @@ mod tests {
             .collect();
         assert_eq!(values.len(), 1);
         assert_eq!(values[0], "application/custom+json");
+    }
+
+    // ── Import / export ──────────────────────────────────────────────────────
+
+    fn export_test_row() -> UpstreamRow {
+        UpstreamRow {
+            id: 7,
+            name: "openai".into(),
+            base_url: "https://api.openai.com/v1".into(),
+            api_key: Some("sk-secret".into()),
+            model_names: "[\"gpt-4o-mini\"]".into(),
+            model_prefixes: "[\"gpt-\"]".into(),
+            model_mappings: "{\"gpt-4o-mini\":\"provider-fast\"}".into(),
+            priority: 120,
+            weight: 80,
+            auto_weight_enabled: 0,
+            enabled: 1,
+            extra_headers: "{\"x-route\":\"premium\"}".into(),
+            timeout_seconds: 120.0,
+            created_at: "2026-08-13 12:00:00".into(),
+            updated_at: "2026-08-13 12:00:00".into(),
+        }
+    }
+
+    #[test]
+    fn export_carries_routing_config_and_drops_runtime_state() {
+        let item = row_to_export_item(&export_test_row(), true).unwrap();
+
+        assert_eq!(item.name, "openai");
+        assert_eq!(item.api_key.as_deref(), Some("sk-secret"));
+        assert_eq!(item.model_names, vec!["gpt-4o-mini"]);
+        assert_eq!(item.model_prefixes, vec!["gpt-"]);
+        assert_eq!(
+            item.model_mappings.get("gpt-4o-mini").map(String::as_str),
+            Some("provider-fast")
+        );
+        assert_eq!(item.priority, 120);
+        assert_eq!(item.weight, 80);
+        assert!(!item.auto_weight_enabled);
+        assert!(item.enabled);
+        assert_eq!(item.timeout_seconds, 120.0);
+
+        let encoded = serde_json::to_value(&item).unwrap();
+        for runtime_only in [
+            "id",
+            "created_at",
+            "updated_at",
+            "api_key_set",
+            "runtime_health_score",
+            "effective_weight",
+        ] {
+            assert!(
+                encoded.get(runtime_only).is_none(),
+                "{runtime_only} must not be exported"
+            );
+        }
+    }
+
+    #[test]
+    fn export_without_keys_omits_the_field_entirely() {
+        let item = row_to_export_item(&export_test_row(), false).unwrap();
+        let encoded = serde_json::to_value(&item).unwrap();
+
+        // An absent field (not a null) is what makes the import path keep the
+        // key already stored on the target channel.
+        assert!(encoded.get("api_key").is_none());
+        assert!(!serde_json::to_string(&item).unwrap().contains("sk-secret"));
+    }
+
+    fn import_request(body: serde_json::Value) -> Result<ChannelImportRequest, String> {
+        let parsed: ChannelImportRequest =
+            serde_json::from_value(body).map_err(|error| error.to_string())?;
+        parsed.validate()?;
+        Ok(parsed)
+    }
+
+    #[test]
+    fn import_rejects_documents_that_are_not_channel_exports() {
+        let error = import_request(serde_json::json!({
+            "kind": "wildtoken.tokens",
+            "channels": [{"name": "a", "base_url": "https://a.test"}],
+            "mode": "skip",
+        }))
+        .unwrap_err();
+        assert!(error.contains("不是渠道导出文件"), "{error}");
+    }
+
+    #[test]
+    fn import_rejects_a_future_document_version() {
+        let error = import_request(serde_json::json!({
+            "kind": "wildtoken.channels",
+            "version": 99,
+            "channels": [{"name": "a", "base_url": "https://a.test"}],
+            "mode": "skip",
+        }))
+        .unwrap_err();
+        assert!(error.contains("99"), "{error}");
+    }
+
+    #[test]
+    fn import_accepts_a_hand_written_document_without_an_envelope() {
+        let parsed = import_request(serde_json::json!({
+            "channels": [{"name": "a", "base_url": "https://a.test"}],
+            "mode": "overwrite",
+        }))
+        .unwrap();
+
+        assert_eq!(parsed.mode, ChannelImportMode::Overwrite);
+        assert_eq!(parsed.channels.len(), 1);
+        // Defaults come from UpstreamIn, so a minimal entry is still routable.
+        assert_eq!(parsed.channels[0].priority, 100);
+        assert_eq!(parsed.channels[0].weight, 100);
+        assert!(parsed.channels[0].enabled);
+    }
+
+    #[test]
+    fn import_rejects_an_empty_channel_list() {
+        let error =
+            import_request(serde_json::json!({ "channels": [], "mode": "skip" })).unwrap_err();
+        assert!(error.contains("没有渠道"), "{error}");
+    }
+
+    #[test]
+    fn import_entry_validation_rejects_bad_entries_without_failing_the_batch() {
+        let parsed = import_request(serde_json::json!({
+            "channels": [
+                {"name": "  ", "base_url": "https://a.test"},
+                {"name": "weighty", "base_url": "https://b.test", "weight": 99999},
+                {"name": "hostile", "base_url": "https://c.test", "extra_headers": {"Host": "evil.test"}},
+                {"name": "fine", "base_url": "https://d.test"},
+            ],
+            "mode": "skip",
+        }))
+        .unwrap();
+
+        let results: Vec<_> = parsed.channels.iter().map(validate_import_entry).collect();
+
+        assert!(results[0].as_ref().unwrap_err().contains("渠道名"));
+        assert!(results[1].as_ref().unwrap_err().contains("weight"));
+        assert!(results[2].as_ref().unwrap_err().contains("Host"));
+        assert!(results[3].is_ok());
     }
 }

@@ -1,4 +1,5 @@
 // ── Dashboard ────────────────────────────────────────────
+// Range state lives in bootstrap.js with the other shared view state.
 
 function formatCompactNumber(value) {
   if (!Number.isFinite(value)) return "—";
@@ -24,6 +25,58 @@ function tokenUsageCard(label, usage, scopeLabel) {
       : `${scopeLabel} · 暂无 token 记录`,
     tone: "",
   };
+}
+
+/// Labels mirror DashboardRange::label on the server. The server echoes
+/// `range_label` for single windows; this covers the multi-window case and any
+/// render that happens before the first response lands.
+function getTimeRangeLabel(range) {
+  switch (range) {
+    case "today":
+      return "今天";
+    case "1d":
+      return "最近 24 小时";
+    case "3d":
+      return "最近 3 天";
+    case "7d":
+      return "最近 7 天";
+    case "30d":
+      return "最近 30 天";
+    case "all":
+      return "全部时间";
+    case "custom":
+      if (dashboardCustomStartDate && dashboardCustomEndDate) {
+        return `${dashboardCustomStartDate} 至 ${dashboardCustomEndDate}`;
+      }
+      return "自定义时间";
+    default:
+      return "所有窗口";
+  }
+}
+
+/// True when one aggregated window is displayed instead of the preset
+/// comparison set. "default" is the only multi-window range.
+function dashboardShowsSingleWindow(range = dashboardTimeRange) {
+  return range !== "default";
+}
+
+/// Query parameters shared by the token-usage and top-ranking requests.
+function dashboardRangeParams(range = dashboardTimeRange) {
+  const params = new URLSearchParams();
+  if (range === "custom") {
+    // Sending range=custom without both bounds is a guaranteed 400, so fall
+    // back until the user has applied a range.
+    if (dashboardCustomStartDate && dashboardCustomEndDate) {
+      params.set("range", "custom");
+      params.set("start_date", dashboardCustomStartDate);
+      params.set("end_date", dashboardCustomEndDate);
+    } else {
+      params.set("range", DASHBOARD_DEFAULT_RANGE);
+    }
+    return params;
+  }
+  params.set("range", DASHBOARD_RANGE_VALUES.has(range) ? range : DASHBOARD_DEFAULT_RANGE);
+  return params;
 }
 
 function formatDashboardCacheHitRate(cacheHitTokens, inputTokens) {
@@ -219,6 +272,8 @@ function renderDashboardRankList(container, rows, emptyText, options = {}) {
   }).join("");
 }
 
+/// Compact label for the ranking card headers, which have less room than the
+/// section metas. Rankings follow the same range as everything else.
 function dashboardTopWindowLabel(value) {
   switch (value) {
     case "today":
@@ -231,8 +286,16 @@ function dashboardTopWindowLabel(value) {
       return "7d";
     case "30d":
       return "30d";
+    case "all":
+      return "全部";
+    case "custom":
+      return dashboardCustomStartDate && dashboardCustomEndDate
+        ? `${dashboardCustomStartDate} 至 ${dashboardCustomEndDate}`
+        : "自定义";
     default:
-      return "今日";
+      // The multi-window comparison has no single ranking period; rankings then
+      // cover 30 days, matching the server's fallback.
+      return "30d";
   }
 }
 
@@ -311,22 +374,48 @@ function renderDashboard() {
       tone: "",
     },
   ]);
-  renderDashboardKpiCards(dashboardTokenKpis, [
-    tokenUsageCard("今天 Tokens", dashboardTokenUsage?.today, "本地日累计"),
-    tokenUsageCard("1d Tokens", dashboardTokenUsage?.one_day, "最近 24 小时"),
-    tokenUsageCard("7d Tokens", dashboardTokenUsage?.seven_days, "最近 7 天"),
-    tokenUsageCard("30d Tokens", dashboardTokenUsage?.thirty_days, "最近 30 天"),
-    cacheHitRateCard("今天缓存率", dashboardTokenUsage?.today, "本地日累计"),
-    cacheHitRateCard("1d 缓存率", dashboardTokenUsage?.one_day, "最近 24 小时"),
-    cacheHitRateCard("7d 缓存率", dashboardTokenUsage?.seven_days, "最近 7 天"),
-    cacheHitRateCard("30d 缓存率", dashboardTokenUsage?.thirty_days, "最近 30 天"),
-  ]);
-  renderDashboardKpiCards(dashboardRequestKpis, [
-    requestCountCard("今天请求", dashboardTokenUsage?.today, "本地日累计"),
-    requestCountCard("1d 请求", dashboardTokenUsage?.one_day, "最近 24 小时"),
-    requestCountCard("7d 请求", dashboardTokenUsage?.seven_days, "最近 7 天"),
-    requestCountCard("30d 请求", dashboardTokenUsage?.thirty_days, "最近 30 天"),
-  ]);
+
+  // Prefer the label the server echoed for the range it actually served, so a
+  // stale local state cannot mislabel the numbers on screen.
+  const rangeLabel = dashboardTokenUsage?.range_label || getTimeRangeLabel(dashboardTimeRange);
+  const servedRange = dashboardTokenUsage?.range || dashboardTimeRange;
+  for (const meta of [dashboardTokenRangeMeta, dashboardSelectedRangeMeta]) {
+    if (meta) meta.textContent = rangeLabel;
+  }
+
+  if (dashboardShowsSingleWindow(servedRange)) {
+    // Single window: the server puts the aggregate in `today` regardless of
+    // which window was asked for.
+    const usage = dashboardTokenUsage?.today;
+    renderDashboardKpiCards(dashboardTokenKpis, [
+      tokenUsageCard("Tokens", usage, rangeLabel),
+      cacheHitRateCard("缓存率", usage, rangeLabel),
+    ]);
+    renderDashboardKpiCards(dashboardRequestKpis, [
+      requestCountCard("请求", usage, rangeLabel),
+    ]);
+  } else {
+    // Default: show all windows
+    renderDashboardKpiCards(dashboardTokenKpis, [
+      tokenUsageCard("今天 Tokens", dashboardTokenUsage?.today, "本地日累计"),
+      tokenUsageCard("1d Tokens", dashboardTokenUsage?.one_day, "最近 24 小时"),
+      tokenUsageCard("7d Tokens", dashboardTokenUsage?.seven_days, "最近 7 天"),
+      tokenUsageCard("30d Tokens", dashboardTokenUsage?.thirty_days, "最近 30 天"),
+      tokenUsageCard("全部 Tokens", dashboardTokenUsage?.all_time, "全部时间统计"),
+      cacheHitRateCard("今天缓存率", dashboardTokenUsage?.today, "本地日累计"),
+      cacheHitRateCard("1d 缓存率", dashboardTokenUsage?.one_day, "最近 24 小时"),
+      cacheHitRateCard("7d 缓存率", dashboardTokenUsage?.seven_days, "最近 7 天"),
+      cacheHitRateCard("30d 缓存率", dashboardTokenUsage?.thirty_days, "最近 30 天"),
+      cacheHitRateCard("全部缓存率", dashboardTokenUsage?.all_time, "全部时间统计"),
+    ]);
+    renderDashboardKpiCards(dashboardRequestKpis, [
+      requestCountCard("今天请求", dashboardTokenUsage?.today, "本地日累计"),
+      requestCountCard("1d 请求", dashboardTokenUsage?.one_day, "最近 24 小时"),
+      requestCountCard("7d 请求", dashboardTokenUsage?.seven_days, "最近 7 天"),
+      requestCountCard("30d 请求", dashboardTokenUsage?.thirty_days, "最近 30 天"),
+      requestCountCard("全部请求", dashboardTokenUsage?.all_time, "全部时间统计"),
+    ]);
+  }
   const metrics = dashboardRuntimeMetrics || {};
   const cleanup = metrics.cleanup || {};
   const activeSse = Number(metrics.active_sse_streams || 0);
@@ -418,7 +507,7 @@ function renderDashboard() {
   const topChannelRequests = Array.isArray(dashboardTopStats?.channels) ? dashboardTopStats.channels : [];
   const topModelTokens = Array.isArray(dashboardTopStats?.model_tokens) ? dashboardTopStats.model_tokens : [];
   const topChannelTokens = Array.isArray(dashboardTopStats?.channel_tokens) ? dashboardTopStats.channel_tokens : [];
-  const topWindowLabel = dashboardTopWindowLabel(dashboardTopStats?.window || dashboardTopWindow);
+  const topWindowLabel = dashboardTopWindowLabel(dashboardTopStats?.window || dashboardTimeRange);
   if (dashboardModelsMeta) {
     dashboardModelsMeta.textContent = `${topWindowLabel} · 请求 Top ${topModelRequests.length || 0}`;
   }
@@ -507,13 +596,18 @@ async function loadDashboardData() {
       limit: String(DASHBOARD_LOG_LIMIT),
       offset: "0",
     });
-    const topParams = new URLSearchParams({
-      window: dashboardTopWindow,
-      limit: String(DASHBOARD_TOP_LIMIT),
-    });
+
+    // One range, two endpoints: token cards and rankings stay in agreement.
+    const tokenUsageParams = dashboardRangeParams();
+    const topParams = dashboardRangeParams();
+    // /logs/top names the parameter `window` and has no multi-window mode.
+    topParams.set("window", topParams.get("range"));
+    topParams.delete("range");
+    topParams.set("limit", String(DASHBOARD_TOP_LIMIT));
+
     const [page, tokenUsage, runtimeMetrics, topStats] = await Promise.all([
       api(`/api/admin/logs?${params}`),
-      api("/api/admin/logs/token-usage"),
+      api(`/api/admin/logs/token-usage?${tokenUsageParams}`),
       api("/api/admin/system/metrics"),
       api(`/api/admin/logs/top?${topParams}`),
     ]);

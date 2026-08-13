@@ -220,6 +220,83 @@ pub async fn recent_one_minute_log_rate(pool: &SqlitePool) -> Result<RecentLogRa
     .await?)
 }
 
+#[derive(Debug, FromRow)]
+struct TokenUsageAggregateRow {
+    request_count: i64,
+    token_request_count: i64,
+    total_tokens: i64,
+    prompt_tokens: i64,
+    prompt_cached_tokens: i64,
+}
+
+impl From<TokenUsageAggregateRow> for TokenUsageWindowOut {
+    fn from(row: TokenUsageAggregateRow) -> Self {
+        Self {
+            total_tokens: row.total_tokens,
+            prompt_tokens: row.prompt_tokens,
+            prompt_cached_tokens: row.prompt_cached_tokens,
+            request_count: row.token_request_count,
+            all_request_count: row.request_count,
+        }
+    }
+}
+
+/// Shared projection for every token-usage aggregate. `{FILTER}` is replaced by
+/// a `WHERE` clause (or left empty for all-time).
+const TOKEN_USAGE_AGGREGATE_SQL: &str = r#"SELECT
+       COUNT(*) AS request_count,
+       COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END), 0)
+           AS token_request_count,
+       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+       COALESCE(SUM(prompt_cached_tokens), 0) AS prompt_cached_tokens
+   FROM request_logs {FILTER}"#;
+
+fn token_usage_sql(filter: &str) -> String {
+    TOKEN_USAGE_AGGREGATE_SQL.replace("{FILTER}", filter)
+}
+
+/// Query all-time token usage statistics directly from the database.
+/// This is not cached and should be called sparingly.
+pub async fn all_time_token_usage(pool: &SqlitePool) -> Result<TokenUsageWindowOut, AppError> {
+    let row: TokenUsageAggregateRow = sqlx::query_as(&token_usage_sql("")).fetch_one(pool).await?;
+    Ok(row.into())
+}
+
+/// Query token usage for a relative window such as the last 3 days.
+///
+/// `cutoff_expression` must be a trusted SQL literal from
+/// [`crate::db::log::LogTopWindow`]-style constants, never user input. Sharing
+/// those expressions keeps the local-day boundary for "today" consistent with
+/// the ranking queries.
+pub async fn cutoff_token_usage(
+    pool: &SqlitePool,
+    cutoff_expression: &str,
+) -> Result<TokenUsageWindowOut, AppError> {
+    let sql = token_usage_sql(&format!("WHERE created_at >= {cutoff_expression}"));
+    let row: TokenUsageAggregateRow = sqlx::query_as(&sql).fetch_one(pool).await?;
+    Ok(row.into())
+}
+
+/// Query token usage statistics for a custom date range.
+///
+/// Both bounds are inclusive days: `end_date` covers that entire day. Dates are
+/// bound as parameters, never interpolated.
+pub async fn custom_range_token_usage(
+    pool: &SqlitePool,
+    start_date: &str,
+    end_date: &str,
+) -> Result<TokenUsageWindowOut, AppError> {
+    let sql =
+        token_usage_sql("WHERE created_at >= datetime(?) AND created_at < datetime(?, '+1 day')");
+    let row: TokenUsageAggregateRow = sqlx::query_as(&sql)
+        .bind(start_date)
+        .bind(end_date)
+        .fetch_one(pool)
+        .await?;
+    Ok(row.into())
+}
+
 impl LogStatsState {
     fn apply_persisted_entry(&mut self, entry: PersistedLogStats, now: DateTime<Utc>) {
         self.total_log_count = self.total_log_count.saturating_add(1);
@@ -292,6 +369,9 @@ impl LogStatsState {
                 one_day: one_day.into_window(),
                 seven_days: seven_days.into_window(),
                 thirty_days: thirty_days.into_window(),
+                // all_time will be populated by the handler from a direct DB query
+                all_time: TokenUsageWindowOut::default(),
+                ..Default::default()
             },
         }
     }
@@ -367,6 +447,7 @@ mod tests {
     use sqlx::{sqlite::SqlitePoolOptions, SqlitePool};
 
     use super::{
+        all_time_token_usage, custom_range_token_usage, cutoff_token_usage,
         recent_one_minute_log_count, recent_one_minute_log_rate, LogStatsCache, PersistedLogStats,
     };
 
@@ -536,5 +617,114 @@ mod tests {
         assert_eq!(snapshot.token_usage.thirty_days.prompt_cached_tokens, 1);
         assert_eq!(snapshot.token_usage.thirty_days.request_count, 2);
         assert_eq!(snapshot.token_usage.thirty_days.all_request_count, 2);
+    }
+
+    /// Seed one request per age band so every window has a distinct sum. The
+    /// presets used to return byte-identical payloads; distinct expected totals
+    /// are what makes that regression impossible to miss.
+    async fn seeded_range_pool() -> SqlitePool {
+        let pool = test_pool().await;
+        sqlx::query(
+            r#"INSERT INTO request_logs
+               (id, created_at, prompt_tokens, prompt_cached_tokens, total_tokens) VALUES
+               (1, datetime('now', '-1 hour'), 50, 10, 100),
+               (2, datetime('now', '-2 days'), 100, 20, 200),
+               (3, datetime('now', '-10 days'), 200, 40, 400),
+               (4, datetime('now', '-40 days'), 400, 80, 800)"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn each_relative_window_aggregates_its_own_span() {
+        let pool = seeded_range_pool().await;
+
+        let three_days = cutoff_token_usage(&pool, "datetime('now', '-3 days')")
+            .await
+            .unwrap();
+        let seven_days = cutoff_token_usage(&pool, "datetime('now', '-7 days')")
+            .await
+            .unwrap();
+        let thirty_days = cutoff_token_usage(&pool, "datetime('now', '-30 days')")
+            .await
+            .unwrap();
+        let all_time = all_time_token_usage(&pool).await.unwrap();
+
+        assert_eq!(three_days.total_tokens, 300, "1h + 2d");
+        assert_eq!(seven_days.total_tokens, 300, "10d row is outside 7d");
+        assert_eq!(thirty_days.total_tokens, 700, "+ the 10d row");
+        assert_eq!(all_time.total_tokens, 1500, "+ the 40d row");
+
+        // Windows must differ from one another, not merely be non-zero.
+        assert_ne!(seven_days.total_tokens, thirty_days.total_tokens);
+        assert_ne!(thirty_days.total_tokens, all_time.total_tokens);
+
+        // Companion fields have to narrow with the window too.
+        assert_eq!(three_days.request_count, 2);
+        assert_eq!(all_time.request_count, 4);
+        assert_eq!(thirty_days.prompt_tokens, 350);
+        assert_eq!(all_time.prompt_cached_tokens, 150);
+    }
+
+    #[tokio::test]
+    async fn the_today_window_uses_the_local_day_boundary() {
+        let pool = seeded_range_pool().await;
+
+        // Same expression the ranking queries use, so "today" cannot drift by a
+        // timezone offset relative to them.
+        let today =
+            cutoff_token_usage(&pool, "datetime('now', 'localtime', 'start of day', 'utc')")
+                .await
+                .unwrap();
+
+        // The 1-hour-old row is the only one that can fall inside today; a row
+        // from two days ago never can.
+        assert!(
+            today.total_tokens == 100 || today.total_tokens == 0,
+            "today should hold at most the newest row, got {}",
+            today.total_tokens
+        );
+        assert!(
+            today.total_tokens < 300,
+            "the 2-day-old row must be excluded"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_custom_range_includes_both_boundary_days() {
+        let pool = test_pool().await;
+        // Fixed dates in the past so these assertions do not drift with the
+        // wall clock.
+        sqlx::query(
+            r#"INSERT INTO request_logs (id, created_at, total_tokens) VALUES
+               (1, '2019-08-01 00:30:00', 10),
+               (2, '2019-08-05 12:00:00', 20),
+               (3, '2019-08-10 23:59:00', 40),
+               (4, '2019-08-11 00:30:00', 80)"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // End day is inclusive: the 23:59 row on the 10th must be counted while
+        // the row just after midnight on the 11th must not.
+        let inclusive = custom_range_token_usage(&pool, "2019-08-01", "2019-08-10")
+            .await
+            .unwrap();
+        assert_eq!(inclusive.total_tokens, 70);
+
+        // A single-day range covers that whole day rather than an empty instant.
+        let one_day = custom_range_token_usage(&pool, "2019-08-05", "2019-08-05")
+            .await
+            .unwrap();
+        assert_eq!(one_day.total_tokens, 20);
+
+        let narrow = custom_range_token_usage(&pool, "2019-08-02", "2019-08-09")
+            .await
+            .unwrap();
+        assert_eq!(narrow.total_tokens, 20);
     }
 }

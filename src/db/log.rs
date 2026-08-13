@@ -108,6 +108,12 @@ pub enum LogTopWindow {
     ThreeDays,
     SevenDays,
     ThirtyDays,
+    AllTime,
+    /// Inclusive day bounds; `end` covers that whole day.
+    Custom {
+        start: chrono::NaiveDate,
+        end: chrono::NaiveDate,
+    },
 }
 
 impl LogTopWindow {
@@ -118,6 +124,7 @@ impl LogTopWindow {
             "3d" => Some(Self::ThreeDays),
             "7d" => Some(Self::SevenDays),
             "30d" => Some(Self::ThirtyDays),
+            "all" => Some(Self::AllTime),
             _ => None,
         }
     }
@@ -129,16 +136,46 @@ impl LogTopWindow {
             Self::ThreeDays => "3d",
             Self::SevenDays => "7d",
             Self::ThirtyDays => "30d",
+            Self::AllTime => "all",
+            Self::Custom { .. } => "custom",
         }
     }
 
-    fn cutoff_expression(self) -> &'static str {
+    /// Relative cutoff for a preset window.
+    ///
+    /// `Today` uses the local-day boundary because `created_at` is stored as
+    /// naive UTC; the other windows are plain offsets from now.
+    fn cutoff_expression(self) -> Option<&'static str> {
         match self {
-            Self::Today => "datetime('now', 'localtime', 'start of day', 'utc')",
-            Self::OneDay => "datetime('now', '-1 day')",
-            Self::ThreeDays => "datetime('now', '-3 days')",
-            Self::SevenDays => "datetime('now', '-7 days')",
-            Self::ThirtyDays => "datetime('now', '-30 days')",
+            Self::Today => Some("datetime('now', 'localtime', 'start of day', 'utc')"),
+            Self::OneDay => Some("datetime('now', '-1 day')"),
+            Self::ThreeDays => Some("datetime('now', '-3 days')"),
+            Self::SevenDays => Some("datetime('now', '-7 days')"),
+            Self::ThirtyDays => Some("datetime('now', '-30 days')"),
+            Self::AllTime | Self::Custom { .. } => None,
+        }
+    }
+
+    /// Append this window's `created_at` predicate. Custom bounds are bound as
+    /// parameters rather than interpolated into the SQL.
+    fn push_time_filter(self, query: &mut QueryBuilder<'_, Sqlite>) {
+        if let Some(cutoff) = self.cutoff_expression() {
+            query.push(" created_at >= ").push(cutoff);
+            return;
+        }
+        match self {
+            Self::Custom { start, end } => {
+                query
+                    .push(" created_at >= datetime(")
+                    .push_bind(start.to_string())
+                    .push(") AND created_at < datetime(")
+                    .push_bind(end.to_string())
+                    .push(", '+1 day')");
+            }
+            // All time has no bound at all.
+            _ => {
+                query.push(" 1 = 1");
+            }
         }
     }
 }
@@ -470,11 +507,9 @@ async fn top_log_counts(
         .push(spec.name_expression)
         .push(" AS name, ")
         .push(spec.metric_expression)
-        .push(" AS value FROM request_logs WHERE created_at >= ")
-        .push(window.cutoff_expression())
-        .push(" AND (")
-        .push(spec.source_filter)
-        .push(")");
+        .push(" AS value FROM request_logs WHERE");
+    window.push_time_filter(&mut query);
+    query.push(" AND (").push(spec.source_filter).push(")");
     if let Some(metric_filter) = spec.metric_filter {
         query.push(" AND (").push(metric_filter).push(")");
     }
@@ -627,6 +662,8 @@ pub async fn token_usage_stats(pool: &SqlitePool) -> Result<TokenUsageStatsOut, 
             request_count: row.thirty_days_requests,
             all_request_count: row.thirty_days_all_requests,
         },
+        all_time: TokenUsageWindowOut::default(),
+        ..Default::default()
     })
 }
 
@@ -1131,6 +1168,102 @@ mod tests {
                 .collect::<Vec<_>>(),
             [("gpt-5", 2)]
         );
+    }
+
+    #[tokio::test]
+    async fn top_log_stats_support_all_time_and_custom_ranges() {
+        let pool = test_pool().await;
+        // Dates are pinned well outside any relative window so the assertions
+        // below cannot drift as the wall clock moves.
+        sqlx::query(
+            r#"INSERT INTO request_logs
+               (id, created_at, model, upstream_id, upstream_name, total_tokens)
+               VALUES
+               (1, '2019-08-01 10:00:00', 'inside', 1, 'inside-channel', 100),
+               (2, '2019-08-10 23:59:00', 'inside', 1, 'inside-channel', 200),
+               (3, '2019-08-11 00:30:00', 'outside', 2, 'outside-channel', 400),
+               (4, '2015-01-01 00:00:00', 'ancient', 3, 'ancient-channel', 800)"#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Relative presets cannot see these fixed historical dates at all,
+        // which makes them a clean check that the range bounds are applied.
+        let recent = top_log_stats(&pool, LogTopWindow::ThirtyDays, 10)
+            .await
+            .unwrap();
+        assert!(recent.models.is_empty(), "fixed dates are far in the past");
+
+        let all_time = top_log_stats(&pool, LogTopWindow::AllTime, 10)
+            .await
+            .unwrap();
+        assert_eq!(all_time.window, "all");
+        assert_eq!(
+            all_time
+                .models
+                .iter()
+                .map(|item| (item.name.as_str(), item.count))
+                .collect::<Vec<_>>(),
+            [("inside", 2), ("ancient", 1), ("outside", 1)]
+        );
+
+        // End day inclusive: the 23:59 row on the 10th counts, 00:30 on the
+        // 11th does not.
+        let custom = top_log_stats(
+            &pool,
+            LogTopWindow::Custom {
+                start: "2019-08-01".parse().unwrap(),
+                end: "2019-08-10".parse().unwrap(),
+            },
+            10,
+        )
+        .await
+        .unwrap();
+        assert_eq!(custom.window, "custom");
+        assert_eq!(
+            custom
+                .models
+                .iter()
+                .map(|item| (item.name.as_str(), item.count))
+                .collect::<Vec<_>>(),
+            [("inside", 2)]
+        );
+        assert_eq!(
+            custom
+                .channel_tokens
+                .iter()
+                .map(|item| (item.name.as_str(), item.count))
+                .collect::<Vec<_>>(),
+            [("inside-channel", 300)]
+        );
+    }
+
+    /// A quote in a date must not be able to alter the query; bounds are bound
+    /// parameters, so a malformed value simply matches nothing.
+    #[tokio::test]
+    async fn custom_top_range_binds_its_dates() {
+        let pool = test_pool().await;
+        sqlx::query(
+            "INSERT INTO request_logs (id, created_at, model, upstream_id, upstream_name)
+             VALUES (1, datetime('now'), 'gpt-5', 1, 'fast')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let stats = top_log_stats(
+            &pool,
+            LogTopWindow::Custom {
+                start: "2026-08-01".parse().unwrap(),
+                end: "2026-08-02".parse().unwrap(),
+            },
+            10,
+        )
+        .await
+        .unwrap();
+
+        assert!(stats.models.is_empty());
     }
 
     #[tokio::test]
