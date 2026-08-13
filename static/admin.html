@@ -142,17 +142,42 @@ anthropic: "/theme-packs/anthropic/theme.css",
 
       <main class="content">
         <section class="view" data-view="dashboard">
-          <section class="panel dashboard-panel">
-            <div class="panel-head">
-              <div>
+          <section class="panel dashboard-panel wt-page" data-dashboard-window="single">
+            <div class="panel-head wt-page-head">
+              <div class="wt-page-copy">
                 <span class="eyebrow">TRAFFIC OVERVIEW</span>
                 <h2>数据看板</h2>
                 <p id="dashboard-scope">近窗图表基于已加载日志；Top 排行按所选周期查询日志库</p>
               </div>
-              <div class="dashboard-time-filter">
-                <label class="dashboard-range-field" for="dashboard-time-preset">
-                  <span>时间范围</span>
-                  <select id="dashboard-time-preset" aria-label="看板统计时间范围">
+              <div class="dashboard-time-filter wt-toolbar">
+                <div id="dashboard-time-chips" class="wt-seg" role="group" aria-label="看板统计时间范围">
+                  <span class="wt-seg-thumb" aria-hidden="true"></span>
+                  <button type="button" class="wt-seg-btn" data-dashboard-range="today">今天</button>
+                  <button type="button" class="wt-seg-btn" data-dashboard-range="1d">24小时</button>
+                  <button type="button" class="wt-seg-btn" data-dashboard-range="3d">3天</button>
+                  <button type="button" class="wt-seg-btn" data-dashboard-range="7d">7天</button>
+                  <button type="button" class="wt-seg-btn" data-dashboard-range="30d">30天</button>
+                  <button type="button" class="wt-seg-btn" data-dashboard-range="all">全部</button>
+                  <button type="button" class="wt-seg-btn" data-dashboard-range="default">对比</button>
+                  <button type="button" class="wt-seg-btn dashboard-custom-chip" data-dashboard-range="custom">自定义</button>
+                  <div id="dashboard-custom-range" class="dashboard-custom-range" hidden>
+                    <div class="dashboard-custom-range-inner">
+                      <label class="dashboard-date-field" data-placeholder="开始">
+                        <span class="dashboard-date-text">开始</span>
+                        <input type="date" id="dashboard-start-date" aria-label="开始日期" />
+                      </label>
+                      <span class="dashboard-date-sep">至</span>
+                      <label class="dashboard-date-field" data-placeholder="结束">
+                        <span class="dashboard-date-text">结束</span>
+                        <input type="date" id="dashboard-end-date" aria-label="结束日期" />
+                      </label>
+                      <button type="button" id="dashboard-apply-custom" class="secondary dashboard-apply-custom">应用</button>
+                    </div>
+                  </div>
+                </div>
+                <label class="dashboard-range-field wt-field" for="dashboard-time-preset">
+                  <span class="wt-sr-only">时间范围</span>
+                  <select id="dashboard-time-preset" class="wt-select wt-sr-only" tabindex="-1" aria-hidden="true">
                     <option value="today">今天</option>
                     <option value="1d">最近 24 小时</option>
                     <option value="3d">最近 3 天</option>
@@ -163,129 +188,133 @@ anthropic: "/theme-packs/anthropic/theme.css",
                     <option value="custom">自定义...</option>
                   </select>
                 </label>
-                <div id="dashboard-custom-range" class="dashboard-custom-range" hidden>
-                  <input type="date" id="dashboard-start-date" aria-label="开始日期" />
-                  <span>至</span>
-                  <input type="date" id="dashboard-end-date" aria-label="结束日期" />
-                  <button type="button" id="dashboard-apply-custom" class="secondary">应用</button>
-                </div>
               </div>
             </div>
 
-            <section class="dashboard-metric-section" aria-labelledby="dashboard-overview-title">
-              <div class="dashboard-metric-head">
-                <div>
-                  <h3 id="dashboard-overview-title">近窗概览</h3>
-                  <p class="dashboard-card-sub">已加载日志与渠道状态</p>
+            <div class="wt-page-body dashboard-layout">
+              <section class="dashboard-metric-section wt-section dashboard-hero" aria-labelledby="dashboard-overview-title">
+                <div class="dashboard-metric-head wt-section-head">
+                  <div class="wt-section-copy">
+                    <h3 id="dashboard-overview-title">近窗概览</h3>
+                    <p class="dashboard-card-sub wt-sub">已加载日志与渠道状态</p>
+                  </div>
+                  <span class="dashboard-card-meta wt-meta">实时快照</span>
                 </div>
-                <span class="dashboard-card-meta">实时快照</span>
-              </div>
-              <div id="dashboard-kpis" class="dashboard-kpis" aria-live="polite"></div>
-            </section>
+                <div id="dashboard-kpis" class="dashboard-kpis wt-metric-grid" aria-live="polite"></div>
+              </section>
 
-            <section class="dashboard-metric-section" aria-labelledby="dashboard-token-title">
-              <div class="dashboard-metric-head">
-                <div>
-                  <h3 id="dashboard-token-title">Tokens 统计</h3>
-                  <p class="dashboard-card-sub">按请求日志中的 token 用量汇总</p>
+              <div class="dashboard-ops wt-board">
+                <section class="dashboard-metric-section wt-section dashboard-ops-runtime" aria-labelledby="dashboard-runtime-title">
+                  <div class="dashboard-metric-head wt-section-head">
+                    <div class="wt-section-copy">
+                      <h3 id="dashboard-runtime-title">运行态</h3>
+                      <p class="dashboard-card-sub wt-sub">当前流、断连、日志写入与清理状态</p>
+                    </div>
+                    <span class="dashboard-card-meta wt-meta">实时快照</span>
+                  </div>
+                  <div id="dashboard-runtime-kpis" class="dashboard-window-kpis wt-metric-grid" aria-live="polite"></div>
+                </section>
+                <div class="dashboard-ops-usage">
+                  <section class="dashboard-metric-section wt-section dashboard-ops-tokens" aria-labelledby="dashboard-token-title">
+                    <div class="dashboard-metric-head wt-section-head">
+                      <div class="wt-section-copy">
+                        <h3 id="dashboard-token-title">Tokens 统计</h3>
+                        <p class="dashboard-card-sub wt-sub">按请求日志中的 token 用量汇总</p>
+                      </div>
+                      <span class="dashboard-card-meta wt-meta" id="dashboard-token-range"></span>
+                    </div>
+                    <div id="dashboard-token-kpis" class="dashboard-window-kpis wt-metric-grid" aria-live="polite"></div>
+                  </section>
+                  <section class="dashboard-metric-section wt-section dashboard-ops-requests" aria-labelledby="dashboard-request-title">
+                    <div class="dashboard-metric-head wt-section-head">
+                      <div class="wt-section-copy">
+                        <h3 id="dashboard-request-title">请求统计</h3>
+                        <p class="dashboard-card-sub wt-sub">按全部请求日志条数汇总</p>
+                      </div>
+                      <span class="dashboard-card-meta wt-meta" id="dashboard-selected-range"></span>
+                    </div>
+                    <div id="dashboard-request-kpis" class="dashboard-window-kpis wt-metric-grid" aria-live="polite"></div>
+                  </section>
                 </div>
-                <span class="dashboard-card-meta" id="dashboard-token-range"></span>
               </div>
-              <div id="dashboard-token-kpis" class="dashboard-window-kpis" aria-live="polite"></div>
-            </section>
 
-            <section class="dashboard-metric-section" aria-labelledby="dashboard-request-title">
-              <div class="dashboard-metric-head">
-                <div>
-                  <h3 id="dashboard-request-title">请求统计</h3>
-                  <p class="dashboard-card-sub">按全部请求日志条数汇总</p>
-                </div>
-                <span class="dashboard-card-meta" id="dashboard-selected-range"></span>
+              <div class="dashboard-grid dashboard-insight">
+                <article class="dashboard-card wt-card">
+                  <div class="dashboard-card-head wt-card-head">
+                    <h3>状态分布</h3>
+                    <span class="dashboard-card-meta wt-meta" id="dashboard-status-meta">近 N 条</span>
+                  </div>
+                  <div id="dashboard-status-chart" class="dashboard-chart"></div>
+                </article>
+                <article class="dashboard-card wt-card">
+                  <div class="dashboard-card-head wt-card-head">
+                    <h3>延迟趋势</h3>
+                    <span class="dashboard-card-meta wt-meta" id="dashboard-latency-meta">近 N 条</span>
+                  </div>
+                  <div id="dashboard-latency-chart" class="dashboard-chart"></div>
+                </article>
               </div>
-              <div id="dashboard-request-kpis" class="dashboard-window-kpis" aria-live="polite"></div>
-            </section>
 
-            <section class="dashboard-metric-section" aria-labelledby="dashboard-runtime-title">
-              <div class="dashboard-metric-head">
-                <div>
-                  <h3 id="dashboard-runtime-title">运行态</h3>
-                  <p class="dashboard-card-sub">当前流、断连、日志写入与清理状态</p>
+              <section class="wt-section dashboard-rankings">
+                <div class="dashboard-ranking-toolbar wt-section-head">
+                  <div class="wt-section-copy">
+                    <h3>Top 排行</h3>
+                    <p class="dashboard-card-sub wt-sub">渠道请求、渠道 Tokens、模型请求、模型 Tokens 按所选周期统计；模型按实际转发给上游的名称归类</p>
+                  </div>
+                  <div class="dashboard-ranking-controls">
+                    <button
+                      id="dashboard-channel-name-toggle"
+                      type="button"
+                      class="secondary ghost log-sensitive-toggle"
+                      aria-pressed="false"
+                      aria-label="渠道名显示中，点击隐藏"
+                      title="渠道名显示中，点击隐藏"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path class="log-sensitive-eye" d="M2.5 12s3.4-5.5 9.5-5.5S21.5 12 21.5 12 18.1 17.5 12 17.5 2.5 12 2.5 12Z"></path>
+                        <circle class="log-sensitive-eye" cx="12" cy="12" r="2.5"></circle>
+                        <path class="log-sensitive-slash" d="m4 4 16 16"></path>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                <span class="dashboard-card-meta">实时快照</span>
-              </div>
-              <div id="dashboard-runtime-kpis" class="dashboard-window-kpis" aria-live="polite"></div>
-            </section>
+                <div class="dashboard-grid dashboard-rank-grid">
+                  <article class="dashboard-card wt-card">
+                    <div class="dashboard-card-head wt-card-head">
+                      <h3>Top 渠道请求</h3>
+                      <span class="dashboard-card-meta wt-meta" id="dashboard-channels-meta">按请求数</span>
+                    </div>
+                    <div id="dashboard-top-channels" class="dashboard-list"></div>
+                  </article>
+                  <article class="dashboard-card wt-card">
+                    <div class="dashboard-card-head wt-card-head">
+                      <h3>Top 渠道 Tokens</h3>
+                      <span class="dashboard-card-meta wt-meta" id="dashboard-channel-tokens-meta">按 Tokens</span>
+                    </div>
+                    <div id="dashboard-top-channel-tokens" class="dashboard-list"></div>
+                  </article>
+                  <article class="dashboard-card wt-card">
+                    <div class="dashboard-card-head wt-card-head">
+                      <h3>Top 模型请求</h3>
+                      <span class="dashboard-card-meta wt-meta" id="dashboard-models-meta">按请求数</span>
+                    </div>
+                    <div id="dashboard-top-models" class="dashboard-list"></div>
+                  </article>
+                  <article class="dashboard-card wt-card">
+                    <div class="dashboard-card-head wt-card-head">
+                      <h3>Top 模型 Tokens</h3>
+                      <span class="dashboard-card-meta wt-meta" id="dashboard-model-tokens-meta">按 Tokens</span>
+                    </div>
+                    <div id="dashboard-top-model-tokens" class="dashboard-list"></div>
+                  </article>
+                </div>
+              </section>
 
-            <div class="dashboard-grid">
-              <div class="dashboard-card">
-                <div class="dashboard-card-head">
-                  <h3>状态分布</h3>
-                  <span class="dashboard-card-meta" id="dashboard-status-meta">近 N 条</span>
-                </div>
-                <div id="dashboard-status-chart" class="dashboard-chart"></div>
-              </div>
-              <div class="dashboard-card">
-                <div class="dashboard-card-head">
-                  <h3>延迟趋势</h3>
-                  <span class="dashboard-card-meta" id="dashboard-latency-meta">近 N 条</span>
-                </div>
-                <div id="dashboard-latency-chart" class="dashboard-chart"></div>
-              </div>
-              <div class="dashboard-ranking-toolbar">
-                <div>
-                  <h3>Top 排行</h3>
-                  <p class="dashboard-card-sub">渠道请求、渠道 Tokens、模型请求、模型 Tokens 按所选周期统计；模型按实际转发给上游的名称归类</p>
-                </div>
-                <div class="dashboard-ranking-controls">
-                  <button
-                    id="dashboard-channel-name-toggle"
-                    type="button"
-                    class="secondary ghost log-sensitive-toggle"
-                    aria-pressed="false"
-                    aria-label="渠道名显示中，点击隐藏"
-                    title="渠道名显示中，点击隐藏"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                      <path class="log-sensitive-eye" d="M2.5 12s3.4-5.5 9.5-5.5S21.5 12 21.5 12 18.1 17.5 12 17.5 2.5 12 2.5 12Z"></path>
-                      <circle class="log-sensitive-eye" cx="12" cy="12" r="2.5"></circle>
-                      <path class="log-sensitive-slash" d="m4 4 16 16"></path>
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <div class="dashboard-card">
-                <div class="dashboard-card-head">
-                  <h3>Top 渠道请求</h3>
-                  <span class="dashboard-card-meta" id="dashboard-channels-meta">按请求数</span>
-                </div>
-                <div id="dashboard-top-channels" class="dashboard-list"></div>
-              </div>
-              <div class="dashboard-card">
-                <div class="dashboard-card-head">
-                  <h3>Top 渠道 Tokens</h3>
-                  <span class="dashboard-card-meta" id="dashboard-channel-tokens-meta">按 Tokens</span>
-                </div>
-                <div id="dashboard-top-channel-tokens" class="dashboard-list"></div>
-              </div>
-              <div class="dashboard-card">
-                <div class="dashboard-card-head">
-                  <h3>Top 模型请求</h3>
-                  <span class="dashboard-card-meta" id="dashboard-models-meta">按请求数</span>
-                </div>
-                <div id="dashboard-top-models" class="dashboard-list"></div>
-              </div>
-              <div class="dashboard-card">
-                <div class="dashboard-card-head">
-                  <h3>Top 模型 Tokens</h3>
-                  <span class="dashboard-card-meta" id="dashboard-model-tokens-meta">按 Tokens</span>
-                </div>
-                <div id="dashboard-top-model-tokens" class="dashboard-list"></div>
-              </div>
-              <div class="dashboard-card dashboard-card-wide">
-                <div class="panel-head dashboard-card-head">
+              <article class="dashboard-card dashboard-card-wide wt-card">
+                <div class="panel-head dashboard-card-head wt-card-head">
                   <div>
                     <h3>最近失败</h3>
-                    <p class="dashboard-card-sub">近窗内 4xx/5xx/无响应</p>
+                    <p class="dashboard-card-sub wt-sub">近窗内 4xx/5xx/无响应</p>
                   </div>
                 </div>
                 <div class="table-wrap">
@@ -302,7 +331,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
                     <tbody id="dashboard-error-rows"></tbody>
                   </table>
                 </div>
-              </div>
+              </article>
             </div>
           </section>
         </section>
