@@ -16,7 +16,9 @@ use crate::db::{
 };
 use crate::error::AppError;
 use crate::middleware::auth::AdminAuth;
-use crate::models::request_log::{RequestLogCursorOut, RequestLogPage, TokenUsageStatsOut};
+use crate::models::request_log::{
+    DashboardRange, RequestLogCursorOut, RequestLogPage, TokenUsageStatsOut, TokenUsageWindowOut,
+};
 use crate::models::settings::{
     AdminTokenRotateIn, ModelTestPromptTemplate, ModelTestPromptTemplateIn, ModelTestTemplate,
     ModelTestTemplateIn, RuntimeCleanupMetricsOut, RuntimeLogSettingsSummary, RuntimeMetricsOut,
@@ -400,6 +402,10 @@ pub struct LogQuery {
 pub struct LogTopQuery {
     window: Option<String>,
     limit: Option<i64>,
+    /// Set alongside `window=custom` (ISO 8601 `YYYY-MM-DD`).
+    start_date: Option<String>,
+    /// Set alongside `window=custom` (ISO 8601 `YYYY-MM-DD`).
+    end_date: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -540,45 +546,53 @@ pub async fn admin_token_usage_stats(
     _auth: AdminAuth,
     Query(query): Query<TokenUsageQuery>,
 ) -> Result<Json<TokenUsageStatsOut>, AppError> {
-    let range = query.range.as_deref().unwrap_or("default");
+    let range = DashboardRange::from_query(
+        query.range.as_deref(),
+        query.start_date.as_deref(),
+        query.end_date.as_deref(),
+    )
+    .map_err(AppError::BadRequest)?;
 
-    match range {
-        "custom" => {
-            // Custom date range
-            let start_date = query.start_date.as_deref()
-                .ok_or_else(|| AppError::BadRequest("start_date required for custom range".into()))?;
-            let end_date = query.end_date.as_deref()
-                .ok_or_else(|| AppError::BadRequest("end_date required for custom range".into()))?;
-
-            let custom_usage = log_stats_db::custom_range_token_usage(&state.db, start_date, end_date).await?;
-
-            Ok(Json(TokenUsageStatsOut {
-                today: custom_usage.clone(),
-                one_day: Default::default(),
-                seven_days: Default::default(),
-                thirty_days: Default::default(),
-                all_time: Default::default(),
-            }))
-        }
-        "all" => {
-            // All time only
-            let all_time_usage = log_stats_db::all_time_token_usage(&state.db).await?;
-
-            Ok(Json(TokenUsageStatsOut {
-                today: all_time_usage.clone(),
-                one_day: Default::default(),
-                seven_days: Default::default(),
-                thirty_days: Default::default(),
-                all_time: all_time_usage,
-            }))
-        }
-        _ => {
-            // Default: return all standard windows
-            let mut stats = state.log_stats.snapshot().token_usage;
-            stats.all_time = log_stats_db::all_time_token_usage(&state.db).await?;
-            Ok(Json(stats))
-        }
+    // The multi-window comparison keeps its original shape so existing clients
+    // are unaffected.
+    if !range.is_single_window() {
+        let mut stats = state.log_stats.snapshot().token_usage;
+        stats.all_time = log_stats_db::all_time_token_usage(&state.db).await?;
+        return Ok(Json(stats));
     }
+
+    // Windows the in-memory cache already maintains are served from it; only the
+    // ranges it cannot answer reach the database.
+    let cached = state.log_stats.snapshot().token_usage;
+    let usage = match range {
+        DashboardRange::Today => cached.today,
+        DashboardRange::OneDay => cached.one_day,
+        DashboardRange::SevenDays => cached.seven_days,
+        DashboardRange::ThirtyDays => cached.thirty_days,
+        DashboardRange::ThreeDays => {
+            log_stats_db::cutoff_token_usage(&state.db, "datetime('now', '-3 days')").await?
+        }
+        DashboardRange::AllTime => log_stats_db::all_time_token_usage(&state.db).await?,
+        DashboardRange::Custom { start, end } => {
+            log_stats_db::custom_range_token_usage(&state.db, &start.to_string(), &end.to_string())
+                .await?
+        }
+        DashboardRange::AllWindows => unreachable!("handled above"),
+    };
+
+    // `today` carries the selected window for backward compatibility; `range`
+    // and `range_label` tell newer clients which window that actually is.
+    Ok(Json(TokenUsageStatsOut {
+        today: usage.clone(),
+        all_time: if range == DashboardRange::AllTime {
+            usage
+        } else {
+            TokenUsageWindowOut::default()
+        },
+        range: Some(range.as_query_value().to_owned()),
+        range_label: Some(range.label()),
+        ..Default::default()
+    }))
 }
 
 pub async fn admin_top_log_stats(
@@ -586,15 +600,36 @@ pub async fn admin_top_log_stats(
     _auth: AdminAuth,
     Query(query): Query<LogTopQuery>,
 ) -> Result<Json<crate::models::request_log::RequestLogTopStatsOut>, AppError> {
-    let window_value = query
-        .window
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or("today");
-    let window = log_db::LogTopWindow::from_query_value(window_value).ok_or_else(|| {
-        AppError::BadRequest("window must be one of: today, 1d, 3d, 7d, 30d".into())
-    })?;
+    // The dashboard drives rankings from the same range control as the token
+    // cards, so accept custom bounds here too. "default" has no meaning for a
+    // ranking; fall back to the widest preset instead of erroring.
+    let window = match query.window.as_deref() {
+        Some("custom") => {
+            let range = DashboardRange::from_query(
+                Some("custom"),
+                query.start_date.as_deref(),
+                query.end_date.as_deref(),
+            )
+            .map_err(AppError::BadRequest)?;
+            let DashboardRange::Custom { start, end } = range else {
+                unreachable!("custom range parses to the custom variant");
+            };
+            log_db::LogTopWindow::Custom { start, end }
+        }
+        Some("default") | None => log_db::LogTopWindow::ThirtyDays,
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                log_db::LogTopWindow::Today
+            } else {
+                log_db::LogTopWindow::from_query_value(trimmed).ok_or_else(|| {
+                    AppError::BadRequest(
+                        "window must be one of: today, 1d, 3d, 7d, 30d, all, custom".into(),
+                    )
+                })?
+            }
+        }
+    };
     let limit = query.limit.unwrap_or(10).clamp(1, 20);
 
     Ok(Json(log_db::top_log_stats(&state.db, window, limit).await?))

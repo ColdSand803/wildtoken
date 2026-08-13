@@ -1,8 +1,5 @@
 // ── Dashboard ────────────────────────────────────────────
-
-let dashboardTimeRange = "default";
-let dashboardCustomStartDate = null;
-let dashboardCustomEndDate = null;
+// Range state lives in bootstrap.js with the other shared view state.
 
 function formatCompactNumber(value) {
   if (!Number.isFinite(value)) return "—";
@@ -30,12 +27,17 @@ function tokenUsageCard(label, usage, scopeLabel) {
   };
 }
 
+/// Labels mirror DashboardRange::label on the server. The server echoes
+/// `range_label` for single windows; this covers the multi-window case and any
+/// render that happens before the first response lands.
 function getTimeRangeLabel(range) {
   switch (range) {
     case "today":
       return "今天";
     case "1d":
       return "最近 24 小时";
+    case "3d":
+      return "最近 3 天";
     case "7d":
       return "最近 7 天";
     case "30d":
@@ -48,8 +50,33 @@ function getTimeRangeLabel(range) {
       }
       return "自定义时间";
     default:
-      return "多个时间窗口";
+      return "所有窗口";
   }
+}
+
+/// True when one aggregated window is displayed instead of the preset
+/// comparison set. "default" is the only multi-window range.
+function dashboardShowsSingleWindow(range = dashboardTimeRange) {
+  return range !== "default";
+}
+
+/// Query parameters shared by the token-usage and top-ranking requests.
+function dashboardRangeParams(range = dashboardTimeRange) {
+  const params = new URLSearchParams();
+  if (range === "custom") {
+    // Sending range=custom without both bounds is a guaranteed 400, so fall
+    // back until the user has applied a range.
+    if (dashboardCustomStartDate && dashboardCustomEndDate) {
+      params.set("range", "custom");
+      params.set("start_date", dashboardCustomStartDate);
+      params.set("end_date", dashboardCustomEndDate);
+    } else {
+      params.set("range", DASHBOARD_DEFAULT_RANGE);
+    }
+    return params;
+  }
+  params.set("range", DASHBOARD_RANGE_VALUES.has(range) ? range : DASHBOARD_DEFAULT_RANGE);
+  return params;
 }
 
 function formatDashboardCacheHitRate(cacheHitTokens, inputTokens) {
@@ -245,6 +272,8 @@ function renderDashboardRankList(container, rows, emptyText, options = {}) {
   }).join("");
 }
 
+/// Compact label for the ranking card headers, which have less room than the
+/// section metas. Rankings follow the same range as everything else.
 function dashboardTopWindowLabel(value) {
   switch (value) {
     case "today":
@@ -257,8 +286,16 @@ function dashboardTopWindowLabel(value) {
       return "7d";
     case "30d":
       return "30d";
+    case "all":
+      return "全部";
+    case "custom":
+      return dashboardCustomStartDate && dashboardCustomEndDate
+        ? `${dashboardCustomStartDate} 至 ${dashboardCustomEndDate}`
+        : "自定义";
     default:
-      return "今日";
+      // The multi-window comparison has no single ranking period; rankings then
+      // cover 30 days, matching the server's fallback.
+      return "30d";
   }
 }
 
@@ -338,17 +375,18 @@ function renderDashboard() {
     },
   ]);
 
-  // Update the displayed range label
-  const rangeLabel = getTimeRangeLabel(dashboardTimeRange);
-  const selectedRangeMeta = document.getElementById("dashboard-selected-range");
-  if (selectedRangeMeta) {
-    selectedRangeMeta.textContent = rangeLabel;
+  // Prefer the label the server echoed for the range it actually served, so a
+  // stale local state cannot mislabel the numbers on screen.
+  const rangeLabel = dashboardTokenUsage?.range_label || getTimeRangeLabel(dashboardTimeRange);
+  const servedRange = dashboardTokenUsage?.range || dashboardTimeRange;
+  for (const meta of [dashboardTokenRangeMeta, dashboardSelectedRangeMeta]) {
+    if (meta) meta.textContent = rangeLabel;
   }
 
-  // Render token usage based on selected range
-  if (dashboardTimeRange === "custom" || dashboardTimeRange === "all") {
-    // Show only the selected range data in the first card
-    const usage = dashboardTokenUsage?.today; // API returns the filtered data in 'today' field
+  if (dashboardShowsSingleWindow(servedRange)) {
+    // Single window: the server puts the aggregate in `today` regardless of
+    // which window was asked for.
+    const usage = dashboardTokenUsage?.today;
     renderDashboardKpiCards(dashboardTokenKpis, [
       tokenUsageCard("Tokens", usage, rangeLabel),
       cacheHitRateCard("缓存率", usage, rangeLabel),
@@ -469,7 +507,7 @@ function renderDashboard() {
   const topChannelRequests = Array.isArray(dashboardTopStats?.channels) ? dashboardTopStats.channels : [];
   const topModelTokens = Array.isArray(dashboardTopStats?.model_tokens) ? dashboardTopStats.model_tokens : [];
   const topChannelTokens = Array.isArray(dashboardTopStats?.channel_tokens) ? dashboardTopStats.channel_tokens : [];
-  const topWindowLabel = dashboardTopWindowLabel(dashboardTopStats?.window || dashboardTopWindow);
+  const topWindowLabel = dashboardTopWindowLabel(dashboardTopStats?.window || dashboardTimeRange);
   if (dashboardModelsMeta) {
     dashboardModelsMeta.textContent = `${topWindowLabel} · 请求 Top ${topModelRequests.length || 0}`;
   }
@@ -558,22 +596,14 @@ async function loadDashboardData() {
       limit: String(DASHBOARD_LOG_LIMIT),
       offset: "0",
     });
-    const topParams = new URLSearchParams({
-      window: dashboardTopWindow,
-      limit: String(DASHBOARD_TOP_LIMIT),
-    });
 
-    // Build token usage query params based on selected range
-    const tokenUsageParams = new URLSearchParams();
-    if (dashboardTimeRange === "custom" && dashboardCustomStartDate && dashboardCustomEndDate) {
-      tokenUsageParams.set("range", "custom");
-      tokenUsageParams.set("start_date", dashboardCustomStartDate);
-      tokenUsageParams.set("end_date", dashboardCustomEndDate);
-    } else if (dashboardTimeRange === "all") {
-      tokenUsageParams.set("range", "all");
-    } else {
-      tokenUsageParams.set("range", "default");
-    }
+    // One range, two endpoints: token cards and rankings stay in agreement.
+    const tokenUsageParams = dashboardRangeParams();
+    const topParams = dashboardRangeParams();
+    // /logs/top names the parameter `window` and has no multi-window mode.
+    topParams.set("window", topParams.get("range"));
+    topParams.delete("range");
+    topParams.set("limit", String(DASHBOARD_TOP_LIMIT));
 
     const [page, tokenUsage, runtimeMetrics, topStats] = await Promise.all([
       api(`/api/admin/logs?${params}`),

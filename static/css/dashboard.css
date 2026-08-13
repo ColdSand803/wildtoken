@@ -25,12 +25,26 @@
   min-width: 0;
 }
 
+/* Sits in the dashboard panel head as the single range control for the whole
+   view: token cards, request cards, and the Top rankings. */
 .dashboard-time-filter {
-  align-items: flex-start;
+  align-items: flex-end;
   display: flex;
-  flex-direction: column;
   flex-shrink: 0;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
+}
+
+.dashboard-range-field {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  gap: 8px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .dashboard-time-filter select {
@@ -55,6 +69,14 @@
   padding: 8px 10px;
 }
 
+.dashboard-custom-range[hidden] {
+  display: none;
+}
+
+.dashboard-custom-range button {
+  min-height: 32px;
+}
+
 .dashboard-custom-range input[type="date"] {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -70,41 +92,9 @@
   font-size: var(--text-sm);
 }
 
-.dashboard-custom-range .btn-sm {
-  background: var(--accent);
-  border: none;
-  border-radius: var(--radius-sm);
-  color: var(--accent-on);
-  cursor: pointer;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  padding: 6px 12px;
-  transition: background var(--transition);
-}
-
-.dashboard-custom-range .btn-sm:hover {
-  background: var(--accent-strong);
-}
-
 .dashboard-metric-section {
   margin: 0 0 22px;
   padding: 0;
-}
-
-.dashboard-top-window-field {
-  align-items: center;
-  color: var(--muted);
-  display: inline-flex;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  gap: 8px;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
-
-.dashboard-top-window-field select {
-  min-height: 34px;
-  min-width: 88px;
 }
 
 .dashboard-metric-section + .dashboard-metric-section,

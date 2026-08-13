@@ -149,6 +149,27 @@ anthropic: "/theme-packs/anthropic/theme.css",
                 <h2>数据看板</h2>
                 <p id="dashboard-scope">近窗图表基于已加载日志；Top 排行按所选周期查询日志库</p>
               </div>
+              <div class="dashboard-time-filter">
+                <label class="dashboard-range-field" for="dashboard-time-preset">
+                  <span>时间范围</span>
+                  <select id="dashboard-time-preset" aria-label="看板统计时间范围">
+                    <option value="today">今天</option>
+                    <option value="1d">最近 24 小时</option>
+                    <option value="3d">最近 3 天</option>
+                    <option value="7d">最近 7 天</option>
+                    <option value="30d">最近 30 天</option>
+                    <option value="all">全部时间</option>
+                    <option value="default">所有窗口对比</option>
+                    <option value="custom">自定义...</option>
+                  </select>
+                </label>
+                <div id="dashboard-custom-range" class="dashboard-custom-range" hidden>
+                  <input type="date" id="dashboard-start-date" aria-label="开始日期" />
+                  <span>至</span>
+                  <input type="date" id="dashboard-end-date" aria-label="结束日期" />
+                  <button type="button" id="dashboard-apply-custom" class="secondary">应用</button>
+                </div>
+              </div>
             </div>
 
             <section class="dashboard-metric-section" aria-labelledby="dashboard-overview-title">
@@ -168,22 +189,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
                   <h3 id="dashboard-token-title">Tokens 统计</h3>
                   <p class="dashboard-card-sub">按请求日志中的 token 用量汇总</p>
                 </div>
-                <div class="dashboard-time-filter">
-                  <select id="dashboard-time-preset" aria-label="时间范围预设">
-                    <option value="today">今天</option>
-                    <option value="1d">最近 24 小时</option>
-                    <option value="7d">最近 7 天</option>
-                    <option value="30d" selected>最近 30 天</option>
-                    <option value="all">全部时间</option>
-                    <option value="custom">自定义...</option>
-                  </select>
-                  <div id="dashboard-custom-range" class="dashboard-custom-range" style="display: none;">
-                    <input type="date" id="dashboard-start-date" aria-label="开始日期" />
-                    <span>至</span>
-                    <input type="date" id="dashboard-end-date" aria-label="结束日期" />
-                    <button type="button" id="dashboard-apply-custom" class="btn-sm">应用</button>
-                  </div>
-                </div>
+                <span class="dashboard-card-meta" id="dashboard-token-range"></span>
               </div>
               <div id="dashboard-token-kpis" class="dashboard-window-kpis" aria-live="polite"></div>
             </section>
@@ -194,7 +200,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
                   <h3 id="dashboard-request-title">请求统计</h3>
                   <p class="dashboard-card-sub">按全部请求日志条数汇总</p>
                 </div>
-                <span class="dashboard-card-meta" id="dashboard-selected-range">最近 30 天</span>
+                <span class="dashboard-card-meta" id="dashboard-selected-range"></span>
               </div>
               <div id="dashboard-request-kpis" class="dashboard-window-kpis" aria-live="polite"></div>
             </section>
@@ -245,16 +251,6 @@ anthropic: "/theme-packs/anthropic/theme.css",
                       <path class="log-sensitive-slash" d="m4 4 16 16"></path>
                     </svg>
                   </button>
-                  <label class="dashboard-top-window-field" for="dashboard-top-window">
-                    <span>排行周期</span>
-                    <select id="dashboard-top-window" aria-label="Top 模型和 Top 渠道统计周期">
-                      <option value="today">今日</option>
-                      <option value="1d">1d</option>
-                      <option value="3d">3d</option>
-                      <option value="7d">7d</option>
-                      <option value="30d">30d</option>
-                    </select>
-                  </label>
                 </div>
               </div>
               <div class="dashboard-card">
@@ -349,6 +345,8 @@ anthropic: "/theme-packs/anthropic/theme.css",
                 <div id="upstream-col-menu" class="col-menu" hidden role="menu" aria-label="渠道列显示"></div>
               </div>
               <div class="actions toolbar-actions">
+                <button id="channel-export" type="button" class="secondary">导出</button>
+                <button id="channel-import" type="button" class="secondary">导入</button>
                 <button id="quick-import" type="button" class="secondary">快速导入</button>
                 <button id="new-upstream" type="button">新增渠道</button>
               </div>
@@ -812,6 +810,79 @@ anthropic: "/theme-packs/anthropic/theme.css",
         <div class="modal-actions">
           <button id="quick-import-cancel" type="button" class="secondary">取消</button>
           <button id="quick-import-fill" type="button" disabled>填入并拉取模型</button>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="channel-export-dialog" class="quick-import-dialog" aria-labelledby="channel-export-title">
+      <div class="quick-import-panel">
+        <div class="modal-head">
+          <div>
+            <h2 id="channel-export-title">导出渠道</h2>
+            <p>导出为 JSON 文件，包含模型、映射、优先级、权重与 Header 覆盖。</p>
+          </div>
+          <div class="modal-head-actions"><button type="button" class="secondary ghost icon-maximize" data-dialog-maximize aria-label="最大化" title="最大化" aria-pressed="false"><svg class="dialog-icon dialog-icon--maximize" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="0.5"/></svg><svg class="dialog-icon dialog-icon--restore" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="3" width="7" height="7" rx="0.5"/><rect x="3.5" y="5.5" width="7" height="7" rx="0.5"/></svg></button><button id="channel-export-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button></div>
+        </div>
+        <div id="channel-export-scope" class="channel-transfer-summary" aria-live="polite"></div>
+        <div class="toggle-list">
+          <label class="toggle-row">
+            <input id="channel-export-include-keys" type="checkbox" checked />
+            <span>
+              <strong>包含 API Key</strong>
+              <small>取消后导出文件不含密钥；用它覆盖导入时会保留目标渠道已有的密钥。</small>
+            </span>
+          </label>
+        </div>
+        <div class="modal-actions">
+          <button id="channel-export-cancel" type="button" class="secondary">取消</button>
+          <button id="channel-export-confirm" type="button">下载 JSON</button>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="channel-import-dialog" class="quick-import-dialog" aria-labelledby="channel-import-title">
+      <div class="quick-import-panel">
+        <div class="modal-head">
+          <div>
+            <h2 id="channel-import-title">导入渠道</h2>
+            <p>选择导出的 JSON 文件，或直接粘贴内容。</p>
+          </div>
+          <div class="modal-head-actions"><button type="button" class="secondary ghost icon-maximize" data-dialog-maximize aria-label="最大化" title="最大化" aria-pressed="false"><svg class="dialog-icon dialog-icon--maximize" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="0.5"/></svg><svg class="dialog-icon dialog-icon--restore" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="3" width="7" height="7" rx="0.5"/><rect x="3.5" y="5.5" width="7" height="7" rx="0.5"/></svg></button><button id="channel-import-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button></div>
+        </div>
+        <label class="field">
+          <span class="field-label">JSON 文件</span>
+          <input id="channel-import-file" type="file" accept="application/json,.json" />
+        </label>
+        <label class="field">
+          <span class="field-label">或粘贴 JSON</span>
+          <textarea
+            id="channel-import-text"
+            rows="8"
+            spellcheck="false"
+            placeholder='{"kind":"wildtoken.channels","version":1,"channels":[…]}'
+          ></textarea>
+        </label>
+        <div class="field">
+          <span class="field-label">同名渠道</span>
+          <div class="channel-import-modes">
+            <label class="toggle-row">
+              <input type="radio" name="channel-import-mode" value="skip" checked />
+              <span>
+                <strong>跳过</strong>
+                <small>保留现有渠道，只新增文件里没有的渠道。</small>
+              </span>
+            </label>
+            <label class="toggle-row">
+              <input type="radio" name="channel-import-mode" value="overwrite" />
+              <span>
+                <strong>覆盖</strong>
+                <small>按渠道名更新现有配置，保留其 ID 与日志关联。</small>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div id="channel-import-preview" class="channel-transfer-summary" aria-live="polite"></div>
+        <div class="modal-actions">
+          <button id="channel-import-cancel" type="button" class="secondary">取消</button>
+          <button id="channel-import-confirm" type="button" disabled>开始导入</button>
         </div>
       </div>
     </dialog>

@@ -1,366 +1,84 @@
-# 时间范围筛选功能
+# 看板时间范围筛选
 
-## 概述
+看板顶部有一个统一的时间范围控件，同时驱动 Tokens 统计、请求统计和 Top 排行。支持快捷区间与自定义日期区间。
 
-为仪表盘的 Token 统计添加了灵活的时间范围筛选功能，支持预设时间范围和自定义日期选择。
+## 快捷区间
 
-## 功能特性
+| 选项 | `range` 值 | 含义 |
+| --- | --- | --- |
+| 今天 | `today` | 本地日 00:00 起至今 |
+| 最近 24 小时 | `1d` | 滚动 24 小时 |
+| 最近 3 天 | `3d` | 滚动 3 天 |
+| 最近 7 天 | `7d` | 滚动 7 天 |
+| 最近 30 天 | `30d` | 滚动 30 天（默认） |
+| 全部时间 | `all` | 日志库全部数据 |
+| 所有窗口对比 | `default` | 并排显示上述预设窗口 |
+| 自定义... | `custom` | 用户指定起止日期 |
 
-### 1. 预设时间范围
+「今天」按**本地日**边界计算，其余快捷项是相对当前时刻的偏移。
 
-用户可以从下拉菜单中快速选择常用的时间范围：
+## 自定义区间
 
-- **默认视图** - 显示所有时间窗口（今天、1天、7天、30天、全部）
-- **今天** - 仅显示本地日累计数据
-- **最近 1 天** - 最近 24 小时
-- **最近 7 天** - 最近 7 天
-- **最近 30 天** - 最近 30 天
-- **全部时间** - 从系统首次运行以来的所有数据
-- **自定义时间** - 用户指定开始和结束日期
+选「自定义...」后展开日期选择器，填好起止日期点「应用」。
 
-### 2. 自定义时间范围
+- 起止日期**都含当日**：选「8月5日 至 8月5日」得到 8月5日全天。
+- 上限 366 天，避免一次查询扫过整个日志库。
+- 前后端各校验一次：缺日期、起晚于止、格式非 `YYYY-MM-DD`、超跨度都会被拒并给出中文提示。
 
-当选择"自定义时间"时：
-- 会显示日期选择器面板
-- 用户输入开始日期和结束日期
-- 点击"应用"按钮后查询该时间范围的统计数据
-- 自动验证日期有效性（开始日期不能晚于结束日期）
+所选范围与自定义日期保存在 localStorage（`wildtoken_dashboard_range`、`wildtoken_dashboard_custom_range`），刷新后保留。旧的 `wildtoken_dashboard_top_window` 会被自动迁移。
 
-### 3. 动态显示
+## 数据来源
 
-- **默认视图模式**：显示所有预设时间窗口的统计卡片（15 个卡片）
-- **单一范围模式**：选择特定时间范围后，只显示该范围的 3 个统计卡片
-  - Tokens 总量
-  - 缓存命中率
-  - 请求总数
-- 显示当前选择的时间范围标签
+`LogStatsCache` 常驻内存维护 today / 1d / 7d / 30d 四个窗口，命中这些档位时**零查询**；其余档位查库：
 
-## 技术实现
+| 范围 | 来源 |
+| --- | --- |
+| `today` / `1d` / `7d` / `30d` / `default` | 内存缓存 |
+| `3d` | SQL（缓存无 3 天桶） |
+| `all` / `custom` | SQL |
 
-### 后端改动
-
-#### 1. API 查询参数 (`src/handlers/admin.rs`)
-
-为 `/api/admin/logs/token-usage` 端点添加查询参数支持：
-
-```rust
-pub struct TokenUsageQuery {
-    pub range: Option<String>,      // "default" | "all" | "custom"
-    pub start_date: Option<String>,  // YYYY-MM-DD 格式
-    pub end_date: Option<String>,    // YYYY-MM-DD 格式
-}
-```
-
-#### 2. 数据库查询函数 (`src/db/log_stats.rs`)
-
-新增两个查询函数：
-
-```rust
-// 查询全部时间的统计数据
-pub async fn all_time_token_usage(db: &Database) -> Result<TokenUsageWindowOut>
-
-// 查询自定义时间范围的统计数据
-pub async fn custom_range_token_usage(
-    db: &Database,
-    start_date: &str,
-    end_date: &str
-) -> Result<TokenUsageWindowOut>
-```
-
-**性能特点**：
-- 全部时间查询直接扫描数据库，无缓存
-- 自定义范围查询使用日期过滤，支持任意时间跨度
-- 响应时间：5-50ms（取决于数据量）
-
-### 前端改动
-
-#### 1. HTML 结构 (`static/index.html`)
-
-在仪表盘页面添加时间筛选控件：
-
-```html
-<div class="dashboard-time-filter">
-  <label for="dashboard-time-preset">统计时间范围：</label>
-  <select id="dashboard-time-preset">
-    <option value="default">默认（全部窗口）</option>
-    <option value="today">今天</option>
-    <option value="1d">最近 1 天</option>
-    <option value="7d">最近 7 天</option>
-    <option value="30d">最近 30 天</option>
-    <option value="all">全部时间</option>
-    <option value="custom">自定义时间</option>
-  </select>
-
-  <div id="dashboard-custom-range" style="display:none;">
-    <input type="date" id="dashboard-start-date" />
-    <span>至</span>
-    <input type="date" id="dashboard-end-date" />
-    <button id="dashboard-apply-custom">应用</button>
-  </div>
-
-  <span id="dashboard-selected-range"></span>
-</div>
-```
-
-#### 2. JavaScript 逻辑 (`static/js/dashboard.js`)
-
-添加状态管理和 UI 更新：
-
-```javascript
-// 全局状态
-let dashboardTimeRange = "default";
-let dashboardCustomStartDate = null;
-let dashboardCustomEndDate = null;
-
-// 获取时间范围标签
-function getTimeRangeLabel(range) { ... }
-
-// 动态渲染统计卡片（根据选择的范围）
-function renderDashboard() {
-  if (dashboardTimeRange === "custom" || dashboardTimeRange === "all") {
-    // 显示单一范围的 3 个统计卡片
-  } else {
-    // 显示默认的 15 个统计卡片
-  }
-}
-```
-
-#### 3. 事件处理 (`static/js/events.js`)
-
-绑定筛选器交互事件：
-
-```javascript
-// 预设范围选择
-dashboardTimePreset.addEventListener("change", () => {
-  if (value === "custom") {
-    // 显示日期选择器
-  } else {
-    // 立即加载数据
-  }
-});
-
-// 自定义范围应用
-dashboardApplyCustom.addEventListener("click", () => {
-  // 验证日期
-  // 设置状态
-  // 重新加载数据
-});
-```
-
-#### 4. API 调用更新 (`static/js/dashboard.js`)
-
-在 `loadDashboardData()` 中构建动态查询参数：
-
-```javascript
-const tokenUsageParams = new URLSearchParams();
-if (dashboardTimeRange === "custom") {
-  tokenUsageParams.set("range", "custom");
-  tokenUsageParams.set("start_date", dashboardCustomStartDate);
-  tokenUsageParams.set("end_date", dashboardCustomEndDate);
-} else if (dashboardTimeRange === "all") {
-  tokenUsageParams.set("range", "all");
-} else {
-  tokenUsageParams.set("range", "default");
-}
-```
-
-### CSS 样式 (`static/css/dashboard.css`)
-
-为时间筛选控件添加样式：
-
-```css
-.dashboard-time-filter {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 1rem;
-}
-
-#dashboard-custom-range {
-  display: none;
-  gap: 0.5rem;
-  align-items: center;
-}
-```
-
-## API 接口
+## API
 
 ### GET /api/admin/logs/token-usage
 
-**查询参数：**
+| 参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `range` | 否 | 上表中的值，缺省为 `default` |
+| `start_date` | `range=custom` 时必填 | `YYYY-MM-DD` |
+| `end_date` | `range=custom` 时必填 | `YYYY-MM-DD` |
 
-| 参数 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| `range` | string | 否 | 时间范围类型：`default`、`all`、`custom` |
-| `start_date` | string | 条件 | 开始日期（YYYY-MM-DD），`range=custom` 时必填 |
-| `end_date` | string | 条件 | 结束日期（YYYY-MM-DD），`range=custom` 时必填 |
+`range=default` 返回全部预设窗口，形状与历史版本一致：
 
-**响应示例：**
+```json
+{ "today": {…}, "one_day": {…}, "seven_days": {…}, "thirty_days": {…}, "all_time": {…} }
+```
 
-1. **默认范围** (`range=default` 或不传):
+其余单窗口范围把聚合结果放在 `today` 字段（保持向后兼容），并额外返回 `range` 与 `range_label` 说明这实际是哪个窗口：
+
 ```json
 {
-  "today": {...},
-  "one_day": {...},
-  "seven_days": {...},
-  "thirty_days": {...},
-  "all_time": {...}
+  "today": { "total_tokens": 300, "prompt_tokens": 150, "prompt_cached_tokens": 30,
+             "request_count": 2, "all_request_count": 2 },
+  "one_day": {…}, "seven_days": {…}, "thirty_days": {…}, "all_time": {…},
+  "range": "3d",
+  "range_label": "最近 3 天"
 }
 ```
 
-2. **全部时间** (`range=all`):
-```json
-{
-  "today": {
-    "total_tokens": 1234567,
-    "request_count": 5678,
-    "cache_creation_tokens": 500000,
-    "cache_read_tokens": 300000
-  },
-  "one_day": {},
-  "seven_days": {},
-  "thirty_days": {},
-  "all_time": {}
-}
-```
+前端优先读 `range_label`，因此显示的标签总与实际返回的数据一致。
 
-3. **自定义范围** (`range=custom&start_date=2026-08-01&end_date=2026-08-10`):
-```json
-{
-  "today": {
-    "total_tokens": 123456,
-    "request_count": 234,
-    "cache_creation_tokens": 50000,
-    "cache_read_tokens": 30000
-  },
-  "one_day": {},
-  "seven_days": {},
-  "thirty_days": {},
-  "all_time": {}
-}
-```
+### GET /api/admin/logs/top
 
-**注意**：当 `range` 为 `all` 或 `custom` 时，筛选后的数据会放在 `today` 字段中返回。
+同一个范围也用于排行，参数名为 `window`（值同上表），`window=custom` 时同样接受 `start_date` / `end_date`。排行没有多窗口概念，`window=default` 回落到 30 天。
 
-## 用户体验
+## 实现位置
 
-### 操作流程
+- `src/models/request_log.rs` — `DashboardRange`：解析与校验查询参数（纯函数，含单元测试）。
+- `src/handlers/admin.rs` — `admin_token_usage_stats`、`admin_top_log_stats`。
+- `src/db/log_stats.rs` — `cutoff_token_usage` / `all_time_token_usage` / `custom_range_token_usage`。
+- `src/db/log.rs` — `LogTopWindow`，含 `AllTime` 与 `Custom` 变体；自定义日期以 bind 参数传入，不拼接 SQL。
+- `static/admin.html` / `static/js/{bootstrap,dashboard,events}.js` / `static/css/dashboard.css` — 控件与渲染。
 
-1. **查看默认视图**
-   - 打开仪表盘，默认显示所有时间窗口
-   - 15 个统计卡片按行排列
+## 注意
 
-2. **选择预设范围**
-   - 从下拉菜单选择时间范围（如"最近 7 天"）
-   - 页面自动刷新，显示该范围的统计数据
-   - 卡片数量减少为 3 个，标题显示选中的范围
-
-3. **使用自定义范围**
-   - 从下拉菜单选择"自定义时间"
-   - 日期选择器面板展开
-   - 选择开始日期和结束日期
-   - 点击"应用"按钮
-   - 页面刷新显示自定义范围的统计数据
-
-4. **返回默认视图**
-   - 从下拉菜单选择"默认（全部窗口）"
-   - 恢复显示所有时间窗口的统计卡片
-
-### 错误处理
-
-- **缺少日期**：提示"请选择开始和结束日期"
-- **日期顺序错误**：提示"开始日期不能晚于结束日期"
-- **API 错误**：显示"看板加载失败"消息
-
-## 测试
-
-### 单元测试
-
-所有 121 个现有测试通过，包括：
-- Token 使用统计查询
-- 数据库操作
-- API 端点
-
-### 手动测试
-
-使用提供的测试脚本：
-
-```bash
-bash test_time_filter.sh
-```
-
-测试场景：
-1. 默认范围查询
-2. 全部时间查询
-3. 自定义范围查询（最近 7 天）
-4. 无效查询（缺少日期参数）
-
-## 性能考虑
-
-### 缓存策略
-
-- **近 30 天**：使用内存缓存（毫秒级响应）
-- **全部时间**：直接查询数据库（5-50ms）
-- **自定义范围**：直接查询数据库，使用日期索引优化
-
-### 数据库查询
-
-```sql
--- 全部时间查询
-SELECT 
-    SUM(total_tokens) as total_tokens,
-    SUM(cache_creation_tokens) as cache_creation_tokens,
-    SUM(cache_read_tokens) as cache_read_tokens,
-    COUNT(*) as request_count
-FROM request_logs
-WHERE total_tokens IS NOT NULL;
-
--- 自定义范围查询
-SELECT ...
-FROM request_logs
-WHERE total_tokens IS NOT NULL
-  AND created_at >= ?
-  AND created_at < datetime(?, '+1 day');
-```
-
-**优化点**：
-- 使用 `created_at` 列的索引加速时间范围过滤
-- 只扫描有 token 数据的记录（`WHERE total_tokens IS NOT NULL`）
-
-## 向后兼容性
-
-- ✅ 不改变现有 API 的默认行为
-- ✅ 查询参数为可选，不传参数时返回默认数据
-- ✅ 前端默认显示传统的多窗口视图
-- ✅ 所有现有测试通过
-
-## 未来改进
-
-可能的增强方向：
-
-1. **时间范围预设扩展**
-   - 最近 90 天
-   - 本月 / 上月
-   - 本年 / 去年
-
-2. **日期选择器增强**
-   - 快捷选择按钮（"最近 7 天"、"最近 30 天"）
-   - 日期范围拖拽选择
-   - 记住上次选择的自定义范围
-
-3. **数据导出**
-   - 导出选定时间范围的统计数据为 CSV / JSON
-   - 生成统计报表
-
-4. **高级筛选**
-   - 按渠道筛选
-   - 按模型筛选
-   - 多维度组合筛选
-
-5. **性能优化**
-   - 为常用的自定义范围添加缓存
-   - 后台预计算热门时间窗口
-
-## 总结
-
-此功能为用户提供了灵活的时间范围筛选能力，既保留了原有的默认视图，又支持查看任意时间段的统计数据。实现方式简洁高效，性能良好，用户体验友好。
+`request_logs.created_at` 以无偏移的 UTC 存储。「今天」必须用 `datetime('now','localtime','start of day','utc')` 三段式取本地日起点——直接按 UTC 日计算会在 +0800 等时区下偏差 8 小时。所有窗口共用这一套 cutoff 表达式，Tokens 统计和 Top 排行因此不会出现口径不一致。
