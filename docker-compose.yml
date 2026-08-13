@@ -13,6 +13,10 @@ services:
       WILDTOKEN_THEME_DIR: /app/themes
     ports:
       - "3100:3100"
+    # 让容器内可以用 host.docker.internal 访问宿主机发布的端口，
+    # 包括其他容器 -p 出来的服务（例如 http://host.docker.internal:3001）。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - wildtoken-data:/data
       # 镜像已自带 themes/；此挂载会覆盖它，便于本地改主题免重建镜像。
