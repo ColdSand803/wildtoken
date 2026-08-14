@@ -306,7 +306,7 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 		}
 	}
 
-	body, err := io.ReadAll(response.Body)
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxProbeResponseBytes))
 	if err != nil {
 		entry := newEntry()
 		entry.StatusCode = &statusCode
@@ -365,13 +365,32 @@ func redactHeaderPreview(headers map[string]string) map[string]string {
 	return preview
 }
 
+// maxProbeResponseBytes bounds what a probe reads back from an upstream.
+//
+// A probe answers a click in the console, and everything done with the body
+// afterwards is a preview measured in hundreds of characters. Reading it without
+// a limit let one click pull an entire upstream response into memory. The
+// preview endpoint takes a base URL straight from the form, so triggering it did
+// not even require a stored channel.
+const maxProbeResponseBytes = 8 << 20
+
 // truncateRunes bounds a preview string without splitting a rune.
+//
+// It walks the string rather than converting it, because a rune slice of the
+// whole value is a second copy of it — four times its size — paid for before
+// discovering the value is too long to show.
 func truncateRunes(value string, limit int) string {
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
+	if limit <= 0 {
+		return ""
 	}
-	return string(runes[:limit])
+	count := 0
+	for index := range value {
+		count++
+		if count > limit {
+			return value[:index]
+		}
+	}
+	return value
 }
 
 // AdminListUpstreams returns every channel with its live health.
