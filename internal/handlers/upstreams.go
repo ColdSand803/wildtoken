@@ -481,7 +481,7 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 func AdminCreateUpstream(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		input := models.DefaultUpstreamIn()
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -522,7 +522,7 @@ func AdminUpdateUpstream(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		input := models.UpstreamUpdate{UpstreamIn: models.DefaultUpstreamIn()}
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -577,7 +577,7 @@ func AdminSetUpstreamEnabled(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.UpstreamEnabledIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -617,7 +617,7 @@ func AdminSetUpstreamPriority(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.UpstreamPriorityIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -677,7 +677,7 @@ func AdminTestUpstream(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		input := models.DefaultTestRequest()
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -752,7 +752,7 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.ModelTestRequest
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -1053,7 +1053,7 @@ func AdminFetchUpstreamModels(state *appstate.State) http.HandlerFunc {
 func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.ModelFetchIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}

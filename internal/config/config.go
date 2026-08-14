@@ -4,6 +4,7 @@ package config
 import (
 	"bufio"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -226,5 +227,11 @@ func loadDotEnv(path string) {
 		if _, exists := os.LookupEnv(key); !exists {
 			os.Setenv(key, value)
 		}
+	}
+	if err := scanner.Err(); err != nil {
+		// Scanning stops at the first line longer than its buffer, silently
+		// skipping the rest of the file. A setting that never took effect is
+		// hard to trace back to a long line several entries earlier.
+		slog.Warn("stopped reading the env file early", "path", path, "error", err)
 	}
 }

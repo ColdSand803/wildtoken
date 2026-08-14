@@ -33,6 +33,9 @@ const (
 	// logDrainTimeout bounds the wait for the log queue, so a database that has
 	// stopped answering cannot hold the process open indefinitely.
 	logDrainTimeout = 30 * time.Second
+	// readHeaderTimeout bounds how long a caller may take to send its request
+	// headers.
+	readHeaderTimeout = 20 * time.Second
 )
 
 // ReadyInfo reports the bound port and console URL once the server is listening.
@@ -136,8 +139,16 @@ func New(ctx context.Context) (*Server, error) {
 
 	port := uint16(listener.Addr().(*net.TCPAddr).Port)
 	return &Server{
-		state:      state,
-		httpServer: &http.Server{Handler: NewRouter(state)},
+		state: state,
+		httpServer: &http.Server{
+			Handler: NewRouter(state),
+			// Only the header deadline is set. A connection that opens and then
+			// dribbles its request line held a goroutine and a descriptor for
+			// as long as it liked; bounding the headers alone costs a streaming
+			// response nothing, whereas ReadTimeout would cap a long request
+			// body and WriteTimeout would cut every SSE answer short.
+			ReadHeaderTimeout: readHeaderTimeout,
+		},
 		listener:   listener,
 		logWriter:  logWriter,
 		cancelJobs: cancelJobs,

@@ -34,7 +34,7 @@ func NewRouter(state *appstate.State) http.Handler {
 	router.Mount("/static", noStore(http.StripPrefix("/static",
 		http.FileServer(http.Dir("static")))))
 	router.Mount("/theme-packs", noStore(http.StripPrefix("/theme-packs",
-		http.FileServer(http.Dir(state.Settings.Themes.Dir)))))
+		serveThemePackCSS(state.Settings.Themes.Dir))))
 
 	router.Group(func(admin chi.Router) {
 		admin.Use(middleware.RequireAdmin(state.Credentials, state.Settings.Admin.ClientIPHeader))
@@ -112,6 +112,25 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			logs.Get("/top", handlers.AdminTopLogStats(state))
 			logs.Get("/{id}", handlers.AdminGetLogDetail(state))
 		})
+	})
+}
+
+// serveThemePackCSS serves the stylesheets under the configured theme directory.
+//
+// A plain FileServer over that directory answered any path ending in a slash
+// with a listing of it, and this route is deliberately outside the admin
+// credential. The directory is whatever the operator configured — the
+// WILDTOKEN_THEME_DIR override accepts any path at all — so what it exposes
+// should be exactly what the console loads: a stylesheet named by a manifest,
+// and nothing else about the machine it runs on.
+func serveThemePackCSS(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, ".css") {
+			http.NotFound(w, r)
+			return
+		}
+		files.ServeHTTP(w, r)
 	})
 }
 

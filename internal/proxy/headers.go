@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/textproto"
 	"strings"
 
 	"github.com/liguangsheng/wildtoken/internal/apperr"
@@ -145,9 +144,32 @@ func connectionNominatedHeaders(headers http.Header) map[string]bool {
 }
 
 // validHeaderName reports whether a name is a valid HTTP field name.
+//
+// Every character is checked against the token set RFC 9110 defines. The check
+// used to be CanonicalMIMEHeaderKey(name) != "", which is true of any non-empty
+// string, so names carrying characters like "(" or "," were accepted and stored
+// — and then rejected wholesale by the transport when the request was written,
+// leaving a channel that fails every request with an error naming none of this.
 func validHeaderName(name string) bool {
-	return name != "" && textproto.CanonicalMIMEHeaderKey(name) != "" &&
-		!strings.ContainsAny(name, " \t\r\n:")
+	if name == "" {
+		return false
+	}
+	for index := range len(name) {
+		if !isHeaderNameByte(name[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+// isHeaderNameByte reports whether c may appear in a field name, per the tchar
+// production of RFC 9110.
+func isHeaderNameByte(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	}
+	return strings.IndexByte("!#$%&'*+-.^_`|~", c) >= 0
 }
 
 // validHeaderValue rejects values that would let a caller inject a new field.

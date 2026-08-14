@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,6 +27,9 @@ import (
 // shape must stay `const Version = "..."`.
 const Version = "0.2.0"
 
+// maxLogListOffset caps how deep the offset-paged log list may reach.
+const maxLogListOffset int32 = 100_000
+
 // decodeJSON reads a JSON request body, ignoring fields the target does not
 // declare.
 //
@@ -33,19 +37,22 @@ const Version = "0.2.0"
 // what an endpoint reads. The channel form is the clearest case: it serves both
 // create and update, so it always sends `clear_api_key`, which only the update
 // payload declares.
-func decodeJSON(r *http.Request, target any) error {
-	return decodeBody(r, target, false)
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	return decodeBody(w, r, target, false)
 }
 
 // decodeStrictJSON additionally rejects unknown fields, so a typo is reported
 // rather than silently ignored. It is reserved for payloads whose clients send
 // exactly the declared shape.
-func decodeStrictJSON(r *http.Request, target any) error {
-	return decodeBody(r, target, true)
+func decodeStrictJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	return decodeBody(w, r, target, true)
 }
 
-func decodeBody(r *http.Request, target any, rejectUnknown bool) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4*1024*1024))
+func decodeBody(w http.ResponseWriter, r *http.Request, target any, rejectUnknown bool) error {
+	// The writer is what lets MaxBytesReader mark the connection for closing
+	// when a body runs over. Passing nil left an oversized request reading on
+	// against a connection the server would go on to reuse.
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4*1024*1024))
 	if rejectUnknown {
 		decoder.DisallowUnknownFields()
 	}
@@ -105,7 +112,7 @@ func AdminGetRuntimeSettings(state *appstate.State) http.HandlerFunc {
 func AdminUpdateRuntimeSettings(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.RuntimeSettingsIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -143,7 +150,7 @@ func AdminListModelTestPromptTemplates(state *appstate.State) http.HandlerFunc {
 func AdminCreateModelTestPromptTemplate(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.ModelTestPromptTemplateIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -173,7 +180,7 @@ func AdminUpdateModelTestPromptTemplate(state *appstate.State) http.HandlerFunc 
 			return
 		}
 		var input models.ModelTestPromptTemplateIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -225,7 +232,7 @@ func AdminRotateAdminToken(state *appstate.State) http.HandlerFunc {
 		}
 
 		var input models.AdminTokenRotateIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -288,9 +295,13 @@ func AdminSystemInfo(state *appstate.State) http.HandlerFunc {
 		}
 
 		var enabledUpstreamCount, totalUpstreamCount int64
-		state.DB.QueryRowContext(r.Context(),
+		if err := state.DB.QueryRowContext(r.Context(),
 			"SELECT COALESCE(SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END), 0), COUNT(*) FROM upstreams").
-			Scan(&enabledUpstreamCount, &totalUpstreamCount)
+			Scan(&enabledUpstreamCount, &totalUpstreamCount); err != nil {
+			// The page still renders, but the zeros it would otherwise show are
+			// indistinguishable from having no channels at all.
+			slog.Warn("could not count channels for the system info panel", "error", err)
+		}
 
 		settings := state.Runtime.Get()
 		apperr.WriteJSON(w, http.StatusOK, models.SystemInfoOut{
@@ -388,7 +399,7 @@ func AdminGetToken(state *appstate.State) http.HandlerFunc {
 func AdminCreateToken(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		input := models.APITokenIn{Enabled: true}
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -418,7 +429,7 @@ func AdminUpdateToken(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.APITokenUpdateIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -446,7 +457,7 @@ func AdminSetTokenEnabled(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.UpstreamEnabledIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -510,7 +521,11 @@ func AdminListLogs(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		limit := clampInt32(queryInt32(query.Get("limit"), 50), 1, 200)
-		offset := max(queryInt32(query.Get("offset"), 0), 0)
+		// SQLite reaches an OFFSET by scanning and discarding the rows before
+		// it, so an unbounded one lets a single request walk the whole log
+		// table and hold one of the few pooled connections for as long as that
+		// takes. Deep pages are what the cursor endpoint is for.
+		offset := clampInt32(queryInt32(query.Get("offset"), 0), 0, maxLogListOffset)
 
 		filter := db.LogFilter{
 			UpstreamID: optionalQueryInt64(query.Get("upstream_id")),

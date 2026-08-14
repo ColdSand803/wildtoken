@@ -27,7 +27,7 @@ func TestChannelPayloadsTolerateTheSharedConsoleForm(t *testing.T) {
 
 	// Creation decodes into UpstreamIn, which has no clear_api_key field.
 	create := models.DefaultUpstreamIn()
-	if err := decodeJSON(postJSON(body), &create); err != nil {
+	if err := decodeJSON(httptest.NewRecorder(), postJSON(body), &create); err != nil {
 		t.Fatalf("creation rejected the shared form: %v", err)
 	}
 	if create.Name != "ch" || len(create.ModelNames) != 1 {
@@ -36,7 +36,7 @@ func TestChannelPayloadsTolerateTheSharedConsoleForm(t *testing.T) {
 
 	// The update payload declares it, and must honor the value.
 	update := models.UpstreamUpdate{UpstreamIn: models.DefaultUpstreamIn()}
-	if err := decodeJSON(postJSON(strings.Replace(body,
+	if err := decodeJSON(httptest.NewRecorder(), postJSON(strings.Replace(body,
 		`"clear_api_key":false`, `"clear_api_key":true`, 1)), &update); err != nil {
 		t.Fatalf("update rejected the shared form: %v", err)
 	}
@@ -67,12 +67,12 @@ func TestStrictPayloadsStillRejectUnknownFields(t *testing.T) {
 			func() any { return &models.ModelTestRequest{} }},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			if err := decodeStrictJSON(postJSON(testCase.body), testCase.target()); err == nil {
+			if err := decodeStrictJSON(httptest.NewRecorder(), postJSON(testCase.body), testCase.target()); err == nil {
 				t.Error("an unknown field was accepted")
 			}
 			// The same body without the typo must still decode.
 			clean := strings.Replace(testCase.body, `,"typo_field":1`, "", 1)
-			if err := decodeStrictJSON(postJSON(clean), testCase.target()); err != nil {
+			if err := decodeStrictJSON(httptest.NewRecorder(), postJSON(clean), testCase.target()); err != nil {
 				t.Errorf("a well-formed body was rejected: %v", err)
 			}
 		})
@@ -98,7 +98,7 @@ func TestLenientPayloadsIgnoreExtraFields(t *testing.T) {
 			func() any { return &models.TestRequest{} }},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
-			if err := decodeJSON(postJSON(testCase.body), testCase.target()); err != nil {
+			if err := decodeJSON(httptest.NewRecorder(), postJSON(testCase.body), testCase.target()); err != nil {
 				t.Errorf("an extra field was rejected: %v", err)
 			}
 		})
@@ -121,7 +121,7 @@ func TestDecodedChannelSurvivesARoundTrip(t *testing.T) {
 	}
 
 	update := models.UpstreamUpdate{UpstreamIn: models.DefaultUpstreamIn()}
-	if err := decodeJSON(postJSON(string(encoded)), &update); err != nil {
+	if err := decodeJSON(httptest.NewRecorder(), postJSON(string(encoded)), &update); err != nil {
 		t.Fatalf("a channel read back from the API did not decode: %v", err)
 	}
 	if update.Name != "ch" || update.Priority != 100 {

@@ -426,3 +426,20 @@ func TestExactModelNameWinsOverALongerCandidateListedFirst(t *testing.T) {
 		t.Fatalf("forwarded model = %v, want the first prefix candidate", forwarded)
 	}
 }
+
+func TestHeaderNamesAreCheckedAgainstTheTokenSet(t *testing.T) {
+	for _, name := range []string{"x-tenant", "X-Tenant", "authorization", "a1", "x_y", "a.b"} {
+		if !validHeaderName(name) {
+			t.Errorf("validHeaderName(%q) = false, want it accepted", name)
+		}
+	}
+	// These used to pass, be stored, and then be rejected by the transport when
+	// the request was written — a channel that failed every request without
+	// naming why.
+	for _, name := range []string{"", "x tenant", "x(tenant)", "x,tenant", "x@tenant",
+		"x:tenant", "x\ttenant", "x\r\ntenant", "x{y}"} {
+		if validHeaderName(name) {
+			t.Errorf("validHeaderName(%q) = true, want it rejected", name)
+		}
+	}
+}
