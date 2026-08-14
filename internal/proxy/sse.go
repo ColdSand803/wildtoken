@@ -3,6 +3,7 @@ package proxy
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -152,13 +153,31 @@ func sseData(line string) (string, bool) {
 }
 
 // usageInt32 reads a numeric usage field, which JSON decoding gives as float64.
+//
+// The value comes from the upstream, so it is clamped rather than converted.
+// A plain int32() of an out-of-range or NaN float is implementation-defined and
+// in practice yields a large negative number, which the quota counter reads as
+// "no usage" and skips — a malformed usage report should not buy free tokens.
 func usageInt32(value any) *int32 {
 	number, ok := value.(float64)
 	if !ok {
 		return nil
 	}
-	converted := int32(number)
+	converted := clampUsage(number)
 	return &converted
+}
+
+// clampUsage folds any float onto the range a token count can hold. NaN fails
+// both comparisons and lands on zero.
+func clampUsage(number float64) int32 {
+	switch {
+	case number >= float64(math.MaxInt32):
+		return math.MaxInt32
+	case number > 0:
+		return int32(number)
+	default:
+		return 0
+	}
 }
 
 // firstUsageInt32 returns the first field that is present.
@@ -172,19 +191,24 @@ func firstUsageInt32(values ...any) *int32 {
 }
 
 // sumTokenParts adds the parts that are present, or returns nil when none are.
+//
+// The sum saturates. Three upstream-supplied counts can each be in range and
+// still overflow int32 together, and a total that wrapped negative reads as
+// "no usage" to the quota counter.
 func sumTokenParts(parts ...*int32) *int32 {
-	var sum int32
+	var sum int64
 	any := false
 	for _, part := range parts {
 		if part != nil {
 			any = true
-			sum += *part
+			sum += int64(*part)
 		}
 	}
 	if !any {
 		return nil
 	}
-	return &sum
+	total := clampUsage(float64(sum))
+	return &total
 }
 
 // isAnthropicStyleUsage distinguishes Anthropic Messages usage from OpenAI
