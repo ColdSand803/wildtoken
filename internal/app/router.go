@@ -73,6 +73,8 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 
 		admin.Route("/upstreams", func(upstreams chi.Router) {
 			upstreams.Post("/fetch-models", handlers.AdminFetchModelsPreview(state))
+			upstreams.Post("/export", handlers.AdminExportUpstreams(state))
+			upstreams.Post("/import", handlers.AdminImportUpstreams(state))
 			upstreams.Get("/", handlers.AdminListUpstreams(state))
 			upstreams.Post("/", handlers.AdminCreateUpstream(state))
 			upstreams.Get("/{id}", handlers.AdminGetUpstream(state))
