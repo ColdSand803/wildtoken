@@ -1,6 +1,7 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"log/slog"
@@ -116,6 +117,11 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
 		return apperr.Database(err)
 	}
 
+	// Bounded by the same watermark the count came from. The two statements run
+	// on their own snapshots, so a row committing between them landed in these
+	// buckets while still counting as pending — and the carry-over below then
+	// added it a second time, inflating the console's usage windows on every
+	// refresh that overlapped a write.
 	rows, err := database.QueryContext(ctx, `SELECT
            CAST((CAST(strftime('%s', created_at) AS INTEGER) / 60) * 60 AS INTEGER)
                AS bucket_start_unix_seconds,
@@ -126,9 +132,9 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
            COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
            COALESCE(SUM(prompt_cached_tokens), 0) AS prompt_cached_tokens
        FROM request_logs
-       WHERE created_at >= datetime('now', '-30 days')
+       WHERE created_at >= datetime('now', '-30 days') AND id <= ?
        GROUP BY bucket_start_unix_seconds
-       ORDER BY bucket_start_unix_seconds`)
+       ORDER BY bucket_start_unix_seconds`, maxLogID.Int64)
 	if err != nil {
 		return apperr.Database(err)
 	}
@@ -159,7 +165,7 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
 	// rebuilt buckets yet, so carry them over rather than losing the count.
 	pending := slices.Collect(maps.Values(c.state.pendingEntries))
 	slices.SortFunc(pending, func(left, right PersistedLogStats) int {
-		return int(left.ID - right.ID)
+		return cmp.Compare(left.ID, right.ID)
 	})
 	for _, entry := range pending {
 		if entry.ID <= refreshed.maxRefreshedLogID {
@@ -232,12 +238,41 @@ func (s *logStatsState) applyPersistedEntry(entry PersistedLogStats, now time.Ti
 	}
 }
 
+// maxPendingEntries caps the rows held between refreshes.
+//
+// A pending entry exists to be carried across the next rebuild. If rebuilds stop
+// happening — a locked database, a full disk — nothing trimmed the map and it
+// grew with every request the gateway served until the process ran out of
+// memory. The cap keeps the failure to stale statistics, which is what a failing
+// refresh already means.
+const maxPendingEntries = 100_000
+
 func (s *logStatsState) prune(now time.Time) {
 	oldestBucket := floorToMinute(oldestWindowStart(now))
 	for bucketStart := range s.minuteBuckets {
 		if bucketStart < oldestBucket {
 			delete(s.minuteBuckets, bucketStart)
 		}
+	}
+
+	// An entry older than the window can no longer be carried into a bucket, so
+	// it is only occupying space.
+	oldestEntry := oldestWindowStart(now)
+	for id, entry := range s.pendingEntries {
+		if entry.CreatedAtUnixSeconds < oldestEntry {
+			delete(s.pendingEntries, id)
+		}
+	}
+	if len(s.pendingEntries) <= maxPendingEntries {
+		return
+	}
+
+	// Still over the cap: drop the lowest ids, which are the ones a rebuild is
+	// most likely to have already accounted for. Their counts stay in the
+	// buckets; only the ability to replay them is given up.
+	ids := slices.Sorted(maps.Keys(s.pendingEntries))
+	for _, id := range ids[:len(ids)-maxPendingEntries] {
+		delete(s.pendingEntries, id)
 	}
 }
 

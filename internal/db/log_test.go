@@ -435,3 +435,58 @@ func TestRefreshPreservesPendingEntriesNewerThanTheWatermark(t *testing.T) {
 		t.Errorf("window = %+v, want the pending entry merged in", window)
 	}
 }
+
+func TestPendingEntriesAreBoundedWhenRefreshesStopHappening(t *testing.T) {
+	cache := NewLogStatsCache()
+	now := nowUnix()
+
+	// Every committed row is held until the next successful rebuild carries it
+	// across. Nothing trimmed the map, so a database that stopped answering
+	// turned steady traffic into unbounded memory.
+	surplus := 1000
+	entries := make([]PersistedLogStats, 0, maxPendingEntries+surplus)
+	for id := range int64(maxPendingEntries + surplus) {
+		entries = append(entries, PersistedLogStats{ID: id + 1, CreatedAtUnixSeconds: now})
+	}
+	cache.RecordPersistedEntries(entries)
+
+	// Snapshot prunes, which is where the cap applies.
+	snapshot := cache.Snapshot()
+
+	cache.mu.Lock()
+	held := len(cache.state.pendingEntries)
+	cache.mu.Unlock()
+
+	if held > maxPendingEntries {
+		t.Errorf("held %d pending entries, want at most %d", held, maxPendingEntries)
+	}
+	// The counts the dropped entries contributed stay in the buckets; only the
+	// ability to replay them across a rebuild is given up.
+	if snapshot.TotalLogCount != int64(maxPendingEntries+surplus) {
+		t.Errorf("total = %d, want every entry counted once", snapshot.TotalLogCount)
+	}
+}
+
+func TestStaleWindowEntriesLeaveThePendingMap(t *testing.T) {
+	cache := NewLogStatsCache()
+	now := nowUnix()
+
+	cache.RecordPersistedEntries([]PersistedLogStats{
+		{ID: 1, CreatedAtUnixSeconds: now},
+		// Outside the thirty-day window, so it can never reach a bucket again.
+		{ID: 2, CreatedAtUnixSeconds: now - int64((31 * 24 * time.Hour).Seconds())},
+	})
+	cache.Snapshot()
+
+	cache.mu.Lock()
+	_, staleHeld := cache.state.pendingEntries[2]
+	_, freshHeld := cache.state.pendingEntries[1]
+	cache.mu.Unlock()
+
+	if staleHeld {
+		t.Error("an entry outside the window is still held for replay")
+	}
+	if !freshHeld {
+		t.Error("an entry inside the window was dropped")
+	}
+}
