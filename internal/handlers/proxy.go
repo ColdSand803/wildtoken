@@ -342,8 +342,9 @@ type proxyAttemptConfig struct {
 }
 
 // runProxyAttempts forwards the request, retrying a failure up to the
-// configured limit. A nil response with a nil error means routing found no
-// upstream and the 503 has already been written.
+// configured limit. A nil response with a nil error means routing produced no
+// attempt and the refusal has already been written and logged: a 429 when every
+// candidate was rate limited, a 503 when there was no route at all.
 func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.State,
 	config proxyAttemptConfig) (*proxy.Response, error) {
 	maxRetries := int(config.runtimeSettings.MaxRetries)
@@ -434,6 +435,12 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		prepared, err := proxy.PrepareRequest(r.Header, &selected.Upstream, r.Method,
 			config.path, r.URL.RawQuery, selected.ForwardModel, config.body, logBodyMaxBytes)
 		if err != nil {
+			// The channel's stored header configuration is what fails here, so
+			// the channel is charged for it. A channel that cannot build a
+			// request fails every one it is given, and without a penalty it
+			// keeps full weight and keeps being chosen to fail again.
+			state.AutoWeight.RecordFailure(selected.Upstream.ID,
+				selected.Upstream.AutoWeightEnabled == 1, config.policy)
 			config.guard.logAndDisarm(502, err.Error())
 			return nil, err
 		}
@@ -453,6 +460,13 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 
 		failed := err != nil || response.Status < 200 || response.Status >= 300
 		if !failed || attempt >= maxRetries {
+			return response, err
+		}
+		// A client that has gone is not owed another attempt. Retrying spent
+		// another channel's rate-limit allowance and wrote another log row for
+		// a request nobody was waiting for, so one disconnect could leave a
+		// handful of 499s behind it.
+		if r.Context().Err() != nil {
 			return response, err
 		}
 

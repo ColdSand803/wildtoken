@@ -537,3 +537,35 @@ func TestACompletedStreamIsNotChargedForTheReadThatFollowsIt(t *testing.T) {
 		t.Errorf("health score = %d, want 100 for a completed stream", health.Score)
 	}
 }
+
+func TestAChannelThatCannotBuildARequestIsChargedForIt(t *testing.T) {
+	harness := newProxyHarness(t)
+	// A base URL that survived storage but that the request builder will not
+	// accept. Such a channel fails every request it is given, so it has to lose
+	// health — otherwise it keeps full weight and keeps being chosen.
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: "http://example.com/\x7f",
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m"}`), requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	if _, err := ProxyRequest(context.Background(), harness.deps, testPolicy(),
+		&upstream, requestCtx, prepared); err == nil {
+		t.Fatal("expected the request build to fail")
+	}
+
+	health := harness.deps.AutoWeight.Snapshot(upstream.ID, upstream.Weight, true, testPolicy())
+	if health.Score == 100 {
+		t.Error("a channel that cannot build a request kept full health")
+	}
+
+	// It still leaves a log row, which is what makes the failure visible.
+	harness.waitForLogs(t, 1)
+}

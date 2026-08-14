@@ -240,6 +240,12 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	if err != nil {
 		attempt.stop()
 
+		// The channel's own configuration is what fails here — a base URL the
+		// request builder will not accept. Charging it is what eventually takes
+		// it out of routing; without that it keeps full weight and is chosen
+		// again for every request it is going to fail in the same way.
+		deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
+
 		// Logged here because the caller disarms its own fallback entry on any
 		// error, trusting that the attempt logged itself. This was the one path
 		// that did not, so the request left no trace at all.
@@ -251,7 +257,10 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.Error = &message
 		deps.LogWriter.Schedule(entry)
 
-		return nil, apperr.Upstream(message)
+		// Returned unwrapped: buildUpstreamRequest already answers with an
+		// upstream error, and wrapping it again repeated the prefix in both the
+		// response and the log.
+		return nil, err
 	}
 
 	response, err := deps.HTTPClient.Do(request)
