@@ -247,7 +247,7 @@ func (s *logStatsState) snapshot(now time.Time) LogStatsSnapshot {
 	sevenDaysCutoff := floorToMinute(now.AddDate(0, 0, -7).Unix())
 	thirtyDaysCutoff := floorToMinute(oldestWindowStart(now))
 
-	var today, oneDay, sevenDays, thirtyDays logStatsBucket
+	var today, oneDay, sevenDays, thirtyDays, allTime logStatsBucket
 	for bucketStart, bucket := range s.minuteBuckets {
 		if bucketStart >= todayCutoff {
 			today.add(*bucket)
@@ -261,7 +261,12 @@ func (s *logStatsState) snapshot(now time.Time) LogStatsSnapshot {
 		if bucketStart >= thirtyDaysCutoff {
 			thirtyDays.add(*bucket)
 		}
+		// All time includes all buckets in the 30-day cache window
+		allTime.add(*bucket)
 	}
+	// All time request count should reflect the total log count including logs
+	// outside the 30-day cache window
+	allTime.requestCount = s.totalLogCount
 
 	return LogStatsSnapshot{
 		TotalLogCount: s.totalLogCount,
@@ -271,6 +276,7 @@ func (s *logStatsState) snapshot(now time.Time) LogStatsSnapshot {
 			OneDay:     oneDay.window(),
 			SevenDays:  sevenDays.window(),
 			ThirtyDays: thirtyDays.window(),
+			AllTime:    allTime.window(),
 		},
 	}
 }
