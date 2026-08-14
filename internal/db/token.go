@@ -357,11 +357,6 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 	digest := TokenDigest(tokenValue)
 	preview := TokenPreview(tokenValue)
 
-	groupID, err := resolveTokenGroup(ctx, db, input.GroupID)
-	if err != nil {
-		return models.APITokenCreatedOut{}, err
-	}
-
 	limitTokens, err := input.ParsedLimit()
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
@@ -371,7 +366,24 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
 	}
 
-	result, err := db.ExecContext(ctx, `INSERT INTO api_tokens
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.APITokenCreatedOut{}, apperr.Database(err)
+	}
+	defer tx.Rollback()
+
+	// The group is checked inside the transaction that writes the reference to
+	// it. api_tokens.group_id carries no foreign key, so nothing but this
+	// ordering stops a group deleted between the check and the insert from
+	// leaving a token pointing at one that no longer exists — a token that then
+	// authenticates but reaches no channel at all, with nothing in the console
+	// to say why. UpdateToken already reads it this way.
+	groupID, err := resolveTokenGroup(ctx, tx, input.GroupID)
+	if err != nil {
+		return models.APITokenCreatedOut{}, err
+	}
+
+	result, err := tx.ExecContext(ctx, `INSERT INTO api_tokens
         (name, description, token, token_hash, token_preview, token_plain, enabled, expires_at, group_id, limit_tokens, rate_limit, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		trimSpace(input.Name), trimSpace(input.Description), digest, digest, preview,
@@ -384,12 +396,19 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 		return models.APITokenCreatedOut{}, apperr.Database(err)
 	}
 
-	created, ok, err := GetToken(ctx, db, id)
+	// Read back inside the transaction: it describes the row this insert made,
+	// where a read after the commit could pick up a later edit and report it as
+	// this one's result.
+	created, ok, err := GetToken(ctx, tx, id)
 	if err != nil {
 		return models.APITokenCreatedOut{}, err
 	}
 	if !ok {
 		return models.APITokenCreatedOut{}, apperr.Internal("token was not persisted")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return models.APITokenCreatedOut{}, apperr.Database(err)
 	}
 
 	return models.APITokenCreatedOut{

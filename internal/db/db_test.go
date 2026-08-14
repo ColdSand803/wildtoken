@@ -1064,3 +1064,82 @@ func TestUpstreamRateLimitRoundTrips(t *testing.T) {
 		t.Error("an invalid rate limit expression was accepted")
 	}
 }
+
+func TestDeletingAGroupRehomesTheChannelsItWasTheLastGroupOf(t *testing.T) {
+	db := memoryDB(t)
+	ctx := context.Background()
+
+	group, err := CreateGroup(ctx, db, &models.GroupIn{Name: "team-a"})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+
+	// One channel serves only the doomed group; the other also serves default.
+	only := models.DefaultUpstreamIn()
+	only.Name = "only-in-team-a"
+	only.BaseURL = "https://api.example.com"
+	only.GroupIDs = []int64{group.ID}
+	onlyCreated, err := CreateUpstream(ctx, db, &only, 300)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	shared := models.DefaultUpstreamIn()
+	shared.Name = "in-both"
+	shared.BaseURL = "https://api.example.com"
+	shared.GroupIDs = []int64{group.ID, models.DefaultGroupID}
+	sharedCreated, err := CreateUpstream(ctx, db, &shared, 300)
+	if err != nil {
+		t.Fatalf("create shared channel: %v", err)
+	}
+
+	if _, err := DeleteGroup(ctx, db, group.ID); err != nil {
+		t.Fatalf("delete group: %v", err)
+	}
+
+	// The cascade alone left this channel in no group at all: still enabled,
+	// still listed, and reachable by no token in the system.
+	groups, err := ListUpstreamGroupIDs(ctx, db, onlyCreated.ID)
+	if err != nil {
+		t.Fatalf("list groups: %v", err)
+	}
+	if len(groups) != 1 || groups[0] != models.DefaultGroupID {
+		t.Errorf("channel groups = %v, want the default group", groups)
+	}
+
+	// A channel that had somewhere else to go is left where it was.
+	sharedGroups, err := ListUpstreamGroupIDs(ctx, db, sharedCreated.ID)
+	if err != nil {
+		t.Fatalf("list shared groups: %v", err)
+	}
+	if len(sharedGroups) != 1 || sharedGroups[0] != models.DefaultGroupID {
+		t.Errorf("shared channel groups = %v, want only the default group", sharedGroups)
+	}
+
+	reachable, err := ListEnabledUpstreamsInGroup(ctx, db, models.DefaultGroupID)
+	if err != nil {
+		t.Fatalf("list reachable: %v", err)
+	}
+	if len(reachable) != 2 {
+		t.Errorf("default group reaches %d channels, want 2", len(reachable))
+	}
+}
+
+func TestCreatingATokenRejectsAGroupThatDoesNotExist(t *testing.T) {
+	db := memoryDB(t)
+	ctx := context.Background()
+
+	missing := int64(4242)
+	input := models.APITokenIn{Name: "caller", Enabled: true, GroupID: &missing}
+	if _, err := CreateToken(ctx, db, &input); err == nil {
+		t.Fatal("a token was created pointing at a group that does not exist")
+	}
+
+	var count int64
+	if err := db.QueryRow("SELECT COUNT(*) FROM api_tokens").Scan(&count); err != nil {
+		t.Fatalf("count tokens: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("%d tokens were left behind by a rejected create", count)
+	}
+}

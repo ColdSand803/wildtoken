@@ -96,11 +96,14 @@ func UpdateGroup(ctx context.Context, database *sql.DB, id int64, input *models.
 	return group, ok, err
 }
 
-// DeleteGroup removes a group, reassigning its tokens to the default group.
+// DeleteGroup removes a group, moving what belonged to it to the default group.
 //
 // A token must always name a group that exists, so the tokens move rather than
-// being left dangling. Channel membership is removed by the join table's
-// cascade, which only narrows what those channels serve.
+// being left dangling. Channels move for the same reason: the join table's
+// cascade narrows what a channel serves, and for a channel that served only this
+// group it narrows it to nothing — leaving it enabled in the console, reachable
+// by no token, with nothing to say why. The channel stores hold that a channel
+// always belongs to a group; deleting one is not an exception to it.
 func DeleteGroup(ctx context.Context, database *sql.DB, id int64) (bool, error) {
 	if id == models.DefaultGroupID {
 		return false, apperr.BadRequest("the default group cannot be deleted")
@@ -115,6 +118,19 @@ func DeleteGroup(ctx context.Context, database *sql.DB, id int64) (bool, error) 
 	if _, err := tx.ExecContext(ctx,
 		"UPDATE api_tokens SET group_id = ?, updated_at = datetime('now') WHERE group_id = ?",
 		models.DefaultGroupID, id); err != nil {
+		return false, apperr.Database(err)
+	}
+
+	// Channels this group was the last home of join the default group. Done
+	// before the delete, so the cascade only has to clear the membership row
+	// itself.
+	if _, err := tx.ExecContext(ctx,
+		`INSERT OR IGNORE INTO upstream_groups (upstream_id, group_id)
+         SELECT upstream_id, ? FROM upstream_groups
+         WHERE group_id = ? AND upstream_id NOT IN (
+             SELECT upstream_id FROM upstream_groups WHERE group_id <> ?
+         )`,
+		models.DefaultGroupID, id, id); err != nil {
 		return false, apperr.Database(err)
 	}
 
