@@ -470,3 +470,70 @@ func TestAStreamCancelledByTheClientIsNotChargedToTheChannel(t *testing.T) {
 		t.Errorf("upstream errors = %d, want 0", snapshot.SSEUpstreamErrorsTotal)
 	}
 }
+
+func TestACompletedStreamIsNotChargedForTheReadThatFollowsIt(t *testing.T) {
+	released := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		// The answer is complete, but the connection stays open until the
+		// attempt's clock runs out — which is what an upstream that does not
+		// close after its terminal event looks like.
+		<-released
+	}))
+	defer server.Close()
+	defer close(released)
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL, TimeoutSeconds: 0.3,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m","stream":true}`),
+		requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	response, err := ProxyRequest(context.Background(), harness.deps, testPolicy(),
+		&upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+
+	buffer := make([]byte, 256)
+	for {
+		if _, err := response.Body.Read(buffer); err != nil {
+			break
+		}
+	}
+	response.Body.Close()
+
+	harness.waitForLogs(t, 1)
+
+	var statusCode int64
+	if err := harness.database.QueryRow(
+		"SELECT status_code FROM request_logs WHERE id = 1").Scan(&statusCode); err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if statusCode != 200 {
+		t.Errorf("status = %d, want 200 for a stream that reached its terminal event", statusCode)
+	}
+
+	// The log recorded a success, so the health score has to agree. Scoring
+	// outside the same guard let one stream be counted as both.
+	health := harness.deps.AutoWeight.Snapshot(upstream.ID, upstream.Weight, true, testPolicy())
+	if health.Score != 100 {
+		t.Errorf("health score = %d, want 100 for a completed stream", health.Score)
+	}
+}

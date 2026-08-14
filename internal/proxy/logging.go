@@ -176,14 +176,39 @@ func (w *LogWriter) Subscribe() (<-chan LogStreamEvent, func()) {
 }
 
 // Close stops accepting entries and waits for the queued batch to drain.
-func (w *LogWriter) Close() {
+func (w *LogWriter) Close() { w.CloseWithin(0) }
+
+// CloseWithin stops accepting entries and waits up to limit for the queue to
+// drain, reporting whether it finished. A limit of zero waits indefinitely.
+//
+// Shutdown needs the bound. Each batch may spend up to logWriteTimeout on a
+// database that has stopped answering, and a full queue is enough batches for
+// that to add up to minutes — long past the point where an operator expects the
+// process to be gone. Giving up loses the rows still queued, which is the same
+// outcome as being killed, and only after having tried.
+func (w *LogWriter) CloseWithin(limit time.Duration) bool {
 	w.closeOnce.Do(func() {
 		w.closeMu.Lock()
 		w.closed = true
 		w.closeMu.Unlock()
 		close(w.entries)
 	})
-	<-w.done
+
+	if limit <= 0 {
+		<-w.done
+		return true
+	}
+
+	timer := time.NewTimer(limit)
+	defer timer.Stop()
+	select {
+	case <-w.done:
+		return true
+	case <-timer.C:
+		slog.Error("request log queue did not drain before shutdown gave up",
+			"waited", limit)
+		return false
+	}
 }
 
 func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogStatsCache) {

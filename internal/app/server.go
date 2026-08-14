@@ -25,6 +25,16 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
+const (
+	// requestDrainTimeout is how long shutdown waits for in-flight requests. A
+	// streaming answer can outlive it, which is why the log writer has to be
+	// safe to schedule onto afterwards.
+	requestDrainTimeout = 15 * time.Second
+	// logDrainTimeout bounds the wait for the log queue, so a database that has
+	// stopped answering cannot hold the process open indefinitely.
+	logDrainTimeout = 30 * time.Second
+)
+
 // ReadyInfo reports the bound port and console URL once the server is listening.
 type ReadyInfo struct {
 	Port     uint16
@@ -159,7 +169,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	slog.Info("shutdown signal received")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), requestDrainTimeout)
 	defer cancel()
 	err := s.httpServer.Shutdown(shutdownCtx)
 	s.shutdownResources()
@@ -175,7 +185,7 @@ func (s *Server) Serve(ctx context.Context) error {
 // the drain this function exists for failed in full — taking the quota
 // increments those rows carry with it.
 func (s *Server) shutdownResources() {
-	s.logWriter.Close()
+	s.logWriter.CloseWithin(logDrainTimeout)
 	s.cancelJobs()
 	s.state.TokenRateLimiter.Close()
 	s.state.UpstreamRateLimiter.Close()
@@ -251,10 +261,11 @@ func newHTTPClient(defaultTimeoutSeconds float64) *http.Client {
 	// A streamed response must reach the client as it arrives, so the transport
 	// is told not to buffer by requesting compression itself.
 	transport.DisableCompression = true
-	// A connection that opens but never answers holds a request until its own
-	// deadline; this bounds the wait for the headers alone, which is where a
-	// silent upstream shows up first.
-	transport.ResponseHeaderTimeout = time.Duration(defaultTimeoutSeconds * float64(time.Second))
+	// No ResponseHeaderTimeout: this transport is shared by every channel, so a
+	// value here is a ceiling on all of them. Setting it to the default cut off
+	// channels configured with a longer one, and did it in a way the caller
+	// could not tell from a channel failing outright. Waiting for the response
+	// headers is already bounded per attempt, against the channel's own timeout.
 	return &http.Client{
 		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {

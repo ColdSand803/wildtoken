@@ -239,7 +239,19 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	request, err := buildUpstreamRequest(attemptCtx, requestCtx.Method, prepared)
 	if err != nil {
 		attempt.stop()
-		return nil, err
+
+		// Logged here because the caller disarms its own fallback entry on any
+		// error, trusting that the attempt logged itself. This was the one path
+		// that did not, so the request left no trace at all.
+		message := err.Error()
+		statusCode := int32(502)
+		entry := baseLogEntry(requestCtx, upstream, prepared)
+		entry.StatusCode = &statusCode
+		entry.DurationMs = elapsedMs(start)
+		entry.Error = &message
+		deps.LogWriter.Schedule(entry)
+
+		return nil, apperr.Upstream(message)
 	}
 
 	response, err := deps.HTTPClient.Do(request)

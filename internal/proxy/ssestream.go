@@ -138,12 +138,17 @@ func (s *sseStream) finishComplete() {
 // long answer — drive a healthy channel's weight to zero and take it out of
 // rotation, while leaving the disconnect metric reading zero.
 func (s *sseStream) finishInterrupted(err error) {
+	// Client aborts are the one outcome the channel is not answerable for. The
+	// health score, like the log, is recorded behind finishLog's guard: a stream
+	// that already finished on its terminal event can still fail the read that
+	// follows, and scoring outside the guard charged that channel for a stream
+	// the log had already recorded as a success.
+	message := err.Error()
 	switch {
 	case s.attempt.Expired():
 		// The upstream went quiet for longer than the channel allows.
-		s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
-		message := err.Error()
 		if s.finishLog(504, &message) {
+			s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
 			s.deps.Metrics.RecordSSEUpstreamError()
 		}
 	case s.requestCtx.Err() != nil:
@@ -152,9 +157,8 @@ func (s *sseStream) finishInterrupted(err error) {
 			s.deps.Metrics.RecordSSEClientDisconnect()
 		}
 	default:
-		s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
-		message := err.Error()
 		if s.finishLog(502, &message) {
+			s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
 			s.deps.Metrics.RecordSSEUpstreamError()
 		}
 	}
