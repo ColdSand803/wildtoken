@@ -117,6 +117,11 @@ html[data-theme="dark"] {
   --control-h-sm: 28px;
   --transition: 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
   --blur: 16px;
+
+  /* Native checkboxes, radios and progress bars follow each theme's accent:
+     declared once here, the property inherits everywhere while the var
+     resolves against whichever theme block is active. */
+  accent-color: var(--accent);
 }
 
 html[data-theme="light"] {
@@ -141,36 +146,47 @@ html[data-theme="light"] {
   --line-strong: #cbd5e1;
   --line-soft: #eef2f7;
 
-  --accent: #0891b2;
-  --accent-strong: #0e7490;
-  --accent-soft: rgb(8 145 178 / 10%);
-  --accent-border: rgb(8 145 178 / 28%);
-  --accent-glow: rgb(8 145 178 / 14%);
+  /* Accent — the teal one step deeper than before: #0891b2 measured 3.68:1
+     both as text on white and under a primary button's white label, short of
+     AA for the 13px/600 the console sets everywhere. #0e7490 clears 5:1 in
+     both directions and already matched the deeper teal literals this theme's
+     rail was using. */
+  --accent: #0e7490;
+  --accent-strong: #155e75;
+  --accent-soft: rgb(14 116 144 / 10%);
+  --accent-border: rgb(14 116 144 / 28%);
+  --accent-glow: rgb(14 116 144 / 14%);
   --accent-on: #ffffff;
   --brand-ink: #ffffff;
 
-  --danger: #dc2626;
+  /* Semantic — text tones sit one Tailwind step deeper than the classic
+     600-on-50 pairing: #d97706 on its cream wash measured 3.07:1 and the
+     emerald 3.58:1, both under AA on the latency and status chips. The
+     700-level tones keep the same hue at 4.8:1 or better. */
+  --danger: #b91c1c;
   --danger-soft: #fef2f2;
   --danger-border: #fecaca;
-  --danger-strong: #b91c1c;
-  --ok: #059669;
+  --danger-strong: #991b1b;
+  --ok: #047857;
   --ok-soft: #ecfdf5;
   --ok-border: #a7f3d0;
-  --ok-strong: #047857;
-  --warning: #d97706;
+  --ok-strong: #065f46;
+  --warning: #b45309;
   --warning-soft: #fffbeb;
   --warning-border: #fde68a;
-  --warning-strong: #b45309;
+  --warning-strong: #92400e;
   --warning-text: #92400e;
 
-  --focus: #22d3ee;
-  --focus-ring: 0 0 0 3px rgb(8 145 178 / 22%);
+  /* Focus rides the same deepened teal: the old #22d3ee outline measured
+     1.6:1 on white — a focus ring that could not be seen. */
+  --focus: #0e7490;
+  --focus-ring: 0 0 0 3px rgb(14 116 144 / 22%);
   --shadow-xs: 0 1px 2px rgb(15 23 42 / 4%);
   --shadow-sm: 0 1px 2px rgb(15 23 42 / 5%), 0 1px 3px rgb(15 23 42 / 4%);
   --shadow-md: 0 8px 24px rgb(15 23 42 / 10%);
   --shadow-lg: 0 16px 48px rgb(15 23 42 / 14%);
   --shadow: var(--shadow-sm);
-  --glow-accent: 0 0 0 1px rgb(8 145 178 / 14%), 0 0 18px rgb(8 145 178 / 10%);
+  --glow-accent: 0 0 0 1px rgb(14 116 144 / 14%), 0 0 18px rgb(14 116 144 / 10%);
 
   --code-frame-bg: #0b1220;
   --code-bg: #0f172a;
@@ -178,14 +194,14 @@ html[data-theme="light"] {
   --code-muted: #94a3b8;
   --code-border: rgb(148 163 184 / 18%);
 
-  --row-hover: rgb(8 145 178 / 5%);
+  --row-hover: rgb(14 116 144 / 5%);
   --row-disabled: #f8fafc;
   --topbar-bg: rgb(255 255 255 / 78%);
   --backdrop: rgb(15 23 42 / 38%);
   --neutral-chip: #f1f5f9;
   --toast-neutral: #94a3b8;
 
-  --aurora-a: rgb(8 145 178 / 10%);
+  --aurora-a: rgb(14 116 144 / 10%);
   --aurora-b: rgb(56 189 248 / 8%);
   --aurora-c: rgb(99 102 241 / 7%);
 }

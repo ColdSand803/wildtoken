@@ -1,8 +1,0 @@
-{
-  "id": "nes",
-  "label": "像素",
-  "css": "theme.css",
-  "swatch": ["#0f0f1b", "#e52521"],
-  "version": "1.0.0",
-  "description": "8-bit console theme with chunky shadows, hard borders, and NES red-blue-yellow accents."
-}

@@ -11,7 +11,7 @@ const adminHtml = read("static/admin.html");
 test("Anthropic manifest exposes the brand palette", () => {
   assert.deepEqual(manifest, {
     id: "anthropic",
-    label: "A/",
+    label: "Anthropic Light",
     css: "theme.css",
     swatch: ["#faf9f5", "#d97757"],
     version: "1.0.0",
@@ -53,7 +53,7 @@ test("Anthropic is available before and after theme registry initialization", ()
   const cssHref = "/theme-packs/anthropic/theme.css";
   assert.match(
     events,
-    /\{ id: "anthropic", label: "A\/", swatch: \["#faf9f5", "#d97757"\], css: "\/theme-packs\/anthropic\/theme\.css", description: ".*" \}/,
+    /\{ id: "anthropic", label: "Anthropic Light", swatch: \["#faf9f5", "#d97757"\], css: "\/theme-packs\/anthropic\/theme\.css", description: ".*" \}/,
   );
   assert.ok(adminHtml.includes(`anthropic: "${cssHref}"`));
 });

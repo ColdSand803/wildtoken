@@ -14,19 +14,11 @@ const BUILT_IN_THEMES = Object.freeze([
 
 const BUNDLED_THEME_PACKS = Object.freeze([
   { id: "ark", label: "Ark", swatch: ["#080a0b", "#18d1ff"], css: "/theme-packs/ark/theme.css", description: "Industrial operations theme with a cyan signal rail and dense technical surfaces." },
-  { id: "win95", label: "Win95", swatch: ["#c0c0c0", "#000080"], css: "/theme-packs/win95/theme.css", description: "Classic desktop chrome theme with teal workspace, hard bevels, and MS-DOS-style code surfaces." },
-  { id: "animal-island", label: "动物岛", swatch: ["#f8f8f0", "#19c8b9"], css: "/theme-packs/animal-island/theme.css", description: "Pastel island theme with parchment surfaces, mint accents, and rounded game-UI controls." },
-  { id: "cyberpunk", label: "赛博朋克", swatch: ["#0a0612", "#ff2bd6"], css: "/theme-packs/cyberpunk/theme.css", description: "Neon HUD theme with black-violet surfaces, magenta accents, and cyan focus states." },
-  { id: "nes", label: "像素", swatch: ["#0f0f1b", "#e52521"], css: "/theme-packs/nes/theme.css", description: "8-bit console theme with chunky shadows, hard borders, and NES red-blue-yellow accents." },
-  { id: "crt", label: "CRT", swatch: ["#020b05", "#39ff14"], css: "/theme-packs/crt/theme.css", description: "Monochrome phosphor terminal theme with scanlines, green glow, and CRT bezel surfaces." },
-  { id: "minecraft", label: "我的世界", swatch: ["#38373f", "#5ec639"], css: "/theme-packs/minecraft/theme.css", description: "Blocky deepslate GUI theme with black pixel outlines, stone bevels, and grass accents." },
-  { id: "bleach", label: "Bleach", swatch: ["#fff7ed", "#f97316"], css: "/theme-packs/bleach/theme.css", description: "Manga-paper admin theme with ink rails and orange reiatsu accents." },
   { id: "endfield", label: "Endfield", swatch: ["#f2f2f0", "#fffa00"], css: "/theme-packs/endfield/theme.css", description: "Field-engineering admin theme with pale work surfaces, signal yellow, and left-rail operations layout." },
   { id: "sakura-mist", label: "樱雾灰紫", swatch: ["#ffe3ee", "#535369"], css: "/theme-packs/sakura-mist/theme.css", description: "Soft pink surfaces with restrained gray-violet accents." },
-{ id: "anthropic", label: "A/", swatch: ["#faf9f5", "#d97757"], css: "/theme-packs/anthropic/theme.css", description: "Warm ivory paper surfaces with slate ink, a single clay accent, and serif display type." },
-  { id: "anthropic-dark", label: "A/ dark", swatch: ["#141413", "#d97757"], css: "/theme-packs/anthropic-dark/theme.css", description: "Slate ground with warm ivory ink, the same single clay accent, and serif display type." },
-  { id: "demon-slayer", label: "鬼灭之刃", swatch: ["#0b0d0c", "#3fbfa6"], css: "/theme-packs/demon-slayer/theme.css", description: "Sumi-ink console theme with a checkered haori rail, seigaiha wave field, and water-breathing teal accents." },
-  { id: "railgun", label: "学园都市", swatch: ["#f4f6f8", "#0ea5e9"], css: "/theme-packs/railgun/theme.css", description: "Academy City in daylight: white concrete and glass, a Tokiwadai clearance plate on a narrow operator rail, a turbine skyline, and arc blue kept back for whatever is live." },
+  { id: "anthropic", label: "Anthropic Light", swatch: ["#faf9f5", "#d97757"], css: "/theme-packs/anthropic/theme.css", description: "Warm ivory paper surfaces with slate ink, a single clay accent, and serif display type." },
+  { id: "anthropic-dark", label: "Anthropic Dark", swatch: ["#141413", "#d97757"], css: "/theme-packs/anthropic-dark/theme.css", description: "Slate ground with warm ivory ink, the same single clay accent, and serif display type." },
+  { id: "gojo", label: "五条悟", swatch: ["#070910", "#63dcff"], css: "/theme-packs/gojo/theme.css", description: "Satoru Gojo character theme with a blindfold rail, Six Eyes focus states, and blue-red-violet Limitless fields." },
 ]);
 let THEMES = [...BUILT_IN_THEMES, ...BUNDLED_THEME_PACKS];
 
@@ -34,11 +26,6 @@ const ARK_THEME_CONFIG = {
   ark: { family: "ark", depth: "complex", optionLabel: "OPS SYSTEM / 03" },
   endfield: { family: "endfield", depth: "complex", optionLabel: "FIELD SYSTEM / 03" },
 };
-
-// 旧 id "animal" 迁移为 "animal-island"
-function normalizeThemeId(value) {
-  return value === "animal" ? "animal-island" : value;
-}
 
 function isSafeThemeId(value) {
   return typeof value === "string" && /^[a-z][a-z0-9-]{0,47}$/.test(value);
@@ -51,8 +38,7 @@ function isSafeThemeCssHref(value) {
 }
 
 function findTheme(value) {
-  const id = normalizeThemeId(value);
-  return THEMES.find((theme) => theme.id === id) || null;
+  return THEMES.find((theme) => theme.id === value) || null;
 }
 
 function isKnownTheme(value) {
@@ -92,7 +78,7 @@ function focusThemeMenuChoice(position = "selected") {
 
 function getStoredTheme() {
   try {
-    const value = normalizeThemeId(localStorage.getItem(THEME_KEY));
+    const value = localStorage.getItem(THEME_KEY);
     return isKnownTheme(value) ? value : "dark";
   } catch {
     return "dark";
@@ -222,7 +208,7 @@ function normalizeThemeDescription(value) {
 
 function normalizeExternalTheme(theme) {
   if (!theme || typeof theme !== "object") return null;
-  const id = normalizeThemeId(String(theme.id || "").trim());
+  const id = String(theme.id || "").trim();
   const css = String(theme.css || "").trim();
   if (!isSafeThemeId(id) || !isSafeThemeCssHref(css)) return null;
 
@@ -392,55 +378,49 @@ settingsDefaultHome?.addEventListener("change", () => {
 });
 serverSettingsForm?.addEventListener("submit", saveServerSettings);
 routingSettingsForm?.addEventListener("submit", saveRoutingSettings);
-newModelTestTemplateButton?.addEventListener("click", () => openModelTestTemplateDialog());
-modelTestTemplateList?.addEventListener("click", async (event) => {
-  const button = event.target.closest("button[data-model-template-action]");
+newModelTestPromptButton?.addEventListener("click", () => openModelTestPromptDialog());
+modelTestPromptList?.addEventListener("click", async (event) => {
+  const button = event.target.closest("button[data-model-prompt-action]");
   if (!button) return;
-  const template = modelTestTemplates.find((item) => item.id === Number(button.dataset.templateId));
+  const template = modelTestPromptTemplates.find((item) => item.id === Number(button.dataset.promptId));
   if (!template) return;
-  if (button.dataset.modelTemplateAction === "edit") {
-    openModelTestTemplateDialog(template);
+  if (button.dataset.modelPromptAction === "edit") {
+    openModelTestPromptDialog(template);
     return;
   }
-  const confirmed = await requestConfirm({ title: "删除测试模板", message: `确定删除模板「${template.name}」？`, confirmLabel: "删除模板", danger: true });
+  const confirmed = await requestConfirm({ title: "删除 Prompt", message: `确定删除 Prompt「${template.name}」？`, confirmLabel: "删除 Prompt", danger: true });
   if (!confirmed) return;
   try {
-    await api(`/api/admin/settings/model-test-templates/${template.id}`, { method: "DELETE" });
-    modelTestTemplates = modelTestTemplates.filter((item) => item.id !== template.id);
-    renderModelTestTemplates();
-    setStatus("测试模板已删除。", "ok");
+    await api(`/api/admin/settings/model-test-prompts/${template.id}`, { method: "DELETE" });
+    await refreshModelTestPromptDropdown();
+    setStatus("Prompt 已删除。", "ok");
   } catch (error) {
-    setStatus(`删除模板失败：${error.message}`, "error");
+    setStatus(`删除 Prompt 失败：${error.message}`, "error");
   }
 });
-modelTestTemplateForm?.addEventListener("submit", async (event) => {
+modelTestPromptForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
-  const id = modelTestTemplateId.value;
+  const id = modelTestPromptId.value;
   const payload = {
-    name: modelTestTemplateName.value.trim(),
-    request_kind: modelTestTemplateKind.value,
-    prompt: modelTestTemplatePrompt.value.trim(),
+    name: modelTestPromptName.value.trim(),
+    prompt: modelTestPromptContent.value.trim(),
   };
   try {
-    const saved = await api(id ? `/api/admin/settings/model-test-templates/${id}` : "/api/admin/settings/model-test-templates", {
+    await api(id ? `/api/admin/settings/model-test-prompts/${id}` : "/api/admin/settings/model-test-prompts", {
       method: id ? "PATCH" : "POST",
       body: JSON.stringify(payload),
     });
-    modelTestTemplates = id
-      ? modelTestTemplates.map((item) => item.id === saved.id ? saved : item)
-      : [...modelTestTemplates, saved];
-    renderModelTestTemplates();
-    closeModelTestTemplateDialog();
-    setStatus("测试模板已保存。", "ok");
+    await refreshModelTestPromptDropdown();
+    closeModelTestPromptDialog();
+    setStatus("Prompt 已保存。", "ok");
   } catch (error) {
-    setStatus(`保存模板失败：${error.message}`, "error");
+    setStatus(`保存 Prompt 失败：${error.message}`, "error");
   }
 });
-modelTestTemplateClose?.addEventListener("click", closeModelTestTemplateDialog);
-modelTestTemplateCancel?.addEventListener("click", closeModelTestTemplateDialog);
-dismissOnBackdropClick(modelTestTemplateDialog, closeModelTestTemplateDialog);
-modelTestTemplate?.addEventListener("change", updateModelTestTemplateHint);
-modelTestPromptTemplate?.addEventListener("change", updateModelTestTemplateHint);
+modelTestPromptClose?.addEventListener("click", closeModelTestPromptDialog);
+modelTestPromptCancel?.addEventListener("click", closeModelTestPromptDialog);
+dismissOnBackdropClick(modelTestPromptDialog, closeModelTestPromptDialog);
+modelTestPromptTemplate?.addEventListener("change", syncModelTestPrompt);
 modelTestClose?.addEventListener("click", closeModelTestDialog);
 modelTestRefreshModels?.addEventListener("click", refreshModelTestModels);
 modelTestForm?.addEventListener("submit", async (event) => {
@@ -452,7 +432,7 @@ modelTestForm?.addEventListener("submit", async (event) => {
   try {
     const result = await api(`/api/admin/upstreams/${modelTestUpstream.id}/test-model`, {
       method: "POST",
-      body: JSON.stringify({ model: modelTestModel.value, wrapper_id: Number(modelTestTemplate.value), prompt_template_id: Number(modelTestPromptTemplate.value), prompt: modelTestPrompt.value.trim() }),
+      body: JSON.stringify({ model: modelTestModel.value, protocol: modelTestProtocol.value, prompt_template_id: Number(modelTestPromptTemplate.value), prompt: modelTestPrompt.value.trim() }),
     });
     modelTestResult.hidden = false;
     modelTestResultStatus.textContent = result.ok ? `测试成功 · HTTP ${result.status_code}` : `测试失败${result.status_code ? ` · HTTP ${result.status_code}` : ""}`;
@@ -508,9 +488,6 @@ if (dashboardTimePreset) {
       ? dashboardTimePreset.value
       : DASHBOARD_DEFAULT_RANGE;
     dashboardTimePreset.value = value;
-    if (dashboardCustomRange) {
-      dashboardCustomRange.hidden = value !== "custom";
-    }
     if (value === "custom") {
       // Prefill from the last custom range and wait for 应用; querying now would
       // use whatever half-entered dates are in the pickers.
@@ -520,14 +497,38 @@ if (dashboardTimePreset) {
       if (dashboardEndDate && !dashboardEndDate.value && dashboardCustomEndDate) {
         dashboardEndDate.value = dashboardCustomEndDate;
       }
+      if (typeof syncDashboardDateMirrors === "function") {
+        syncDashboardDateMirrors();
+      }
       dashboardStartDate?.focus();
+      syncDashboardRangeChips();
       return;
     }
     dashboardTimeRange = value;
     persistDashboardRange();
+    syncDashboardRangeChips();
     loadDashboardData();
   });
 }
+
+const dashboardTimeChips = document.querySelector("#dashboard-time-chips");
+if (dashboardTimeChips && dashboardTimePreset) {
+  dashboardTimeChips.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-dashboard-range]");
+    if (!button) return;
+    const value = button.dataset.dashboardRange;
+    if (!value || dashboardTimePreset.value === value) {
+      if (value === "custom") {
+        setDashboardCustomRangeOpen(true);
+        dashboardStartDate?.focus();
+      }
+      return;
+    }
+    dashboardTimePreset.value = value;
+    dashboardTimePreset.dispatchEvent(new Event("change"));
+  });
+}
+
 
 if (dashboardApplyCustom && dashboardStartDate && dashboardEndDate) {
   dashboardApplyCustom.addEventListener("click", () => {
@@ -989,6 +990,64 @@ document.addEventListener("click", (event) => {
   event.preventDefault();
   toggleDialogMaximized(dialog);
 });
+
+// ── Pointer position, published for themes that want it ──
+//
+// Writes --pointer-x / --pointer-y on <html> as 0–1 fractions of the viewport.
+// Nothing here knows about any particular theme: a pack that wants to react to
+// the pointer reads the two variables, and for every other pack they are two
+// custom properties nobody looks at. No layout is read and nothing is written
+// outside the rAF, so this cannot force a reflow no matter how fast the pointer
+// moves.
+//
+// Throttled to one write per frame. A raw mousemove handler fires far more
+// often than the compositor can use and is a reliable way to make a page feel
+// worse, not better.
+//
+// Skipped entirely under prefers-reduced-motion: the whole point of the
+// variables is to drive movement, so on that setting they are never published
+// and any rule keyed on them falls back to its declared default.
+(() => {
+  const root = document.documentElement;
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let queued = false;
+  let x = 0.5;
+  let y = 0.5;
+
+  function flush() {
+    queued = false;
+    root.style.setProperty("--pointer-x", x.toFixed(4));
+    root.style.setProperty("--pointer-y", y.toFixed(4));
+  }
+
+  function onMove(event) {
+    if (reduced.matches) return;
+    x = event.clientX / (window.innerWidth || 1);
+    y = event.clientY / (window.innerHeight || 1);
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(flush);
+  }
+
+  window.addEventListener("pointermove", onMove, { passive: true });
+
+  // Leaving the window parks the field at centre rather than freezing it
+  // wherever the pointer happened to exit.
+  window.addEventListener("pointerleave", () => {
+    if (reduced.matches) return;
+    x = 0.5;
+    y = 0.5;
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(flush);
+  }, { passive: true });
+
+  reduced.addEventListener?.("change", (e) => {
+    if (!e.matches) return;
+    root.style.removeProperty("--pointer-x");
+    root.style.removeProperty("--pointer-y");
+  });
+})();
 
 // Start only after every classic script has registered its globals and listeners.
 if (getAdminToken()) {

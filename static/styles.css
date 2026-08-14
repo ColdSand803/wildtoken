@@ -3,6 +3,7 @@
 @import url("./css/forms-dialogs.css");
 @import url("./css/logs-tokens.css");
 @import url("./css/responsive.css");
+@import url("./css/components.css");
 @import url("./css/dashboard.css");
 @import url("./css/enhancements.css");
 @import url("./css/dark-theme.css");
@@ -12,7 +13,6 @@
 @import url("./css/settings.css");
 
 html[data-theme] .token-preview-code,
-html[data-theme] .token-value-box code,
 html[data-theme] #api-key,
 html[data-theme] #quick-import-apikey,
 html[data-theme] #token-custom {

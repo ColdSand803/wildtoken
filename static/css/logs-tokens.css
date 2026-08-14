@@ -14,8 +14,26 @@
   min-width: 190px;
 }
 
+.token-table td.col-expiry {
+  min-width: 170px;
+}
+
 .token-table td.muted {
   display: table-cell;
+}
+
+.token-expiry {
+  align-items: flex-start;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+
+.token-expiry-time {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
 .log-row {
@@ -493,48 +511,76 @@
 }
 
 .token-preview-button:hover .token-preview-code,
-.token-preview-button:focus-visible .token-preview-code,
-.token-preview-button.copied .token-preview-code {
+.token-preview-button:focus-visible .token-preview-code {
   background: var(--accent-soft);
   border-color: var(--accent-border);
   color: var(--accent-strong);
 }
 
-.token-preview-button:disabled {
-  cursor: wait;
-  opacity: 0.72;
+/* Always in the layout, never hidden: the cell must keep the same width when
+   the glyph brightens or the row confirms, or the whole table shifts. Quiet
+   at rest so eight columns of chrome stay readable. */
+.token-preview-icon {
+  color: var(--muted);
+  display: inline-flex;
+  flex: 0 0 auto;
+  opacity: 0.5;
+  transition: color var(--transition), opacity var(--transition);
 }
 
-.field-readonly {
-  /* presentation only */
+.token-preview-icon svg {
+  fill: none;
+  height: 12px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 12px;
 }
 
-.token-value-box {
-  align-items: center;
-  background: var(--panel-subtle);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  display: flex;
-  gap: 8px;
-  padding: 8px 10px;
-}
-
-.token-value-box code {
+.token-preview-button:hover .token-preview-icon,
+.token-preview-button:focus-visible .token-preview-icon {
   color: var(--accent-strong);
-  flex: 1;
-  font-family: var(--font-secret);
-  font-size: var(--text-sm);
-  font-variant-ligatures: none;
-  letter-spacing: 0;
-  user-select: all;
-  word-break: break-all;
+  opacity: 1;
 }
 
-.token-copy-btn {
-  flex-shrink: 0;
-  font-size: var(--text-sm);
-  min-height: var(--control-h-sm);
-  padding: 0 10px;
+/* Same green the table's other inline copy confirm uses (.url-action). */
+.token-preview-button.is-confirmed .token-preview-code {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok);
+}
+
+.token-preview-button.is-confirmed .token-preview-icon,
+.token-preview-button.is-confirmed:hover .token-preview-icon {
+  color: var(--ok);
+  opacity: 1;
+}
+
+/* Tokens created before plaintext storage: aria-disabled rather than disabled,
+   so the button keeps its place in the tab order and a keyboard user can still
+   land on it and read why the value is gone. Dashed frame carries the same
+   meaning without relying on colour. */
+.token-preview-button[aria-disabled="true"] {
+  cursor: not-allowed;
+}
+
+.token-preview-button[aria-disabled="true"] .token-preview-code {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.token-preview-button[aria-disabled="true"]:hover .token-preview-code,
+.token-preview-button[aria-disabled="true"]:focus-visible .token-preview-code {
+  background: var(--panel-subtle);
+  border-color: var(--line-soft);
+  color: var(--muted);
+}
+
+.token-preview-button[aria-disabled="true"]:hover .token-preview-icon,
+.token-preview-button[aria-disabled="true"]:focus-visible .token-preview-icon {
+  color: var(--muted);
+  opacity: 0.7;
 }
 
 .action-cell {

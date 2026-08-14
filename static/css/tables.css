@@ -293,11 +293,53 @@ td.no-match-state {
   min-width: 0;
 }
 
+/* A name with a marker riding beside it. Flex rather than a bare space so the
+   two align on their box centres — the badge is inline-flex with its own
+   padding, and baseline-aligning that against <strong> sits it a hair low.
+   The name takes the slack and truncates; the badge never shrinks or wraps
+   away from the name it belongs to. */
+.name-inline {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.name-inline strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name-inline .badge {
+  flex: 0 0 auto;
+}
+
 .name-stack strong,
 .channel-cell strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 描述是自由填写的长文本。给上下界而不是放任它撑宽：不设上界，一条 200 字的
+   描述会把同表其它列挤扁；不设下界，全是空描述时这列又会缩成一条缝。截断在
+   内层 span 上做，td 只负责给出宽度——单元格自己 overflow: hidden 会连粘性
+   表头和阴影一起裁掉。 */
+.desc-cell {
+  max-width: 320px;
+  min-width: 180px;
+}
+
+.desc-cell .muted {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 没填描述时的占位符要明显弱于真描述，否则一列破折号和正文一样抢眼 */
+.desc-cell .muted.is-empty {
+  opacity: 0.55;
 }
 
 .url-cell-inner {
@@ -417,6 +459,13 @@ td.no-match-state {
   background: var(--panel-solid);
   border-color: var(--line-strong);
   color: var(--muted);
+}
+
+/* 分组和模型匹配用的是同一套 chip，配色区分开，免得两列看上去连成一片 */
+.model-chip.group {
+  background: var(--accent-soft, var(--panel-muted));
+  border-color: var(--accent-border, var(--line-strong));
+  color: var(--accent-strong, var(--muted-strong));
 }
 
 .row-actions {
@@ -1007,4 +1056,43 @@ td.no-match-state {
     opacity: 0;
     transform: translateY(-8px) scale(0.98);
   }
+}
+
+/* 限额列：已用 / 剩余 / 限额。用尽标红、接近用尽标黄，好在一列里扫出该处理哪个 */
+.quota-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.quota-sep {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+.quota-used {
+  font-weight: 600;
+}
+
+.quota-limit {
+  color: var(--muted-strong);
+}
+
+.quota-cell.warn .quota-used {
+  color: var(--warning, #d97706);
+}
+
+.quota-cell.danger .quota-used,
+.quota-cell.danger .quota-remaining {
+  color: var(--danger, #dc2626);
+}
+
+/* 限速标记：挂在限额后面的小字，如 100/m。设了限速的令牌是少数，单独占列不值 */
+.quota-rate-note {
+  display: block;
+  font-size: 0.78em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }

@@ -1,0 +1,1624 @@
+/* Satoru Gojo character theme.
+   The blindfold becomes the navigation rail, the Six Eyes own focus and live
+   state, and Limitless is drawn as an offset field of rings. Blue is the
+   working accent, red is reserved for destructive pressure, and violet only
+   appears where the two techniques meet. No external art assets are used. */
+
+@keyframes gojo-field-drift {
+  from {
+    transform: translate3d(-1.2%, -0.6%, 0) rotate(-0.35deg);
+  }
+
+  to {
+    transform: translate3d(1.2%, 0.6%, 0) rotate(0.35deg);
+  }
+}
+
+@keyframes gojo-eye-breathe {
+  0%,
+  100% {
+    opacity: 0.58;
+    transform: scale(0.92);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes gojo-line-flow {
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 0 180px;
+  }
+}
+
+html[data-theme="gojo"] {
+  color-scheme: dark;
+
+  --bg: #070910;
+  --bg-elevated: #0b0e17;
+  --panel: rgb(13 16 26 / 94%);
+  --panel-solid: #0d101a;
+  --panel-subtle: #111624;
+  --panel-muted: #181d2b;
+  --panel-elevated: #151a29;
+  --glass: rgb(10 13 22 / 88%);
+  --glass-strong: rgb(9 12 20 / 97%);
+
+  --text: #f7f9ff;
+  --text-secondary: #d5dced;
+  --muted: #8f9ab1;
+  --muted-strong: #b8c3d8;
+
+  --line: rgb(139 156 187 / 24%);
+  --line-strong: rgb(174 194 228 / 44%);
+  --line-soft: rgb(117 134 164 / 15%);
+
+  --accent: #63dcff;
+  --accent-strong: #34bce8;
+  --accent-soft: rgb(99 220 255 / 12%);
+  --accent-border: rgb(99 220 255 / 42%);
+  --accent-glow: rgb(99 220 255 / 28%);
+  --accent-on: #031018;
+  --brand-ink: #031018;
+
+  --danger: #ff6178;
+  --danger-soft: rgb(255 97 120 / 13%);
+  --danger-border: rgb(255 97 120 / 42%);
+  --danger-strong: #ff9aaa;
+  --ok: #64ddb2;
+  --ok-soft: rgb(100 221 178 / 12%);
+  --ok-border: rgb(100 221 178 / 38%);
+  --ok-strong: #9cf0d2;
+  --warning: #ffb75d;
+  --warning-soft: rgb(255 183 93 / 13%);
+  --warning-border: rgb(255 183 93 / 40%);
+  --warning-strong: #ffd29a;
+  --warning-text: #ffdaa9;
+
+  --focus: #8be7ff;
+  --focus-ring:
+    0 0 0 2px #070910,
+    0 0 0 4px rgb(99 220 255 / 82%),
+    0 0 18px rgb(169 131 255 / 30%);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 46%);
+  --shadow-sm: 0 4px 14px rgb(0 0 0 / 34%);
+  --shadow-md: 0 12px 32px rgb(0 0 0 / 46%);
+  --shadow-lg: 0 22px 58px rgb(0 0 0 / 58%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px rgb(99 220 255 / 32%), 0 0 22px rgb(99 220 255 / 18%);
+
+  --code-frame-bg: #05070d;
+  --code-bg: #090c14;
+  --code-text: #e8edfa;
+  --code-muted: #7f8aa1;
+  --code-border: rgb(99 220 255 / 22%);
+
+  --row-hover: rgb(99 220 255 / 8%);
+  --row-disabled: rgb(7 9 16 / 62%);
+  --topbar-bg: rgb(5 7 13 / 96%);
+  --backdrop: rgb(2 4 10 / 78%);
+  --neutral-chip: rgb(40 47 65 / 76%);
+  --toast-neutral: #748198;
+
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  --radius-sm: 3px;
+  --radius: 5px;
+  --radius-md: 7px;
+  --radius-lg: 8px;
+  --radius-full: 999px;
+
+  --font-sans: "Space Grotesk", "Noto Sans SC", "Segoe UI", system-ui, sans-serif;
+  /* The Latin mono faces carry no CJK, so a Chinese channel or model name fell
+     through to whatever generic `monospace` resolves to — Songti on Windows,
+     WenQuanYi on Linux — and landed next to the Latin glyphs at a different
+     weight and width. Noto Sans SC is already loaded for --font-sans and takes
+     the CJK run; the Latin faces still win for the identifiers that matter. */
+  --font-mono: "JetBrains Mono", "Fira Code", "SFMono-Regular", ui-monospace, Consolas, "Noto Sans SC", monospace;
+  --font-secret: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", ui-monospace, Consolas, monospace;
+  --transition: 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --blur: 0px;
+
+  --gojo-blue: #63dcff;
+  --gojo-blue-deep: #167eac;
+  --gojo-red: #ff6178;
+  --gojo-purple: #a983ff;
+  --gojo-white: #f7f9ff;
+  --gojo-ink: #05070d;
+  --gojo-rail-width: 118px;
+  --gojo-weave:
+    repeating-linear-gradient(135deg, rgb(255 255 255 / 2%) 0 1px, transparent 1px 5px),
+    repeating-linear-gradient(45deg, rgb(99 220 255 / 2%) 0 1px, transparent 1px 7px);
+  --gojo-icon-density: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h16M8 4.6 12 8.6l4-4M8 19.4 12 15.4l4 4'/%3E%3C/svg%3E");
+  --gojo-icon-logout: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 20H5.6A1.6 1.6 0 0 1 4 18.4V5.6A1.6 1.6 0 0 1 5.6 4h3.9M14.8 8.2 18.6 12l-3.8 3.8M18.6 12H9.4'/%3E%3C/svg%3E");
+
+  scrollbar-color: #387e9f #070910;
+}
+
+html[data-theme="gojo"] .aurora {
+  display: none;
+}
+
+html[data-theme="gojo"] ::selection {
+  background: var(--gojo-purple);
+  color: #0a0514;
+  text-shadow: none;
+}
+
+html[data-theme="gojo"] input[type="checkbox"] {
+  accent-color: var(--gojo-blue);
+}
+
+html[data-theme="gojo"] body {
+  background-color: var(--bg);
+  background-image:
+    repeating-linear-gradient(118deg, transparent 0 42px, rgb(247 249 255 / 2.5%) 42px 43px),
+    linear-gradient(180deg, #070910 0%, #0a0d16 48%, #06080e 100%);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Limitless field: displaced elliptical rings that never close around content. */
+html[data-theme="gojo"] body::before {
+  animation: gojo-field-drift 18s ease-in-out infinite alternate;
+  background-image:
+    repeating-radial-gradient(
+      ellipse at 82% 18%,
+      transparent 0 54px,
+      rgb(99 220 255 / 13%) 55px 56px,
+      transparent 57px 104px,
+      rgb(169 131 255 / 10%) 105px 106px,
+      transparent 107px 154px
+    ),
+    repeating-radial-gradient(
+      ellipse at 78% 22%,
+      transparent 0 88px,
+      rgb(255 97 120 / 6%) 89px 90px,
+      transparent 91px 178px
+    );
+  content: "";
+  inset: -4%;
+  pointer-events: none;
+  position: fixed;
+  transform-origin: 82% 18%;
+  z-index: 0;
+  mask-image: linear-gradient(132deg, transparent 0 18%, rgb(0 0 0 / 42%) 44%, #000 100%);
+  -webkit-mask-image: linear-gradient(132deg, transparent 0 18%, rgb(0 0 0 / 42%) 44%, #000 100%);
+}
+
+/* Blue and red vectors converge into violet without becoming decorative blobs. */
+html[data-theme="gojo"] body::after {
+  background:
+    linear-gradient(132deg, transparent 0 56%, rgb(99 220 255 / 13%) 56.1% 56.25%, transparent 56.35%),
+    linear-gradient(48deg, transparent 0 72%, rgb(255 97 120 / 10%) 72.1% 72.24%, transparent 72.34%),
+    linear-gradient(90deg, transparent 0 68%, rgb(169 131 255 / 8%) 82%, transparent 100%);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: 0;
+}
+
+html[data-theme="gojo"] .app-shell {
+  position: relative;
+  z-index: 1;
+}
+
+@media (min-width: 761px) {
+  html[data-theme="gojo"],
+  html[data-theme="gojo"] body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  html[data-theme="gojo"] .app-shell {
+    display: grid;
+    grid-template-columns: var(--gojo-rail-width) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    height: 100dvh;
+    min-height: 100dvh;
+    overflow: hidden;
+  }
+}
+
+/* Blindfold rail. */
+html[data-theme="gojo"] .topbar {
+  align-items: stretch;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background:
+    linear-gradient(180deg, rgb(99 220 255 / 5%), transparent 30%, rgb(169 131 255 / 5%) 78%, transparent),
+    var(--gojo-weave),
+    #05070d;
+  border: 0;
+  border-right: 1px solid rgb(99 220 255 / 32%);
+  box-shadow: 12px 0 32px rgb(0 0 0 / 38%);
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  isolation: isolate;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 18px 10px 14px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
+}
+
+html[data-theme="gojo"] .topbar::after {
+  animation: gojo-line-flow 7s linear infinite;
+  background:
+    linear-gradient(
+      180deg,
+      transparent 0 34%,
+      var(--gojo-blue) 42%,
+      #ffffff 47%,
+      var(--gojo-purple) 52%,
+      var(--gojo-red) 58%,
+      transparent 66%
+    );
+  background-repeat: repeat-y;
+  background-size: 100% 180px;
+  bottom: 0;
+  height: auto;
+  left: auto;
+  opacity: 0.9;
+  right: -2px;
+  top: 0;
+  width: 2px;
+}
+
+html[data-theme="gojo"] .topbar-brand {
+  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 2px 15px;
+  position: relative;
+  width: 100%;
+}
+
+/* White hair silhouette, kept on decoration so focus geometry stays intact. */
+html[data-theme="gojo"] .topbar-brand::before {
+  background: linear-gradient(160deg, #ffffff 0%, #d9e2f3 72%, #9da9c0 100%);
+  clip-path: polygon(0 58%, 8% 20%, 23% 46%, 34% 0, 46% 43%, 61% 7%, 69% 49%, 86% 17%, 100% 62%, 88% 100%, 9% 100%);
+  content: "";
+  height: 36px;
+  left: 5px;
+  opacity: 0.94;
+  pointer-events: none;
+  position: absolute;
+  right: 5px;
+  top: -13px;
+  z-index: -1;
+}
+
+html[data-theme="gojo"] .topbar-brand::after {
+  color: rgb(169 131 255 / 84%);
+  content: "LIMITLESS / 06";
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+/* The product mark becomes an abstract Six Eyes iris. */
+html[data-theme="gojo"] .brand-mark {
+  filter: none;
+  height: 34px;
+  position: relative;
+  width: 58px;
+}
+
+html[data-theme="gojo"] .brand-mark svg {
+  opacity: 0;
+}
+
+html[data-theme="gojo"] .brand-mark::before {
+  background:
+    radial-gradient(ellipse at center, #02040a 0 12%, #ffffff 13% 18%, #42cfff 19% 34%, #13749f 35% 42%, #dff8ff 43% 49%, #09101d 50% 68%, #c7d3e7 69% 73%, transparent 74%),
+    #edf4ff;
+  border: 1px solid rgb(247 249 255 / 70%);
+  border-radius: 52% 48% 52% 48% / 44% 44% 56% 56%;
+  box-shadow: 0 0 16px rgb(99 220 255 / 52%);
+  content: "";
+  inset: 5px 2px;
+  position: absolute;
+}
+
+html[data-theme="gojo"] .brand-mark::after {
+  animation: gojo-eye-breathe 3.8s ease-in-out infinite;
+  border: 1px solid rgb(99 220 255 / 64%);
+  border-radius: 50%;
+  box-shadow: 0 0 14px rgb(169 131 255 / 30%);
+  content: "";
+  inset: -4px 5px;
+  position: absolute;
+}
+
+html[data-theme="gojo"] .brand-text {
+  align-items: center;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
+}
+
+html[data-theme="gojo"] .topbar-brand h1 {
+  color: var(--gojo-white);
+  font-family: "Space Grotesk", var(--font-sans);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  text-shadow: 0 0 12px rgb(99 220 255 / 24%);
+  white-space: normal;
+}
+
+html[data-theme="gojo"] .brand-label {
+  color: var(--gojo-blue);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+/* ── Navigation ────────────────────────────────────────────
+   Rows are bare type on the blindfold; only the selected one is drawn. The
+   marker is the pack's own vector — blue at rest, blue-to-violet when live —
+   because a filled plate per row would turn the rail into a stack of fields. */
+
+html[data-theme="gojo"] .topbar-nav {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  counter-reset: gojo-nav;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  overflow: visible;
+  padding: 0;
+  width: 100%;
+}
+
+html[data-theme="gojo"] .nav-link {
+  align-items: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: rgb(213 220 237 / 74%);
+  counter-increment: gojo-nav;
+  display: flex;
+  font-size: 13px;
+  font-weight: 500;
+  justify-content: center;
+  letter-spacing: 0.04em;
+  min-height: 46px;
+  min-width: 0;
+  overflow: hidden;
+  padding: 6px 8px 15px;
+  position: relative;
+  text-align: center;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition);
+  white-space: nowrap;
+  width: 100%;
+}
+
+html[data-theme="gojo"] .nav-link::before {
+  background: rgb(143 154 177 / 46%);
+  border-radius: 0 2px 2px 0;
+  bottom: 0;
+  content: "";
+  height: 9px;
+  left: 0;
+  margin: auto 0;
+  position: absolute;
+  top: 0;
+  transition: background var(--transition), height var(--transition);
+  width: 3px;
+}
+
+html[data-theme="gojo"] .nav-link::after {
+  bottom: 4px;
+  color: #7a8599;
+  content: counter(gojo-nav, decimal-leading-zero);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  left: 0;
+  line-height: 1;
+  position: absolute;
+  right: 0;
+  transition: color var(--transition);
+}
+
+html[data-theme="gojo"] .nav-link:hover {
+  background: rgb(99 220 255 / 8%);
+  border-color: rgb(99 220 255 / 20%);
+  color: var(--gojo-white);
+}
+
+html[data-theme="gojo"] .nav-link:hover::before {
+  background: rgb(99 220 255 / 78%);
+  height: 17px;
+}
+
+html[data-theme="gojo"] .nav-link.active,
+html[data-theme="gojo"] .nav-link.active:hover {
+  background:
+    linear-gradient(96deg, rgb(99 220 255 / 16%) 0 46%, rgb(169 131 255 / 9%) 100%),
+    rgb(15 20 33 / 88%);
+  border-color: rgb(99 220 255 / 34%);
+  box-shadow: inset 0 0 18px rgb(99 220 255 / 10%);
+  color: #ffffff;
+}
+
+html[data-theme="gojo"] .nav-link.active::before,
+html[data-theme="gojo"] .nav-link.active:hover::before {
+  background: linear-gradient(180deg, var(--gojo-blue), #ffffff 50%, var(--gojo-purple));
+  height: 100%;
+}
+
+html[data-theme="gojo"] .nav-link.active::after,
+html[data-theme="gojo"] .nav-link.active:hover::after {
+  color: #9fe9ff;
+}
+
+html[data-theme="gojo"] .nav-link:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── Rail footer ───────────────────────────────────────────
+   Utilities, not actions: no fill until pointed at. console-rail.css scopes its
+   glyphs to the two built-in consoles, so the pack carries its own copies. The
+   paths are deliberately identical to the built-ins: the motifs may differ
+   between themes, but "change density" and "log out" should not. */
+
+html[data-theme="gojo"] .topbar-actions {
+  align-items: stretch;
+  border-top: 1px solid rgb(99 220 255 / 16%);
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  margin-left: 0;
+  margin-top: auto;
+  padding-top: 11px;
+  width: 100%;
+}
+
+html[data-theme="gojo"] .topbar-actions > *,
+html[data-theme="gojo"] .topbar-actions button {
+  min-width: 0;
+  width: 100%;
+}
+
+html[data-theme="gojo"] .topbar-actions .theme-toggle,
+html[data-theme="gojo"] .topbar-actions .density-toggle,
+html[data-theme="gojo"] .topbar-actions .nav-logout {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: #93a0b8;
+  display: flex;
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 500;
+  gap: 8px;
+  justify-content: center;
+  letter-spacing: 0;
+  min-height: 30px;
+  padding: 0 8px;
+  text-transform: none;
+}
+
+/* base.css sizes this as a square holding only the swatch, which leaves a lone
+   disc in a column of labelled rows. The button already carries
+   aria-label="选择主题", so this text is decoration and is not announced twice. */
+html[data-theme="gojo"] .topbar-actions .theme-toggle::after {
+  content: "主题";
+}
+
+html[data-theme="gojo"] .topbar-actions .theme-toggle-icon {
+  flex: 0 0 auto;
+  height: 14px;
+  width: 14px;
+}
+
+html[data-theme="gojo"] .topbar-actions .density-toggle::before,
+html[data-theme="gojo"] .topbar-actions .nav-logout::before {
+  background-color: currentColor;
+  content: "";
+  flex: 0 0 auto;
+  height: 14px;
+  opacity: 0.7;
+  transition: opacity var(--transition);
+  width: 14px;
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+html[data-theme="gojo"] .topbar-actions .density-toggle::before {
+  mask-image: var(--gojo-icon-density);
+  -webkit-mask-image: var(--gojo-icon-density);
+}
+
+html[data-theme="gojo"] .topbar-actions .nav-logout::before {
+  mask-image: var(--gojo-icon-logout);
+  -webkit-mask-image: var(--gojo-icon-logout);
+}
+
+html[data-theme="gojo"] .topbar-actions .theme-toggle:hover,
+html[data-theme="gojo"] .topbar-actions .density-toggle:hover {
+  background: rgb(99 220 255 / 12%);
+  border: 0;
+  box-shadow: none;
+  color: var(--gojo-white);
+  transform: none;
+}
+
+html[data-theme="gojo"] .topbar-actions .nav-logout:hover {
+  background: rgb(255 97 120 / 14%);
+  border: 0;
+  box-shadow: none;
+  color: var(--danger-strong);
+  transform: none;
+}
+
+html[data-theme="gojo"] .topbar-actions .density-toggle:hover::before,
+html[data-theme="gojo"] .topbar-actions .nav-logout:hover::before {
+  opacity: 1;
+}
+
+html[data-theme="gojo"] .live-indicator {
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid rgb(99 220 255 / 14%);
+  border-radius: 0;
+  color: #93a0b8;
+  font-size: 10px;
+  justify-content: center;
+  min-height: 26px;
+  padding: 0 8px 9px;
+}
+
+html[data-theme="gojo"] .live-dot,
+html[data-theme="gojo"] .stream-state-dot {
+  background: var(--gojo-blue);
+  box-shadow: 0 0 0 3px rgb(99 220 255 / 20%);
+}
+
+/* The rail is narrower than the menu, so it opens alongside rather than below,
+   and anchors to the bottom because its trigger sits at the foot. */
+html[data-theme="gojo"] .theme-menu {
+  bottom: 0;
+  left: calc(100% + 12px);
+  max-height: calc(100dvh - 28px);
+  min-width: 196px;
+  overflow: auto;
+  right: auto;
+  top: auto;
+}
+
+html[data-theme="gojo"] .theme-toggle-icon::before {
+  background: conic-gradient(from 210deg, var(--gojo-blue) 0 50%, var(--gojo-purple) 50% 100%);
+  border-color: rgb(99 220 255 / 58%);
+}
+
+/* ── Stage ───────────────────────────────────────────────── */
+
+html[data-theme="gojo"] .content {
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  margin: 0;
+  max-width: none;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding: 26px clamp(20px, 2.4vw, 38px) 54px;
+  scrollbar-gutter: stable;
+  width: 100%;
+}
+
+/* base.css caps .content at --content-max, which centres a column and leaves
+   the rest of a wide window as margin. The rail is the page's left edge here,
+   so the stage runs to the window instead. */
+html[data-theme="gojo"] .content > .view {
+  margin-inline: 0;
+  max-width: none;
+  width: 100%;
+}
+
+html[data-theme="gojo"] .view > .panel {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background-color: var(--panel-solid);
+  background-image:
+    linear-gradient(168deg, rgb(99 220 255 / 5%) 0 16%, transparent 44%),
+    var(--gojo-weave);
+  border: 1px solid rgb(139 156 187 / 22%);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  isolation: isolate;
+  min-height: calc(100dvh - 88px);
+  padding: 22px;
+  position: relative;
+}
+
+/* The Infinity boundary: a hairline that stops short of the far corner, so the
+   edge reads as something held off rather than a border drawn around a card. */
+html[data-theme="gojo"] .view > .panel::before {
+  background: linear-gradient(90deg, var(--gojo-blue) 0 22%, var(--gojo-purple) 46%, var(--gojo-red) 72%, transparent);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  content: "";
+  height: 2px;
+  left: 22px;
+  opacity: 0.72;
+  pointer-events: none;
+  position: absolute;
+  right: 44%;
+  top: -1px;
+}
+
+/* 領域 — the view's name distilled to one glyph, ghosted onto the surface.
+   z-index -1 with the panel's own isolation pins it between the panel's
+   background and its contents, so nothing inside needs a stacking fix. */
+html[data-theme="gojo"] .view > .panel::after {
+  color: rgb(99 220 255 / 6%);
+  content: var(--gojo-view-mark, "");
+  font-family: "Noto Serif SC", "Noto Sans SC", serif;
+  font-size: 300px;
+  font-weight: 700;
+  line-height: 0.8;
+  pointer-events: none;
+  position: absolute;
+  right: 8px;
+  top: 74px;
+  user-select: none;
+  z-index: -1;
+}
+
+html[data-theme="gojo"] .view[data-view="dashboard"] {
+  --gojo-view-mark: "眼";
+}
+
+html[data-theme="gojo"] .view[data-view="upstreams"] {
+  --gojo-view-mark: "術";
+}
+
+html[data-theme="gojo"] .view[data-view="logs"] {
+  --gojo-view-mark: "録";
+}
+
+html[data-theme="gojo"] .view[data-view="tokens"] {
+  --gojo-view-mark: "呪";
+}
+
+html[data-theme="gojo"] .view[data-view="groups"] {
+  --gojo-view-mark: "領";
+}
+
+html[data-theme="gojo"] .view[data-view="settings"] {
+  --gojo-view-mark: "縛";
+}
+
+html[data-theme="gojo"] .panel-head {
+  border-bottom: 1px solid rgb(139 156 187 / 20%);
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+}
+
+html[data-theme="gojo"] .panel h2,
+html[data-theme="gojo"] .dashboard-card h3,
+html[data-theme="gojo"] .dashboard-card-head h3,
+html[data-theme="gojo"] .dashboard-metric-head h3,
+html[data-theme="gojo"] .settings-card h3,
+html[data-theme="gojo"] .settings-card-head h3,
+html[data-theme="gojo"] .form-section-head h3 {
+  border-left: 2px solid var(--gojo-blue);
+  color: var(--gojo-white);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  padding-left: 10px;
+}
+
+html[data-theme="gojo"] .dashboard-card-head h3,
+html[data-theme="gojo"] .dashboard-metric-head h3 {
+  border-left-color: rgb(99 220 255 / 58%);
+}
+
+html[data-theme="gojo"] .eyebrow {
+  color: #7fd6f2;
+  letter-spacing: 0.14em;
+}
+
+html[data-theme="gojo"] .panel p,
+html[data-theme="gojo"] .dashboard-card-sub,
+html[data-theme="gojo"] .field-hint {
+  color: var(--muted);
+}
+
+html[data-theme="gojo"] .status,
+html[data-theme="gojo"] .summary-strip,
+html[data-theme="gojo"] .dashboard-kpi,
+html[data-theme="gojo"] .kpi-card,
+html[data-theme="gojo"] .dashboard-card,
+html[data-theme="gojo"] .settings-card,
+html[data-theme="gojo"] .system-info-grid,
+html[data-theme="gojo"] .system-info-item,
+html[data-theme="gojo"] .test-model-result,
+html[data-theme="gojo"] .test-model-prompt,
+html[data-theme="gojo"] .test-model-response,
+html[data-theme="gojo"] .log-detail-meta-card,
+html[data-theme="gojo"] .log-detail-section {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background-color: var(--panel-subtle);
+  border: 1px solid rgb(139 156 187 / 18%);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+}
+
+html[data-theme="gojo"] .dashboard-card:hover {
+  border-color: rgb(99 220 255 / 40%);
+  box-shadow: var(--shadow-sm), 0 0 0 1px rgb(99 220 255 / 18%);
+  transform: translateY(-1px);
+}
+
+/* .eyebrow is deliberately absent: base.css makes it display:block, so a fill
+   and a border would stretch it into a bar across the whole header. */
+html[data-theme="gojo"] .dashboard-card-meta,
+html[data-theme="gojo"] .settings-local-tag,
+html[data-theme="gojo"] .settings-readonly-tag,
+html[data-theme="gojo"] .settings-security-mark,
+html[data-theme="gojo"] .settings-revision {
+  background: rgb(99 220 255 / 10%);
+  border: 1px solid rgb(99 220 255 / 26%);
+  border-radius: var(--radius-sm);
+  color: #a9e6fa;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+html[data-theme="gojo"] .summary-strip span {
+  border-right: 1px solid rgb(139 156 187 / 16%);
+}
+
+html[data-theme="gojo"] .summary-strip strong,
+html[data-theme="gojo"] .dashboard-kpi strong,
+html[data-theme="gojo"] .kpi-card strong {
+  color: var(--gojo-white);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+html[data-theme="gojo"] .status[data-tone="ok"] {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok-strong);
+}
+
+html[data-theme="gojo"] .status[data-tone="error"] {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger-strong);
+}
+
+/* ── Buttons ───────────────────────────────────────────────
+   Primary actions are the blue technique: a cool fill with a bright top edge.
+   Navigation and the inline utility controls are excluded by name — they own
+   their own states, and a filled treatment on a table's sort control would read
+   as a primary action. The list is repeated per state rather than factored out
+   because :is()/:not() cannot be shared across separate rules. */
+
+html[data-theme="gojo"] button:not(:where(
+  .nav-link,
+  .table-sort-button,
+  .url-action,
+  .priority-value,
+  .token-preview-button,
+  .model-selection-remove,
+  .toast-close,
+  .field-action,
+  .action-menu-trigger,
+  .icon-close,
+  .icon-maximize,
+  .icon-refresh,
+  .status-switch,
+  .theme-toggle,
+  .density-toggle,
+  .nav-logout,
+  .segmented-control > button,
+  .theme-menu button,
+  .select-panel button,
+  .upstream-action-menu button
+)) {
+  background: linear-gradient(180deg, #63dcff 0%, #2fb2dd 52%, #1a86ad 100%);
+  border: 1px solid rgb(24 128 165 / 90%);
+  border-radius: var(--radius);
+  box-shadow:
+    inset 0 1px 0 rgb(233 250 255 / 62%),
+    0 1px 3px rgb(0 0 0 / 42%);
+  color: var(--accent-on);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+html[data-theme="gojo"] button:not(:where(
+  .nav-link,
+  .table-sort-button,
+  .url-action,
+  .priority-value,
+  .token-preview-button,
+  .model-selection-remove,
+  .toast-close,
+  .field-action,
+  .action-menu-trigger,
+  .icon-close,
+  .icon-maximize,
+  .icon-refresh,
+  .status-switch,
+  .theme-toggle,
+  .density-toggle,
+  .nav-logout,
+  .segmented-control > button,
+  .theme-menu button,
+  .select-panel button,
+  .upstream-action-menu button
+)):hover {
+  background: linear-gradient(180deg, #86e8ff 0%, #45c3ea 52%, #2295bd 100%);
+  box-shadow:
+    inset 0 1px 0 rgb(244 253 255 / 76%),
+    0 2px 10px rgb(99 220 255 / 26%);
+  color: var(--accent-on);
+}
+
+html[data-theme="gojo"] button:not(:where(
+  .nav-link,
+  .table-sort-button,
+  .url-action,
+  .priority-value,
+  .token-preview-button,
+  .model-selection-remove,
+  .toast-close,
+  .field-action,
+  .action-menu-trigger,
+  .icon-close,
+  .icon-maximize,
+  .icon-refresh,
+  .status-switch,
+  .segmented-control > button,
+  .theme-menu button,
+  .select-panel button,
+  .upstream-action-menu button
+)):active:not(:disabled) {
+  box-shadow: inset 0 2px 5px rgb(0 0 0 / 34%);
+  transform: translateY(1px);
+}
+
+html[data-theme="gojo"] button:not(:where(
+  .nav-link,
+  .table-sort-button,
+  .url-action,
+  .priority-value,
+  .token-preview-button,
+  .model-selection-remove,
+  .toast-close,
+  .field-action,
+  .action-menu-trigger,
+  .icon-close,
+  .icon-maximize,
+  .icon-refresh,
+  .status-switch,
+  .segmented-control > button,
+  .theme-menu button,
+  .select-panel button,
+  .upstream-action-menu button
+)):disabled,
+html[data-theme="gojo"] button:not(:where(
+  .nav-link,
+  .table-sort-button,
+  .url-action,
+  .priority-value,
+  .token-preview-button,
+  .model-selection-remove,
+  .toast-close,
+  .field-action,
+  .action-menu-trigger,
+  .icon-close,
+  .icon-maximize,
+  .icon-refresh,
+  .status-switch,
+  .segmented-control > button,
+  .theme-menu button,
+  .select-panel button,
+  .upstream-action-menu button
+)):disabled:hover {
+  background: rgb(40 47 65 / 82%);
+  border-color: rgb(139 156 187 / 22%);
+  box-shadow: none;
+  color: #8a95ab;
+  transform: none;
+}
+
+html[data-theme="gojo"] button.secondary {
+  background: rgb(24 29 43 / 92%);
+  border-color: rgb(139 156 187 / 26%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+  color: var(--text-secondary);
+}
+
+html[data-theme="gojo"] button.secondary:hover {
+  background: rgb(32 39 57 / 94%);
+  border-color: rgb(99 220 255 / 38%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%);
+  color: var(--gojo-white);
+}
+
+html[data-theme="gojo"] button.ghost {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted-strong);
+}
+
+html[data-theme="gojo"] button.ghost:hover {
+  background: rgb(99 220 255 / 12%);
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--gojo-white);
+  transform: none;
+}
+
+/* These two ship as .secondary.ghost, and the ghost rule above strips them to
+   bare text. Next to two filled buttons in a toolbar that reads as a label
+   someone forgot to style, so they take the secondary surface they claim. */
+html[data-theme="gojo"] .view > .panel .col-menu-btn.secondary.ghost,
+html[data-theme="gojo"] .view > .panel .log-sensitive-toggle.secondary.ghost {
+  background: rgb(24 29 43 / 92%);
+  border: 1px solid rgb(139 156 187 / 26%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+  color: var(--text-secondary);
+}
+
+html[data-theme="gojo"] .view > .panel .col-menu-btn.secondary.ghost:hover,
+html[data-theme="gojo"] .view > .panel .log-sensitive-toggle.secondary.ghost:hover {
+  background: rgb(32 39 57 / 94%);
+  border-color: rgb(99 220 255 / 38%);
+  color: var(--gojo-white);
+}
+
+html[data-theme="gojo"] .view > .panel .log-sensitive-toggle.secondary.ghost.is-active {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+/* Red is the reversal technique and stays reserved for destructive pressure. */
+html[data-theme="gojo"] button.danger {
+  background: rgb(255 97 120 / 12%);
+  border-color: var(--danger-border);
+  box-shadow: none;
+  color: var(--danger-strong);
+}
+
+html[data-theme="gojo"] button.danger:hover {
+  background: rgb(255 97 120 / 20%);
+  border-color: var(--danger);
+  box-shadow: none;
+  color: #ffc2cc;
+}
+
+html[data-theme="gojo"] .table-sort-button,
+html[data-theme="gojo"] .url-action,
+html[data-theme="gojo"] .priority-value,
+html[data-theme="gojo"] .token-preview-button,
+html[data-theme="gojo"] .model-selection-remove,
+html[data-theme="gojo"] .toast-close,
+html[data-theme="gojo"] .action-menu-trigger {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: inherit;
+  transform: none;
+}
+
+html[data-theme="gojo"] .table-sort-button:hover,
+html[data-theme="gojo"] .url-action:hover,
+html[data-theme="gojo"] .token-preview-button:hover,
+html[data-theme="gojo"] .action-menu-trigger:hover {
+  background: rgb(99 220 255 / 12%);
+  color: var(--accent);
+}
+
+html[data-theme="gojo"] .modal-head .icon-close,
+html[data-theme="gojo"] .modal-head .icon-maximize,
+html[data-theme="gojo"] .modal-head .icon-refresh,
+html[data-theme="gojo"] .log-detail-head .icon-close,
+html[data-theme="gojo"] .log-detail-head .icon-maximize {
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  color: var(--muted-strong);
+}
+
+html[data-theme="gojo"] .modal-head .icon-close:hover,
+html[data-theme="gojo"] .modal-head .icon-close:focus-visible,
+html[data-theme="gojo"] .log-detail-head .icon-close:hover,
+html[data-theme="gojo"] .log-detail-head .icon-close:focus-visible {
+  background: rgb(255 97 120 / 16%);
+  border-color: var(--danger-border);
+  color: var(--danger-strong);
+  transform: none;
+}
+
+html[data-theme="gojo"] .modal-head .icon-maximize:hover,
+html[data-theme="gojo"] .modal-head .icon-maximize:focus-visible,
+html[data-theme="gojo"] .modal-head .icon-refresh:enabled:hover,
+html[data-theme="gojo"] .modal-head .icon-refresh:enabled:focus-visible,
+html[data-theme="gojo"] .log-detail-head .icon-maximize:hover,
+html[data-theme="gojo"] .log-detail-head .icon-maximize:focus-visible {
+  background: rgb(99 220 255 / 16%);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  transform: none;
+}
+
+/* Six Eyes: every control answers keyboard focus with the same ring, including
+   the ones whose selected state replaces their box-shadow. */
+html[data-theme="gojo"] button:focus-visible,
+html[data-theme="gojo"] a:focus-visible,
+html[data-theme="gojo"] summary:focus-visible,
+html[data-theme="gojo"] [tabindex]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── Forms and menus ─────────────────────────────────────── */
+
+html[data-theme="gojo"] input,
+html[data-theme="gojo"] select,
+html[data-theme="gojo"] textarea {
+  background-color: rgb(6 8 14 / 76%);
+  border: 1px solid rgb(139 156 187 / 26%);
+  border-radius: var(--radius);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 36%);
+  color: var(--text);
+}
+
+html[data-theme="gojo"] input:hover,
+html[data-theme="gojo"] select:hover,
+html[data-theme="gojo"] textarea:hover {
+  border-color: rgb(139 156 187 / 42%);
+}
+
+html[data-theme="gojo"] input:focus,
+html[data-theme="gojo"] select:focus,
+html[data-theme="gojo"] textarea:focus,
+html[data-theme="gojo"] input:focus-visible,
+html[data-theme="gojo"] select:focus-visible,
+html[data-theme="gojo"] textarea:focus-visible {
+  background-color: rgb(4 6 12 / 86%);
+  border-color: var(--accent);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 36%), 0 0 0 3px rgb(99 220 255 / 18%);
+}
+
+html[data-theme="gojo"] .segmented-control {
+  background: rgb(6 8 14 / 76%);
+  border: 1px solid rgb(139 156 187 / 22%);
+  border-radius: var(--radius);
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 32%);
+}
+
+html[data-theme="gojo"] .segmented-control button,
+html[data-theme="gojo"] .theme-menu button,
+html[data-theme="gojo"] .select-panel button,
+html[data-theme="gojo"] .col-menu label,
+html[data-theme="gojo"] .upstream-action-menu button {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text-secondary);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  transform: none;
+}
+
+html[data-theme="gojo"] .segmented-control button.is-selected,
+html[data-theme="gojo"] .theme-menu button.is-selected,
+html[data-theme="gojo"] .select-panel button.is-selected {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-border);
+  color: #9fe9ff;
+}
+
+html[data-theme="gojo"] .theme-menu,
+html[data-theme="gojo"] .select-panel,
+html[data-theme="gojo"] .col-menu,
+html[data-theme="gojo"] .upstream-action-menu,
+html[data-theme="gojo"] .command-palette-panel {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: var(--glass-strong);
+  border: 1px solid rgb(139 156 187 / 26%);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+html[data-theme="gojo"] .theme-menu button:hover,
+html[data-theme="gojo"] .select-panel button:hover,
+html[data-theme="gojo"] .select-panel button.is-active,
+html[data-theme="gojo"] .col-menu label:hover,
+html[data-theme="gojo"] .upstream-action-menu button:hover {
+  background: var(--row-hover);
+  color: var(--gojo-white);
+}
+
+/* ── Tables and data surfaces ───────────────────────────── */
+
+html[data-theme="gojo"] .table-wrap {
+  background: rgb(10 13 21 / 88%);
+  border: 1px solid rgb(139 156 187 / 20%);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-xs);
+}
+
+html[data-theme="gojo"] th {
+  background: linear-gradient(180deg, rgb(23 29 44 / 96%), rgb(15 19 30 / 96%));
+  border-bottom: 1px solid rgb(99 220 255 / 24%);
+  color: #c9d5ea;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+html[data-theme="gojo"] td {
+  border-bottom-color: rgb(139 156 187 / 14%);
+  color: var(--text-secondary);
+}
+
+html[data-theme="gojo"] .table-wrap tbody tr:hover td {
+  background: var(--row-hover);
+  color: var(--gojo-white);
+}
+
+html[data-theme="gojo"] .dashboard-rank-track,
+html[data-theme="gojo"] .ops-bar-track {
+  background: rgb(24 29 43 / 88%);
+  border: 1px solid rgb(139 156 187 / 18%);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+/* The filled head is where blue and red meet, which is the one place violet is
+   allowed to appear on data. */
+html[data-theme="gojo"] .dashboard-rank-fill,
+html[data-theme="gojo"] .ops-bar-fill {
+  background: linear-gradient(90deg, #1a86ad 0%, #63dcff 62%, var(--gojo-purple) 100%);
+}
+
+html[data-theme="gojo"] .badge,
+html[data-theme="gojo"] .model-chip,
+html[data-theme="gojo"] .model-selection-chip,
+html[data-theme="gojo"] .model-selection-more,
+html[data-theme="gojo"] .token-preview-code,
+html[data-theme="gojo"] .effective-zero-note,
+html[data-theme="gojo"] .status-chip,
+html[data-theme="gojo"] .token-chip {
+  background: rgb(24 29 43 / 88%);
+  border: 1px solid rgb(139 156 187 / 22%);
+  border-radius: var(--radius-sm);
+  color: #cfd9ec;
+  font-weight: 600;
+}
+
+html[data-theme="gojo"] .badge.on,
+html[data-theme="gojo"] .badge.badge-ok,
+html[data-theme="gojo"] .badge.status-2xx {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok-strong);
+}
+
+html[data-theme="gojo"] .badge.danger,
+html[data-theme="gojo"] .badge.status-5xx {
+  background: var(--danger-soft);
+  border-color: var(--danger-border);
+  color: var(--danger-strong);
+}
+
+html[data-theme="gojo"] .badge.status-4xx {
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning-strong);
+}
+
+html[data-theme="gojo"] .badge.status-3xx {
+  background: rgb(169 131 255 / 14%);
+  border-color: rgb(169 131 255 / 40%);
+  color: #cbb6ff;
+}
+
+html[data-theme="gojo"] .badge.neutral,
+html[data-theme="gojo"] .badge.off,
+html[data-theme="gojo"] .badge.badge-off,
+html[data-theme="gojo"] .badge.status-other {
+  background: var(--neutral-chip);
+  border-color: rgb(139 156 187 / 24%);
+  color: #b3bfd4;
+}
+
+/* The flat chip rule above collapses name/prefix/mapping into one look, so the
+   mapping variants are restated to stay distinct from plain model names. */
+html[data-theme="gojo"] .model-selection-chip.is-mapping,
+html[data-theme="gojo"] .model-chip.mapping {
+  background: rgb(169 131 255 / 16%);
+  border-color: rgb(169 131 255 / 46%);
+  color: #d3c2ff;
+}
+
+html[data-theme="gojo"] .model-chip.is-selected,
+html[data-theme="gojo"] .status-chip.ok,
+html[data-theme="gojo"] .token-chip.ok {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok-strong);
+}
+
+html[data-theme="gojo"] pre,
+html[data-theme="gojo"] code,
+html[data-theme="gojo"] .code-frame,
+html[data-theme="gojo"] .token-value-box {
+  background: var(--code-bg);
+  border-color: var(--code-border);
+  color: var(--code-text);
+}
+
+/* ── Dialogs and overlays ───────────────────────────────── */
+
+html[data-theme="gojo"] dialog::backdrop,
+html[data-theme="gojo"] .upstream-dialog::backdrop,
+html[data-theme="gojo"] .model-dialog::backdrop,
+html[data-theme="gojo"] .log-detail-dialog::backdrop,
+html[data-theme="gojo"] .quick-import-dialog::backdrop,
+html[data-theme="gojo"] .admin-token-dialog::backdrop,
+html[data-theme="gojo"] .balance-dialog::backdrop,
+html[data-theme="gojo"] .confirm-dialog::backdrop,
+html[data-theme="gojo"] .command-palette-dialog::backdrop {
+  background:
+    radial-gradient(120% 80% at 78% 12%, rgb(99 220 255 / 10%), transparent 62%),
+    var(--backdrop);
+}
+
+html[data-theme="gojo"] dialog,
+html[data-theme="gojo"] .upstream-dialog-panel,
+html[data-theme="gojo"] .model-dialog-panel,
+html[data-theme="gojo"] .log-detail-panel,
+html[data-theme="gojo"] .quick-import-panel,
+html[data-theme="gojo"] .admin-token-panel,
+html[data-theme="gojo"] .balance-panel,
+html[data-theme="gojo"] .confirm-panel {
+  background: var(--panel-solid);
+  border: 1px solid rgb(139 156 187 / 26%);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+html[data-theme="gojo"] .modal-head,
+html[data-theme="gojo"] .upstream-modal-head,
+html[data-theme="gojo"] .log-detail-head,
+html[data-theme="gojo"] .modal-footer {
+  border-color: rgb(139 156 187 / 20%);
+}
+
+html[data-theme="gojo"] .toast {
+  background: var(--panel-elevated);
+  border: 1px solid rgb(139 156 187 / 26%);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  color: var(--text);
+}
+
+/* ── Switches and scrollbars ────────────────────────────── */
+
+/* The switch is a track and a thumb, so it carries no surface of its own. It is
+   deliberately NOT stripped of its focus state the way the neighbouring packs
+   strip theirs: it is a keyboard-operable toggle, and `outline: none` on
+   :focus-visible leaves it the one control in the console a keyboard user
+   cannot locate. The ring goes on the track below, which is the part with a
+   visible edge to hang it on. */
+html[data-theme="gojo"] .status-switch,
+html[data-theme="gojo"] .status-switch:hover {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--text-secondary);
+  outline: none;
+  padding: 0;
+}
+
+html[data-theme="gojo"] .status-switch:focus-visible {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  outline: none;
+  padding: 0;
+}
+
+html[data-theme="gojo"] .status-switch:focus-visible .status-switch-track {
+  border-color: var(--focus);
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px rgb(99 220 255 / 82%);
+}
+
+html[data-theme="gojo"] .status-switch-track {
+  background: rgb(24 29 43 / 92%);
+  border: 1px solid rgb(139 156 187 / 26%);
+  border-radius: var(--radius-full);
+}
+
+html[data-theme="gojo"] .status-switch-thumb {
+  background: #cfd9ec;
+  border-radius: 50%;
+}
+
+html[data-theme="gojo"] .status-switch.on .status-switch-track {
+  background: linear-gradient(90deg, #1a86ad, #63dcff);
+  border-color: rgb(99 220 255 / 52%);
+}
+
+html[data-theme="gojo"] .status-switch.on .status-switch-thumb {
+  background: #ffffff;
+}
+
+html[data-theme="gojo"] ::-webkit-scrollbar {
+  height: 11px;
+  width: 11px;
+}
+
+html[data-theme="gojo"] ::-webkit-scrollbar-track {
+  background: #05070d;
+}
+
+html[data-theme="gojo"] ::-webkit-scrollbar-thumb {
+  background: #2b6f8d;
+  border: 2px solid #05070d;
+  border-radius: 999px;
+}
+
+html[data-theme="gojo"] ::-webkit-scrollbar-thumb:hover {
+  background: #3c92b5;
+}
+
+html[data-theme="gojo"] ::-webkit-scrollbar-corner {
+  background: #05070d;
+}
+
+/* ── Mobile ─────────────────────────────────────────────────
+   The rail becomes a six-slot dock. The shell has to be un-gridded first: the
+   desktop block above locks html/body to 100dvh with overflow hidden, which on
+   a phone would trap the page inside one viewport. */
+
+@media (max-width: 760px) {
+  html[data-theme="gojo"],
+  html[data-theme="gojo"] body {
+    height: auto;
+    overflow: visible;
+  }
+
+  html[data-theme="gojo"] .app-shell {
+    display: flex;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    /* Room for the fixed dock plus the home indicator, so the last table row is
+       not parked underneath it. */
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+
+  html[data-theme="gojo"] .topbar {
+    align-items: center;
+    background:
+      linear-gradient(90deg, rgb(99 220 255 / 6%), transparent 46%, rgb(169 131 255 / 6%)),
+      var(--gojo-weave),
+      #05070d;
+    border-bottom: 1px solid rgb(99 220 255 / 28%);
+    border-right: 0;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 36%);
+    flex-direction: row;
+    gap: 10px;
+    height: auto;
+    justify-content: space-between;
+    min-height: 56px;
+    padding: 8px 12px;
+    position: sticky;
+    width: 100%;
+  }
+
+  html[data-theme="gojo"] .topbar::after {
+    background: linear-gradient(90deg, transparent, var(--gojo-blue) 22%, #ffffff 50%, var(--gojo-purple) 74%, transparent);
+    bottom: -1px;
+    height: 2px;
+    inset-inline: 0;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: auto;
+  }
+
+  html[data-theme="gojo"] .topbar-brand {
+    align-items: center;
+    flex-direction: row;
+    gap: 9px;
+    padding: 0;
+    width: auto;
+  }
+
+  /* The hair silhouette and the clearance line are rail furniture; in a 56px
+     horizontal bar there is no column for them to sit in. */
+  html[data-theme="gojo"] .topbar-brand::before,
+  html[data-theme="gojo"] .topbar-brand::after,
+  html[data-theme="gojo"] .brand-label,
+  html[data-theme="gojo"] .topbar-actions .live-indicator,
+  html[data-theme="gojo"] .topbar-actions .density-toggle,
+  html[data-theme="gojo"] .topbar-actions .theme-menu-wrap {
+    display: none;
+  }
+
+  html[data-theme="gojo"] .brand-mark {
+    height: 26px;
+    width: 40px;
+  }
+
+  html[data-theme="gojo"] .brand-mark::before {
+    inset: 3px 1px;
+  }
+
+  html[data-theme="gojo"] .brand-mark::after {
+    inset: -3px 3px;
+  }
+
+  html[data-theme="gojo"] .brand-text {
+    align-items: flex-start;
+    text-align: left;
+    width: auto;
+  }
+
+  html[data-theme="gojo"] .topbar-brand h1 {
+    font-size: 15px;
+    overflow-wrap: normal;
+    white-space: nowrap;
+  }
+
+  html[data-theme="gojo"] .topbar-actions {
+    align-items: center;
+    border-top: 0;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 0;
+    padding-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="gojo"] .topbar-actions > *,
+  html[data-theme="gojo"] .topbar-actions button {
+    width: auto;
+  }
+
+  html[data-theme="gojo"] .topbar-nav {
+    background: rgb(5 7 13 / 96%);
+    border: 1px solid rgb(99 220 255 / 26%);
+    border-radius: var(--radius-md);
+    bottom: max(8px, env(safe-area-inset-bottom));
+    box-shadow: 0 10px 26px rgb(0 0 0 / 52%);
+    display: grid;
+    gap: 2px;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    left: 8px;
+    padding: 4px;
+    position: fixed;
+    right: 8px;
+    width: auto;
+    z-index: 40;
+  }
+
+  /* A sixth of a phone screen is ~58px, so the row keeps a 48px tap target and
+     the marker moves to the top edge where it does not eat label width. */
+  html[data-theme="gojo"] .nav-link {
+    font-size: var(--text-sm);
+    justify-content: center;
+    letter-spacing: 0;
+    min-height: 48px;
+    padding: 7px 2px 14px;
+  }
+
+  html[data-theme="gojo"] .nav-link::before {
+    border-radius: 0 0 2px 2px;
+    bottom: auto;
+    height: 3px;
+    left: 10px;
+    margin: 0;
+    right: 10px;
+    top: 0;
+    transform: scaleX(0.4);
+    transform-origin: center;
+    transition: background var(--transition), transform var(--transition);
+    width: auto;
+  }
+
+  html[data-theme="gojo"] .nav-link:hover::before {
+    height: 3px;
+    transform: scaleX(0.7);
+  }
+
+  html[data-theme="gojo"] .nav-link.active::before,
+  html[data-theme="gojo"] .nav-link.active:hover::before {
+    background: linear-gradient(90deg, var(--gojo-blue), #ffffff 50%, var(--gojo-purple));
+    height: 3px;
+    transform: scaleX(1);
+  }
+
+  html[data-theme="gojo"] .content {
+    display: block;
+    height: auto;
+    max-width: var(--content-max);
+    overflow: visible;
+    padding: 16px 12px 36px;
+  }
+
+  html[data-theme="gojo"] .view > .panel {
+    min-height: 0;
+    padding: 14px;
+  }
+
+  /* At 300px the glyph would sit under the whole first screen of content. */
+  html[data-theme="gojo"] .view > .panel::after {
+    font-size: 150px;
+    top: 56px;
+  }
+
+  html[data-theme="gojo"] .view > .panel::before {
+    left: 14px;
+    right: 36%;
+  }
+
+  html[data-theme="gojo"] .panel-head {
+    align-items: stretch;
+  }
+}
+
+/* The console is something people stare at for hours; nothing in it may move in
+   the reader's peripheral vision without consent. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="gojo"] *,
+  html[data-theme="gojo"] *::before,
+  html[data-theme="gojo"] *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

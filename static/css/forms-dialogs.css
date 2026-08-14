@@ -396,11 +396,60 @@ html:has(dialog:modal) {
   gap: 5px;
 }
 
+/* The grid above outranks the UA stylesheet's [hidden] rule, so any field a
+   script hides needs the hiding spelled out here or it stays on screen. */
+.field[hidden] {
+  display: none;
+}
+
 .field-label {
   color: var(--muted-strong);
   font-size: var(--text-sm);
   font-weight: 600;
   letter-spacing: 0.01em;
+}
+
+/* An input with a control riding alongside it. The input takes the slack so the
+   button keeps its square footprint at any dialog width. */
+.field-with-action {
+  display: flex;
+  gap: 6px;
+}
+
+.field-with-action input {
+  flex: 1 1 auto;
+}
+
+.field-action {
+  flex: 0 0 auto;
+  padding: 0;
+  width: var(--control-h);
+}
+
+.field-action svg {
+  fill: none;
+  height: 14px;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+  width: 14px;
+}
+
+/* Same green confirmation the tables use for an inline copy. */
+.field-action.is-confirmed {
+  background: var(--ok-soft);
+  border-color: var(--ok-border);
+  color: var(--ok);
+}
+
+.field-action-done,
+.field-action.is-confirmed .field-action-icon {
+  display: none;
+}
+
+.field-action.is-confirmed .field-action-done {
+  display: block;
 }
 
 .field-hint {
@@ -414,6 +463,16 @@ html:has(dialog:modal) {
   background: var(--panel-muted);
   border-radius: 3px;
   padding: 0 4px;
+}
+
+.field-hint-error {
+  color: var(--danger);
+}
+
+.expiry-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .model-picker-label-row {
@@ -1061,4 +1120,26 @@ dialog.is-maximized .log-detail-panel {
 
 .modal-actions {
   justify-content: flex-end;
+}
+
+/* 分组多选：横向排列的复选框，数量多时自动换行 */
+.group-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-muted, transparent);
+  max-height: 8rem;
+  overflow-y: auto;
+}
+
+.group-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9em;
+  white-space: nowrap;
+  cursor: pointer;
 }

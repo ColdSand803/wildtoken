@@ -1,8 +1,0 @@
-{
-  "id": "crt",
-  "label": "CRT",
-  "css": "theme.css",
-  "swatch": ["#020b05", "#39ff14"],
-  "version": "1.0.0",
-  "description": "Monochrome phosphor terminal theme with scanlines, green glow, and CRT bezel surfaces."
-}

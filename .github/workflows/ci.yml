@@ -15,12 +15,11 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: "1"
+  GO_VERSION: "1.25"
 
 jobs:
   checks:
-    name: Rust and JavaScript checks
+    name: Go and JavaScript checks
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -29,25 +28,39 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Go toolchain
+        uses: actions/setup-go@v6
         with:
-          toolchain: 1.88.0
-          components: clippy, rustfmt
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Install Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 22
 
-      - name: Check Rust formatting
-        run: cargo fmt --all -- --check
+      - name: Check Go formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          unformatted="$(gofmt -l cmd internal)"
+          if [[ -n "$unformatted" ]]; then
+            echo "These files are not gofmt-clean:" >&2
+            echo "$unformatted" >&2
+            exit 1
+          fi
 
-      - name: Lint Rust
-        run: cargo clippy --locked --all-targets -- -D warnings
+      - name: Verify module tidiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          git diff --exit-code go.mod go.sum
 
-      - name: Run Rust tests
-        run: cargo test --locked --all-targets
+      - name: Vet Go
+        run: go vet ./...
+
+      - name: Run Go tests
+        run: go test -race ./...
 
       - name: Check JavaScript syntax
         shell: bash
@@ -58,9 +71,9 @@ jobs:
           done < <(find static/js -type f -name '*.js' -print0 | sort -z)
           node --test tests/*.test.mjs
 
-  windows-check:
-    name: Windows compile check
-    runs-on: windows-2022
+  cross-compile:
+    name: Cross-compile check
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - name: Check out repository
@@ -68,14 +81,23 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Go toolchain
+        uses: actions/setup-go@v6
         with:
-          toolchain: 1.88.0
-          targets: x86_64-pc-windows-msvc
+          go-version: ${{ env.GO_VERSION }}
 
-      - name: Check Windows target
-        run: cargo check --locked --target x86_64-pc-windows-msvc
+      # Every target builds without cgo, so a single Linux runner can verify
+      # them all.
+      - name: Build every release target
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o /dev/null ./cmd/wildtoken
+          GOOS=darwin GOARCH=amd64 go build -o /dev/null ./cmd/wildtoken
+          GOOS=darwin GOARCH=arm64 go build -o /dev/null ./cmd/wildtoken
+          GOOS=linux GOARCH=arm64 go build -o /dev/null ./cmd/wildtoken
 
   docker-smoke:
     name: Docker smoke test
@@ -98,7 +120,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          admin_token='ci-smoke-placeholder'
+          admin_token='ci-smoke-placeholder-token'
           docker run --detach \
             --name "$CONTAINER_NAME" \
             --publish 127.0.0.1:3110:3100 \
@@ -129,7 +151,7 @@ jobs:
           grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-admin.html"
 
           curl --fail --silent --show-error \
-            http://127.0.0.1:3110/theme-packs/bleach/theme.css \
+            http://127.0.0.1:3110/theme-packs/ark/theme.css \
             --output "$RUNNER_TEMP/wildtoken-theme.css"
 
           curl --fail --silent --show-error \

@@ -141,15 +141,43 @@ function cleanupRuntimeHint(cleanup) {
   return `上次 ${duration} · ${formatCompactNumber(Number(cleanup.last_rows_cleared || 0))} 行`;
 }
 
+/* Tone of each KPI as it was on the previous render, keyed by container and
+   label. The dashboard is rebuilt with `innerHTML =` on a five-second poll, so
+   a CSS animation declared on `.tone-danger` would not play when a metric goes
+   bad — it would replay every five seconds for as long as it stayed bad, which
+   is the failure mode this console has to avoid above all others.
+
+   Recording the previous tone lets the *transition* be marked instead of the
+   state: `data-tone-escalated` is set for one render only, on the poll where a
+   metric first gets worse than it was. Themes decide whether to draw anything
+   for it; nothing here assumes they will. */
+const kpiToneMemory = new WeakMap();
+
+const TONE_RANK = { "": 0, "tone-ok": 0, "tone-warn": 1, "tone-danger": 2 };
+
 function renderDashboardKpiCards(container, cards) {
   if (!container) return;
-  container.innerHTML = cards.map((card) => `
-    <div class="dashboard-kpi ${card.tone}">
+  const entering = container.childElementCount === 0;
+  const previous = kpiToneMemory.get(container) || new Map();
+  const next = new Map();
+  const html = cards.map((card, index) => {
+    const tone = card.tone || "";
+    next.set(card.label, tone);
+    const before = previous.get(card.label);
+    // Only on a real worsening, and never on the first render — arriving at a
+    // page that is already failing is a state, not an event.
+    const escalated = before !== undefined
+      && (TONE_RANK[tone] ?? 0) > (TONE_RANK[before] ?? 0);
+    return `
+    <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}>
       <div class="dashboard-kpi-value">${escapeHtml(card.value)}</div>
       <div class="dashboard-kpi-label">${escapeHtml(card.label)}</div>
       <div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>
     </div>
-  `).join("");
+  `;
+  }).join("");
+  kpiToneMemory.set(container, next);
+  container.innerHTML = html;
 }
 
 function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
@@ -379,6 +407,10 @@ function renderDashboard() {
   // stale local state cannot mislabel the numbers on screen.
   const rangeLabel = dashboardTokenUsage?.range_label || getTimeRangeLabel(dashboardTimeRange);
   const servedRange = dashboardTokenUsage?.range || dashboardTimeRange;
+  if (dashboardPanel) {
+    dashboardPanel.dataset.dashboardWindow = dashboardShowsSingleWindow(servedRange) ? "single" : "multi";
+  }
+
   for (const meta of [dashboardTokenRangeMeta, dashboardSelectedRangeMeta]) {
     if (meta) meta.textContent = rangeLabel;
   }
@@ -634,3 +666,117 @@ async function loadDashboardData() {
 const scheduleRenderUpstreamSummary = debounce(() => {
   renderUpstreamSummaryCore();
 }, 120);
+
+let dashboardCustomRangeHideTimer = 0;
+const DASHBOARD_CUSTOM_RANGE_MOTION_MS = 260;
+
+function prefersReducedDashboardMotion() {
+  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+function formatDashboardDateLabel(value) {
+  if (!value) return "";
+  const [year, month, day] = String(value).split("-");
+  if (!year || !month || !day) return value;
+  return `${year}/${month}/${day}`;
+}
+
+function syncDashboardDateMirrors() {
+  document.querySelectorAll(".dashboard-date-field").forEach((field) => {
+    const input = field.querySelector("input[type='date']");
+    const mirror = field.querySelector(".dashboard-date-text");
+    if (!input || !mirror) return;
+    const label = formatDashboardDateLabel(input.value);
+    mirror.textContent = label || field.dataset.placeholder || "";
+    field.classList.toggle("is-empty", !label);
+  });
+}
+
+function setDashboardCustomRangeOpen(open) {
+  if (!dashboardCustomRange) return;
+  const el = dashboardCustomRange;
+  const chips = document.querySelector("#dashboard-time-chips");
+  window.clearTimeout(dashboardCustomRangeHideTimer);
+  chips?.classList.toggle("is-custom", open);
+
+  const finishHide = () => {
+    if (el.classList.contains("is-open")) return;
+    el.hidden = true;
+    window.requestAnimationFrame(syncDashboardRangeThumb);
+  };
+
+  if (open) {
+    const alreadyOpen = el.classList.contains("is-open") && !el.hidden;
+    el.hidden = false;
+    el.setAttribute("aria-hidden", "false");
+    syncDashboardDateMirrors();
+    if (alreadyOpen) {
+      window.requestAnimationFrame(syncDashboardRangeThumb);
+      return;
+    }
+    const reveal = () => {
+      el.classList.add("is-open");
+      window.requestAnimationFrame(() => {
+        syncDashboardRangeThumb();
+        el.scrollIntoView({ inline: "end", block: "nearest", behavior: "smooth" });
+      });
+    };
+    if (prefersReducedDashboardMotion()) {
+      reveal();
+      return;
+    }
+    window.requestAnimationFrame(reveal);
+    return;
+  }
+
+  if (el.hidden && !el.classList.contains("is-open")) {
+    window.requestAnimationFrame(syncDashboardRangeThumb);
+    return;
+  }
+  el.setAttribute("aria-hidden", "true");
+  el.classList.remove("is-open");
+  window.requestAnimationFrame(syncDashboardRangeThumb);
+  if (prefersReducedDashboardMotion()) {
+    finishHide();
+    return;
+  }
+  dashboardCustomRangeHideTimer = window.setTimeout(finishHide, DASHBOARD_CUSTOM_RANGE_MOTION_MS);
+}
+
+function syncDashboardRangeThumb() {
+  const chips = document.querySelector("#dashboard-time-chips");
+  const thumb = chips?.querySelector(".wt-seg-thumb");
+  const customOpen = chips?.classList.contains("is-custom");
+  const active = customOpen
+    ? chips.querySelector(".dashboard-custom-range")
+    : chips?.querySelector("[data-dashboard-range].is-active");
+  if (!chips || !thumb || !active || (customOpen && active.hidden)) {
+    if (thumb) thumb.style.opacity = "0";
+    return;
+  }
+  thumb.style.width = `${active.offsetWidth}px`;
+  thumb.style.height = `${active.offsetHeight}px`;
+  thumb.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+  thumb.style.opacity = "1";
+}
+
+function syncDashboardRangeChips() {
+  const value = dashboardTimePreset?.value || dashboardTimeRange;
+  document.querySelectorAll("[data-dashboard-range]").forEach((button) => {
+    const on = button.dataset.dashboardRange === value;
+    button.classList.toggle("is-active", on);
+    button.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  setDashboardCustomRangeOpen(value === "custom");
+}
+
+syncDashboardDateMirrors();
+syncDashboardRangeChips();
+["#dashboard-start-date", "#dashboard-end-date"].forEach((selector) => {
+  const input = document.querySelector(selector);
+  input?.addEventListener("input", syncDashboardDateMirrors);
+  input?.addEventListener("change", syncDashboardDateMirrors);
+});
+window.addEventListener("resize", () => {
+  window.requestAnimationFrame(syncDashboardRangeThumb);
+});
