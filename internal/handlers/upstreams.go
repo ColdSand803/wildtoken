@@ -1340,15 +1340,15 @@ func parseSub2APIBalancePayload(payload map[string]any) (map[string]any, bool) {
 func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ExportUpstreamsRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondErr(w, apperr.BadRequest("invalid request body: "+err.Error()))
+		if err := decodeJSON(r, &req); err != nil {
+			apperr.WriteError(w, err)
 			return
 		}
 
 		ctx := r.Context()
 		rows, err := db.ListUpstreams(ctx, state.DB)
 		if err != nil {
-			respondErr(w, err)
+			apperr.WriteError(w, err)
 			return
 		}
 
@@ -1389,7 +1389,7 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 			if req.IncludeAPIKeys {
 				row, found, err := db.GetUpstream(ctx, state.DB, out.ID)
 				if err != nil {
-					respondErr(w, err)
+					apperr.WriteError(w, err)
 					return
 				}
 				if found && row.APIKey != nil {
@@ -1405,7 +1405,7 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 			ExportedAt: time.Now().UTC().Format(time.RFC3339),
 			Channels:   channels,
 		}
-		respondJSON(w, http.StatusOK, resp)
+		apperr.WriteJSON(w, http.StatusOK, resp)
 	}
 }
 
@@ -1413,13 +1413,13 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ImportUpstreamsRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			respondErr(w, apperr.BadRequest("invalid request body: "+err.Error()))
+		if err := decodeJSON(r, &req); err != nil {
+			apperr.WriteError(w, err)
 			return
 		}
 
 		if req.Mode != "skip" && req.Mode != "overwrite" {
-			respondErr(w, apperr.BadRequest("mode must be 'skip' or 'overwrite'"))
+			apperr.WriteError(w, apperr.BadRequest("mode must be 'skip' or 'overwrite'"))
 			return
 		}
 
@@ -1495,7 +1495,7 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 
 				// Overwrite
 				update := models.UpstreamUpdate{
-					Base:        input,
+					UpstreamIn:  input,
 					ClearAPIKey: false, // Keep existing key if import has none
 				}
 				_, err := db.UpdateUpstream(ctx, state.DB, existing.ID, &update)
@@ -1539,10 +1539,10 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 		}
 
 		// Invalidate caches after all changes
-		state.ModelsListCache.Invalidate()
-		state.RoutingCache.Invalidate()
+		state.ModelsCache.Invalidate()
+		state.Routing.Invalidate()
 
-		respondJSON(w, http.StatusOK, result)
+		apperr.WriteJSON(w, http.StatusOK, result)
 	}
 }
 
