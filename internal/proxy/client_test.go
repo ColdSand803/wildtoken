@@ -419,3 +419,36 @@ func TestObservationDiscardsAndRecoversFromAnOversizedEventLine(t *testing.T) {
 		t.Error("the stream did not recover to observe the terminal event")
 	}
 }
+
+func TestBufferedSSEBodiesAreWalkedWithoutCopyingThem(t *testing.T) {
+	usageEvent := `data: {"type":"response.completed","response":{"usage":` +
+		`{"input_tokens":11,"output_tokens":7,"total_tokens":18}}}`
+	tokenEvent := `data: {"type":"response.output_text.delta","delta":"hi"}`
+
+	// The body is walked in place now, so the line boundaries themselves are
+	// what a rewrite could get wrong: a trailing newline, none at all, and the
+	// CRLF an upstream behind a proxy tends to emit.
+	for name, body := range map[string]string{
+		"trailing newline":    tokenEvent + "\n\n" + usageEvent + "\n\n",
+		"no trailing newline": tokenEvent + "\n\n" + usageEvent,
+		"crlf":                tokenEvent + "\r\n\r\n" + usageEvent + "\r\n\r\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			raw := []byte(body)
+			assertUsage(t, ExtractUsage(raw, "text/event-stream"), map[string]any{
+				"prompt": int32(11), "completion": int32(7), "total": int32(18),
+			})
+			if !HasVisibleToken(raw) {
+				t.Error("a body carrying a delta reported no visible token")
+			}
+		})
+	}
+
+	// An empty body must not be mistaken for a line.
+	if usage := ExtractUsage(nil, "text/event-stream"); usage.TotalTokens != nil {
+		t.Errorf("an empty body reported usage %v", usage.TotalTokens)
+	}
+	if HasVisibleToken(nil) {
+		t.Error("an empty body reported a visible token")
+	}
+}

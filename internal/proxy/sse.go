@@ -121,14 +121,48 @@ func jsonHasVisibleToken(payload jsonValue) bool {
 	return false
 }
 
+// forEachSSELine walks a buffered body one newline-delimited line at a time,
+// stopping early when visit returns false.
+//
+// The lines are slices of the body rather than copies. Converting the body to a
+// string and splitting it allocated a second copy of the whole thing plus a
+// slice header for every line it contained — several times the body's own size
+// before a single byte had been parsed, and three separate readers each paid it
+// for the same body. A large response from a channel answering in bad faith
+// turned its size into a multiple of itself in memory.
+func forEachSSELine(body []byte, visit func(line []byte) bool) {
+	for len(body) > 0 {
+		line, rest, found := bytes.Cut(body, []byte("\n"))
+		if !visit(line) {
+			return
+		}
+		if !found {
+			return
+		}
+		body = rest
+	}
+}
+
+// sseDataBytes returns the payload of a `data:` line, as a slice of the line.
+func sseDataBytes(line []byte) ([]byte, bool) {
+	rest, found := bytes.CutPrefix(bytes.TrimSpace(line), []byte("data:"))
+	if !found {
+		return nil, false
+	}
+	return bytes.TrimLeft(rest, " \t"), true
+}
+
 // HasVisibleToken reports whether a buffered SSE chunk contains a content token.
 func HasVisibleToken(chunk []byte) bool {
-	for _, line := range strings.Split(string(chunk), "\n") {
-		if sseLineHasVisibleToken(line) {
-			return true
+	visible := false
+	forEachSSELine(chunk, func(line []byte) bool {
+		if sseBytesLineHasVisibleToken(line) {
+			visible = true
+			return false
 		}
-	}
-	return false
+		return true
+	})
+	return visible
 }
 
 func sseLineHasVisibleToken(line string) bool {
@@ -348,24 +382,23 @@ func responseReasoningEffortFromValue(payload jsonValue) (string, bool) {
 
 // ExtractUsage reads token usage from either an SSE stream body or a JSON body.
 func ExtractUsage(rawBody []byte, contentType string) TokenUsage {
-	text := string(rawBody)
-
 	if IsSSEContentType(contentType) || strings.Contains(strings.ToLower(contentType), "sse") {
 		// A stream reports usage repeatedly; the last report wins.
 		var usage TokenUsage
-		for _, line := range strings.Split(text, "\n") {
-			data, ok := sseData(line)
-			if !ok || data == "[DONE]" {
-				continue
+		forEachSSELine(rawBody, func(line []byte) bool {
+			data, ok := sseDataBytes(line)
+			if !ok || string(data) == "[DONE]" {
+				return true
 			}
 			var payload jsonValue
-			if err := json.Unmarshal([]byte(data), &payload); err != nil {
-				continue
+			if err := json.Unmarshal(data, &payload); err != nil {
+				return true
 			}
 			if found, ok := usageFromValue(payload); ok {
 				usage = found
 			}
-		}
+			return true
+		})
 		return usage
 	}
 
@@ -527,20 +560,23 @@ func (o *sseObservation) finish(elapsedMs func() int32) {
 // ExtractResponseReasoningEffort reads the effort a response reported.
 func ExtractResponseReasoningEffort(rawBody []byte, contentType string) *string {
 	if strings.Contains(contentType, "event-stream") || bytes.HasPrefix(rawBody, []byte("data:")) {
-		for _, line := range strings.Split(string(rawBody), "\n") {
-			data, ok := sseData(line)
+		var reported *string
+		forEachSSELine(rawBody, func(line []byte) bool {
+			data, ok := sseDataBytes(line)
 			if !ok {
-				continue
+				return true
 			}
 			var payload jsonValue
-			if err := json.Unmarshal([]byte(strings.TrimSpace(data)), &payload); err != nil {
-				continue
+			if err := json.Unmarshal(bytes.TrimSpace(data), &payload); err != nil {
+				return true
 			}
 			if effort, ok := responseReasoningEffortFromValue(payload); ok {
-				return &effort
+				reported = &effort
+				return false
 			}
-		}
-		return nil
+			return true
+		})
+		return reported
 	}
 
 	var payload jsonValue
