@@ -21,6 +21,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
@@ -87,8 +88,9 @@ func New(ctx context.Context) (*Server, error) {
 	}
 
 	jobsCtx, cancelJobs := context.WithCancel(context.Background())
+	quotas := quota.NewTracker()
 	logWriter := proxy.NewLogWriter(jobsCtx, database, runtimeMetrics, logStats,
-		settings.Logging.LogQueueCapacity)
+		settings.Logging.LogQueueCapacity, quotas)
 
 	state := &appstate.State{
 		DB:                  database,
@@ -105,6 +107,7 @@ func New(ctx context.Context) (*Server, error) {
 		Routing:             proxy.NewRoutingCache(),
 		TokenRateLimiter:    ratelimit.NewLimiter(),
 		UpstreamRateLimiter: ratelimit.NewLimiter(),
+		Quotas:              quotas,
 		StartedAt:           time.Now(),
 	}
 
@@ -164,11 +167,16 @@ func (s *Server) Serve(ctx context.Context) error {
 	return err
 }
 
-// shutdownResources stops the background jobs and drains the log queue, so
+// shutdownResources drains the log queue and then stops the background jobs, so
 // requests served just before shutdown still reach the database.
+//
+// The queue is drained first on purpose. Cancelling the jobs context ahead of it
+// left every queued row to be written under a context that was already done, so
+// the drain this function exists for failed in full — taking the quota
+// increments those rows carry with it.
 func (s *Server) shutdownResources() {
-	s.cancelJobs()
 	s.logWriter.Close()
+	s.cancelJobs()
 	s.state.TokenRateLimiter.Close()
 	s.state.UpstreamRateLimiter.Close()
 	s.state.DB.Close()

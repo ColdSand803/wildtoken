@@ -15,6 +15,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/authstate"
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
@@ -171,7 +172,8 @@ func parseForwardedAddr(value string) (netip.Addr, bool) {
 
 // RequireDownstream validates the caller's API token against the api_tokens
 // table, accepting only enabled and unexpired rows.
-func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter) func(http.Handler) http.Handler {
+func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter,
+	quotas *quota.Tracker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Anthropic clients authenticate with x-api-key and expect their own
@@ -198,12 +200,22 @@ func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter) func(http.H
 			}
 
 			/* An exhausted quota is refused before the request reaches an
-			   upstream. The check is on the total recorded so far, so the request
-			   that crosses the limit is allowed to finish: its cost is only known
-			   once the response completes. */
-			if credential.LimitTokens != nil && credential.UsedTokens >= *credential.LimitTokens {
+			   upstream. The stored total is not the whole of what is spent:
+			   requests still running have a cost nobody knows yet, and requests
+			   that just finished have one the batched writer has not committed.
+			   Both are weighed here, because on the stored total alone every
+			   request of a burst read the same figure, each found the same room,
+			   and each was admitted — overshooting the limit by as much as
+			   happened to arrive at once.
+
+			   The request that crosses the limit is still allowed to finish: its
+			   cost is only known once the response completes. */
+			reservation, projected, admitted := quotas.Admit(credential.TokenID,
+				credential.UsedTokens, credential.LimitTokens)
+			defer reservation.Release()
+			if !admitted {
 				writeDownstreamQuotaRejection(w, anthropic,
-					models.QuotaExceededMessage(credential.UsedTokens, *credential.LimitTokens))
+					models.QuotaExceededMessage(projected, *credential.LimitTokens))
 				return
 			}
 

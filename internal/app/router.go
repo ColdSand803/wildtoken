@@ -47,7 +47,7 @@ func NewRouter(state *appstate.State) http.Handler {
 	// surface.
 	router.Group(func(proxyRoutes chi.Router) {
 		proxyRoutes.Use(allowAnyOrigin)
-		proxyRoutes.Use(middleware.RequireDownstream(state.DB, state.TokenRateLimiter))
+		proxyRoutes.Use(middleware.RequireDownstream(state.DB, state.TokenRateLimiter, state.Quotas))
 		proxyRoutes.Get("/v1/models", handlers.ListModelsHandler(state))
 		proxyRoutes.Handle("/v1/*", handlers.ProxyHandler(state))
 	})

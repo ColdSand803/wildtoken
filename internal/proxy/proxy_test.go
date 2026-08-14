@@ -14,6 +14,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 )
 
 // proxyHarness wires the dependencies a forwarded request needs.
@@ -37,7 +38,7 @@ func newProxyHarness(t *testing.T) *proxyHarness {
 
 	runtimeMetrics := metrics.New()
 	ctx, cancel := context.WithCancel(context.Background())
-	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 64)
+	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 64, quota.NewTracker())
 	t.Cleanup(func() {
 		writer.Close()
 		cancel()

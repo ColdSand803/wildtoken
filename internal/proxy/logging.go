@@ -15,6 +15,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/apperr"
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 )
 
 const (
@@ -23,6 +24,7 @@ const (
 	logWriteRetryBaseDelay      = 50 * time.Millisecond
 	logWriteBatchSize           = 20
 	logWriteBatchInterval       = 50 * time.Millisecond
+	logWriteTimeout             = 15 * time.Second
 	logEventChannelCapacity     = 1024
 	cleanupStartupDelay         = 120 * time.Second
 	logBodyCleanupInterval      = 60 * time.Second
@@ -93,39 +95,78 @@ type persistedLogRecord struct {
 // LogWriter batches request logs onto a single background writer, so proxy
 // requests never wait on SQLite's write lock.
 type LogWriter struct {
-	entries   chan LogEntry
-	metrics   LogMetricsRecorder
-	events    *eventBroker
-	done      chan struct{}
+	entries chan LogEntry
+	metrics LogMetricsRecorder
+	events  *eventBroker
+	quotas  *quota.Tracker
+	done    chan struct{}
+	// closeMu orders closing the queue against scheduling onto it. Sending on a
+	// closed channel panics and a select's default case does not prevent that,
+	// so the two are made exclusive rather than left to race: a stream still
+	// running when the server stopped waiting for it schedules its log after
+	// shutdown has begun.
+	closeMu   sync.RWMutex
+	closed    bool
 	closeOnce sync.Once
 }
 
-// NewLogWriter starts the background writer. It stops when ctx is cancelled or
-// Close is called.
+// NewLogWriter starts the background writer. It stops when Close is called,
+// which is also what drains the queue: ctx bounds each write rather than
+// abandoning the rows still waiting to be made.
 func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecorder,
-	logStats *db.LogStatsCache, queueCapacity int) *LogWriter {
+	logStats *db.LogStatsCache, queueCapacity int, quotas *quota.Tracker) *LogWriter {
 	writer := &LogWriter{
 		entries: make(chan LogEntry, max(queueCapacity, 1)),
 		metrics: metrics,
 		events:  newEventBroker(),
+		quotas:  quotas,
 		done:    make(chan struct{}),
 	}
 	go writer.run(ctx, database, logStats)
 	return writer
 }
 
-// Schedule queues a log entry, dropping it when the queue is full.
+// Schedule queues a log entry, dropping it when the queue is full or closed.
 //
 // A dropped log is preferable to blocking a proxied request on the writer.
 func (w *LogWriter) Schedule(entry LogEntry) {
 	w.metrics.RecordLogEnqueue()
+
+	// Held across the send so the queue cannot close underneath it.
+	w.closeMu.RLock()
+	defer w.closeMu.RUnlock()
+
+	if w.closed {
+		w.metrics.RecordLogDequeue(1)
+		w.metrics.RecordLogDrop()
+		slog.Warn("request log queue closed; dropping request log")
+		return
+	}
+
 	select {
 	case w.entries <- entry:
+		// The usage is held against the token's quota until the row commits,
+		// because until then the stored total still understates it. A dropped
+		// entry holds nothing: it will never reach the total either.
+		if tokenID, used, ok := quotaUsage(entry); ok {
+			w.quotas.Meter(tokenID, used)
+		}
 	default:
 		w.metrics.RecordLogDequeue(1)
 		w.metrics.RecordLogDrop()
 		slog.Warn("request log queue full; dropping request log")
 	}
+}
+
+// quotaUsage reports the token and amount a log entry contributes to a quota.
+//
+// It is the single definition of what counts, so the hold taken at enqueue and
+// the increment applied at commit can never disagree.
+func quotaUsage(entry LogEntry) (tokenID int64, used int64, ok bool) {
+	if entry.DownstreamTokenID == nil || entry.TotalTokens == nil || *entry.TotalTokens <= 0 {
+		return 0, 0, false
+	}
+	return *entry.DownstreamTokenID, int64(*entry.TotalTokens), true
 }
 
 // Subscribe returns a channel of committed rows and the function that releases
@@ -136,7 +177,12 @@ func (w *LogWriter) Subscribe() (<-chan LogStreamEvent, func()) {
 
 // Close stops accepting entries and waits for the queued batch to drain.
 func (w *LogWriter) Close() {
-	w.closeOnce.Do(func() { close(w.entries) })
+	w.closeOnce.Do(func() {
+		w.closeMu.Lock()
+		w.closed = true
+		w.closeMu.Unlock()
+		close(w.entries)
+	})
 	<-w.done
 }
 
@@ -185,14 +231,32 @@ func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.Lo
 	entryCount := uint64(len(entries))
 	w.metrics.RecordLogDequeue(entryCount)
 
+	// The hold each entry took at enqueue is released however the write turns
+	// out: a committed row is in the stored total, and an abandoned one never
+	// will be.
+	defer func() {
+		for _, entry := range entries {
+			if tokenID, used, ok := quotaUsage(entry); ok {
+				w.quotas.Settle(tokenID, used)
+			}
+		}
+	}()
+
+	// Shutdown cancels the jobs context, but the batch it interrupts still has
+	// to reach the database: these rows carry the quota increments, so a write
+	// abandoned mid-shutdown hands that usage back for free. The deadline keeps
+	// a stuck write from holding shutdown open instead.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), logWriteTimeout)
+	defer cancel()
+
 	startedAt := time.Now()
-	records, err := insertLogBatchWithRetry(ctx, database, entries)
+	records, err := insertLogBatchWithRetry(writeCtx, database, entries)
 	if err != nil {
 		w.metrics.RecordLogWriteFailureCount(entryCount)
 		slog.Error("failed to persist request logs", "error", err, "entry_count", entryCount)
 	} else {
 		w.metrics.RecordLogWritten(entryCount)
-		w.publish(ctx, database, logStats, records)
+		w.publish(writeCtx, database, logStats, records)
 	}
 	if time.Since(startedAt) >= slowDBOperationThreshold {
 		w.metrics.RecordSlowDBOperation()

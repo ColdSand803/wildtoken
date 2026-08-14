@@ -18,6 +18,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 )
 
 func upstreamTestState(t *testing.T) *appstate.State {
@@ -41,6 +42,7 @@ func upstreamTestState(t *testing.T) *appstate.State {
 		Metrics:     metrics.New(),
 		ModelsCache: appstate.NewModelsListCache(),
 		Routing:     proxy.NewRoutingCache(),
+		Quotas:      quota.NewTracker(),
 		StartedAt:   time.Now(),
 	}
 }
