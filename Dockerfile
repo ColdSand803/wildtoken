@@ -5,6 +5,11 @@ WORKDIR /src
 
 # Cache module downloads when only application sources change.
 COPY go.mod go.sum ./
+
+# Use China mirror for faster downloads
+ENV GOPROXY=https://goproxy.cn,https://goproxy.io,direct
+ENV GOSUMDB=off
+
 RUN go mod download
 
 COPY cmd ./cmd
