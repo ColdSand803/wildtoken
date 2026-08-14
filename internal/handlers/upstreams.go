@@ -69,6 +69,25 @@ func parseExtraHeaders(stored string) (map[string]string, error) {
 	return overrides, nil
 }
 
+// parseJSONArray decodes a stored list column, naming it in the failure so the
+// operator learns which one is damaged rather than that "something" is.
+func parseJSONArray(stored, column string) ([]string, error) {
+	values := []string{}
+	if err := json.Unmarshal([]byte(stored), &values); err != nil {
+		return nil, apperr.BadRequest("channel " + column + " JSON is invalid: " + err.Error())
+	}
+	return values, nil
+}
+
+// parseJSONMap decodes a stored mapping column.
+func parseJSONMap(stored, column string) (map[string]string, error) {
+	values := map[string]string{}
+	if err := json.Unmarshal([]byte(stored), &values); err != nil {
+		return nil, apperr.BadRequest("channel " + column + " JSON is invalid: " + err.Error())
+	}
+	return values, nil
+}
+
 func validateOverrides(overrides map[string]string) error {
 	if err := proxy.ValidateHeaderOverrides(overrides); err != nil {
 		return apperr.BadRequest(err.Error())
@@ -392,12 +411,26 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 		health := state.AutoWeight.Snapshot(row.ID, row.Weight,
 			row.AutoWeightEnabled == 1, state.AutoWeightPolicy())
 
-		modelNames := []string{}
-		json.Unmarshal([]byte(row.ModelNames), &modelNames)
-		modelPrefixes := []string{}
-		json.Unmarshal([]byte(row.ModelPrefixes), &modelPrefixes)
-		modelMappings := map[string]string{}
-		json.Unmarshal([]byte(row.ModelMappings), &modelMappings)
+		// A parse failure is reported rather than swallowed. The console fills
+		// the edit form from this response, so decoding a damaged column to an
+		// empty list showed the channel as having no models — and saving that
+		// form wrote the emptiness back, destroying the routing configuration
+		// the operator came to look at.
+		modelNames, err := parseJSONArray(row.ModelNames, "model_names")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		modelPrefixes, err := parseJSONArray(row.ModelPrefixes, "model_prefixes")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		modelMappings, err := parseJSONMap(row.ModelMappings, "model_mappings")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 
 		extraHeaders, err := parseExtraHeaders(row.ExtraHeaders)
 		if err != nil {
