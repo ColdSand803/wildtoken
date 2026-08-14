@@ -596,8 +596,13 @@ func AdminSetUpstreamEnabled(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.UpstreamEnabledIn
-		if err := decodeJSON(w, r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+		enabled, err := input.Value()
+		if err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
 			return
 		}
 
@@ -609,7 +614,7 @@ func AdminSetUpstreamEnabled(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		updated, err := db.SetUpstreamEnabled(r.Context(), state.DB, id, input.Enabled)
+		updated, err := db.SetUpstreamEnabled(r.Context(), state.DB, id, enabled)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -619,7 +624,7 @@ func AdminSetUpstreamEnabled(state *appstate.State) http.HandlerFunc {
 		state.Routing.Invalidate()
 		// Re-enabling gives a channel a clean slate rather than the health it
 		// had when the operator turned it off.
-		if input.Enabled {
+		if enabled {
 			state.AutoWeight.Reset(id)
 		}
 		applyRuntimeHealth(state, state.AutoWeightPolicy(), &updated)
@@ -636,8 +641,13 @@ func AdminSetUpstreamPriority(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.UpstreamPriorityIn
-		if err := decodeJSON(w, r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+		priority, err := input.Value()
+		if err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
 			return
 		}
 
@@ -649,7 +659,7 @@ func AdminSetUpstreamPriority(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		updated, err := db.SetUpstreamPriority(r.Context(), state.DB, id, input.Priority)
+		updated, err := db.SetUpstreamPriority(r.Context(), state.DB, id, priority)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return

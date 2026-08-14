@@ -295,3 +295,20 @@ type APITokenCreatedOut struct {
 	Quota        QuotaState `json:"quota"`
 	RateLimit    *string    `json:"rate_limit"`
 }
+
+// TokenEnabledIn toggles a token.
+//
+// It mirrors UpstreamEnabledIn rather than reusing it, so the endpoint's
+// contract names what it operates on, and it is a pointer for the same reason:
+// a body of {} must not read as "disable this credential".
+type TokenEnabledIn struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// Value returns the requested state, or an error when the body named none.
+func (t *TokenEnabledIn) Value() (bool, error) {
+	if t.Enabled == nil {
+		return false, ErrString("enabled is required")
+	}
+	return *t.Enabled, nil
+}

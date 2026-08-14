@@ -456,9 +456,14 @@ func AdminSetTokenEnabled(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-		var input models.UpstreamEnabledIn
-		if err := decodeJSON(w, r, &input); err != nil {
+		var input models.TokenEnabledIn
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+		enabled, err := input.Value()
+		if err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
 			return
 		}
 
@@ -470,7 +475,7 @@ func AdminSetTokenEnabled(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		updated, err := db.SetTokenEnabled(r.Context(), state.DB, id, input.Enabled)
+		updated, err := db.SetTokenEnabled(r.Context(), state.DB, id, enabled)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return

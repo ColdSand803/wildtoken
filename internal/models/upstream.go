@@ -182,12 +182,37 @@ type UpstreamUpdate struct {
 	ClearAPIKey bool `json:"clear_api_key"`
 }
 
+// UpstreamEnabledIn toggles a channel.
+//
+// The field is a pointer so that "not mentioned" is distinguishable from
+// "false". As a plain bool, a body of {} decoded to false and disabled the
+// channel — as did a misspelled key — with nothing reported to the caller who
+// meant the opposite. Rejecting unknown fields alone does not cover {}, which
+// carries no unknown field at all.
 type UpstreamEnabledIn struct {
-	Enabled bool `json:"enabled"`
+	Enabled *bool `json:"enabled"`
 }
 
+// Value returns the requested state, or an error when the body named none.
+func (u *UpstreamEnabledIn) Value() (bool, error) {
+	if u.Enabled == nil {
+		return false, ErrString("enabled is required")
+	}
+	return *u.Enabled, nil
+}
+
+// UpstreamPriorityIn sets a channel's routing priority. The field is a pointer
+// for the same reason UpstreamEnabledIn's is.
 type UpstreamPriorityIn struct {
-	Priority int32 `json:"priority"`
+	Priority *int32 `json:"priority"`
+}
+
+// Value returns the requested priority, or an error when the body named none.
+func (u *UpstreamPriorityIn) Value() (int32, error) {
+	if u.Priority == nil {
+		return 0, ErrString("priority is required")
+	}
+	return *u.Priority, nil
 }
 
 // UpstreamOut is the list representation; the API key is never included.
