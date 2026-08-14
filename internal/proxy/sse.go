@@ -188,30 +188,26 @@ func sseData(line string) (string, bool) {
 
 // usageInt32 reads a numeric usage field, which JSON decoding gives as float64.
 //
-// The value comes from the upstream, so it is clamped rather than converted.
-// A plain int32() of an out-of-range or NaN float is implementation-defined and
-// in practice yields a large negative number, which the quota counter reads as
-// "no usage" and skips — a malformed usage report should not buy free tokens.
+// A figure that will not fit is reported as absent rather than as a substitute.
+// int32() of an out-of-range or NaN float is implementation-defined and in
+// practice lands on a large negative number, which the quota counter reads as
+// "no usage" and skips — that buys free tokens. Saturating to the maximum
+// instead is worse: one malformed report would spend a token's entire budget
+// and persist it, leaving the customer locked out until an operator resets it.
+//
+// No real request spends two billion tokens, so a value that large is not a
+// count at all, and the honest record is that this request's usage is unknown.
 func usageInt32(value any) *int32 {
 	number, ok := value.(float64)
 	if !ok {
 		return nil
 	}
-	converted := clampUsage(number)
-	return &converted
-}
-
-// clampUsage folds any float onto the range a token count can hold. NaN fails
-// both comparisons and lands on zero.
-func clampUsage(number float64) int32 {
-	switch {
-	case number >= float64(math.MaxInt32):
-		return math.MaxInt32
-	case number > 0:
-		return int32(number)
-	default:
-		return 0
+	// NaN fails both comparisons and is reported absent.
+	if !(number >= 0 && number <= float64(math.MaxInt32)) {
+		return nil
 	}
+	converted := int32(number)
+	return &converted
 }
 
 // firstUsageInt32 returns the first field that is present.
@@ -226,9 +222,10 @@ func firstUsageInt32(values ...any) *int32 {
 
 // sumTokenParts adds the parts that are present, or returns nil when none are.
 //
-// The sum saturates. Three upstream-supplied counts can each be in range and
-// still overflow int32 together, and a total that wrapped negative reads as
-// "no usage" to the quota counter.
+// The sum is taken in int64 because three upstream-supplied counts can each be
+// in range and still overflow int32 together, and a total that wrapped negative
+// reads as "no usage" to the quota counter. A total that does not fit is
+// reported absent, for the same reason usageInt32 does.
 func sumTokenParts(parts ...*int32) *int32 {
 	var sum int64
 	any := false
@@ -238,10 +235,10 @@ func sumTokenParts(parts ...*int32) *int32 {
 			sum += int64(*part)
 		}
 	}
-	if !any {
+	if !any || sum > math.MaxInt32 {
 		return nil
 	}
-	total := clampUsage(float64(sum))
+	total := int32(sum)
 	return &total
 }
 
