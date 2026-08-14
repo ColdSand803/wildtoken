@@ -139,14 +139,42 @@ func TestFreeAttemptsAreUnpenalizedThenBackoffDoublesToACap(t *testing.T) {
 	}
 }
 
-func TestLoopbackIsNeverThrottled(t *testing.T) {
+func TestLoopbackKeepsItsFreeAttemptsButNotAFreePass(t *testing.T) {
 	throttle := NewThrottle()
 	loopback := Client{Kind: ClientLoopback}
-	for range globalThreshold * 2 {
+
+	// An operator mistyping the token is not penalised for it: loopback has no
+	// address to track, so there is no per-client backoff to serve.
+	for range freeAttempts {
+		throttle.RecordFailure(loopback)
+		if !throttle.Admit(loopback) {
+			t.Fatal("a loopback caller was blocked within its free attempts")
+		}
+	}
+
+	// A flood is another matter. Behind a same-host reverse proxy every caller
+	// in the world arrives as loopback, so exempting it from the gate left
+	// nothing but Argon2id's own cost bounding a guessing run.
+	for range globalThreshold {
 		throttle.RecordFailure(loopback)
 	}
-	if !throttle.Admit(loopback) {
-		t.Error("a loopback caller was throttled")
+	if throttle.Admit(loopback) {
+		t.Error("the gate did not refuse a loopback caller after a flood of failures")
+	}
+}
+
+func TestARemoteFloodCannotLockOutTheLocalOperator(t *testing.T) {
+	throttle := NewThrottle()
+	noisy := remoteClient(t, "203.0.113.9")
+
+	for range globalThreshold {
+		throttle.RecordFailure(noisy)
+	}
+
+	// The gates are counted separately for exactly this: the console must stay
+	// reachable from the machine it runs on while it is under attack.
+	if !throttle.Admit(Client{Kind: ClientLoopback}) {
+		t.Error("a remote flood locked the local operator out")
 	}
 }
 

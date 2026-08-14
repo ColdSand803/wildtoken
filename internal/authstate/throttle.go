@@ -35,8 +35,8 @@ const (
 	maxTrackedClients = 4096
 
 	globalWindow = 60 * time.Second
-	// globalThreshold is the number of failures per globalWindow before every
-	// non-loopback caller is refused.
+	// globalThreshold is the number of failures per globalWindow before the
+	// callers counting against that gate are refused.
 	globalThreshold uint32 = 100
 	globalCooldown         = 30 * time.Second
 )
@@ -73,8 +73,6 @@ func ClientFromAddr(addr netip.Addr) Client {
 // UnknownClient is the caller whose address could not be resolved.
 func UnknownClient() Client { return Client{Kind: ClientUnknown} }
 
-func (c Client) exempt() bool { return c.Kind == ClientLoopback }
-
 // key returns the tracking key, and false when the caller cannot be tracked.
 func (c Client) key() (netip.Addr, bool) {
 	if c.Kind == ClientRemote {
@@ -100,35 +98,59 @@ type Throttle struct {
 	clientsMu sync.Mutex
 	clients   map[netip.Addr]*clientState
 
-	globalMu sync.Mutex
-	global   globalState
+	gatesMu sync.Mutex
+	// remote gates callers with an off-machine or unresolved address.
+	remote globalState
+	// loopback gates callers on the local machine, on its own counter.
+	loopback globalState
 
 	// now is swappable so tests can advance time without sleeping.
 	now func() time.Time
 }
 
 func NewThrottle() *Throttle {
+	now := time.Now()
 	return &Throttle{
-		clients: map[netip.Addr]*clientState{},
-		global:  globalState{windowStart: time.Now()},
-		now:     time.Now,
+		clients:  map[netip.Addr]*clientState{},
+		remote:   globalState{windowStart: now},
+		loopback: globalState{windowStart: now},
+		now:      time.Now,
 	}
+}
+
+// gateFor returns the failure gate a caller counts against.
+//
+// Loopback keeps its own counter rather than being exempt from the gate. The
+// exemption assumed a loopback peer really is the operator, which stops being
+// true the moment the gateway sits behind a reverse proxy on the same host:
+// every caller in the world then arrives as 127.0.0.1 and skips the gate
+// altogether, leaving nothing but Argon2id's own cost between an attacker and
+// the admin token.
+//
+// The counter stays separate rather than shared, because that is what the
+// exemption was protecting: a remote flood must not be able to lock the operator
+// out of the console it is attacking.
+//
+// The caller must hold gatesMu.
+func (t *Throttle) gateFor(client Client) *globalState {
+	if client.Kind == ClientLoopback {
+		return &t.loopback
+	}
+	return &t.remote
 }
 
 // Admit reports whether client may pay for an Argon2id verification right now.
 func (t *Throttle) Admit(client Client) bool {
-	if client.exempt() {
-		return true
-	}
 	now := t.now()
 
-	t.globalMu.Lock()
-	if !t.global.cooldownUntil.IsZero() && now.Before(t.global.cooldownUntil) {
-		t.globalMu.Unlock()
+	t.gatesMu.Lock()
+	gate := t.gateFor(client)
+	if !gate.cooldownUntil.IsZero() && now.Before(gate.cooldownUntil) {
+		t.gatesMu.Unlock()
 		return false
 	}
-	t.global.cooldownUntil = time.Time{}
-	t.globalMu.Unlock()
+	gate.cooldownUntil = time.Time{}
+	t.gatesMu.Unlock()
 
 	addr, ok := client.key()
 	if !ok {
@@ -159,23 +181,21 @@ func (t *Throttle) RecordSuccess(client Client) {
 
 // RecordFailure charges a failed verification to the client and the global gate.
 func (t *Throttle) RecordFailure(client Client) {
-	if client.exempt() {
-		return
-	}
 	now := t.now()
 
-	t.globalMu.Lock()
-	if now.Sub(t.global.windowStart) >= globalWindow {
-		t.global.windowStart = now
-		t.global.failures = 0
+	t.gatesMu.Lock()
+	gate := t.gateFor(client)
+	if now.Sub(gate.windowStart) >= globalWindow {
+		gate.windowStart = now
+		gate.failures = 0
 	}
-	t.global.failures++
-	if t.global.failures >= globalThreshold {
-		t.global.cooldownUntil = now.Add(globalCooldown)
-		t.global.windowStart = now
-		t.global.failures = 0
+	gate.failures++
+	if gate.failures >= globalThreshold {
+		gate.cooldownUntil = now.Add(globalCooldown)
+		gate.windowStart = now
+		gate.failures = 0
 	}
-	t.globalMu.Unlock()
+	t.gatesMu.Unlock()
 
 	addr, ok := client.key()
 	if !ok {
@@ -184,9 +204,15 @@ func (t *Throttle) RecordFailure(client Client) {
 
 	t.clientsMu.Lock()
 	defer t.clientsMu.Unlock()
-	t.prune(now)
+	hasRoom := t.prune(now)
 	state, tracked := t.clients[addr]
 	if !tracked {
+		if !hasRoom {
+			// Every slot is held by a client still being penalised. This caller
+			// is bounded by its gate rather than by an entry taken from one of
+			// them.
+			return
+		}
 		state = &clientState{lastFailure: now}
 		t.clients[addr] = state
 	}
@@ -218,14 +244,18 @@ func backoff(failures uint32) (time.Duration, bool) {
 	return delay, true
 }
 
-// prune drops entries that have gone quiet. If the map is still full afterwards
-// the traffic is distributed rather than repetitive, and the global gate is the
-// limit that applies; refuse to grow further rather than track it all.
+// prune drops entries that have gone quiet and reports whether there is room to
+// track another client.
+//
+// A map still full afterwards means the traffic is distributed rather than
+// repetitive, and the gate is the limit that applies. Emptying the map to make
+// room is what this must not do: it hands every penalised client its backoff
+// back, which is the opposite of the right answer to an address flood.
 //
 // The caller must hold clientsMu.
-func (t *Throttle) prune(now time.Time) {
+func (t *Throttle) prune(now time.Time) bool {
 	if len(t.clients) < maxTrackedClients {
-		return
+		return true
 	}
 	for addr, state := range t.clients {
 		quiet := now.Sub(state.lastFailure) >= clientResetAfter
@@ -234,9 +264,7 @@ func (t *Throttle) prune(now time.Time) {
 			delete(t.clients, addr)
 		}
 	}
-	if len(t.clients) >= maxTrackedClients {
-		clear(t.clients)
-	}
+	return len(t.clients) < maxTrackedClients
 }
 
 // trackedClients reports the map size, for tests asserting the bound holds.

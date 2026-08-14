@@ -94,11 +94,18 @@ func writeUnauthorized(w http.ResponseWriter) {
 
 // adminClient identifies the caller for throttling purposes.
 //
-// A forwarded header is only consulted when the operator has named one, and an
-// address learned that way is always treated as remote — otherwise anyone could
-// claim 127.0.0.1 and inherit the loopback exemption.
+// A forwarded header is only consulted when the operator has named one and the
+// connection came from somewhere that proxy could be: a reverse proxy reaches
+// the gateway over loopback or a private network. Honouring the header from any
+// peer at all would let a caller that can reach the port directly invent a fresh
+// address per request and never accumulate a failure streak to be blocked for.
+//
+// An address learned that way is always treated as remote — otherwise anyone
+// could claim 127.0.0.1 and count against the operator's own gate.
 func adminClient(r *http.Request, clientIPHeader string) authstate.Client {
-	if clientIPHeader != "" {
+	peer := peerAddr(r)
+
+	if clientIPHeader != "" && couldBeProxy(peer) {
 		forwarded := r.Header.Get(clientIPHeader)
 		if forwarded != "" {
 			first, _, _ := strings.Cut(forwarded, ",")
@@ -108,15 +115,31 @@ func adminClient(r *http.Request, clientIPHeader string) authstate.Client {
 		}
 	}
 
+	if !peer.IsValid() {
+		return authstate.UnknownClient()
+	}
+	return authstate.ClientFromAddr(peer)
+}
+
+// peerAddr is the address of the machine that opened the connection, which is
+// the one piece of the request a caller cannot choose.
+func peerAddr(r *http.Request) netip.Addr {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
 	addr, err := netip.ParseAddr(host)
 	if err != nil {
-		return authstate.UnknownClient()
+		return netip.Addr{}
 	}
-	return authstate.ClientFromAddr(addr.Unmap())
+	return addr.Unmap()
+}
+
+// couldBeProxy reports whether a connection plausibly came from the operator's
+// own reverse proxy rather than straight off the internet.
+func couldBeProxy(addr netip.Addr) bool {
+	return addr.IsValid() &&
+		(addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast())
 }
 
 // parseForwardedAddr accepts the bare address, `host:port` and `[v6]:port`
