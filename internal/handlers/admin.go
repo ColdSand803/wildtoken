@@ -629,29 +629,135 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 	}
 }
 
-// AdminTokenUsageStats reports the cached token usage windows.
+const dashboardDateLayout = "2006-01-02"
+
+type dashboardRangeSelection struct {
+	Value   string
+	Label   string
+	Window  db.LogTopWindow
+	StartAt string
+	EndAt   string
+}
+
+func parseDashboardRange(value, startValue, endValue, fallback string) (dashboardRangeSelection, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = fallback
+	}
+	window, ok := db.ParseLogTopWindow(value)
+	if !ok {
+		return dashboardRangeSelection{}, apperr.BadRequest(
+			"range must be one of: today, 1d, 3d, 7d, 30d, all, default, custom")
+	}
+
+	selection := dashboardRangeSelection{Value: value, Window: window}
+	switch value {
+	case "today":
+		selection.Label = "今天"
+	case "1d":
+		selection.Label = "最近 24 小时"
+	case "3d":
+		selection.Label = "最近 3 天"
+	case "7d":
+		selection.Label = "最近 7 天"
+	case "30d":
+		selection.Label = "最近 30 天"
+	case "all":
+		selection.Label = "全部时间"
+	case "default":
+		selection.Label = "所有窗口"
+	case "custom":
+		startValue = strings.TrimSpace(startValue)
+		endValue = strings.TrimSpace(endValue)
+		if startValue == "" || endValue == "" {
+			return dashboardRangeSelection{}, apperr.BadRequest(
+				"start_date and end_date are required when range is custom")
+		}
+		startDate, startErr := time.ParseInLocation(dashboardDateLayout, startValue, time.Local)
+		endDate, endErr := time.ParseInLocation(dashboardDateLayout, endValue, time.Local)
+		if startErr != nil || endErr != nil {
+			return dashboardRangeSelection{}, apperr.BadRequest(
+				"start_date and end_date must use YYYY-MM-DD")
+		}
+		if startDate.After(endDate) {
+			return dashboardRangeSelection{}, apperr.BadRequest(
+				"start_date must not be after end_date")
+		}
+		if endDate.After(startDate.AddDate(0, 0, 365)) {
+			return dashboardRangeSelection{}, apperr.BadRequest(
+				"custom date range must not exceed 366 days")
+		}
+		selection.Label = startValue + " 至 " + endValue
+		selection.StartAt = startDate.UTC().Format(models.TimestampFormat)
+		selection.EndAt = endDate.AddDate(0, 0, 1).UTC().Format(models.TimestampFormat)
+	}
+	return selection, nil
+}
+
+// AdminTokenUsageStats reports token usage for the selected dashboard range.
 func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		apperr.WriteJSON(w, http.StatusOK, state.LogStats.Snapshot().TokenUsage)
+		query := r.URL.Query()
+		selection, err := parseDashboardRange(
+			query.Get("range"), query.Get("start_date"), query.Get("end_date"), "default")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
+		stats := state.LogStats.Snapshot().TokenUsage
+		if selection.Value == "default" {
+			apperr.WriteJSON(w, http.StatusOK, stats)
+			return
+		}
+
+		var usage models.TokenUsageWindowOut
+		switch selection.Window {
+		case db.LogTopWindowToday:
+			usage = stats.Today
+		case db.LogTopWindowOneDay:
+			usage = stats.OneDay
+		case db.LogTopWindowSevenDays:
+			usage = stats.SevenDays
+		case db.LogTopWindowThirtyDays:
+			usage = stats.ThirtyDays
+		case db.LogTopWindowAll:
+			usage = stats.AllTime
+		default:
+			usage, err = db.QueryTokenUsage(r.Context(), state.DB, selection.Window,
+				selection.StartAt, selection.EndAt)
+			if err != nil {
+				apperr.WriteError(w, err)
+				return
+			}
+		}
+
+		stats.Today = usage
+		stats.Range = selection.Value
+		stats.RangeLabel = selection.Label
+		apperr.WriteJSON(w, http.StatusOK, stats)
 	}
 }
 
 // AdminTopLogStats ranks models and channels over a window.
 func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		windowValue := strings.TrimSpace(r.URL.Query().Get("window"))
-		if windowValue == "" {
-			windowValue = "today"
-		}
-		window, ok := db.ParseLogTopWindow(windowValue)
-		if !ok {
-			apperr.WriteError(w, apperr.BadRequest(
-				"window must be one of: today, 1d, 3d, 7d, 30d"))
+		query := r.URL.Query()
+		selection, err := parseDashboardRange(
+			query.Get("window"), query.Get("start_date"), query.Get("end_date"), "today")
+		if err != nil {
+			apperr.WriteError(w, err)
 			return
 		}
-		limit := clampInt64(queryInt64(r.URL.Query().Get("limit"), 10), 1, 20)
+		limit := clampInt64(queryInt64(query.Get("limit"), 10), 1, 20)
 
-		stats, err := db.TopLogStats(r.Context(), state.DB, window, limit)
+		var stats models.RequestLogTopStatsOut
+		if selection.Window == db.LogTopWindowCustom {
+			stats, err = db.TopLogStatsCustom(r.Context(), state.DB,
+				selection.StartAt, selection.EndAt, limit)
+		} else {
+			stats, err = db.TopLogStats(r.Context(), state.DB, selection.Window, limit)
+		}
 		if err != nil {
 			apperr.WriteError(w, err)
 			return

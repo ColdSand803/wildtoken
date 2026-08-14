@@ -99,6 +99,8 @@ type TokenUsageStatsOut struct {
 	SevenDays  TokenUsageWindowOut `json:"seven_days"`
 	ThirtyDays TokenUsageWindowOut `json:"thirty_days"`
 	AllTime    TokenUsageWindowOut `json:"all_time"`
+	Range      string              `json:"range,omitempty"`
+	RangeLabel string              `json:"range_label,omitempty"`
 }
 
 type RequestLogTopItemOut struct {

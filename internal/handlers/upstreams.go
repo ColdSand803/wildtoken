@@ -1545,4 +1545,3 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 		apperr.WriteJSON(w, http.StatusOK, result)
 	}
 }
-

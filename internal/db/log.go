@@ -43,6 +43,8 @@ const (
 	LogTopWindowThreeDays
 	LogTopWindowSevenDays
 	LogTopWindowThirtyDays
+	LogTopWindowAll
+	LogTopWindowCustom
 )
 
 // ParseLogTopWindow maps a query value onto a window.
@@ -58,6 +60,12 @@ func ParseLogTopWindow(value string) (LogTopWindow, bool) {
 		return LogTopWindowSevenDays, true
 	case "30d":
 		return LogTopWindowThirtyDays, true
+	case "all":
+		return LogTopWindowAll, true
+	case "default":
+		return LogTopWindowThirtyDays, true
+	case "custom":
+		return LogTopWindowCustom, true
 	default:
 		return 0, false
 	}
@@ -73,8 +81,14 @@ func (w LogTopWindow) QueryValue() string {
 		return "3d"
 	case LogTopWindowSevenDays:
 		return "7d"
-	default:
+	case LogTopWindowThirtyDays:
 		return "30d"
+	case LogTopWindowAll:
+		return "all"
+	case LogTopWindowCustom:
+		return "custom"
+	default:
+		return ""
 	}
 }
 
@@ -88,9 +102,32 @@ func (w LogTopWindow) cutoffExpression() string {
 		return "datetime('now', '-3 days')"
 	case LogTopWindowSevenDays:
 		return "datetime('now', '-7 days')"
-	default:
+	case LogTopWindowThirtyDays:
 		return "datetime('now', '-30 days')"
+	default:
+		return ""
 	}
+}
+
+func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWindow,
+	startAt, endAt string) ([]any, error) {
+	switch window {
+	case LogTopWindowAll:
+		query.WriteString("1 = 1")
+	case LogTopWindowCustom:
+		if startAt == "" || endAt == "" {
+			return nil, apperr.BadRequest("custom window requires start_date and end_date")
+		}
+		query.WriteString("created_at >= ? AND created_at < ?")
+		args = append(args, startAt, endAt)
+	default:
+		cutoff := window.cutoffExpression()
+		if cutoff == "" {
+			return nil, apperr.BadRequest("invalid log statistics window")
+		}
+		fmt.Fprintf(query, "created_at >= %s", cutoff)
+	}
+	return args, nil
 }
 
 // LogFilter narrows a log listing. A nil field means the filter is not applied.
@@ -358,6 +395,17 @@ const tokenMetricFilter = "total_tokens IS NOT NULL AND total_tokens > 0"
 
 // TopLogStats ranks models and channels by request count and token usage.
 func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, limit int64) (models.RequestLogTopStatsOut, error) {
+	return topLogStats(ctx, database, window, "", "", limit)
+}
+
+// TopLogStatsCustom ranks logs in the half-open UTC interval [startAt, endAt).
+func TopLogStatsCustom(ctx context.Context, database *sql.DB, startAt, endAt string,
+	limit int64) (models.RequestLogTopStatsOut, error) {
+	return topLogStats(ctx, database, LogTopWindowCustom, startAt, endAt, limit)
+}
+
+func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
+	startAt, endAt string, limit int64) (models.RequestLogTopStatsOut, error) {
 	limit = min(max(limit, 1), 20)
 
 	// Channels aggregate by upstream_id so renamed or same-name channels stay
@@ -395,7 +443,7 @@ func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, lim
 
 	var rankings [4][]models.RequestLogTopItemOut
 	for i, spec := range specs {
-		items, err := topLogCounts(ctx, database, window, spec, limit)
+		items, err := topLogCounts(ctx, database, window, startAt, endAt, spec, limit)
 		if err != nil {
 			return models.RequestLogTopStatsOut{}, err
 		}
@@ -412,7 +460,7 @@ func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, lim
 }
 
 func topLogCounts(ctx context.Context, database *sql.DB, window LogTopWindow,
-	spec topLogCountSpec, limit int64) ([]models.RequestLogTopItemOut, error) {
+	startAt, endAt string, spec topLogCountSpec, limit int64) ([]models.RequestLogTopItemOut, error) {
 	// Rows group by groupExpression (e.g. upstream_id) but surface a display
 	// name. When several names share one group key, MAX(name) picks a stable
 	// non-null label.
@@ -422,17 +470,22 @@ func topLogCounts(ctx context.Context, database *sql.DB, window LogTopWindow,
 	}
 
 	var query strings.Builder
-	fmt.Fprintf(&query, "SELECT MAX(name) AS name, SUM(value) AS count, %s FROM (SELECT %s AS group_key, %s AS name, %s AS value FROM request_logs WHERE created_at >= %s AND (%s)",
-		idSelect, spec.groupExpression, spec.nameExpression, spec.metricExpression,
-		window.cutoffExpression(), spec.sourceFilter)
+	fmt.Fprintf(&query, "SELECT MAX(name) AS name, SUM(value) AS count, %s FROM (SELECT %s AS group_key, %s AS name, %s AS value FROM request_logs WHERE ",
+		idSelect, spec.groupExpression, spec.nameExpression, spec.metricExpression)
+	args, err := appendLogTimePredicate(&query, nil, window, startAt, endAt)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(&query, " AND (%s)", spec.sourceFilter)
 	if spec.metricFilter != "" {
 		fmt.Fprintf(&query, " AND (%s)", spec.metricFilter)
 	}
 	query.WriteString(`) WHERE group_key IS NOT NULL AND name IS NOT NULL AND name <> '' ` +
 		`GROUP BY group_key HAVING count > 0 ` +
 		`ORDER BY count DESC, name COLLATE NOCASE ASC LIMIT ?`)
+	args = append(args, limit)
 
-	rows, err := database.QueryContext(ctx, query.String(), limit)
+	rows, err := database.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, apperr.Database(err)
 	}

@@ -229,6 +229,103 @@ func TestTopLogStatsRanksModelsAndChannels(t *testing.T) {
 	}
 }
 
+func TestParseLogTopWindowAcceptsDashboardRanges(t *testing.T) {
+	testCases := []struct {
+		value string
+		want  string
+	}{
+		{value: "all", want: "all"},
+		{value: "default", want: "30d"},
+		{value: "custom", want: "custom"},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.value, func(t *testing.T) {
+			window, ok := ParseLogTopWindow(testCase.value)
+			if !ok {
+				t.Fatalf("ParseLogTopWindow(%q) was rejected", testCase.value)
+			}
+			if got := window.QueryValue(); got != testCase.want {
+				t.Errorf("QueryValue() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+func TestTopLogStatsAllTimeIncludesOldRows(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+
+	if _, err := database.Exec(`INSERT INTO upstreams (id, name, base_url)
+        VALUES (1, 'primary', 'https://example.test')`); err != nil {
+		t.Fatalf("insert upstream: %v", err)
+	}
+	for id, age := range []string{"-90 days", "-1 day"} {
+		if _, err := database.Exec(`INSERT INTO request_logs
+            (id, created_at, method, path, client_type, upstream_id, upstream_name,
+             upstream_model, stream, status_code, total_tokens)
+            VALUES (?, datetime('now', ?), 'POST', '/v1/responses', 'codex',
+                    1, 'primary', 'gpt-test', 0, 200, 10)`, id+1, age); err != nil {
+			t.Fatalf("insert log %d: %v", id+1, err)
+		}
+	}
+
+	window, ok := ParseLogTopWindow("all")
+	if !ok {
+		t.Fatal("all-time window was rejected")
+	}
+	stats, err := TopLogStats(ctx, database, window, 10)
+	if err != nil {
+		t.Fatalf("top stats: %v", err)
+	}
+	if stats.Window != "all" {
+		t.Errorf("window = %q, want all", stats.Window)
+	}
+	if len(stats.Models) != 1 || stats.Models[0].Count != 2 {
+		t.Errorf("model ranking = %+v, want both old and recent rows", stats.Models)
+	}
+}
+
+func TestCustomLogRangesUseAnInclusiveEndDate(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+	if _, err := database.Exec(`INSERT INTO upstreams (id, name, base_url)
+        VALUES (1, 'primary', 'https://example.test')`); err != nil {
+		t.Fatalf("insert upstream: %v", err)
+	}
+	for id, createdAt := range []string{
+		"2026-08-01 00:00:00",
+		"2026-08-03 23:59:59",
+		"2026-08-04 00:00:00",
+	} {
+		if _, err := database.Exec(`INSERT INTO request_logs
+            (id, created_at, method, path, client_type, upstream_id, upstream_name,
+             upstream_model, stream, status_code, total_tokens)
+            VALUES (?, ?, 'POST', '/v1/responses', 'codex', 1, 'primary',
+                    'gpt-test', 0, 200, 10)`, id+1, createdAt); err != nil {
+			t.Fatalf("insert log %d: %v", id+1, err)
+		}
+	}
+
+	usage, err := QueryTokenUsage(ctx, database, LogTopWindowCustom,
+		"2026-08-01 00:00:00", "2026-08-04 00:00:00")
+	if err != nil {
+		t.Fatalf("custom token usage: %v", err)
+	}
+	if usage.TotalTokens != 20 || usage.RequestCount != 2 || usage.AllRequestCount != 2 {
+		t.Errorf("custom token usage = %+v, want the first two rows", usage)
+	}
+
+	stats, err := TopLogStatsCustom(ctx, database,
+		"2026-08-01 00:00:00", "2026-08-04 00:00:00", 10)
+	if err != nil {
+		t.Fatalf("custom top stats: %v", err)
+	}
+	if stats.Window != "custom" || len(stats.Models) != 1 || stats.Models[0].Count != 2 {
+		t.Errorf("custom top stats = %+v, want two rows", stats)
+	}
+}
+
 func TestDeleteOldLogsRemovesPayloadsWithTheirLogs(t *testing.T) {
 	database := memoryDB(t)
 	ctx := context.Background()
@@ -337,6 +434,12 @@ func TestRefreshGroupsLogsIntoUsageWindows(t *testing.T) {
 	thirtyDays := snapshot.TokenUsage.ThirtyDays
 	if thirtyDays.TotalTokens != 300 || thirtyDays.AllRequestCount != 4 {
 		t.Errorf("thirty-day window = %+v", thirtyDays)
+	}
+	allTime := snapshot.TokenUsage.AllTime
+	if allTime.TotalTokens != 700 || allTime.PromptTokens != 400 ||
+		allTime.PromptCachedTokens != 100 || allTime.RequestCount != 3 ||
+		allTime.AllRequestCount != 5 {
+		t.Errorf("all-time window = %+v", allTime)
 	}
 }
 

@@ -171,7 +171,7 @@ type ImportUpstreamsRequest struct {
 // ImportResultItem represents one channel's import outcome.
 type ImportResultItem struct {
 	Name    string  `json:"name"`
-	Action  string  `json:"action"`  // "created", "updated", "skipped", "failed"
+	Action  string  `json:"action"` // "created", "updated", "skipped", "failed"
 	Message *string `json:"message,omitempty"`
 }
 
@@ -183,7 +183,6 @@ type ImportUpstreamsResponse struct {
 	Failed  int                `json:"failed"`
 	Items   []ImportResultItem `json:"items"`
 }
-
 
 // UpstreamDetailOut adds the decrypted API key for the single-item endpoint.
 type UpstreamDetailOut struct {
@@ -209,4 +208,3 @@ type UpstreamDetailOut struct {
 	HealthRecoveryRemainingSeconds *int64            `json:"health_recovery_remaining_seconds,omitempty"`
 	GroupIDs                       []int64           `json:"group_ids"`
 }
-
