@@ -112,13 +112,8 @@
   }
 
   .dashboard-range-field,
-  .dashboard-range-field select,
-  .dashboard-custom-range {
+  .dashboard-range-field select {
     width: 100%;
-  }
-
-  .dashboard-custom-range {
-    flex-wrap: wrap;
   }
 
   .actions {

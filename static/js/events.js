@@ -488,9 +488,6 @@ if (dashboardTimePreset) {
       ? dashboardTimePreset.value
       : DASHBOARD_DEFAULT_RANGE;
     dashboardTimePreset.value = value;
-    if (dashboardCustomRange) {
-      dashboardCustomRange.hidden = value !== "custom";
-    }
     if (value === "custom") {
       // Prefill from the last custom range and wait for 应用; querying now would
       // use whatever half-entered dates are in the pickers.
@@ -500,14 +497,38 @@ if (dashboardTimePreset) {
       if (dashboardEndDate && !dashboardEndDate.value && dashboardCustomEndDate) {
         dashboardEndDate.value = dashboardCustomEndDate;
       }
+      if (typeof syncDashboardDateMirrors === "function") {
+        syncDashboardDateMirrors();
+      }
       dashboardStartDate?.focus();
+      syncDashboardRangeChips();
       return;
     }
     dashboardTimeRange = value;
     persistDashboardRange();
+    syncDashboardRangeChips();
     loadDashboardData();
   });
 }
+
+const dashboardTimeChips = document.querySelector("#dashboard-time-chips");
+if (dashboardTimeChips && dashboardTimePreset) {
+  dashboardTimeChips.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-dashboard-range]");
+    if (!button) return;
+    const value = button.dataset.dashboardRange;
+    if (!value || dashboardTimePreset.value === value) {
+      if (value === "custom") {
+        setDashboardCustomRangeOpen(true);
+        dashboardStartDate?.focus();
+      }
+      return;
+    }
+    dashboardTimePreset.value = value;
+    dashboardTimePreset.dispatchEvent(new Event("change"));
+  });
+}
+
 
 if (dashboardApplyCustom && dashboardStartDate && dashboardEndDate) {
   dashboardApplyCustom.addEventListener("click", () => {

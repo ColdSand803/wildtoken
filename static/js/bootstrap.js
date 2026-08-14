@@ -337,6 +337,7 @@ let dashboardRefreshTimer = null;
 let dashboardLoading = false;
 let lastDashboardLoadError = "";
 
+const dashboardPanel = document.querySelector(".dashboard-panel");
 const dashboardScope = document.querySelector("#dashboard-scope");
 const dashboardKpis = document.querySelector("#dashboard-kpis");
 const dashboardTokenKpis = document.querySelector("#dashboard-token-kpis");
