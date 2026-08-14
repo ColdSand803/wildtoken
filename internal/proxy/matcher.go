@@ -130,8 +130,11 @@ func (c *RoutingCache) get() *routingSnapshot {
 	return c.value
 }
 
-// Invalidate drops the snapshot and advances the revision, so a load already in
-// flight cannot publish data that predates this call.
+// Invalidate advances the revision and then drops the snapshot, so a load
+// already in flight cannot publish data that predates this call.
+//
+// The revision moves first on purpose: a loader compares it before publishing,
+// so raising it is what makes an in-flight load give up.
 func (c *RoutingCache) Invalidate() {
 	c.revision.Add(1)
 	c.mu.Lock()
@@ -275,8 +278,12 @@ type Selection struct {
 // SelectUpstream chooses the upstream that serves a request.
 //
 //  1. Direct selection via `x-wildtoken-upstream` header or `upstream` query
-//     parameter (the value can be an id or a name).
-//  2. Otherwise every enabled upstream is considered.
+//     parameter (the value can be an id or a name). A direct selection still has
+//     to serve the caller's group and match the model.
+//  2. Otherwise every enabled upstream is considered, narrowed first to the ones
+//     serving the caller's group. This filter comes before all the others: a
+//     model reachable from one group and not from another is group membership
+//     doing its job, not a routing fault.
 //  3. Channels in `exclude` are dropped as if disabled — the caller found their
 //     rate limit full this round, so re-selection falls over to the rest.
 //  4. Candidates are filtered by model match score, keeping only the highest.

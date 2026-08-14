@@ -120,9 +120,14 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 // A plain FileServer over that directory answered any path ending in a slash
 // with a listing of it, and this route is deliberately outside the admin
 // credential. The directory is whatever the operator configured — the
-// WILDTOKEN_THEME_DIR override accepts any path at all — so what it exposes
-// should be exactly what the console loads: a stylesheet named by a manifest,
-// and nothing else about the machine it runs on.
+// WILDTOKEN_THEME_DIR override accepts any path at all — so the listing named
+// every file under it to anyone who asked.
+//
+// What remains reachable is any .css file anywhere below that directory,
+// including through a symlink pointing out of it. That is wider than the
+// manifests describe; it is bounded to a file type the console actually loads,
+// which is what closes the enumeration. Pointing the theme directory at
+// something that is not a theme directory is still the operator's to get right.
 func serveThemePackCSS(dir string) http.Handler {
 	files := http.FileServer(http.Dir(dir))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

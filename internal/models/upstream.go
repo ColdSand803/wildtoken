@@ -181,7 +181,12 @@ type UpstreamOut struct {
 	GroupIDs                       []int64           `json:"group_ids"`
 }
 
-// UpstreamDetailOut adds the decrypted API key for the single-item endpoint.
+// UpstreamDetailOut adds the channel's API key for the single-item endpoint,
+// which the console's edit form needs in order to save the channel back.
+//
+// The key is stored as written — nothing in this service encrypts it — so this
+// endpoint hands out a credential in the clear to anyone holding the admin
+// token.
 type UpstreamDetailOut struct {
 	ID                             int64             `json:"id"`
 	Name                           string            `json:"name"`

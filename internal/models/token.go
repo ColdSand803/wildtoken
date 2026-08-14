@@ -274,8 +274,12 @@ type APITokenOut struct {
 	RateLimit    *string    `json:"rate_limit"`
 }
 
-// APITokenCreatedOut is returned only by the creation endpoint, so the full
-// token can be shown once.
+// APITokenCreatedOut is what the creation endpoint answers with.
+//
+// It carries the full token, but so does APITokenOut: the console lets an
+// operator copy a credential back out at any time, so token_plain is stored and
+// the list and detail endpoints return it too. This is not a one-time reveal,
+// and reading it as one understates where plaintext tokens are exposed.
 type APITokenCreatedOut struct {
 	ID           int64      `json:"id"`
 	Name         string     `json:"name"`

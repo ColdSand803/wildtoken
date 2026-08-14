@@ -196,10 +196,18 @@ func (s *Server) Serve(ctx context.Context) error {
 // the drain this function exists for failed in full — taking the quota
 // increments those rows carry with it.
 func (s *Server) shutdownResources() {
-	s.logWriter.CloseWithin(logDrainTimeout)
+	drained := s.logWriter.CloseWithin(logDrainTimeout)
 	s.cancelJobs()
 	s.state.TokenRateLimiter.Close()
 	s.state.UpstreamRateLimiter.Close()
+
+	if !drained {
+		// The writer is still working. Closing the database under it would turn
+		// every batch it has left into an error about a closed database, which
+		// says nothing about the actual cause: that shutdown stopped waiting.
+		// The process is exiting either way, so the handle goes with it.
+		return
+	}
 	s.state.DB.Close()
 }
 

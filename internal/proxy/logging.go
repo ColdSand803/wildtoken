@@ -421,10 +421,14 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 		// The quota counter advances with the log row, so a committed request is
 		// always accounted for exactly once. A request that carried no usage, or
 		// came from a deleted token, contributes nothing.
-		if entry.DownstreamTokenID != nil && entry.TotalTokens != nil && *entry.TotalTokens > 0 {
+		//
+		// Through quotaUsage, so the increment applied here and the hold taken
+		// at enqueue cannot drift apart. They were two copies of one condition,
+		// which is only correct for as long as nobody edits one of them.
+		if tokenID, used, ok := quotaUsage(entry); ok {
 			_, err := tx.ExecContext(ctx,
 				"UPDATE api_tokens SET used_tokens = used_tokens + ? WHERE id = ?",
-				int64(*entry.TotalTokens), *entry.DownstreamTokenID)
+				used, tokenID)
 			if err != nil {
 				return nil, apperr.Database(err)
 			}

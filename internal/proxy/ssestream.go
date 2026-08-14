@@ -31,7 +31,14 @@ type sseStream struct {
 	autoWeightEnabled bool
 	upstreamID        int64
 
-	// mu guards entry, so a Close racing the final Read cannot log twice.
+	// mu guards entry so that whichever path reaches the end of the stream first
+	// is the one that logs it: the terminal event, the EOF after it, a failed
+	// read, or Close.
+	//
+	// It guards entry only. Everything else here is written from the read loop
+	// and read again in Close, which is safe because both run in the handler's
+	// own goroutine — a caller that closed the body from another one would be
+	// racing the fields this lock does not cover.
 	mu    sync.Mutex
 	entry *LogEntry
 }
