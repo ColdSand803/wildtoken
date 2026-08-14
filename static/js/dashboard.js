@@ -141,15 +141,42 @@ function cleanupRuntimeHint(cleanup) {
   return `上次 ${duration} · ${formatCompactNumber(Number(cleanup.last_rows_cleared || 0))} 行`;
 }
 
+/* Tone of each KPI as it was on the previous render, keyed by container and
+   label. The dashboard is rebuilt with `innerHTML =` on a five-second poll, so
+   a CSS animation declared on `.tone-danger` would not play when a metric goes
+   bad — it would replay every five seconds for as long as it stayed bad, which
+   is the failure mode this console has to avoid above all others.
+
+   Recording the previous tone lets the *transition* be marked instead of the
+   state: `data-tone-escalated` is set for one render only, on the poll where a
+   metric first gets worse than it was. Themes decide whether to draw anything
+   for it; nothing here assumes they will. */
+const kpiToneMemory = new WeakMap();
+
+const TONE_RANK = { "": 0, "tone-ok": 0, "tone-warn": 1, "tone-danger": 2 };
+
 function renderDashboardKpiCards(container, cards) {
   if (!container) return;
-  container.innerHTML = cards.map((card) => `
-    <div class="dashboard-kpi ${card.tone}">
+  const previous = kpiToneMemory.get(container) || new Map();
+  const next = new Map();
+  const html = cards.map((card) => {
+    const tone = card.tone || "";
+    next.set(card.label, tone);
+    const before = previous.get(card.label);
+    // Only on a real worsening, and never on the first render — arriving at a
+    // page that is already failing is a state, not an event.
+    const escalated = before !== undefined
+      && (TONE_RANK[tone] ?? 0) > (TONE_RANK[before] ?? 0);
+    return `
+    <div class="dashboard-kpi ${tone}"${escalated ? ' data-tone-escalated="true"' : ""}>
       <div class="dashboard-kpi-value">${escapeHtml(card.value)}</div>
       <div class="dashboard-kpi-label">${escapeHtml(card.label)}</div>
       <div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>
     </div>
-  `).join("");
+  `;
+  }).join("");
+  kpiToneMemory.set(container, next);
+  container.innerHTML = html;
 }
 
 function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {

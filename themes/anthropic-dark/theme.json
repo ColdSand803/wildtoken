@@ -1,6 +1,6 @@
 {
   "id": "anthropic-dark",
-  "label": "A/ dark",
+  "label": "Anthropic Dark",
   "css": "theme.css",
   "swatch": ["#141413", "#d97757"],
   "version": "1.0.0",

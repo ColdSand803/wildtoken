@@ -122,6 +122,63 @@ function formatLogTimestamp(value) {
   return Number.isFinite(timestamp) ? logTimeFormatter.format(new Date(timestamp)) : "—";
 }
 
+/** The console's timestamp fields, as plain numbers, for a given instant. */
+function consoleZoneFields(timestamp) {
+  const parts = logTimeFormatter.formatToParts(new Date(timestamp));
+  const field = (type) => Number(parts.find((part) => part.type === type)?.value);
+  return {
+    year: field("year"),
+    month: field("month"),
+    day: field("day"),
+    hour: field("hour"),
+    minute: field("minute"),
+    second: field("second"),
+  };
+}
+
+/**
+ * Read a wall-clock time in LOG_TIME_ZONE back into a UTC timestamp.
+ *
+ * The console renders every time in that one zone rather than the browser's,
+ * so a time typed into a form has to be read in it too — otherwise what the
+ * operator types and what the table shows back differ by the zone's offset.
+ *
+ * Two passes: the first offset is sampled at the wrong instant, the second at
+ * one already within an hour of the answer.
+ */
+function consoleWallClockToTimestamp(year, month, day, hour, minute, second) {
+  const naive = Date.UTC(year, month - 1, day, hour, minute, second);
+  const offsetAt = (timestamp) => {
+    const zoned = consoleZoneFields(timestamp);
+    return (
+      Date.UTC(zoned.year, zoned.month - 1, zoned.day, zoned.hour, zoned.minute, zoned.second) -
+      timestamp
+    );
+  };
+  return naive - offsetAt(naive - offsetAt(naive));
+}
+
+/** Format an instant the way the database stores it: UTC, no offset suffix. */
+function toStoredTimestamp(timestamp) {
+  return new Date(timestamp).toISOString().slice(0, 19).replace("T", " ");
+}
+
+// A modal <dialog> is promoted to the top layer and the rest of the document
+// goes inert behind it, so a scratch node parked on <body> can never hold a
+// selection and execCommand finds nothing to copy. Hand the fallback the
+// topmost modal instead. This is the common path, not the rare one: the async
+// Clipboard API is gated on secure contexts, and this console is usually
+// reached over plain http on a LAN address.
+function clipboardScratchHost() {
+  let openModals;
+  try {
+    openModals = document.querySelectorAll("dialog[open]:modal");
+  } catch {
+    openModals = document.querySelectorAll("dialog[open]");
+  }
+  return openModals[openModals.length - 1] || document.body;
+}
+
 async function copyTextToClipboard(text) {
   if (navigator.clipboard?.writeText) {
     try {
@@ -132,15 +189,24 @@ async function copyTextToClipboard(text) {
     }
   }
 
+  const previouslyFocused = document.activeElement;
   const textarea = document.createElement("textarea");
   textarea.value = text;
   textarea.setAttribute("readonly", "");
   textarea.style.position = "fixed";
   textarea.style.left = "-9999px";
-  document.body.append(textarea);
+  clipboardScratchHost().append(textarea);
   textarea.select();
-  const copied = document.execCommand("copy");
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
   textarea.remove();
+  // Removing the scratch node drops focus to the document; put it back so the
+  // caller's button keeps the keyboard.
+  previouslyFocused?.focus?.({ preventScroll: true });
   return copied;
 }
 
@@ -388,9 +454,8 @@ const modelTestTitle = document.querySelector("#model-test-title");
 const modelTestSummary = document.querySelector("#model-test-summary");
 const modelTestClose = document.querySelector("#model-test-close");
 const modelTestModel = document.querySelector("#model-test-model");
-const modelTestTemplate = document.querySelector("#model-test-template");
+const modelTestProtocol = document.querySelector("#model-test-protocol");
 const modelTestPromptTemplate = document.querySelector("#model-test-prompt-template");
-const modelTestTemplateHint = document.querySelector("#model-test-template-hint");
 const modelTestPrompt = document.querySelector("#model-test-prompt");
 const modelTestRefreshModels = document.querySelector("#model-test-refresh-models");
 const modelTestSubmit = document.querySelector("#model-test-submit");
@@ -400,17 +465,15 @@ const modelTestResultMeta = document.querySelector("#model-test-result-meta");
 const modelTestResultBody = document.querySelector("#model-test-result-body");
 const modelTestRequestBody = document.querySelector("#model-test-request-body");
 const modelTestResponseBody = document.querySelector("#model-test-response-body");
-const modelTestTemplateList = document.querySelector("#model-test-template-list");
-const newModelTestTemplateButton = document.querySelector("#new-model-test-template");
-const modelTestTemplateDialog = document.querySelector("#model-test-template-dialog");
-const modelTestTemplateForm = document.querySelector("#model-test-template-form");
-const modelTestTemplateClose = document.querySelector("#model-test-template-close");
-const modelTestTemplateCancel = document.querySelector("#model-test-template-cancel");
-const modelTestTemplateId = document.querySelector("#model-test-template-id");
-const modelTestTemplateName = document.querySelector("#model-test-template-name");
-const modelTestTemplateKind = document.querySelector("#model-test-template-kind");
-const modelTestTemplatePrompt = document.querySelector("#model-test-template-prompt");
-let modelTestTemplates = [];
+const modelTestPromptList = document.querySelector("#model-test-prompt-list");
+const newModelTestPromptButton = document.querySelector("#new-model-test-prompt");
+const modelTestPromptDialog = document.querySelector("#model-test-prompt-dialog");
+const modelTestPromptForm = document.querySelector("#model-test-prompt-form");
+const modelTestPromptClose = document.querySelector("#model-test-prompt-close");
+const modelTestPromptCancel = document.querySelector("#model-test-prompt-cancel");
+const modelTestPromptId = document.querySelector("#model-test-prompt-id");
+const modelTestPromptName = document.querySelector("#model-test-prompt-name");
+const modelTestPromptContent = document.querySelector("#model-test-prompt-content");
 let modelTestPromptTemplates = [];
 let modelTestUpstream = null;
 
@@ -446,6 +509,7 @@ const fields = {
   weight: document.querySelector("#weight"),
   timeoutSeconds: document.querySelector("#timeout-seconds"),
   extraHeaders: document.querySelector("#extra-headers"),
+  rateLimit: document.querySelector("#upstream-rate-limit"),
   enabled: document.querySelector("#enabled"),
   fixedWeightEnabled: document.querySelector("#auto-weight-enabled"),
   clearApiKey: document.querySelector("#clear-api-key"),
@@ -460,15 +524,19 @@ const tokenFormTitle = document.querySelector("#token-form-title");
 const tokenDialogClose = document.querySelector("#token-dialog-close");
 const newTokenButton = document.querySelector("#new-token");
 const tokenResetButton = document.querySelector("#token-reset-form");
-const copyTokenButton = document.querySelector("#copy-token");
-const tokenValueRow = document.querySelector("#token-value-row");
 const tokenNameInput = document.querySelector("#token-name");
 const tokenDescriptionInput = document.querySelector("#token-description");
-const tokenCustomRow = document.querySelector("#token-custom-row");
+const tokenCustomLabel = document.querySelector("#token-custom-label");
 const tokenCustomInput = document.querySelector("#token-custom");
+const tokenCustomHint = document.querySelector("#token-custom-hint");
+const tokenCustomCopy = document.querySelector("#token-custom-copy");
+const tokenExpiresInput = document.querySelector("#token-expires");
+const tokenLimitInput = document.querySelector("#token-limit");
+const tokenRateLimitInput = document.querySelector("#token-rate-limit");
+const tokenExpiresPresets = document.querySelector("#token-expires-presets");
+const tokenExpiresPreview = document.querySelector("#token-expires-preview");
 const tokenEnabledCheckbox = document.querySelector("#token-enabled");
 const tokenIdInput = document.querySelector("#token-id");
-const tokenValueDisplay = document.querySelector("#token-value-display");
 
 let tokenRefreshTimer = null;
 let tokens = [];
@@ -1178,6 +1246,40 @@ function renderModelMatches(upstream) {
   return `<div class="model-chip-list" title="${escapeHtml(title)}">${chips}${more}</div>`;
 }
 
+/* 渠道所属分组。分组名要靠 groupCache 翻译，那份缓存由 groups.js 维护——列表
+   页首次渲染可能还没拉回来，这时只显示 id，等分组页访问过就自动带上名字。 */
+function renderUpstreamGroups(upstream) {
+  const ids = Array.isArray(upstream.group_ids) ? upstream.group_ids : [];
+  if (ids.length === 0) {
+    return '<span class="muted">—</span>';
+  }
+  const labels = ids.map((id) => {
+    const group = typeof groupById === "function" ? groupById(id) : null;
+    return group ? group.name : `#${id}`;
+  });
+  const visible = labels.slice(0, MAX_MODEL_CHIPS);
+  const hiddenCount = labels.length - visible.length;
+  const chips = visible
+    .map((label) => `<span class="model-chip group">${escapeHtml(label)}</span>`)
+    .join("");
+  const more = hiddenCount > 0 ? `<span class="model-chip more">+${hiddenCount}</span>` : "";
+  return `<div class="model-chip-list" title="${escapeHtml(labels.join(", "))}">${chips}${more}</div>`;
+}
+
+/* 分组表和令牌表的描述列共用这一个渲染。`.muted` 必须挂在内层 span 上：
+   tables.css 给 .muted 设了 display: block，落在 td 上会把单元格从表格布局里
+   摘出去，那一格就不再参与行高、vertical-align 也失效，看着跟同行对不齐。
+   描述服务端限 200 字且拒控制符，一定是单行，所以截断比换行更贴表格的节奏，
+   全文放 title 里。空值单独标 is-empty，让占位符比真描述更淡。 */
+function renderDescriptionCell(description) {
+  const text = String(description || "").trim();
+  if (!text) {
+    return '<td class="desc-cell"><span class="muted is-empty">—</span></td>';
+  }
+  const safe = escapeHtml(text);
+  return `<td class="desc-cell"><span class="muted" title="${safe}">${safe}</span></td>`;
+}
+
 function renderUpstreamSummary() {
   scheduleRenderUpstreamSummary();
 }
@@ -1224,6 +1326,7 @@ const DEFAULT_UPSTREAM_COLUMNS = {
   id: true,
   name: true,
   models: true,
+  groups: true,
   priority: true,
   weight: true,
   status: true,
@@ -1250,6 +1353,7 @@ const UPSTREAM_COL_LABELS = {
   id: "ID",
   name: "渠道名",
   models: "模型匹配",
+  groups: "分组",
   priority: "优先级",
   weight: "权重",
   status: "状态",

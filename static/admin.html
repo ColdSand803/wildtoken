@@ -12,22 +12,19 @@
           var safeThemeCss = /^\/theme-packs\/[a-z][a-z0-9-]{0,47}\/[A-Za-z0-9._/-]+\.css$/;
           var bundledThemeCss = {
             ark: "/theme-packs/ark/theme.css",
-            win95: "/theme-packs/win95/theme.css",
-            "animal-island": "/theme-packs/animal-island/theme.css",
-            cyberpunk: "/theme-packs/cyberpunk/theme.css",
-            nes: "/theme-packs/nes/theme.css",
-            crt: "/theme-packs/crt/theme.css",
-            minecraft: "/theme-packs/minecraft/theme.css",
-            bleach: "/theme-packs/bleach/theme.css",
             endfield: "/theme-packs/endfield/theme.css",
             "sakura-mist": "/theme-packs/sakura-mist/theme.css",
-anthropic: "/theme-packs/anthropic/theme.css",
+            anthropic: "/theme-packs/anthropic/theme.css",
             "anthropic-dark": "/theme-packs/anthropic-dark/theme.css",
-            "demon-slayer": "/theme-packs/demon-slayer/theme.css",
+            gojo: "/theme-packs/gojo/theme.css",
           };
           var t = localStorage.getItem("wildtoken_theme");
-          if (t === "animal") t = "animal-island";
-          if (!safeThemeId.test(t || "")) t = "dark";
+          /* 只校验 id 形状不够：主题包被移除后，老用户 localStorage 里还存着它的 id，
+             形状合法却没有任何主题 CSS 可加载，页面只能吃 base.css 的兜底变量，观感是
+             坏的。events.js 里的 resolveTheme 有同样的兜底，但它在页面底部才加载，中间
+             会露出一段坏样式。所以这里连成员资格一起校验。内置的 dark/light 不是主题包，
+             不在 bundledThemeCss 里，单独放行。 */
+          if (!safeThemeId.test(t || "") || (t !== "dark" && t !== "light" && !bundledThemeCss[t])) t = "dark";
           document.documentElement.setAttribute("data-theme", t);
           var arkThemeFamilies = { ark: "ark", endfield: "endfield" };
           if (arkThemeFamilies[t]) {
@@ -45,9 +42,6 @@ anthropic: "/theme-packs/anthropic/theme.css",
               localStorage.setItem("wildtoken_theme_css", bundledThemeCss[t]);
             } catch (e) {}
           }
-          if (t === "animal-island") {
-            try { localStorage.setItem("wildtoken_theme", t); } catch (e) {}
-          }
         } catch (e) {
           document.documentElement.setAttribute("data-theme", "dark");
         }
@@ -63,7 +57,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@600;700&family=Orbitron:wght@500;600;700&family=Pixelify+Sans:wght@400;500;600;700&family=Press+Start+2P&family=Rajdhani:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=VT323&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/static/styles.css" />
@@ -105,6 +99,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
           <button type="button" class="nav-link" data-view="upstreams">渠道</button>
           <button type="button" class="nav-link" data-view="logs">日志</button>
           <button type="button" class="nav-link" data-view="tokens">令牌</button>
+          <button type="button" class="nav-link" data-view="groups">分组</button>
           <button type="button" class="nav-link" data-view="settings">设置</button>
         </div>
         <div class="topbar-actions">
@@ -361,6 +356,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
                     <th class="col-id" data-col="id" aria-sort="none"><button type="button" class="table-sort-button" data-upstream-sort="id">ID <span aria-hidden="true"></span></button></th>
                     <th data-col="name" aria-sort="none"><button type="button" class="table-sort-button" data-upstream-sort="name">渠道名 <span aria-hidden="true"></span></button></th>
                     <th data-col="models">模型匹配</th>
+                    <th data-col="groups">分组</th>
                     <th data-col="priority" aria-sort="descending"><button type="button" class="table-sort-button" data-upstream-sort="priority">优先级 <span aria-hidden="true">↓</span></button></th>
                     <th data-col="weight">权重</th>
                     <th class="col-status" data-col="status" aria-sort="none"><button type="button" class="table-sort-button" data-upstream-sort="status">状态 <span aria-hidden="true"></span></button></th>
@@ -408,7 +404,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
                   id="log-search"
                   type="search"
                   autocomplete="off"
-                  placeholder="模型、渠道、状态码…"
+                  placeholder="模型、渠道、令牌、状态码…"
                 />
               </label>
               <label class="log-filter">
@@ -421,6 +417,10 @@ anthropic: "/theme-packs/anthropic/theme.css",
                   <option value="opencode">opencode</option>
                   <option value="claude">claude</option>
                   <option value="unknown">unknown</option>
+                  <option value="model-test">model-test</option>
+                  <option value="channel-test">channel-test</option>
+                  <option value="model-list">model-list</option>
+                  <option value="balance">balance</option>
                 </select>
               </label>
               <label class="log-filter">
@@ -499,6 +499,35 @@ anthropic: "/theme-packs/anthropic/theme.css",
           </section>
         </section>
 
+        <section class="view" data-view="groups" hidden>
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <span class="eyebrow">ROUTING SCOPES</span>
+                <h2>分组</h2>
+                <p>令牌只能路由到同分组的渠道。</p>
+              </div>
+              <div class="panel-actions">
+                <button type="button" id="group-create" class="primary">新增分组</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="admin-table" id="group-table">
+                <thead>
+                  <tr>
+                    <th>名称</th>
+                    <th>描述</th>
+                    <th class="numeric">渠道</th>
+                    <th class="numeric">令牌</th>
+                    <th class="actions-col">操作</th>
+                  </tr>
+                </thead>
+                <tbody id="group-rows"></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
         <section class="view" data-view="tokens" hidden>
           <section class="panel">
             <div class="panel-head">
@@ -529,6 +558,9 @@ anthropic: "/theme-packs/anthropic/theme.css",
                     <th>名称</th>
                     <th>描述</th>
                     <th>令牌预览</th>
+                    <th>分组</th>
+                    <th>限额</th>
+                    <th>有效期</th>
                     <th class="col-status">状态</th>
                     <th class="col-actions">操作</th>
                   </tr>
@@ -599,9 +631,9 @@ anthropic: "/theme-packs/anthropic/theme.css",
                 </form>
               </section>
 
-              <section class="settings-card" aria-labelledby="model-test-templates-title">
-                <div class="settings-card-head"><div><h3 id="model-test-templates-title">模型测试请求包装</h3><p>codex-tui / opencode / claude-cli 包装决定接口协议和请求头；Prompt 在测试窗口中独立选择。</p></div><button id="new-model-test-template" type="button" class="secondary">新增包装</button></div>
-                <div id="model-test-template-list" class="model-test-template-list" aria-live="polite"><p class="settings-loading">进入设置页后加载模板。</p></div>
+              <section class="settings-card" aria-labelledby="model-test-prompts-title">
+                <div class="settings-card-head"><div><h3 id="model-test-prompts-title">模型测试 Prompt</h3><p>测试窗口选择的 Prompt 模板；编辑后下次测试立即生效。</p></div><button id="new-model-test-prompt" type="button" class="secondary">新增 Prompt</button></div>
+                <div id="model-test-prompt-list" class="model-test-template-list" aria-live="polite"><p class="settings-loading">进入设置页后加载 Prompt。</p></div>
               </section>
 
               <section class="settings-card settings-readonly" aria-labelledby="gateway-default-title">
@@ -657,6 +689,11 @@ anthropic: "/theme-packs/anthropic/theme.css",
                 <input id="api-key" autocomplete="off" spellcheck="false" placeholder="未配置时留空" />
                 <span class="field-hint">编辑时会显示当前密钥；复制渠道需重新填写。</span>
               </label>
+              <div class="field span-2">
+                <span class="field-label">分组</span>
+                <div id="upstream-groups" class="group-checklist"></div>
+                <span class="field-hint">可同时加入多个分组；不选则归入 default。只有同分组的令牌能路由到本渠道。</span>
+              </div>
               <div class="toggle-list span-2">
                 <label class="toggle-row span-2">
                   <input id="clear-api-key" type="checkbox" />
@@ -755,7 +792,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
             <summary>
               <span>
                 <span class="section-title">高级设置</span>
-                <span class="section-copy">Header 覆盖 JSON</span>
+                <span class="section-copy">Header 覆盖 JSON 与限速</span>
               </span>
               <span class="section-summary-state" aria-hidden="true"></span>
             </summary>
@@ -771,6 +808,11 @@ anthropic: "/theme-packs/anthropic/theme.css",
               <span id="extra-headers-hint" class="field-hint">
                 Header 名大小写不敏感；这里的值最后写入，可覆盖下游请求头和渠道 API Key 生成的认证头。用 {client_header:User-Agent} 可读取同名下游 Header。Host、Content-Length 等传输头不可覆盖。
               </span>
+            </label>
+            <label class="field">
+              <span class="field-label">限速（可选）</span>
+              <input id="upstream-rate-limit" autocomplete="off" spellcheck="false" maxlength="24" placeholder="留空则不限速，如 100/m、1000/h、50/10s" />
+              <span class="field-hint">按请求次数限速，格式为 次数/时间窗口，单位支持 s/m/h/d，可带倍数如 50/10s。被限速的渠道会在路由时被跳过。</span>
             </label>
           </details>
         </div>
@@ -1057,7 +1099,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
         </div>
         <div class="upstream-dialog-body">
           <label class="field"><span class="field-label">模型</span><select id="model-test-model" required></select><span class="field-hint">可使用此渠道配置的模型，或从上游刷新后选择。</span></label>
-          <label class="field"><span class="field-label">请求包装</span><select id="model-test-template" required></select><span id="model-test-template-hint" class="field-hint"></span></label>
+          <label class="field"><span class="field-label">请求协议</span><select id="model-test-protocol" required><option value="responses">Responses（codex-tui）</option><option value="chat_completions">Chat Completions（opencode）</option><option value="messages">Messages（claude-cli）</option></select><span class="field-hint">请求格式和头部由协议决定。</span></label>
           <label class="field"><span class="field-label">Prompt 模板</span><select id="model-test-prompt-template" required></select></label>
           <label class="field test-model-prompt"><span class="field-label">本次 Prompt</span><textarea id="model-test-prompt" rows="6" maxlength="20000" required></textarea></label>
           <div class="test-model-result" id="model-test-result" hidden>
@@ -1070,18 +1112,51 @@ anthropic: "/theme-packs/anthropic/theme.css",
         <div class="modal-footer"><button id="model-test-refresh-models" type="button" class="secondary">刷新模型</button><button id="model-test-submit" type="submit">发送测试</button></div>
       </form>
     </dialog>
-    <dialog id="model-test-template-dialog" class="confirm-dialog" aria-labelledby="model-test-template-title">
-      <form id="model-test-template-form" class="confirm-panel">
-        <div class="modal-head"><div><h2 id="model-test-template-title">新增测试模板</h2><p>提示词会作为实际测试请求的一部分发送给渠道。</p></div><div class="modal-head-actions"><button type="button" class="secondary ghost icon-maximize" data-dialog-maximize aria-label="最大化" title="最大化" aria-pressed="false"><svg class="dialog-icon dialog-icon--maximize" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="0.5"/></svg><svg class="dialog-icon dialog-icon--restore" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="3" width="7" height="7" rx="0.5"/><rect x="3.5" y="5.5" width="7" height="7" rx="0.5"/></svg></button><button id="model-test-template-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button></div></div>
-        <input id="model-test-template-id" type="hidden" />
+    <dialog id="model-test-prompt-dialog" class="confirm-dialog" aria-labelledby="model-test-prompt-title">
+      <form id="model-test-prompt-form" class="confirm-panel">
+        <div class="modal-head"><div><h2 id="model-test-prompt-title">新增 Prompt</h2><p>测试窗口会从这些模板中选择。</p></div><div class="modal-head-actions"><button type="button" class="secondary ghost icon-maximize" data-dialog-maximize aria-label="最大化" title="最大化" aria-pressed="false"><svg class="dialog-icon dialog-icon--maximize" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="0.5"/></svg><svg class="dialog-icon dialog-icon--restore" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="3" width="7" height="7" rx="0.5"/><rect x="3.5" y="5.5" width="7" height="7" rx="0.5"/></svg></button><button id="model-test-prompt-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button></div></div>
+        <input id="model-test-prompt-id" type="hidden" />
         <div class="form-grid">
-          <label class="field span-2"><span class="field-label">模板名称</span><input id="model-test-template-name" maxlength="80" required placeholder="例如：简短中文响应" /></label>
-          <label class="field span-2"><span class="field-label">接口类型</span><select id="model-test-template-kind"><option value="responses">Responses（codex-tui）</option><option value="chat_completions">Chat Completions（opencode）</option><option value="messages">Messages（claude-cli）</option></select></label>
-          <label class="field span-2"><span class="field-label">提示词</span><textarea id="model-test-template-prompt" rows="6" maxlength="20000" required></textarea></label>
+          <label class="field span-2"><span class="field-label">Prompt 名称</span><input id="model-test-prompt-name" maxlength="80" required placeholder="例如：代码审查" /></label>
+          <label class="field span-2"><span class="field-label">Prompt 内容</span><textarea id="model-test-prompt-content" rows="8" maxlength="20000" required></textarea></label>
         </div>
-        <div class="modal-actions"><button id="model-test-template-cancel" type="button" class="secondary">取消</button><button type="submit">保存模板</button></div>
+        <div class="modal-actions"><button id="model-test-prompt-cancel" type="button" class="secondary">取消</button><button type="submit">保存 Prompt</button></div>
       </form>
     </dialog>
+    <dialog id="group-dialog" class="upstream-dialog">
+      <form id="group-form" class="upstream-dialog-panel">
+        <header class="modal-head">
+          <div>
+            <h2 id="group-dialog-title">新增分组</h2>
+            <p class="modal-sub">分组用于隔离令牌可访问的渠道范围。</p>
+          </div>
+          <div class="modal-head-actions">
+            <button id="group-dialog-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button>
+          </div>
+        </header>
+        <input id="group-id" type="hidden" />
+        <div class="upstream-dialog-body">
+          <section class="form-section">
+            <div class="form-grid">
+              <label class="field span-2">
+                <span class="field-label">名称</span>
+                <input id="group-name" required maxlength="60" placeholder="例如：team-a" />
+                <span class="field-hint">default 分组不可重命名或删除。</span>
+              </label>
+              <label class="field span-2">
+                <span class="field-label">描述</span>
+                <input id="group-description" maxlength="200" placeholder="可选备注" />
+              </label>
+            </div>
+          </section>
+        </div>
+        <footer class="modal-foot">
+          <button type="button" id="group-cancel" class="secondary">取消</button>
+          <button type="submit" class="primary">保存</button>
+        </footer>
+      </form>
+    </dialog>
+
     <dialog id="token-dialog" class="upstream-dialog">
       <form id="token-form" class="upstream-dialog-panel">
         <div class="modal-head upstream-modal-head">
@@ -1102,18 +1177,42 @@ anthropic: "/theme-packs/anthropic/theme.css",
               <span class="field-label">描述</span>
               <input id="token-description" maxlength="200" placeholder="可选备注" />
             </label>
-            <label id="token-custom-row" class="field span-2">
-              <span class="field-label">自定义令牌（可选）</span>
-              <input id="token-custom" autocomplete="off" spellcheck="false" minlength="16" maxlength="256" placeholder="留空则自动生成" />
-              <span class="field-hint">需为 16–256 字节、无空格的可打印 ASCII；完整值仅在创建时显示一次。</span>
-            </label>
-            <div id="token-value-row" hidden class="field span-2 field-readonly">
-              <span class="field-label">令牌</span>
-              <div class="token-value-box">
-                <code id="token-value-display"></code>
-                <button id="copy-token" type="button" class="secondary token-copy-btn">复制</button>
+            <div id="token-custom-row" class="field span-2">
+              <label class="field-label" id="token-custom-label" for="token-custom">自定义令牌（可选）</label>
+              <div class="field-with-action">
+                <input id="token-custom" autocomplete="off" spellcheck="false" maxlength="256" placeholder="留空则自动生成" />
+                <button id="token-custom-copy" type="button" class="secondary field-action" aria-label="复制令牌" title="复制令牌" disabled>
+                  <svg class="field-action-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="10" height="10" rx="2"></rect><path d="M5 15V7a2 2 0 0 1 2-2h8"></path></svg>
+                  <svg class="field-action-done" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 12.5l4.5 4.5L19 7"></path></svg>
+                </button>
               </div>
-              <span class="field-hint">请立即保存。关闭后不再完整显示。</span>
+              <span class="field-hint" id="token-custom-hint">需为无空格的可打印 ASCII，最长 256 字节；短于 16 字节会要求二次确认。</span>
+            </div>
+            <label class="field span-2">
+              <span class="field-label">分组</span>
+              <select id="token-group"></select>
+              <span class="field-hint">令牌只能路由到同分组的渠道。</span>
+            </label>
+            <label class="field span-2">
+              <span class="field-label">限额（可选）</span>
+              <input id="token-limit" autocomplete="off" spellcheck="false" maxlength="24" placeholder="留空则不限额，如 100M、1B、1000K" />
+              <span class="field-hint">按累计 token 总量计算，不会自动重置。支持 K/M/B/T 后缀。</span>
+            </label>
+            <label class="field span-2">
+              <span class="field-label">限速（可选）</span>
+              <input id="token-rate-limit" autocomplete="off" spellcheck="false" maxlength="24" placeholder="留空则不限速，如 100/m、1000/h、50/10s" />
+              <span class="field-hint">按请求次数限速，格式为 次数/时间窗口，单位支持 s/m/h/d，可带倍数如 50/10s。</span>
+            </label>
+            <div class="field span-2">
+              <label class="field-label" for="token-expires">有效期（可选）</label>
+              <input id="token-expires" autocomplete="off" spellcheck="false" maxlength="40" placeholder="留空则永不过期，如 30d、1d3h" />
+              <div class="expiry-presets" id="token-expires-presets">
+                <button type="button" class="secondary small" data-expiry-preset="7d">7 天</button>
+                <button type="button" class="secondary small" data-expiry-preset="30d">30 天</button>
+                <button type="button" class="secondary small" data-expiry-preset="90d">90 天</button>
+                <button type="button" class="secondary small" data-expiry-preset="">永不过期</button>
+              </div>
+              <span class="field-hint" id="token-expires-preview"></span>
             </div>
             <div class="toggle-list span-2">
               <label class="toggle-row">
@@ -1204,6 +1303,7 @@ anthropic: "/theme-packs/anthropic/theme.css",
     <script src="/static/js/logs.js"></script>
     <script src="/static/js/models.js"></script>
     <script src="/static/js/tokens.js"></script>
+    <script src="/static/js/groups.js"></script>
     <script src="/static/js/events.js"></script>
   </body>
 </html>

@@ -1,0 +1,8 @@
+{
+  "id": "gojo",
+  "label": "五条悟",
+  "css": "theme.css",
+  "swatch": ["#070910", "#63dcff"],
+  "version": "1.0.0",
+  "description": "Satoru Gojo character theme with a blindfold rail, Six Eyes focus states, and blue-red-violet Limitless fields."
+}

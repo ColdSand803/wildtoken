@@ -145,7 +145,7 @@ html[data-theme="endfield"] .app-shell {
 
 html[data-theme="endfield"] .topbar {
   align-items: stretch;
-  /* Must stay none (as in Ark / Bleach): any non-none backdrop-filter makes
+  /* Must stay none (as in Ark): any non-none backdrop-filter makes
      the bar a containing block for fixed descendants, which would anchor the
      mobile navigation dock to the bar instead of the viewport. */
   backdrop-filter: none;
@@ -426,7 +426,8 @@ html[data-theme="endfield"] .view[data-view="dashboard"] > .panel::before { cont
 html[data-theme="endfield"] .view[data-view="upstreams"] > .panel::before { content: "02"; }
 html[data-theme="endfield"] .view[data-view="logs"] > .panel::before { content: "03"; }
 html[data-theme="endfield"] .view[data-view="tokens"] > .panel::before { content: "04"; }
-html[data-theme="endfield"] .view[data-view="settings"] > .panel::before { content: "05"; }
+html[data-theme="endfield"] .view[data-view="groups"] > .panel::before { content: "05"; }
+html[data-theme="endfield"] .view[data-view="settings"] > .panel::before { content: "06"; }
 
 html[data-theme="endfield"] .view > .panel > .panel-head {
   align-items: end;
@@ -452,7 +453,8 @@ html[data-theme="endfield"] .view[data-view="dashboard"] > .panel > .panel-head:
 html[data-theme="endfield"] .view[data-view="upstreams"] > .panel > .panel-head::before { content: "02 / ROUTE MATRIX"; }
 html[data-theme="endfield"] .view[data-view="logs"] > .panel > .panel-head::before { content: "03 / REQUEST ARCHIVE"; }
 html[data-theme="endfield"] .view[data-view="tokens"] > .panel > .panel-head::before { content: "04 / ACCESS CONTROL"; }
-html[data-theme="endfield"] .view[data-view="settings"] > .panel > .panel-head::before { content: "05 / CONSOLE CONFIG"; }
+html[data-theme="endfield"] .view[data-view="groups"] > .panel > .panel-head::before { content: "05 / ROUTING SCOPES"; }
+html[data-theme="endfield"] .view[data-view="settings"] > .panel > .panel-head::before { content: "06 / CONSOLE CONFIG"; }
 
 /* The label above is this theme's own, numbered to line up with the rail and
    the sector watermark. base.css gives every view header an .eyebrow saying
@@ -1053,7 +1055,7 @@ html[data-theme="endfield"] .live-dot {
     box-shadow: 0 5px 0 rgb(25 25 25 / 22%);
     display: grid;
     gap: 1px;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
     left: 8px;
     padding: 3px;
     position: fixed;

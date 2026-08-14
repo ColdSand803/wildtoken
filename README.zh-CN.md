@@ -2,7 +2,7 @@
 
 **🌐 语言：** [English](README.md) | 简体中文
 
-> **使用 Rust 编写的自托管 LLM API 聚合网关。**
+> **使用 Go 编写的自托管 LLM API 聚合网关。**
 >
 > WildToken 向下游暴露 OpenAI 兼容的 `/v1/*` 接口和 Anthropic 兼容的
 > `/v1/messages` 接口，再根据显式渠道、模型规则、优先级、权重和运行时健康状态，
@@ -27,7 +27,8 @@
 - 🛣️ **多上游聚合：** 每个渠道可配置 Base URL、上游 API Key、模型名、模型映射、模型前缀和额外 Header。
 - 🧭 **路由控制：** 支持 `X-WildToken-Upstream`、`?upstream=`、精确模型映射、模型名、前缀匹配、优先级分层、按权重随机和自动健康权重。
 - 🔁 **重试与故障切换：** 自动路由失败后可重新选择渠道；再次选到同一渠道时遵守同渠道重试间隔。
-- 🔐 **下游令牌管理：** 在后台创建客户端使用的 API Token；完整值只在创建时显示一次，数据库仅保存摘要和不可还原预览。
+- 🔐 **下游令牌管理：** 在后台创建客户端使用的 API Token，格式为 `sk-` 前缀加 32 位随机字母数字。完整值保存在数据库中，可在令牌列表里随时复制，也可在编辑时直接改写（旧值随即失效）。可以给令牌设有效期，填 `1d3h` 这样的时长或具体日期均可；到期后不再通过认证，记录仍保留，可随时续期。
+- 🚦 **令牌与渠道限速：** 令牌和渠道都可以单独设置限速表达式，如 `100/m`、`1000/h`、`50/10s`（次数/时间窗口，单位 s/m/h/d 可带倍数）。令牌超速返回 429；渠道超速则在路由时被跳过、自动切换到下一候选渠道，全部被限时才返回 429。基于内存滑动窗口计数，重启后窗口清零。
 - 📊 **管理看板：** 查看渠道状态、请求日志、Token 用量、Top 模型和渠道、延迟、运行指标以及请求/响应快照；
   统一的时间范围控件支持今天 / 24 小时 / 3 天 / 7 天 / 30 天 / 全部 / 自定义日期区间。
 - 🧰 **渠道工具：** 支持拉取模型列表、测试连通性、测试指定模型，以及查询 new-api / sub2api 风格余额。
@@ -45,11 +46,11 @@
 | --- | --- |
 | ![内置浅色主题下的数据看板](screenshots/screenshot-light.png) | ![内置深色主题下的数据看板](screenshots/screenshot-dark.png) |
 
-使用 [`themes/`](themes/) 下 CSS-only 主题包渲染的使用日志页：
+使用 [`themes/`](themes/) 下某个 CSS-only 主题包渲染的使用日志页：
 
-| Ark | Bleach |
-| --- | --- |
-| ![Ark 主题下的使用日志页](screenshots/screenshot-ark.png) | ![Bleach 主题下的使用日志页](screenshots/screenshot-bleach.png) |
+| Ark |
+| --- |
+| ![Ark 主题下的使用日志页](screenshots/screenshot-ark.png) |
 
 ## 🚀 快速启动
 
@@ -59,7 +60,7 @@ Docker Compose 是最简单的本地服务运行方式。
 
 ```bash
 cp .env.example .env
-# 编辑 .env，把 ADMIN_TOKEN 设置为唯一的 8-256 字节可打印 ASCII 值。
+# 编辑 .env，把 ADMIN_TOKEN 设置为唯一的 24-256 字节可打印 ASCII 值。
 docker compose up -d --build
 curl -fsS http://127.0.0.1:3100/health
 ```
@@ -72,21 +73,21 @@ http://127.0.0.1:3100/admin
 
 Compose 会把 SQLite 数据保存到 `wildtoken-data` 卷，并发布 `3100` 端口。它还会把宿主机 `./themes` 只读挂载进容器，方便修改主题而不重建镜像。
 
-全新数据库如果监听非本机地址，必须显式设置 `ADMIN_TOKEN`，否则 WildToken 会拒绝启动。该 Token 必须是 8-256 字节、可打印 ASCII、不包含空格，且不能是 `change-me`。
+全新数据库如果监听非本机地址，必须显式设置 `ADMIN_TOKEN`，否则 WildToken 会拒绝启动。该 Token 必须是 24-256 字节、可打印 ASCII、不包含空格，且不能是 `change-me`。
 
 ### 🛠️ 源码运行
 
 要求：
 
-- Rust 工具链与仓库 lockfile 兼容
-- 通过 `sqlx` 使用 SQLite
+- Go 1.25 或更新版本
+- 无需 C 工具链：SQLite 驱动为纯 Go 实现，所有目标平台均可在 `CGO_ENABLED=0` 下构建
 
 本地运行：
 
 ```bash
 cp .env.example .env
 # 仅本机首次启动时可不设置；暴露服务前必须设置强 Token。
-ADMIN_TOKEN=replace-with-a-long-random-token cargo run
+ADMIN_TOKEN=replace-with-a-long-random-token go run ./cmd/wildtoken
 ```
 
 源码运行默认监听 `127.0.0.1:3100`，数据库为 `sqlite:wildtoken.db?mode=rwc`。
@@ -254,8 +255,7 @@ APP__DATABASE__MAX_CONNECTIONS=3
 APP__LOGGING__LOG_QUEUE_CAPACITY=512
 APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS=300
 WILDTOKEN_THEME_DIR=themes
-TOKIO_WORKER_THREADS=4
-RUST_LOG=info
+WILDTOKEN_LOG=info
 ```
 
 `ADMIN_TOKEN` 只用于初始化新数据库中的管理员凭证。SQLite 里已有管理员凭证后，请在后台的“设置 -> 安全”中更换；修改 `.env` 不会轮换或重置已有凭证。
@@ -284,18 +284,25 @@ RUST_LOG=info
 - 在可信机器或内网之外暴露 WildToken 前，请放到 TLS 和常规网络访问控制之后。
 - 非 localhost 监听必须使用强 `ADMIN_TOKEN`；暴露前请轮换遗留的 `change-me` 凭证。
 - 不要把 `.env`、SQLite 数据、日志或带真实配置的发布压缩包提交到公开仓库。
-- 下游 API Token 存储为 SHA-256 摘要和不可还原预览；完整值只在创建时显示一次。
+- 下游 API Token 以明文形式存储在数据库中，以便在控制台随时复制；认证走 SHA-256 摘要，明文不参与请求链路。
+  这意味着 SQLite 文件和管理端口的访问控制等同于所有下游令牌的访问控制，请照此对待两者。
 - 提供商 API Key 只应由服务端注入上游请求，不应分发给下游客户端。
 - 管理 API 同源访问并要求 `x-admin-token`；兼容性 `/v1/*` API 会为下游客户端开启 CORS。
+- 管理端认证带准入控制：单个来源连续失败 5 次后按指数退避（1 秒起，最长 60 秒），
+  全局每分钟失败超过 100 次则进入 30 秒冷却。已验证通过的 Token 走缓存，不受影响。
+  本机来源始终豁免，避免把运维人员锁在自己的控制台外。
+- 放在反向代理后面时，把 `admin.client_ip_header` 设为代理覆写的头（如 `x-forwarded-for`），
+  否则所有请求会被当作同一个来源。**只有在代理确实覆写该头时才配置它** —— 该头由调用方可控，
+  未经覆写就信任等于让每个调用方自选身份、随时甩掉失败记录。
 
 ## 🧪 开发检查
 
 发布变更前常用检查：
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+gofmt -l cmd internal
+go vet ./...
+go test -race ./...
 docker compose up -d --build
 curl -fsS http://127.0.0.1:3100/health
 docker compose ps
@@ -305,4 +312,4 @@ docker compose ps
 
 ## 📦 发布
 
-推送与 `Cargo.toml` 版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。发布压缩包包含运行所需的 `static/`、`config/`、`themes/` 目录以及 `SHA256SUMS`。当前发布目标包括 Windows x86_64、Linux x86_64 GNU 和 macOS Universal。
+推送与 `internal/handlers/admin.go` 中服务版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。发布压缩包包含运行所需的 `static/`、`config/`、`themes/` 目录以及 `SHA256SUMS`。当前发布目标包括 Windows x86_64、Linux x86_64、Linux aarch64、macOS x86_64 和 macOS aarch64。

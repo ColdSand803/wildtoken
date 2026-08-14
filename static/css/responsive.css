@@ -290,6 +290,12 @@
     display: none;
   }
 
+  /* 窄屏上横向滚动已经够长了，描述让位给名称和状态那几列 */
+  .desc-cell {
+    max-width: 200px;
+    min-width: 140px;
+  }
+
   th,
   td {
     padding: 9px 10px;
@@ -538,19 +544,6 @@
 
   .action-cell button {
     margin: 0 4px 4px 0;
-  }
-
-  .token-value-box {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .token-value-box code {
-    min-width: 0;
-  }
-
-  .token-copy-btn {
-    width: 100%;
   }
 }
 

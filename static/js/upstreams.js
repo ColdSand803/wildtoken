@@ -91,9 +91,15 @@ function payloadFromForm() {
     timeout_seconds: Number(fields.timeoutSeconds.value || 300),
     enabled: fields.enabled.checked,
     extra_headers: extraHeaders,
+    rate_limit: fields.rateLimit.value.trim() || null,
     clear_api_key: fields.clearApiKey.checked,
+    group_ids: readUpstreamGroupSelection(),
   };
 }
+
+/* 编辑/复制渠道时先把该渠道的分组记下来，等 openUpstreamDialog 真正打开弹窗时
+   再填进去——填充要等分组列表拉回来，而打开弹窗是同步的。 */
+let pendingUpstreamGroupIds = null;
 
 function hasExtraHeaders(headers) {
   return headers
@@ -109,6 +115,8 @@ function setAdvancedSettingsOpen(open) {
 }
 
 function openUpstreamDialog() {
+  // 分组列表可能在别处被改过，每次开弹窗都重新填一遍。
+  fillUpstreamGroupOptions(pendingUpstreamGroupIds);
   if (typeof upstreamDialog.showModal === "function") {
     upstreamDialog.showModal();
   } else {
@@ -235,6 +243,7 @@ async function editUpstream(upstream) {
     fields.baseUrl.value = detail.base_url;
     fields.apiKey.value = detail.api_key || "";
     persistedFormApiKey = detail.api_key || null;
+    pendingUpstreamGroupIds = detail.group_ids || null;
     formModelManualInput.value = "";
     fields.modelPrefixes.value = joinList(detail.model_prefixes);
     fields.modelMappings.value = joinModelMappings(detail.model_mappings);
@@ -244,9 +253,11 @@ async function editUpstream(upstream) {
     fields.fixedWeightEnabled.checked = !detail.auto_weight_enabled;
     fields.timeoutSeconds.value = detail.timeout_seconds;
     fields.extraHeaders.value = JSON.stringify(detail.extra_headers || {}, null, 2);
+    fields.rateLimit.value = detail.rate_limit || "";
     fields.enabled.checked = detail.enabled;
     fields.clearApiKey.checked = false;
-    setAdvancedSettingsOpen(hasExtraHeaders(detail.extra_headers));
+    // 限速也在高级设置里，配置过就展开，不然编辑时看不到已有的值。
+    setAdvancedSettingsOpen(hasExtraHeaders(detail.extra_headers) || Boolean(detail.rate_limit));
     fetchModelsButton.disabled = false;
     formTitle.textContent = `编辑渠道：${detail.name}`;
     openUpstreamDialog();
@@ -257,6 +268,7 @@ async function editUpstream(upstream) {
 
 function duplicateUpstream(upstream) {
   resetForm();
+  pendingUpstreamGroupIds = upstream.group_ids || null;
   fields.name.value = `${upstream.name} 副本`;
   fields.baseUrl.value = upstream.base_url;
   fields.modelPrefixes.value = joinList(upstream.model_prefixes);
@@ -267,8 +279,9 @@ function duplicateUpstream(upstream) {
   fields.fixedWeightEnabled.checked = !upstream.auto_weight_enabled;
   fields.timeoutSeconds.value = upstream.timeout_seconds;
   fields.extraHeaders.value = JSON.stringify(upstream.extra_headers || {}, null, 2);
+  fields.rateLimit.value = upstream.rate_limit || "";
   fields.enabled.checked = upstream.enabled;
-  setAdvancedSettingsOpen(hasExtraHeaders(upstream.extra_headers));
+  setAdvancedSettingsOpen(hasExtraHeaders(upstream.extra_headers) || Boolean(upstream.rate_limit));
   formTitle.textContent = `复制渠道：${upstream.name}`;
   openUpstreamDialog();
   setStatus("已复制渠道配置，API Key 需要重新填写后再保存。", "ok");
@@ -399,6 +412,8 @@ function resetForm() {
   form.reset();
   fields.id.value = "";
   persistedFormApiKey = null;
+  // 不清掉的话，新建渠道会带上上一次编辑的分组。
+  pendingUpstreamGroupIds = null;
   fields.priority.value = 100;
   fields.weight.value = 100;
   fields.timeoutSeconds.value = 300;
@@ -406,6 +421,7 @@ function resetForm() {
   fields.modelMappings.value = "";
   setFormModels([]);
   fields.extraHeaders.value = "{}";
+  fields.rateLimit.value = "";
   fields.enabled.checked = true;
   fields.fixedWeightEnabled.checked = false;
   setAdvancedSettingsOpen(false);
@@ -449,7 +465,8 @@ function renderRows() {
   rows.innerHTML = "";
   renderUpstreamSummary();
 
-  const colCount = 8;
+  // 选择、ID、渠道名、模型匹配、分组、优先级、权重、状态、操作
+  const colCount = 9;
 
   if (upstreamsLoading && !upstreamsLoadedOnce) {
     rows.innerHTML = skeletonRowsMarkup(colCount, 6);
@@ -508,6 +525,7 @@ function renderRows() {
         </div>
       </td>
       <td class="match-cell" data-col="models">${renderModelMatches(upstream)}</td>
+      <td class="match-cell" data-col="groups">${renderUpstreamGroups(upstream)}</td>
       <td class="col-priority" data-col="priority">
         <button
           type="button"

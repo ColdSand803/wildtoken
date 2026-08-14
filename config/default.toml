@@ -18,6 +18,10 @@ default_timeout_seconds = 300.0
 
 [admin]
 token = "change-me"
+# Header carrying the real client address when running behind a reverse proxy.
+# Leave unset unless the proxy overwrites it — the header is caller-controlled,
+# and trusting one no proxy rewrites lets callers shed their failure history.
+# client_ip_header = "x-forwarded-for"
 
 [themes]
 dir = "themes"

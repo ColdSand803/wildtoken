@@ -2,7 +2,7 @@
 
 **🌐 Language:** English | [简体中文](README.zh-CN.md)
 
-> **Self-hosted LLM API aggregation gateway in Rust.**
+> **Self-hosted LLM API aggregation gateway in Go.**
 >
 > WildToken exposes OpenAI-compatible `/v1/*` endpoints and an
 > Anthropic-compatible `/v1/messages` endpoint, then routes each downstream
@@ -38,8 +38,18 @@ an admin console for day-to-day operations.
 - 🔁 **Retry and failover policy:** failed automatic routes can reselect another
   channel, while same-channel retries respect the configured delay.
 - 🔐 **Downstream token management:** create client-facing API tokens in the admin
-  console; full token values are shown once, and the database stores only
-  hashes plus irreversible previews.
+  console, shaped as an `sk-` prefix followed by 32 random alphanumerics. The full
+  value is kept in the database so it can be copied from the token list at any
+  time, or rewritten while editing — which retires the old value at once. Tokens
+  can carry an optional expiry — entered as a duration such as `1d3h` or as a
+  date — after which they stop authenticating while the record stays around to be
+  renewed.
+- 🚦 **Token and channel rate limits:** both tokens and channels accept an optional
+  rate expression such as `100/m`, `1000/h` or `50/10s` (requests per window,
+  units s/m/h/d with an optional multiplier). A rate-limited token is refused
+  with 429; a rate-limited channel is skipped during routing so traffic fails
+  over to the next candidate, and 429 is returned only when every candidate is
+  exhausted. Counting uses in-memory sliding windows, so limits reset on restart.
 - 📊 **Admin dashboard:** inspect channel status, request logs, token usage, top
   models/channels, latency, runtime metrics, and request/response snapshots. One
   time-range control covers today, 24h, 3d, 7d, 30d, all time, and custom dates.
@@ -63,11 +73,11 @@ Dashboard with the built-in light and dark themes:
 | --- | --- |
 | ![Dashboard in the built-in light theme](screenshots/screenshot-light.png) | ![Dashboard in the built-in dark theme](screenshots/screenshot-dark.png) |
 
-Request log page rendered by two CSS-only theme packs from [`themes/`](themes/):
+Request log page rendered by a CSS-only theme pack from [`themes/`](themes/):
 
-| Ark | Bleach |
-| --- | --- |
-| ![Request logs with the Ark theme](screenshots/screenshot-ark.png) | ![Request logs with the Bleach theme](screenshots/screenshot-bleach.png) |
+| Ark |
+| --- |
+| ![Request logs with the Ark theme](screenshots/screenshot-ark.png) |
 
 ## 🚀 Quick Start
 
@@ -77,7 +87,7 @@ Docker Compose is the easiest way to run WildToken as a local service.
 
 ```bash
 cp .env.example .env
-# Edit .env and set ADMIN_TOKEN to a unique 8-256 byte printable ASCII value.
+# Edit .env and set ADMIN_TOKEN to a unique 24-256 byte printable ASCII value.
 docker compose up -d --build
 curl -fsS http://127.0.0.1:3100/health
 ```
@@ -93,22 +103,23 @@ port `3100`. It also mounts `./themes` read-only into the container so theme
 changes do not require an image rebuild.
 
 For a brand-new database listening beyond localhost, WildToken refuses to start
-unless `ADMIN_TOKEN` is explicitly set. The token must be 8-256 bytes, printable
+unless `ADMIN_TOKEN` is explicitly set. The token must be 24-256 bytes, printable
 ASCII, contain no spaces, and not be `change-me`.
 
 ### 🛠️ From Source
 
 Requirements:
 
-- Rust toolchain compatible with the repository lockfile
-- SQLite support through `sqlx`
+- Go 1.25 or newer
+- No C toolchain: the SQLite driver is pure Go, so `CGO_ENABLED=0` builds work
+  on every supported target
 
 Run locally:
 
 ```bash
 cp .env.example .env
 # Optional for localhost-only first boot, required before exposing the service.
-ADMIN_TOKEN=replace-with-a-long-random-token cargo run
+ADMIN_TOKEN=replace-with-a-long-random-token go run ./cmd/wildtoken
 ```
 
 By default, source runs bind to `127.0.0.1:3100` and use
@@ -304,8 +315,7 @@ APP__DATABASE__MAX_CONNECTIONS=3
 APP__LOGGING__LOG_QUEUE_CAPACITY=512
 APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS=300
 WILDTOKEN_THEME_DIR=themes
-TOKIO_WORKER_THREADS=4
-RUST_LOG=info
+WILDTOKEN_LOG=info
 ```
 
 `ADMIN_TOKEN` is used only to initialize a new database credential. After the
@@ -348,21 +358,33 @@ theme packs.
   `change-me` credential before exposure.
 - Keep `.env`, SQLite data, logs, and release archives with live configuration
   out of public repositories.
-- Downstream API tokens are stored as SHA-256 digests plus irreversible previews;
-  the full token is displayed only once at creation time.
+- Downstream API tokens are stored in plaintext so the console can copy them at
+  any time; authentication resolves a SHA-256 digest and the plaintext never
+  enters the request path. Treat access to the SQLite file and to the admin port
+  as access to every downstream token.
 - Provider API keys are injected into upstream requests server-side and should
   never be distributed to downstream clients.
 - Admin APIs are same-origin and require `x-admin-token`; compatibility `/v1/*`
   APIs are intentionally CORS-enabled for downstream clients.
+- Admin authentication is rate limited: a single source backs off exponentially
+  after 5 consecutive failures (1s, doubling to 60s), and more than 100 failures
+  per minute puts every remote caller into a 30s cooldown. Already-verified
+  tokens are answered from cache and are never throttled. Loopback callers are
+  always exempt, so an operator cannot be locked out of their own console.
+- Behind a reverse proxy, set `admin.client_ip_header` to the header your proxy
+  overwrites (e.g. `x-forwarded-for`); otherwise every request looks like one
+  source. **Only set it when a proxy really does overwrite that header** — it is
+  caller-controlled, so trusting an unwritten one lets every caller pick its own
+  identity and shed its failure history.
 
 ## 🧪 Development Checks
 
 Useful local checks before shipping a change:
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets -- -D warnings
-cargo test --locked --all-targets
+gofmt -l cmd internal
+go vet ./...
+go test -race ./...
 docker compose up -d --build
 curl -fsS http://127.0.0.1:3100/health
 docker compose ps
@@ -374,7 +396,8 @@ the theme contract tests under `tests/*.mjs`.
 
 ## 📦 Releases
 
-Pushing a `v*` tag matching the `Cargo.toml` version creates a GitHub Release
-through Actions. Release archives include the required `static/`, `config/`, and
-`themes/` directories plus `SHA256SUMS`. Current release targets are Windows
-x86_64, Linux x86_64 GNU, and macOS Universal.
+Pushing a `v*` tag matching the service version in `internal/handlers/admin.go`
+creates a GitHub Release through Actions. Release archives include the required
+`static/`, `config/`, and `themes/` directories plus `SHA256SUMS`. Current
+release targets are Windows x86_64, Linux x86_64, Linux aarch64, macOS x86_64,
+and macOS aarch64.

@@ -1,0 +1,416 @@
+// Package middleware authenticates admin and downstream API callers.
+package middleware
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"net/netip"
+	"strings"
+
+	"github.com/liguangsheng/wildtoken/internal/apperr"
+	"github.com/liguangsheng/wildtoken/internal/authstate"
+	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/ratelimit"
+)
+
+type contextKey int
+
+const (
+	adminAuthKey contextKey = iota
+	downstreamAuthKey
+)
+
+// AdminAuth records the credential snapshot a request authenticated against.
+type AdminAuth struct {
+	// CredentialVersion is the generation this request proved itself against.
+	// Handlers that mutate the credential use it as their CAS precondition.
+	CredentialVersion int64
+}
+
+// AdminAuthFrom returns the admin authentication attached to an authorized
+// request.
+func AdminAuthFrom(ctx context.Context) (AdminAuth, bool) {
+	auth, ok := ctx.Value(adminAuthKey).(AdminAuth)
+	return auth, ok
+}
+
+// DownstreamAuth identifies the API token a proxied request presented.
+type DownstreamAuth struct {
+	TokenID    int64
+	TokenName  string
+	ClientType string
+	// GroupID scopes which channels this token may reach.
+	GroupID int64
+	// UsedTokens and LimitTokens carry the quota state this request was admitted
+	// under. LimitTokens is nil when the token is unlimited.
+	UsedTokens  int64
+	LimitTokens *int64
+}
+
+// DownstreamAuthFrom returns the downstream authentication attached to an
+// authorized request.
+func DownstreamAuthFrom(ctx context.Context) (DownstreamAuth, bool) {
+	auth, ok := ctx.Value(downstreamAuthKey).(DownstreamAuth)
+	return auth, ok
+}
+
+// RequireAdmin verifies the `x-admin-token` header against the current Argon2id
+// credential snapshot. All authentication failures are deliberately
+// indistinguishable to callers.
+//
+// clientIPHeader names the forwarded header to trust, and is empty when no
+// proxy sits in front of the service.
+func RequireAdmin(credentials *authstate.Credentials, clientIPHeader string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token := r.Header.Get("x-admin-token")
+			if token == "" {
+				writeUnauthorized(w)
+				return
+			}
+
+			client := adminClient(r, clientIPHeader)
+			credentialVersion, ok := credentials.Authenticate(token, client)
+			if !ok {
+				writeUnauthorized(w)
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), adminAuthKey,
+				AdminAuth{CredentialVersion: credentialVersion})
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func writeUnauthorized(w http.ResponseWriter) {
+	apperr.WriteJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+}
+
+// adminClient identifies the caller for throttling purposes.
+//
+// A forwarded header is only consulted when the operator has named one, and an
+// address learned that way is always treated as remote — otherwise anyone could
+// claim 127.0.0.1 and inherit the loopback exemption.
+func adminClient(r *http.Request, clientIPHeader string) authstate.Client {
+	if clientIPHeader != "" {
+		forwarded := r.Header.Get(clientIPHeader)
+		if forwarded != "" {
+			first, _, _ := strings.Cut(forwarded, ",")
+			if addr, ok := parseForwardedAddr(first); ok {
+				return authstate.Client{Kind: authstate.ClientRemote, Addr: addr}
+			}
+		}
+	}
+
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return authstate.UnknownClient()
+	}
+	return authstate.ClientFromAddr(addr.Unmap())
+}
+
+// parseForwardedAddr accepts the bare address, `host:port` and `[v6]:port`
+// forms proxies sometimes emit.
+func parseForwardedAddr(value string) (netip.Addr, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return netip.Addr{}, false
+	}
+	if addr, err := netip.ParseAddr(value); err == nil {
+		return addr.Unmap(), true
+	}
+	if addrPort, err := netip.ParseAddrPort(value); err == nil {
+		return addrPort.Addr().Unmap(), true
+	}
+	if host, _, err := net.SplitHostPort(value); err == nil {
+		if addr, err := netip.ParseAddr(host); err == nil {
+			return addr.Unmap(), true
+		}
+	}
+	// A bracketed literal without a port is not valid for either parser above.
+	if trimmed := strings.TrimSuffix(strings.TrimPrefix(value, "["), "]"); trimmed != value {
+		if addr, err := netip.ParseAddr(trimmed); err == nil {
+			return addr.Unmap(), true
+		}
+	}
+	return netip.Addr{}, false
+}
+
+// RequireDownstream validates the caller's API token against the api_tokens
+// table, accepting only enabled and unexpired rows.
+func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Anthropic clients authenticate with x-api-key and expect their own
+			// error shape.
+			anthropic := strings.TrimRight(r.URL.Path, "/") == "/v1/messages"
+
+			token, ok := extractDownstreamToken(r, anthropic)
+			if !ok {
+				writeDownstreamRejection(w, anthropic, http.StatusUnauthorized,
+					"Incorrect API key provided")
+				return
+			}
+
+			credential, found, err := LookupEnabledDownstreamToken(r.Context(), database, token)
+			if err != nil {
+				writeDownstreamRejection(w, anthropic, http.StatusInternalServerError,
+					"database error")
+				return
+			}
+			if !found {
+				writeDownstreamRejection(w, anthropic, http.StatusUnauthorized,
+					"Incorrect API key provided")
+				return
+			}
+
+			/* An exhausted quota is refused before the request reaches an
+			   upstream. The check is on the total recorded so far, so the request
+			   that crosses the limit is allowed to finish: its cost is only known
+			   once the response completes. */
+			if credential.LimitTokens != nil && credential.UsedTokens >= *credential.LimitTokens {
+				writeDownstreamQuotaRejection(w, anthropic,
+					models.QuotaExceededMessage(credential.UsedTokens, *credential.LimitTokens))
+				return
+			}
+
+			/* The rate limit is enforced after the quota so an exhausted token
+			   reports its quota, not its rate: the quota message tells the caller
+			   the credential itself is out of budget, which is the more permanent
+			   condition. The expression is parsed on every request — it survived
+			   validation at write time, so a parse failure here means the row was
+			   edited out of band, and the request is admitted rather than refused
+			   on a config error the caller cannot fix. */
+			if credential.RateLimit != nil {
+				if parsed, err := ratelimit.ParseRateLimit(*credential.RateLimit); err == nil {
+					if !limiter.Check(credential.TokenID, parsed) {
+						writeDownstreamRateLimitRejection(w, anthropic, *credential.RateLimit)
+						return
+					}
+				}
+			}
+
+			ctx := context.WithValue(r.Context(), downstreamAuthKey, DownstreamAuth{
+				TokenID:     credential.TokenID,
+				TokenName:   credential.TokenName,
+				ClientType:  DetectClientType(r, anthropic),
+				GroupID:     credential.GroupID,
+				UsedTokens:  credential.UsedTokens,
+				LimitTokens: credential.LimitTokens,
+			})
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+func writeDownstreamRejection(w http.ResponseWriter, anthropic bool, status int, message string) {
+	writeDownstreamError(w, anthropic, status, message, "invalid_api_key", "authentication_error")
+}
+
+// QuotaExhaustedCode identifies an exhausted token quota at the top level of the
+// refusal, where a caller that does not speak either vendor's error shape can
+// branch on it.
+const QuotaExhaustedCode = "API_KEY_QUOTA_EXHAUSTED"
+
+// QuotaExhaustedMessage is the operator-facing summary carried alongside the
+// code. The detailed figures stay in the nested error a vendor SDK reads.
+const QuotaExhaustedMessage = "API key 额度已用完"
+
+// writeDownstreamQuotaRejection reports an exhausted quota.
+//
+// The error type deliberately differs from a bad credential: a client that reads
+// invalid_api_key is expected to stop and have its key replaced, whereas a quota
+// refusal is resolved by raising the limit or resetting usage. Both vendors have
+// a rate-limit shape for exactly this, so it is reused.
+//
+// The body carries the refusal twice. A vendor SDK only looks inside `error`, so
+// that shape has to stay; a caller written against this proxy reads the top-level
+// code instead, without having to know which vendor dialect the route speaks.
+func writeDownstreamQuotaRejection(w http.ResponseWriter, anthropic bool, detail string) {
+	body := map[string]any{
+		"code":    QuotaExhaustedCode,
+		"message": QuotaExhaustedMessage,
+	}
+	if anthropic {
+		body["type"] = "error"
+		body["error"] = map[string]string{"type": "rate_limit_error", "message": detail}
+	} else {
+		body["error"] = map[string]string{
+			"message": detail,
+			"type":    "insufficient_quota",
+			"code":    "insufficient_quota",
+		}
+	}
+	apperr.WriteJSON(w, http.StatusTooManyRequests, body)
+}
+
+// RateLimitedCode identifies a rate-limited request at the top level of the
+// refusal, mirroring QuotaExhaustedCode: a caller that does not speak either
+// vendor's error shape can branch on it.
+const RateLimitedCode = "API_KEY_RATE_LIMITED"
+
+// RateLimitedMessage is the operator-facing summary carried alongside the code.
+const RateLimitedMessage = "API key 请求频率超限"
+
+// writeDownstreamRateLimitRejection reports a request refused for exceeding the
+// token's configured rate.
+//
+// Unlike a quota refusal this one heals itself: the caller only has to wait for
+// the window to slide. The nested message names the configured rate so a client
+// can decide how long that is likely to be. Both vendor dialects use their
+// rate-limit shape, which is exactly what SDK retry logic keys on.
+func writeDownstreamRateLimitRejection(w http.ResponseWriter, anthropic bool, rateLimit string) {
+	detail := fmt.Sprintf("请求频率超过限制（%s），请稍后重试", rateLimit)
+	body := map[string]any{
+		"code":    RateLimitedCode,
+		"message": RateLimitedMessage,
+	}
+	if anthropic {
+		body["type"] = "error"
+		body["error"] = map[string]string{"type": "rate_limit_error", "message": detail}
+	} else {
+		body["error"] = map[string]string{
+			"message": detail,
+			"type":    "rate_limit_exceeded",
+			"code":    "rate_limit_exceeded",
+		}
+	}
+	apperr.WriteJSON(w, http.StatusTooManyRequests, body)
+}
+
+func writeDownstreamError(w http.ResponseWriter, anthropic bool, status int,
+	message, openAIType, anthropicType string) {
+	if anthropic {
+		apperr.WriteJSON(w, status, map[string]any{
+			"type":  "error",
+			"error": map[string]string{"type": anthropicType, "message": message},
+		})
+		return
+	}
+	apperr.WriteJSON(w, status, map[string]any{
+		"error": map[string]string{
+			"message": message,
+			"type":    openAIType,
+			"code":    openAIType,
+		},
+	})
+}
+
+// DetectClientType labels the caller from its originator and user-agent headers.
+func DetectClientType(r *http.Request, anthropic bool) string {
+	originator := strings.ToLower(r.Header.Get("originator"))
+	userAgent := strings.ToLower(r.Header.Get("user-agent"))
+
+	switch {
+	case strings.Contains(originator, "codex desktop"):
+		return "codex-desktop"
+	case strings.Contains(originator, "codex-tui"):
+		return "codex-tui"
+	case strings.Contains(userAgent, "codex desktop"):
+		return "codex-desktop"
+	case strings.Contains(userAgent, "codex-tui"):
+		return "codex-tui"
+	case strings.Contains(userAgent, "opencode"):
+		return "opencode"
+	case strings.Contains(originator, "codex") || strings.Contains(userAgent, "codex"):
+		return "codex"
+	case anthropic || strings.Contains(userAgent, "claude") || r.Header.Get("anthropic-version") != "":
+		return "claude"
+	default:
+		return "unknown"
+	}
+}
+
+// extractDownstreamToken reads a bearer token, falling back to x-api-key for
+// Anthropic-style requests.
+func extractDownstreamToken(r *http.Request, anthropic bool) (string, bool) {
+	authorization := r.Header.Get("authorization")
+	if scheme, credentials, found := strings.Cut(authorization, " "); found &&
+		strings.EqualFold(scheme, "bearer") {
+		if token := strings.TrimSpace(credentials); token != "" {
+			return token, true
+		}
+	}
+	if !anthropic {
+		return "", false
+	}
+	if token := strings.TrimSpace(r.Header.Get("x-api-key")); token != "" {
+		return token, true
+	}
+	return "", false
+}
+
+// DownstreamCredential is the authenticated token's routing and quota state.
+type DownstreamCredential struct {
+	TokenID     int64
+	TokenName   string
+	GroupID     int64
+	UsedTokens  int64
+	LimitTokens *int64
+	// RateLimit is the stored rate expression ("100/m"), nil when unlimited.
+	RateLimit *string
+}
+
+// LookupEnabledDownstreamToken resolves a token to its row.
+//
+// A lapsed expiry filters the row out here rather than being reported
+// separately, so an expired token is indistinguishable from a disabled or
+// nonexistent one. Anything else would turn the error body into an oracle for
+// which tokens once existed.
+//
+// An exhausted quota is deliberately not filtered here: the caller reports it
+// separately, because a credential that is merely out of budget should say so
+// rather than look like a wrong key.
+//
+// The digest is resolved on every request with nothing cached in front of it,
+// which is what lets the console rewrite a token's value with no invalidation
+// step: the previous value stops authenticating as soon as the write commits.
+func LookupEnabledDownstreamToken(ctx context.Context, database *sql.DB,
+	token string) (DownstreamCredential, bool, error) {
+	if token == "" {
+		return DownstreamCredential{}, false, nil
+	}
+
+	// A row predating groups, or one whose group was removed out of band, reads
+	// as the default group rather than as no group: a token that reaches nothing
+	// would look like a routing bug rather than a configuration choice.
+	var credential DownstreamCredential
+	var storedGroupID, storedLimit sql.NullInt64
+	var storedRateLimit sql.NullString
+	err := database.QueryRowContext(ctx,
+		`SELECT id, name, group_id, COALESCE(used_tokens, 0), limit_tokens, rate_limit
+		FROM api_tokens
+        WHERE token_hash = ? AND enabled = 1
+          AND (expires_at IS NULL OR expires_at > datetime('now'))`,
+		db.TokenDigest(token)).
+		Scan(&credential.TokenID, &credential.TokenName, &storedGroupID,
+			&credential.UsedTokens, &storedLimit, &storedRateLimit)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DownstreamCredential{}, false, nil
+	}
+	if err != nil {
+		return DownstreamCredential{}, false, err
+	}
+
+	credential.GroupID = models.DefaultGroupID
+	if storedGroupID.Valid && storedGroupID.Int64 > 0 {
+		credential.GroupID = storedGroupID.Int64
+	}
+	if storedLimit.Valid && storedLimit.Int64 > 0 {
+		credential.LimitTokens = &storedLimit.Int64
+	}
+	if storedRateLimit.Valid && storedRateLimit.String != "" {
+		credential.RateLimit = &storedRateLimit.String
+	}
+	return credential, true, nil
+}

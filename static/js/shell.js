@@ -372,6 +372,9 @@ function switchView(name) {
   } else {
     stopTokenRefresh();
   }
+  if (name === "groups") {
+    loadGroups();
+  }
   if (name === "settings") {
     loadSettingsPage();
     startSystemUptimeTicker();
@@ -736,11 +739,15 @@ function renderSystemInfo(system) {
 async function loadSettingsPage() {
   updatePreferenceControls();
   try {
-    const [settings, system, templates] = await Promise.all([api("/api/admin/settings"), api("/api/admin/system"), api("/api/admin/settings/model-test-templates")]);
+    const [settings, system, prompts] = await Promise.all([
+      api("/api/admin/settings"),
+      api("/api/admin/system"),
+      api("/api/admin/settings/model-test-prompts"),
+    ]);
     fillServerSettings(settings);
     renderSystemInfo(system);
-    modelTestTemplates = templates;
-    renderModelTestTemplates();
+    modelTestPromptTemplates = prompts;
+    renderModelTestPromptList();
   } catch (error) {
     if (currentViewFromHash() === "settings") {
       setSettingsStatus("无法加载设置，请检查连接后重试。", "error");
@@ -750,37 +757,11 @@ async function loadSettingsPage() {
   }
 }
 
-function templateKindLabel(kind) {
-  if (kind === "responses") return "Responses";
-  if (kind === "messages") return "Messages";
-  return "Chat Completions";
-}
-
-function renderModelTestTemplates() {
-  if (!modelTestTemplateList) return;
-  if (modelTestTemplates.length === 0) {
-    modelTestTemplateList.innerHTML = `<p class="settings-loading">暂无模板。请新增一个模板后再测试模型。</p>`;
-    return;
-  }
-  modelTestTemplateList.innerHTML = modelTestTemplates.map((template) => `
-    <div class="model-test-template-item">
-      <div><strong>${escapeHtml(template.name)} <span class="muted">${escapeHtml(templateKindLabel(template.request_kind))}</span></strong><p title="${escapeHtml(template.prompt)}">${escapeHtml(template.prompt)}</p></div>
-      <div class="model-test-template-actions"><button type="button" class="secondary small" data-model-template-action="edit" data-template-id="${template.id}">编辑</button><button type="button" class="secondary small danger" data-model-template-action="delete" data-template-id="${template.id}">删除</button></div>
-    </div>`).join("");
-}
-
 function closeModelTestDialog() {
   modelTestUpstream = null;
   clearDialogMaximized(modelTestDialog);
   if (modelTestDialog.open && typeof modelTestDialog.close === "function") modelTestDialog.close();
   else modelTestDialog.removeAttribute("open");
-}
-
-function renderModelTestTemplateOptions() {
-  const current = Number(modelTestTemplate.value);
-  modelTestTemplate.innerHTML = modelTestTemplates.map((template) => `<option value="${template.id}">${escapeHtml(template.name)} · ${escapeHtml(templateKindLabel(template.request_kind))}</option>`).join("");
-  if (modelTestTemplates.some((template) => template.id === current)) modelTestTemplate.value = String(current);
-  updateModelTestTemplateHint();
 }
 
 function renderModelTestPromptTemplateOptions() {
@@ -789,9 +770,7 @@ function renderModelTestPromptTemplateOptions() {
   if (randomTemplate) modelTestPromptTemplate.value = String(randomTemplate.id);
 }
 
-function updateModelTestTemplateHint() {
-  const template = modelTestTemplates.find((item) => item.id === Number(modelTestTemplate.value));
-  modelTestTemplateHint.textContent = template ? `${templateKindLabel(template.request_kind)} 请求格式与头部。` : "请选择请求包装。";
+function syncModelTestPrompt() {
   const prompt = modelTestPromptTemplates.find((item) => item.id === Number(modelTestPromptTemplate.value));
   modelTestPrompt.value = prompt?.prompt || "";
 }
@@ -828,7 +807,7 @@ function renderModelTestModelOptions(models, selected = "") {
     ? normalized.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")
     : `<option value="" disabled selected>此渠道尚未配置模型</option>`;
   if (selected && normalized.includes(selected)) modelTestModel.value = selected;
-  modelTestSubmit.disabled = normalized.length === 0 || modelTestTemplates.length === 0;
+  modelTestSubmit.disabled = normalized.length === 0;
 }
 
 async function openModelTestDialog(upstream) {
@@ -840,10 +819,9 @@ async function openModelTestDialog(upstream) {
   modelTestRequestBody.textContent = "";
   modelTestResponseBody.textContent = "";
   try {
-    [modelTestTemplates, modelTestPromptTemplates] = await Promise.all([api("/api/admin/settings/model-test-templates"), api("/api/admin/settings/model-test-prompts")]);
-    renderModelTestTemplateOptions();
+    modelTestPromptTemplates = await api("/api/admin/settings/model-test-prompts");
     renderModelTestPromptTemplateOptions();
-    updateModelTestTemplateHint();
+    syncModelTestPrompt();
     renderModelTestModelOptions(configuredModels(upstream));
     if (typeof modelTestDialog.showModal === "function") modelTestDialog.showModal();
     else modelTestDialog.setAttribute("open", "");
@@ -869,22 +847,50 @@ async function refreshModelTestModels() {
   }
 }
 
-function openModelTestTemplateDialog(template = null) {
-  modelTestTemplateForm.reset();
-  modelTestTemplateId.value = template?.id || "";
-  modelTestTemplateName.value = template?.name || "";
-  modelTestTemplateKind.value = template?.request_kind || "responses";
-  modelTestTemplatePrompt.value = template?.prompt || "Reply with exactly: WildToken test passed.";
-  document.querySelector("#model-test-template-title").textContent = template ? `编辑模板：${template.name}` : "新增测试模板";
-  if (typeof modelTestTemplateDialog.showModal === "function") modelTestTemplateDialog.showModal();
-  else modelTestTemplateDialog.setAttribute("open", "");
-  modelTestTemplateName.focus();
+function renderModelTestPromptList() {
+  if (!modelTestPromptList) return;
+  if (modelTestPromptTemplates.length === 0) {
+    modelTestPromptList.innerHTML = `<p class="settings-loading">暂无 Prompt。</p>`;
+    return;
+  }
+  modelTestPromptList.innerHTML = modelTestPromptTemplates.map((template) => `
+    <div class="model-test-template-item">
+      <div><strong>${escapeHtml(template.name)}</strong><p title="${escapeHtml(template.prompt)}">${escapeHtml(template.prompt)}</p></div>
+      <div class="model-test-template-actions"><button type="button" class="secondary small" data-model-prompt-action="edit" data-prompt-id="${template.id}">编辑</button><button type="button" class="secondary small danger" data-model-prompt-action="delete" data-prompt-id="${template.id}">删除</button></div>
+    </div>`).join("");
 }
 
-function closeModelTestTemplateDialog() {
-  clearDialogMaximized(modelTestTemplateDialog);
-  if (modelTestTemplateDialog.open && typeof modelTestTemplateDialog.close === "function") modelTestTemplateDialog.close();
-  else modelTestTemplateDialog.removeAttribute("open");
+function openModelTestPromptDialog(template = null) {
+  modelTestPromptForm.reset();
+  modelTestPromptId.value = template?.id || "";
+  modelTestPromptName.value = template?.name || "";
+  modelTestPromptContent.value = template?.prompt || "";
+  document.querySelector("#model-test-prompt-title").textContent = template ? `编辑 Prompt：${template.name}` : "新增 Prompt";
+  if (typeof modelTestPromptDialog.showModal === "function") modelTestPromptDialog.showModal();
+  else modelTestPromptDialog.setAttribute("open", "");
+  modelTestPromptName.focus();
+}
+
+function closeModelTestPromptDialog() {
+  clearDialogMaximized(modelTestPromptDialog);
+  if (modelTestPromptDialog.open && typeof modelTestPromptDialog.close === "function") modelTestPromptDialog.close();
+  else modelTestPromptDialog.removeAttribute("open");
+}
+
+/* 测试窗口的 Prompt 下拉只在打开时填一次，所以设置页改完要主动同步一遍，
+   否则窗口还开着的人会选到一个已经改名或删掉的模板。 */
+async function refreshModelTestPromptDropdown() {
+  modelTestPromptTemplates = await api("/api/admin/settings/model-test-prompts");
+  renderModelTestPromptList();
+  if (!modelTestPromptTemplate) return;
+  const previous = Number(modelTestPromptTemplate.value);
+  modelTestPromptTemplate.innerHTML = modelTestPromptTemplates.map((template) => `<option value="${template.id}">${escapeHtml(template.name)}</option>`).join("");
+  // 原来选的还在就留着，不打断正在编辑的一次测试；没了才让浏览器落到第一项。
+  if (modelTestPromptTemplates.some((template) => template.id === previous)) {
+    modelTestPromptTemplate.value = String(previous);
+  }
+  // 选中项的正文可能刚被改过，正文框跟着走一遍。
+  if (modelTestDialog?.open) syncModelTestPrompt();
 }
 
 function runtimeSettingsPayload() {

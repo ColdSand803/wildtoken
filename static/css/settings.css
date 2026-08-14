@@ -5,7 +5,8 @@
    under it. Both are gone: width now comes from the shared content cap, and
    the header spacing from .panel-head, so all five views agree.
 
-   The class stays on the element — animal-island hooks its header off it. */
+   类名还留在元素上，但目前没有任何主题挂它了——原先挂它的 animal-island、
+   demon-slayer、railgun 都已移除。主题包想单独定制设置页表头时仍可以用这个钩子。 */
 
 /* .eyebrow now labels every view's header, not just this one — it lives in
    base.css next to .panel-head. */

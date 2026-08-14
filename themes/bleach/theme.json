@@ -1,8 +1,0 @@
-{
-  "id": "bleach",
-  "label": "Bleach",
-  "css": "theme.css",
-  "swatch": ["#fff7ed", "#f97316"],
-  "version": "1.1.0",
-  "description": "Manga-paper admin theme with ink rails and orange reiatsu accents."
-}
