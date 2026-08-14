@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -306,6 +307,12 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			runtimeSettings: runtimeSettings,
 		})
 		if err != nil {
+			// Every failing path inside runProxyAttempts logs the attempt it
+			// failed on, with the status that describes it. Leaving the guard
+			// armed added a second row for the same request, blaming a client
+			// disconnect for what was an upstream failure and leaving the
+			// console unable to tell the two apart.
+			guard.disarm()
 			apperr.WriteError(w, err)
 			return
 		}
@@ -408,6 +415,10 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			config.runtimeSettings.SameUpstreamRetryIntervalMs > 0 {
 			select {
 			case <-r.Context().Done():
+				// Logged here because no attempt was made to log it: this is
+				// the one error path out of this function that ProxyRequest
+				// never saw.
+				config.guard.logAndDisarm(499, "client disconnected during retry backoff")
 				return nil, apperr.Upstream("client disconnected during retry backoff")
 			case <-time.After(time.Duration(config.runtimeSettings.SameUpstreamRetryIntervalMs) *
 				time.Millisecond):
@@ -445,11 +456,13 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			return response, err
 		}
 
-		// A failed attempt's body is abandoned, so its connection is released
-		// rather than left for the garbage collector.
+		// A failed attempt's body is buffered rather than discarded. Its
+		// connection is released either way, but if no channel is left to try
+		// this response is what the caller receives: draining it delivered the
+		// upstream's status and headers with an empty body, throwing away the
+		// only explanation of what went wrong.
 		if response != nil {
-			io.Copy(io.Discard, response.Body)
-			response.Body.Close()
+			response.Body = bufferFailedBody(response.Body)
 		}
 
 		upstreamID := selected.Upstream.ID
@@ -461,6 +474,29 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 type attemptResult struct {
 	response *proxy.Response
 	err      error
+}
+
+// maxBufferedFailureBytes caps what is kept from a failed attempt. A provider's
+// error body is a small piece of JSON, so this only bounds a channel that is
+// answering a rejection with something unreasonable.
+const maxBufferedFailureBytes = 1 << 20
+
+// bufferFailedBody reads a failed attempt's body into memory and closes the
+// original, returning a reader over what it held.
+//
+// The body is normally already buffered by the time it gets here, but reading it
+// again is what makes the release of the connection unconditional rather than a
+// property of which path produced the response.
+func bufferFailedBody(body io.ReadCloser) io.ReadCloser {
+	defer body.Close()
+
+	buffered, err := io.ReadAll(io.LimitReader(body, maxBufferedFailureBytes))
+	if err != nil {
+		// Whatever could not be read is not worth failing the retry over; the
+		// status and headers still describe the attempt.
+		buffered = nil
+	}
+	return io.NopCloser(bytes.NewReader(buffered))
 }
 
 // writeProxiedResponse copies an upstream response downstream, streaming it as
