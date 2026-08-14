@@ -238,14 +238,23 @@ func (s *logStatsState) applyPersistedEntry(entry PersistedLogStats, now time.Ti
 	}
 }
 
-// maxPendingEntries caps the rows held between refreshes.
-//
-// A pending entry exists to be carried across the next rebuild. If rebuilds stop
-// happening — a locked database, a full disk — nothing trimmed the map and it
-// grew with every request the gateway served until the process ran out of
-// memory. The cap keeps the failure to stale statistics, which is what a failing
-// refresh already means.
-const maxPendingEntries = 100_000
+const (
+	// maxPendingEntries caps the rows held between refreshes.
+	//
+	// A pending entry exists to be carried across the next rebuild. If rebuilds
+	// stop happening — a locked database, a full disk — nothing trimmed the map
+	// and it grew with every request the gateway served until the process ran
+	// out of memory. The cap keeps the failure to stale statistics, which is
+	// what a failing refresh already means.
+	maxPendingEntries = 100_000
+	// pendingLowWater is what an over-cap trim reduces the map to.
+	//
+	// Trimming to the cap exactly put the map back over it on the very next
+	// batch, so every batch and every console poll paid for a full sort of
+	// every key — while holding the lock the console reads through. The gap
+	// amortizes one sort over the entries it takes to close it.
+	pendingLowWater = maxPendingEntries * 9 / 10
+)
 
 func (s *logStatsState) prune(now time.Time) {
 	oldestBucket := floorToMinute(oldestWindowStart(now))
@@ -255,23 +264,18 @@ func (s *logStatsState) prune(now time.Time) {
 		}
 	}
 
-	// An entry older than the window can no longer be carried into a bucket, so
-	// it is only occupying space.
-	oldestEntry := oldestWindowStart(now)
-	for id, entry := range s.pendingEntries {
-		if entry.CreatedAtUnixSeconds < oldestEntry {
-			delete(s.pendingEntries, id)
-		}
-	}
+	// Nothing else to do until the map is over its cap. Entries are held only
+	// until the next rebuild carries them across, so in ordinary operation this
+	// is where prune returns.
 	if len(s.pendingEntries) <= maxPendingEntries {
 		return
 	}
 
-	// Still over the cap: drop the lowest ids, which are the ones a rebuild is
-	// most likely to have already accounted for. Their counts stay in the
-	// buckets; only the ability to replay them is given up.
+	// Over the cap: drop the lowest ids, which are the ones a rebuild is most
+	// likely to have accounted for already. Their counts stay in the buckets;
+	// only the ability to replay them across a rebuild is given up.
 	ids := slices.Sorted(maps.Keys(s.pendingEntries))
-	for _, id := range ids[:len(ids)-maxPendingEntries] {
+	for _, id := range ids[:len(ids)-pendingLowWater] {
 		delete(s.pendingEntries, id)
 	}
 }

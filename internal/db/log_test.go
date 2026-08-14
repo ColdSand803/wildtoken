@@ -460,6 +460,13 @@ func TestPendingEntriesAreBoundedWhenRefreshesStopHappening(t *testing.T) {
 	if held > maxPendingEntries {
 		t.Errorf("held %d pending entries, want at most %d", held, maxPendingEntries)
 	}
+	// Trimming leaves headroom rather than stopping at the cap, so the next
+	// batch does not put the map straight back over it and pay for another
+	// full sort of every key.
+	if held > pendingLowWater {
+		t.Errorf("trimmed to %d, want the low-water mark %d so the sort amortizes",
+			held, pendingLowWater)
+	}
 	// The counts the dropped entries contributed stay in the buckets; only the
 	// ability to replay them across a rebuild is given up.
 	if snapshot.TotalLogCount != int64(maxPendingEntries+surplus) {
@@ -467,26 +474,25 @@ func TestPendingEntriesAreBoundedWhenRefreshesStopHappening(t *testing.T) {
 	}
 }
 
-func TestStaleWindowEntriesLeaveThePendingMap(t *testing.T) {
+func TestPruneDoesNotSortWhileTheMapIsWithinItsCap(t *testing.T) {
 	cache := NewLogStatsCache()
 	now := nowUnix()
 
-	cache.RecordPersistedEntries([]PersistedLogStats{
-		{ID: 1, CreatedAtUnixSeconds: now},
-		// Outside the thirty-day window, so it can never reach a bucket again.
-		{ID: 2, CreatedAtUnixSeconds: now - int64((31 * 24 * time.Hour).Seconds())},
-	})
+	// The ordinary case is a map holding one refresh interval of rows. Prune
+	// runs on every batch and every console poll, so it must not touch the
+	// entries at all until the cap is actually reached.
+	entries := make([]PersistedLogStats, 0, 128)
+	for id := range int64(128) {
+		entries = append(entries, PersistedLogStats{ID: id + 1, CreatedAtUnixSeconds: now})
+	}
+	cache.RecordPersistedEntries(entries)
 	cache.Snapshot()
 
 	cache.mu.Lock()
-	_, staleHeld := cache.state.pendingEntries[2]
-	_, freshHeld := cache.state.pendingEntries[1]
+	held := len(cache.state.pendingEntries)
 	cache.mu.Unlock()
 
-	if staleHeld {
-		t.Error("an entry outside the window is still held for replay")
-	}
-	if !freshHeld {
-		t.Error("an entry inside the window was dropped")
+	if held != 128 {
+		t.Errorf("held %d entries, want all 128 kept below the cap", held)
 	}
 }
