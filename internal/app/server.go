@@ -231,14 +231,30 @@ func sqliteDSN(settings config.DatabaseSettings) (string, error) {
 	return path + "?" + values.Encode(), nil
 }
 
+// maxUpstreamRedirects bounds how far a channel may forward the gateway.
+//
+// A provider that moved an endpoint is worth following; a chain longer than this
+// is a channel leading the gateway somewhere it was not configured to go.
+const maxUpstreamRedirects = 3
+
 func newHTTPClient(defaultTimeoutSeconds float64) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConnsPerHost = 20
 	// A streamed response must reach the client as it arrives, so the transport
 	// is told not to buffer by requesting compression itself.
 	transport.DisableCompression = true
+	// A connection that opens but never answers holds a request until its own
+	// deadline; this bounds the wait for the headers alone, which is where a
+	// silent upstream shows up first.
+	transport.ResponseHeaderTimeout = time.Duration(defaultTimeoutSeconds * float64(time.Second))
 	return &http.Client{
 		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxUpstreamRedirects {
+				return fmt.Errorf("upstream redirected more than %d times", maxUpstreamRedirects)
+			}
+			return nil
+		},
 		// Per-request deadlines carry the real timeout, because a streaming
 		// response legitimately outlives any client-wide limit.
 		Timeout: 0,

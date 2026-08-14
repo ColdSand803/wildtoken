@@ -1,5 +1,10 @@
 package models
 
+import (
+	"net/url"
+	"strings"
+)
+
 // UpstreamRow mirrors a row of the `upstreams` table.
 type UpstreamRow struct {
 	ID                int64
@@ -55,15 +60,63 @@ func DefaultUpstreamIn() UpstreamIn {
 	}
 }
 
-// Validate rejects weights outside the range the schema also enforces.
+// Validate rejects weights outside the range the schema also enforces, and a
+// base URL the gateway could not forward to.
 func (u *UpstreamIn) Validate() error {
 	if u.Weight < 0 || u.Weight > 10000 {
 		return ErrString("weight must be between 0 and 10000")
 	}
+	normalized, err := ValidateBaseURL(u.BaseURL)
+	if err != nil {
+		return err
+	}
+	u.BaseURL = normalized
 	if _, err := u.NormalizedRateLimit(); err != nil {
 		return err
 	}
 	return nil
+}
+
+// ValidateBaseURL checks that a channel's base URL is one the proxy can build a
+// request from, and returns it trimmed.
+//
+// Nothing checked this before, so any string at all could be stored and was then
+// concatenated into a request URL. That turned an operator's typo into a channel
+// that fails at request time with an error about the URL rather than about the
+// form, and left the scheme open to values the proxy has no business dialling.
+//
+// Addresses on the local machine and on private networks are deliberately
+// allowed: a self-hosted model server is a first-class use of this gateway, and
+// refusing them would break it for the sake of a restriction an operator with
+// admin rights could lift anyway.
+func ValidateBaseURL(raw string) (string, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return "", ErrString("base_url is required")
+	}
+	if len(value) > 2048 {
+		return "", ErrString("base_url must be at most 2048 bytes")
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return "", ErrString("base_url is not a valid URL: " + err.Error())
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", ErrString("base_url must start with http:// or https://")
+	}
+	if parsed.Host == "" {
+		return "", ErrString("base_url must include a host, for example https://api.example.com/v1")
+	}
+	// The path is concatenated onto, so a query or fragment here would end up in
+	// the middle of the request URL rather than where it was written.
+	if parsed.RawQuery != "" || parsed.ForceQuery {
+		return "", ErrString("base_url must not carry a query string")
+	}
+	if parsed.Fragment != "" {
+		return "", ErrString("base_url must not carry a fragment")
+	}
+	return value, nil
 }
 
 // NormalizedRateLimit validates the rate limit expression for storage.

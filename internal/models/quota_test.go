@@ -157,3 +157,43 @@ func TestAnUnlimitedTokenReportsNoRemainingOrExhaustion(t *testing.T) {
 		t.Errorf("used = %d, want it still reported", state.UsedTokens)
 	}
 }
+
+func TestValidateBaseURLRejectsWhatTheProxyCannotDial(t *testing.T) {
+	for _, value := range []string{
+		"https://api.example.com",
+		"https://api.example.com/v1",
+		"http://127.0.0.1:11434",
+		"http://192.168.1.10:8080/v1",
+		"  https://api.example.com  ",
+	} {
+		if _, err := ValidateBaseURL(value); err != nil {
+			t.Errorf("ValidateBaseURL(%q) = %v, want it accepted", value, err)
+		}
+	}
+
+	// A self-hosted model server is a first-class use of this gateway, so a
+	// local or private address is deliberately not on this list.
+	for _, value := range []string{
+		"",
+		"   ",
+		"api.example.com",
+		"file:///etc/passwd",
+		"ftp://api.example.com",
+		"https://",
+		"https://api.example.com?key=secret",
+		"https://api.example.com#fragment",
+	} {
+		if _, err := ValidateBaseURL(value); err == nil {
+			t.Errorf("ValidateBaseURL(%q) was accepted", value)
+		}
+	}
+
+	// The stored value is trimmed, so the console echoes back what it will dial.
+	normalized, err := ValidateBaseURL("  https://api.example.com/v1  ")
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if normalized != "https://api.example.com/v1" {
+		t.Errorf("normalized = %q, want the trimmed URL", normalized)
+	}
+}

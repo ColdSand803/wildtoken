@@ -1025,6 +1025,14 @@ func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		// The preview dials whatever the form holds, so the URL is checked here
+		// too rather than only on the path that saves a channel.
+		baseURL, err := models.ValidateBaseURL(input.BaseURL)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
 		extra := input.ExtraHeaders
 		if extra == nil {
 			extra = map[string]string{}
@@ -1042,7 +1050,7 @@ func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 		// The channel form's preview probes a typed-in base URL, so there is no
 		// channel row to attribute the log row to.
 		list, err := fetchModelsForTarget(r.Context(), state, nil, nil,
-			input.BaseURL, input.APIKey, extra, timeout)
+			baseURL, input.APIKey, extra, timeout)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
