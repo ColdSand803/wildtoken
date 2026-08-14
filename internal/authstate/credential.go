@@ -28,6 +28,12 @@ const (
 	argonKeyLen    uint32 = 32
 	argonSaltLen          = 16
 	argonVersion          = argon2.Version // 0x13, the `v=19` in a PHC string
+	// argonMinMemoryKiB and argonMaxMemoryKiB bound the memory cost a stored
+	// hash may ask for. The floor is argon2's own minimum for the parallelism
+	// this service uses; the ceiling keeps a corrupt row from asking for an
+	// allocation the machine cannot make.
+	argonMinMemoryKiB uint32 = 8
+	argonMaxMemoryKiB uint32 = 1 << 21 // 2 GiB
 )
 
 // phcEncoding is the unpadded standard base64 alphabet PHC strings use.
@@ -79,6 +85,14 @@ func parsePHC(encoded string) (memory, time uint32, threads uint8, salt, hash []
 
 	var parsedThreads uint8
 	if _, err := fmt.Sscanf(fields[3], "m=%d,t=%d,p=%d", &memory, &time, &parsedThreads); err != nil {
+		return 0, 0, 0, nil, nil, errMalformedHash
+	}
+	// argon2.IDKey panics on a zero time or thread count and tries to allocate
+	// memory KiB up front, so a row carrying t=0 or m=4294967295 would take the
+	// process down. One of the callers runs before the server is listening, with
+	// no recover between it and main, so the failure would be a panic out of a
+	// crypto package on every start with nothing pointing at the credential row.
+	if time < 1 || parsedThreads < 1 || memory < argonMinMemoryKiB || memory > argonMaxMemoryKiB {
 		return 0, 0, 0, nil, nil, errMalformedHash
 	}
 

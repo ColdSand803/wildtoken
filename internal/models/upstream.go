@@ -3,6 +3,8 @@ package models
 import (
 	"net/url"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // UpstreamRow mirrors a row of the `upstreams` table.
@@ -60,11 +62,42 @@ func DefaultUpstreamIn() UpstreamIn {
 	}
 }
 
-// Validate rejects weights outside the range the schema also enforces, and a
-// base URL the gateway could not forward to.
+const (
+	// UpstreamNameMaxChars bounds a channel name, matching the limit tokens use.
+	UpstreamNameMaxChars = 80
+	// UpstreamMaxTimeoutSeconds bounds a channel's per-request timeout.
+	//
+	// The value is multiplied by a second's worth of nanoseconds to make a
+	// Duration, so an unchecked one overflows int64 and lands on a negative
+	// duration — which fires its timer immediately and fails every request the
+	// channel is given, reported as an upstream timeout rather than as the
+	// configuration error it is.
+	UpstreamMaxTimeoutSeconds = 3600
+)
+
+// Validate rejects weights outside the range the schema also enforces, a base
+// URL the gateway could not forward to, and a name or timeout the rest of the
+// service cannot work with.
 func (u *UpstreamIn) Validate() error {
+	name := strings.TrimSpace(u.Name)
+	if name == "" || utf8.RuneCountInString(name) > UpstreamNameMaxChars {
+		return ErrString("channel name must be between 1 and 80 characters")
+	}
+	if strings.ContainsFunc(name, unicode.IsControl) {
+		return ErrString("channel name must not contain control characters")
+	}
+	u.Name = name
+
 	if u.Weight < 0 || u.Weight > 10000 {
 		return ErrString("weight must be between 0 and 10000")
+	}
+	// A nil timeout means "use the service default"; a stored zero means the
+	// same thing to the proxy, so only a positive value is bounded here.
+	if u.TimeoutSeconds != nil {
+		seconds := *u.TimeoutSeconds
+		if seconds < 0 || seconds > UpstreamMaxTimeoutSeconds {
+			return ErrString("timeout_seconds must be between 0 and 3600")
+		}
 	}
 	normalized, err := ValidateBaseURL(u.BaseURL)
 	if err != nil {

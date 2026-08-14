@@ -198,16 +198,22 @@ func MigrateLegacyTokenStorage(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
-	if !hasTokenHash {
+	// Driven by the rows that actually need repair rather than by whether the
+	// column had to be added. The two agree only on a first migration: a
+	// database whose column already exists but whose rows were left without a
+	// digest — added by hand, restored from a partial copy — never reached the
+	// repair and failed the check below on every start, with no way out.
+	missingHashes, err := countMissingTokenHashes(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if missingHashes != 0 {
 		if err := hashLegacyPlaintextTokens(ctx, tx); err != nil {
 			return err
 		}
-	}
-
-	var missingHashes int64
-	if err := tx.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM api_tokens WHERE token_hash IS NULL").Scan(&missingHashes); err != nil {
-		return err
+		if missingHashes, err = countMissingTokenHashes(ctx, tx); err != nil {
+			return err
+		}
 	}
 	if missingHashes != 0 {
 		return errors.New("api_tokens contains rows without a token digest")
@@ -244,6 +250,14 @@ func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]boo
 		columns[name] = true
 	}
 	return columns, rows.Err()
+}
+
+// countMissingTokenHashes reports how many rows still lack a digest.
+func countMissingTokenHashes(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var missing int64
+	err := tx.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM api_tokens WHERE token_hash IS NULL").Scan(&missing)
+	return missing, err
 }
 
 // hashLegacyPlaintextTokens replaces every plaintext value with its digest,
