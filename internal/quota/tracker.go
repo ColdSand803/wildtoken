@@ -75,13 +75,12 @@ func (r *Reservation) Release() {
 // Admit weighs a request against a token's limit and reserves room for it.
 //
 // stored is the total the database holds; a nil limit is unlimited and always
-// admits. The usage it weighed comes back with the verdict, so a refusal is
-// explained by the figure that produced it rather than by the stale stored one.
+// admits.
 //
 // An admitted request must release its reservation exactly once.
-func (t *Tracker) Admit(tokenID int64, stored int64, limit *int64) (Reservation, int64, bool) {
+func (t *Tracker) Admit(tokenID int64, stored int64, limit *int64) (Reservation, bool) {
 	if limit == nil {
-		return Reservation{}, stored, true
+		return Reservation{}, true
 	}
 
 	t.mu.Lock()
@@ -93,7 +92,7 @@ func (t *Tracker) Admit(tokenID int64, stored int64, limit *int64) (Reservation,
 		projected += entry.metered + entry.requests*ProvisionalCost
 	}
 	if projected >= *limit {
-		return Reservation{}, projected, false
+		return Reservation{}, false
 	}
 
 	if entry == nil {
@@ -101,7 +100,7 @@ func (t *Tracker) Admit(tokenID int64, stored int64, limit *int64) (Reservation,
 		t.tokens[tokenID] = entry
 	}
 	entry.requests++
-	return Reservation{tracker: t, tokenID: tokenID, held: true}, projected, true
+	return Reservation{tracker: t, tokenID: tokenID, held: true}, true
 }
 
 // Meter records usage that is known but not yet committed, so admission keeps

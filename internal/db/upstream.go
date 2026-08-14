@@ -146,8 +146,6 @@ func ListEnabledUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamRow
 }
 
 // GetUpstream returns ok=false when no row carries the id.
-// GetUpstream reads one channel. It takes a Queryer so a store that reads before
-// it writes can do both inside the same transaction.
 func GetUpstream(ctx context.Context, db Queryer, id int64) (models.UpstreamRow, bool, error) {
 	row := db.QueryRowContext(ctx, "SELECT "+upstreamColumns+" FROM upstreams WHERE id = ?", id)
 	upstream, err := scanUpstreamRow(row)

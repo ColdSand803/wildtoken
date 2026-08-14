@@ -1062,7 +1062,7 @@ func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 		// too rather than only on the path that saves a channel.
 		baseURL, err := models.ValidateBaseURL(input.BaseURL)
 		if err != nil {
-			apperr.WriteError(w, err)
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
 			return
 		}
 

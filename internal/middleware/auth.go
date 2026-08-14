@@ -136,11 +136,23 @@ func peerAddr(r *http.Request) netip.Addr {
 	return addr.Unmap()
 }
 
+// carrierGradeNAT is 100.64.0.0/10, which is not covered by Addr.IsPrivate but
+// is where a mesh VPN such as Tailscale puts its nodes — a reverse proxy there
+// is a real deployment, and ignoring its forwarded header would collapse every
+// operator onto one throttle entry.
+var carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
+
 // couldBeProxy reports whether a connection plausibly came from the operator's
 // own reverse proxy rather than straight off the internet.
+//
+// A proxy on a public address cannot be recognised from the connection alone,
+// so its forwarded header is ignored and its callers are tracked by the proxy's
+// own address. That is the safe direction — a forged header cannot shed a
+// failure streak — but it is worth knowing before putting one there.
 func couldBeProxy(addr netip.Addr) bool {
 	return addr.IsValid() &&
-		(addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast())
+		(addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() ||
+			carrierGradeNAT.Contains(addr))
 }
 
 // parseForwardedAddr accepts the bare address, `host:port` and `[v6]:port`
@@ -210,12 +222,17 @@ func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter,
 
 			   The request that crosses the limit is still allowed to finish: its
 			   cost is only known once the response completes. */
-			reservation, projected, admitted := quotas.Admit(credential.TokenID,
+			reservation, admitted := quotas.Admit(credential.TokenID,
 				credential.UsedTokens, credential.LimitTokens)
 			defer reservation.Release()
 			if !admitted {
+				// The message reports the stored total, not what admission
+				// weighed. The weighed figure counts a provisional charge for
+				// requests still running, so reporting it as "used" would name a
+				// quantity that matches no record the operator can look at and
+				// that changes with the concurrency of the moment.
 				writeDownstreamQuotaRejection(w, anthropic,
-					models.QuotaExceededMessage(projected, *credential.LimitTokens))
+					models.QuotaExceededMessage(credential.UsedTokens, *credential.LimitTokens))
 				return
 			}
 
