@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"sync"
 	"time"
@@ -13,8 +14,11 @@ import (
 // destructor, so the same guarantee comes from the HTTP server always closing a
 // response body: Close is what finalizes an abandoned stream.
 type sseStream struct {
-	upstream    io.ReadCloser
-	cancel      func()
+	upstream io.ReadCloser
+	// requestCtx is the downstream request's context, which is what tells a
+	// client walking away apart from an upstream failing.
+	requestCtx  context.Context
+	attempt     *attemptTimeout
 	capture     *responseCapture
 	observation *sseObservation
 	start       time.Time
@@ -32,13 +36,15 @@ type sseStream struct {
 	entry *LogEntry
 }
 
-func newSSEStream(upstream io.ReadCloser, cancel func(), start time.Time, status int,
+func newSSEStream(requestCtx context.Context, upstream io.ReadCloser, attempt *attemptTimeout,
+	start time.Time, status int,
 	responseHeaders map[string]string, logBodyMaxBytes int, entry LogEntry,
 	deps Deps, policy AutoWeightPolicy, autoWeightEnabled bool, upstreamID int64) *sseStream {
 	deps.Metrics.StartSSEStream()
 	return &sseStream{
 		upstream:          upstream,
-		cancel:            cancel,
+		requestCtx:        requestCtx,
+		attempt:           attempt,
 		capture:           newResponseCapture(logBodyMaxBytes),
 		observation:       &sseObservation{},
 		start:             start,
@@ -56,6 +62,9 @@ func newSSEStream(upstream io.ReadCloser, cancel func(), start time.Time, status
 func (s *sseStream) Read(buffer []byte) (int, error) {
 	read, err := s.upstream.Read(buffer)
 	if read > 0 {
+		// Progress restarts the attempt's clock, so a long answer is never cut
+		// off for being long.
+		s.attempt.extend()
 		chunk := buffer[:read]
 		s.capture.push(chunk)
 		s.observation.observeChunk(chunk, s.measure)
@@ -68,7 +77,7 @@ func (s *sseStream) Read(buffer []byte) (int, error) {
 	case err == io.EOF:
 		s.finishComplete()
 	case err != nil:
-		s.finishUpstreamError(err.Error())
+		s.finishInterrupted(err)
 	}
 	return read, err
 }
@@ -91,7 +100,7 @@ func (s *sseStream) Close() error {
 
 	s.deps.Metrics.FinishSSEStream()
 	err := s.upstream.Close()
-	s.cancel()
+	s.attempt.stop()
 	return err
 }
 
@@ -107,17 +116,47 @@ func (s *sseStream) recordResponseHealth() {
 	s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
 }
 
+// finishComplete logs a stream that reached its end.
+//
+// The health score is recorded behind the same guard as the log, because a
+// stream reaches here more than once: the terminal event finishes it, and so
+// does the EOF that follows. Recording outside the guard scored one stream
+// twice and let a penalised channel recover at double the configured rate.
 func (s *sseStream) finishComplete() {
-	s.recordResponseHealth()
 	if s.finishLog(int32(s.upstreamStatus), nil) {
+		s.recordResponseHealth()
 		s.deps.Metrics.RecordSSEComplete()
 	}
 }
 
-func (s *sseStream) finishUpstreamError(message string) {
-	s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
-	if s.finishLog(502, &message) {
-		s.deps.Metrics.RecordSSEUpstreamError()
+// finishInterrupted logs a stream that stopped before its terminal event,
+// attributing it to whichever side actually ended it.
+//
+// A client that walks away cancels the request context, and the read fails with
+// a cancellation indistinguishable from an upstream one. Charging every such
+// read to the channel is what let ordinary use — a user pressing escape on a
+// long answer — drive a healthy channel's weight to zero and take it out of
+// rotation, while leaving the disconnect metric reading zero.
+func (s *sseStream) finishInterrupted(err error) {
+	switch {
+	case s.attempt.Expired():
+		// The upstream went quiet for longer than the channel allows.
+		s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
+		message := err.Error()
+		if s.finishLog(504, &message) {
+			s.deps.Metrics.RecordSSEUpstreamError()
+		}
+	case s.requestCtx.Err() != nil:
+		if s.finishLog(499,
+			ptrTo("client disconnected before the SSE response completed")) {
+			s.deps.Metrics.RecordSSEClientDisconnect()
+		}
+	default:
+		s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
+		message := err.Error()
+		if s.finishLog(502, &message) {
+			s.deps.Metrics.RecordSSEUpstreamError()
+		}
 	}
 }
 

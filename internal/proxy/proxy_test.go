@@ -391,3 +391,81 @@ func TestAnUnreachableUpstreamIsReportedAndCharged(t *testing.T) {
 		t.Errorf("status = %d, want 502 for a failed dial", statusCode)
 	}
 }
+
+func TestAStreamCancelledByTheClientIsNotChargedToTheChannel(t *testing.T) {
+	released := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		// The upstream is still working; the client is the one that leaves.
+		<-released
+	}))
+	defer server.Close()
+	defer close(released)
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m","stream":true}`),
+		requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	response, err := ProxyRequest(ctx, harness.deps, testPolicy(), &upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+
+	buffer := make([]byte, 64)
+	if _, err := response.Body.Read(buffer); err != nil {
+		t.Fatalf("read first event: %v", err)
+	}
+
+	// Cancelling while a read is waiting for the next event is where a client
+	// walking away actually surfaces: as a read error indistinguishable from an
+	// upstream one.
+	cancel()
+	if _, err := response.Body.Read(buffer); err == nil {
+		t.Fatal("the cancelled request did not fail the read")
+	}
+	response.Body.Close()
+
+	harness.waitForLogs(t, 1)
+
+	var statusCode int64
+	if err := harness.database.QueryRow(
+		"SELECT status_code FROM request_logs WHERE id = 1").Scan(&statusCode); err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if statusCode != 499 {
+		t.Errorf("status = %d, want 499 for a client that walked away", statusCode)
+	}
+
+	// The channel did nothing wrong. Charging it is what let ordinary use — a
+	// user pressing escape — drive a healthy channel's weight to zero.
+	health := harness.deps.AutoWeight.Snapshot(upstream.ID, upstream.Weight, true, testPolicy())
+	if health.Score != 100 {
+		t.Errorf("health score = %d, want 100 after a client cancellation", health.Score)
+	}
+
+	snapshot := harness.metrics.Snapshot()
+	if snapshot.SSEClientDisconnectsTotal != 1 {
+		t.Errorf("client disconnects = %d, want 1", snapshot.SSEClientDisconnectsTotal)
+	}
+	if snapshot.SSEUpstreamErrorsTotal != 0 {
+		t.Errorf("upstream errors = %d, want 0", snapshot.SSEUpstreamErrorsTotal)
+	}
+}
