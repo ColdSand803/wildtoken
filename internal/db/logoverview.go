@@ -19,6 +19,8 @@ type LogOverviewOut struct {
 	// 昨天同时段；固定窗口对比再往前一个窗口；自定义对比等长的前置区间；
 	// "全部"没有上一周期，字段为 null。
 	PreviousTotal *int64             `json:"previous_total"`
+	// PreviousStatus 是上一同长周期的分类计数，给状态分布图例的环比用。
+	PreviousStatus *StatusCounts     `json:"previous_status"`
 	ErrorRequests int64              `json:"error_requests"`
 	Status2xx     int64              `json:"status_2xx"`
 	Status4xx     int64              `json:"status_4xx"`
@@ -42,10 +44,22 @@ type LatencyBucketOut struct {
 	Count       int64   `json:"count"`
 }
 
-// RequestBucketOut is one time bucket of the request-volume trend.
+// RequestBucketOut is one time bucket of the request-volume trend. Errors
+// feeds the status card's error-time strip: which buckets the failures
+// cluster in, not just how many there were overall.
 type RequestBucketOut struct {
 	BucketEpoch int64 `json:"bucket_epoch"`
 	Count       int64 `json:"count"`
+	Errors      int64 `json:"errors"`
+}
+
+// StatusCounts carries per-class request counts for one window.
+type StatusCounts struct {
+	Total       int64 `json:"total"`
+	Status2xx   int64 `json:"status_2xx"`
+	Status4xx   int64 `json:"status_4xx"`
+	Status5xx   int64 `json:"status_5xx"`
+	StatusOther int64 `json:"status_other"`
 }
 
 /* latencyBucketSteps are the allowed bucket widths, smallest first. The series
@@ -162,11 +176,13 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	}
 
 	// 一条分桶查询同时供出两个序列：COUNT(*) 数全部请求（请求量趋势），
-	// AVG 只吃有效耗时（SQL 的 AVG 会忽略 CASE 落空的 NULL）。
+	// AVG 只吃有效耗时（SQL 的 AVG 会忽略 CASE 落空的 NULL），错误数给
+	// 状态卡的时间细带定位失败发生在哪些桶。
 	seriesQuery := `
 		SELECT
 			(CAST(strftime('%s', created_at) AS INTEGER) / ?) * ? AS bucket_epoch,
 			COUNT(*),
+			COALESCE(SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300 THEN 1 ELSE 0 END), 0),
 			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END),
 			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0)
 		FROM request_logs
@@ -182,14 +198,15 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	out.LatencySeries = []LatencyBucketOut{}
 	out.RequestSeries = []RequestBucketOut{}
 	for rows.Next() {
-		var epoch, requests, durationRows int64
+		var epoch, requests, bucketErrors, durationRows int64
 		var avgMs sql.NullFloat64
-		if err := rows.Scan(&epoch, &requests, &avgMs, &durationRows); err != nil {
+		if err := rows.Scan(&epoch, &requests, &bucketErrors, &avgMs, &durationRows); err != nil {
 			return out, err
 		}
 		out.RequestSeries = append(out.RequestSeries, RequestBucketOut{
 			BucketEpoch: epoch,
 			Count:       requests,
+			Errors:      bucketErrors,
 		})
 		if durationRows > 0 && avgMs.Valid {
 			out.LatencySeries = append(out.LatencySeries, LatencyBucketOut{
@@ -203,34 +220,36 @@ func LogOverview(ctx context.Context, database *sql.DB,
 		return out, err
 	}
 
-	previousTotal, hasPrevious, err := previousWindowTotal(ctx, database, window, startAt, endAt)
+	previousCounts, hasPrevious, err := previousWindowCounts(ctx, database, window, startAt, endAt)
 	if err != nil {
 		return out, err
 	}
 	if hasPrevious {
-		out.PreviousTotal = &previousTotal
+		out.PreviousTotal = &previousCounts.Total
+		out.PreviousStatus = &previousCounts
 	}
 	return out, nil
 }
 
-/* previousWindowTotal 统计"上一个同长周期"的请求数。今天对比昨天同时段
-   （截至当前时刻），避免半天的今天永远输给完整的昨天；固定窗口整体后移
-   一个窗口长度；自定义区间取等长的前置区间；"全部"没有可比周期。 */
-func previousWindowTotal(ctx context.Context, database *sql.DB,
-	window LogTopWindow, startAt, endAt string) (int64, bool, error) {
+/* previousWindowCounts 统计"上一个同长周期"的请求总数与分类计数。今天对比
+   昨天同时段（截至当前时刻），避免半天的今天永远输给完整的昨天；固定窗口
+   整体后移一个窗口长度；自定义区间取等长的前置区间；"全部"没有可比周期。 */
+func previousWindowCounts(ctx context.Context, database *sql.DB,
+	window LogTopWindow, startAt, endAt string) (StatusCounts, bool, error) {
+	var counts StatusCounts
 	var predicate string
 	var args []any
 	switch window {
 	case LogTopWindowAll:
-		return 0, false, nil
+		return counts, false, nil
 	case LogTopWindowCustom:
 		start, err := time.Parse("2006-01-02 15:04:05", startAt)
 		if err != nil {
-			return 0, false, err
+			return counts, false, err
 		}
 		end, err := time.Parse("2006-01-02 15:04:05", endAt)
 		if err != nil {
-			return 0, false, err
+			return counts, false, err
 		}
 		span := end.Sub(start)
 		predicate = "created_at >= ? AND created_at < ?"
@@ -247,14 +266,19 @@ func previousWindowTotal(ctx context.Context, database *sql.DB,
 	case LogTopWindowThirtyDays:
 		predicate = "created_at >= datetime('now', '-60 days') AND created_at < datetime('now', '-30 days')"
 	default:
-		return 0, false, nil
+		return counts, false, nil
 	}
 
-	var total int64
-	row := database.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM request_logs WHERE "+predicate, args...)
-	if err := row.Scan(&total); err != nil {
-		return 0, false, err
+	row := database.QueryRowContext(ctx, `
+		SELECT
+			COUNT(*),
+			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0)
+		FROM request_logs WHERE `+predicate, args...)
+	if err := row.Scan(&counts.Total, &counts.Status2xx, &counts.Status4xx, &counts.Status5xx); err != nil {
+		return counts, false, err
 	}
-	return total, true, nil
+	counts.StatusOther = counts.Total - counts.Status2xx - counts.Status4xx - counts.Status5xx
+	return counts, true, nil
 }

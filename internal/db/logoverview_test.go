@@ -75,9 +75,22 @@ func TestLogOverviewAggregatesTheSelectedWindow(t *testing.T) {
 	if requestRows != 4 {
 		t.Errorf("1d request series rows = %d, want 4", requestRows)
 	}
-	// The 1d previous period ([-48h, -24h)) holds exactly the -30h row.
+	// The 1d previous period ([-48h, -24h)) holds exactly the -30h row (a 200).
 	if day.PreviousTotal == nil || *day.PreviousTotal != 1 {
 		t.Errorf("1d previous total = %v, want 1", day.PreviousTotal)
+	}
+	if day.PreviousStatus == nil || day.PreviousStatus.Status2xx != 1 ||
+		day.PreviousStatus.Status4xx != 0 || day.PreviousStatus.Status5xx != 0 ||
+		day.PreviousStatus.StatusOther != 0 {
+		t.Errorf("1d previous status = %+v, want 1/0/0/0", day.PreviousStatus)
+	}
+	// The series carries per-bucket error counts: 502 + 404 + missing status.
+	var seriesErrors int64
+	for _, bucket := range day.RequestSeries {
+		seriesErrors += bucket.Errors
+	}
+	if seriesErrors != 3 {
+		t.Errorf("1d series errors = %d, want 3", seriesErrors)
 	}
 
 	all, err := LogOverview(ctx, database, LogTopWindowAll, "", "")

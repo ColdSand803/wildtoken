@@ -193,16 +193,28 @@ function renderDashboardKpiCards(container, cards) {
 }
 
 /* ── KPI 数字滚动 ─────────────────────────────────────────────
-   卡片每次刷新都是整体重建 innerHTML，数字会瞬间跳变。带 data-count-to 的
-   .kpi-number 节点在重建后从上一次的数值缓动滚到新值，格式化函数逐帧套用，
-   所以滚动过程中显示的始终是合法格式（1.2k、6.0% 这类）。 */
+   卡片每次刷新都是整体重建 innerHTML，数字会瞬间跳变。带 data-count-key 的
+   节点（主数字、增长率/环比徽标里的百分比）在重建后从上一次的数值缓动滚到
+   新值，格式化函数逐帧套用，滚动过程中显示的始终是合法格式（1.2k、6.0%）。
+   徽标可能整个消失再出现（噪声下限、小基数保护），所以每个容器记住上一轮
+   出现过哪些 key：本轮不在了就清记忆、掐掉在飞的动画帧，重新出现时不会从
+   陈旧值滚起。 */
 const kpiNumberMemory = new Map();
 const kpiNumberFrames = new Map();
+const kpiNumberContainerKeys = new Map();
 const KPI_COUNT_DURATION_MS = 560;
 
 function formatKpiCount(value, format) {
   if (format === "percent") {
     return `${value.toFixed(1).replace(/\.0$/, "")}%`;
+  }
+  if (format === "percent1") {
+    return `${value.toFixed(1)}%`;
+  }
+  if (format === "growth") {
+    return Math.abs(value) >= 100
+      ? `${Math.round(value)}%`
+      : `${value.toFixed(1)}%`;
   }
   if (format === "compact") {
     return formatCompactNumber(Math.round(value));
@@ -210,14 +222,27 @@ function formatKpiCount(value, format) {
   return String(Math.round(value));
 }
 
+function dropKpiNumberKey(key) {
+  kpiNumberMemory.delete(key);
+  const frame = kpiNumberFrames.get(key);
+  if (frame) {
+    window.cancelAnimationFrame(frame);
+    kpiNumberFrames.delete(key);
+  }
+}
+
 function animateKpiNumbers(container) {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  for (const node of container.querySelectorAll(".kpi-number[data-count-key]")) {
+  const previousKeys = kpiNumberContainerKeys.get(container) || new Set();
+  const seenKeys = new Set();
+
+  for (const node of container.querySelectorAll("[data-count-key]")) {
     const key = node.dataset.countKey;
+    seenKeys.add(key);
     const target = Number(node.dataset.countTo);
     if (!Number.isFinite(target)) {
       // 本轮没有数值（显示 —），清掉记忆，下次有数据时不要从陈旧值滚起。
-      kpiNumberMemory.delete(key);
+      dropKpiNumberKey(key);
       continue;
     }
     const from = kpiNumberMemory.get(key);
@@ -248,6 +273,13 @@ function animateKpiNumbers(container) {
     };
     kpiNumberFrames.set(key, window.requestAnimationFrame(step));
   }
+
+  for (const key of previousKeys) {
+    if (!seenKeys.has(key)) {
+      dropKpiNumberKey(key);
+    }
+  }
+  kpiNumberContainerKeys.set(container, seenKeys);
 }
 
 let dashboardSparkGradientSeq = 0;
@@ -503,7 +535,8 @@ function renderDashboard() {
   let errorDeltaHtml = "";
   if (errorRatePct !== null && lastErrorRateDelta !== null) {
     const up = lastErrorRateDelta > 0;
-    errorDeltaHtml = `<span class="kpi-delta ${up ? "kpi-delta--up" : "kpi-delta--down"}" title="较最近一次变化前">${up ? "↑" : "↓"}${Math.abs(lastErrorRateDelta).toFixed(1)}%</span>`;
+    const magnitude = Math.abs(lastErrorRateDelta);
+    errorDeltaHtml = `<span class="kpi-delta ${up ? "kpi-delta--up" : "kpi-delta--down"}" title="较最近一次变化前">${up ? "↑" : "↓"}<span data-count-key="dashboard-error-delta" data-count-to="${magnitude.toFixed(3)}" data-count-format="percent1">${magnitude.toFixed(1)}%</span></span>`;
   }
 
   /* 请求数的环比增长率：对比上一同长周期（今天 vs 昨天同时段）。基数为 0
@@ -515,10 +548,8 @@ function renderDashboard() {
     const growth = ((total - previousTotal) / previousTotal) * 100;
     if (Math.abs(growth) >= 0.05) {
       const up = growth > 0;
-      const magnitude = Math.abs(growth) >= 100
-        ? Math.round(Math.abs(growth)).toString()
-        : Math.abs(growth).toFixed(1);
-      requestTrendHtml = `<span class="kpi-trend ${up ? "kpi-trend--up" : "kpi-trend--down"}" title="较上一同长周期（${previousTotal} 条）">${up ? "↑" : "↓"}${magnitude}%</span>`;
+      const magnitude = Math.abs(growth);
+      requestTrendHtml = `<span class="kpi-trend ${up ? "kpi-trend--up" : "kpi-trend--down"}" title="较上一同长周期（${previousTotal} 条）">${up ? "↑" : "↓"}<span data-count-key="dashboard-request-growth" data-count-to="${magnitude.toFixed(3)}" data-count-format="growth">${formatKpiCount(magnitude, "growth")}</span></span>`;
     }
   }
   const requestSeries = Array.isArray(overview?.request_series) ? overview.request_series : [];
@@ -646,6 +677,7 @@ function renderDashboard() {
   const c4 = Number(overview?.status_4xx) || 0;
   const c5 = Number(overview?.status_5xx) || 0;
   const cOther = Number(overview?.status_other) || 0;
+  const requestSeriesForStatus = Array.isArray(overview?.request_series) ? overview.request_series : [];
   if (dashboardStatusMeta) {
     dashboardStatusMeta.textContent = overviewRangeLabel;
   }
@@ -659,18 +691,70 @@ function renderDashboard() {
         if (width <= 0) return "";
         return `<span class="ops-bar-seg ${cls}" style="width:${width.toFixed(2)}%" title="${count}"></span>`;
       };
+
+      /* 图例的环比徽标。小基数保护：上一周期不足 10 条时百分比全是噪声
+         （5xx 从 1 涨到 3 会显示 +200%），直接不标。配色语义按类别分：
+         2xx 涨绿跌灰（跌通常只是流量降，报警交给错误类），错误类涨红跌绿。 */
+      const prevStatus = overview?.previous_status;
+      const legendDelta = (key, current, previous, upClass, downClass) => {
+        if (typeof previous !== "number" || previous < 10) return "";
+        const growth = ((current - previous) / previous) * 100;
+        if (Math.abs(growth) < 0.5) return "";
+        const up = growth > 0;
+        const magnitude = Math.abs(growth);
+        return `<span class="status-delta ${up ? upClass : downClass}" title="较上一同长周期（${previous} 条）">${up ? "↑" : "↓"}<span data-count-key="status-delta-${key}" data-count-to="${magnitude.toFixed(3)}" data-count-format="growth">${formatKpiCount(magnitude, "growth")}</span></span>`;
+      };
+      const legendItem = (seg, label, count, countKey, deltaHtml) => `
+        <span class="status-legend-item">
+          <span class="status-legend-dot ops-bar-seg ${seg}" aria-hidden="true"></span>
+          <span class="status-legend-label">${label}</span>
+          <strong class="status-legend-count" data-count-key="status-count-${countKey}" data-count-to="${count}" data-count-format="compact">${formatCompactNumber(count)}</strong>
+          ${deltaHtml}
+        </span>`;
+      const legendHtml = [
+        legendItem("ok", "2xx", c2, "2xx",
+          legendDelta("2xx", c2, prevStatus?.status_2xx, "status-delta--good", "status-delta--calm")),
+        legendItem("warn", "4xx", c4, "4xx",
+          legendDelta("4xx", c4, prevStatus?.status_4xx, "status-delta--bad", "status-delta--good")),
+        legendItem("danger", "5xx", c5, "5xx",
+          legendDelta("5xx", c5, prevStatus?.status_5xx, "status-delta--bad", "status-delta--good")),
+        legendItem("muted", "其他", cOther, "other",
+          legendDelta("other", cOther, prevStatus?.status_other, "status-delta--bad", "status-delta--good")),
+      ].join("");
+
+      /* 错误时间细带：每桶一格，颜色深浅随该桶错误率，回答"错误发生在何时、
+         是集中爆发还是均匀散布"——分段条本身没有时间维度。 */
+      let stripHtml = "";
+      if (requestSeriesForStatus.length >= 2) {
+        const cells = requestSeriesForStatus.map((bucket) => {
+          const count = Number(bucket.count) || 0;
+          const bucketErrors = Number(bucket.errors) || 0;
+          const when = logTimeFormatter.format(new Date((Number(bucket.bucket_epoch) || 0) * 1000));
+          if (!bucketErrors) {
+            return `<span class="status-error-cell is-clean" title="${escapeHtml(when)} · ${count} 条 · 无错误"></span>`;
+          }
+          const rate = count > 0 ? bucketErrors / count : 0;
+          // 错误率 50% 及以上就到满色；下限 0.25 保证个位数错误也看得见。
+          const opacity = (0.25 + 0.75 * Math.min(1, rate / 0.5)).toFixed(2);
+          return `<span class="status-error-cell" style="opacity:${opacity}" title="${escapeHtml(when)} · 错误 ${bucketErrors}/${count}"></span>`;
+        }).join("");
+        stripHtml = `
+          <div class="status-error-strip-wrap">
+            <span class="status-error-strip-label">错误时间分布</span>
+            <div class="status-error-strip" role="img" aria-label="按时间桶的错误分布">${cells}</div>
+          </div>`;
+      }
+
       dashboardStatusChart.innerHTML = `
         <div class="ops-bar-track" role="img" aria-label="2xx ${c2} · 4xx ${c4} · 5xx ${c5} · 其他 ${cOther}">
           ${barSeg("ok", c2)}${barSeg("warn", c4)}${barSeg("danger", c5)}${barSeg("muted", cOther)}
         </div>
-        <div class="ops-chart-legend">
-          <span>2xx ${c2}</span>
-          <span>4xx ${c4}</span>
-          <span>5xx ${c5}</span>
-          <span>其他 ${cOther}</span>
-        </div>
+        <div class="status-legend">${legendHtml}</div>
+        ${stripHtml}
       `;
     }
+    // 图例的数量与环比徽标也走数字滚动（这块不经过 KPI 构建器，手动扫一次）。
+    animateKpiNumbers(dashboardStatusChart);
   }
 
   // 延迟趋势：按时间分桶的平均耗时序列，横轴就是真实时间而不是"最近 N 条"。

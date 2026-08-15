@@ -511,6 +511,95 @@ html[data-theme] .dashboard-date-field input[type="date"],
   color: var(--muted);
 }
 
+/* ── 状态分布：增强图例 + 错误时间细带 ─────────────────────── */
+
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 2px;
+}
+
+.status-legend-item {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 复用 ops-bar-seg 的四色，几何在这里压回小圆点（enhancements.css 在本文件
+   之后加载，同名属性要靠更高优先级取胜）。 */
+.status-legend .status-legend-dot {
+  border-radius: 50%;
+  flex: none;
+  height: 8px;
+  width: 8px;
+  align-self: center;
+}
+
+.status-legend-label {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.status-legend-count {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.status-delta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.status-delta--good {
+  color: var(--ok);
+}
+
+.status-delta--bad {
+  color: var(--danger);
+}
+
+.status-delta--calm {
+  color: var(--muted);
+}
+
+.status-error-strip-wrap {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.status-error-strip-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.status-error-strip {
+  display: flex;
+  gap: 2px;
+}
+
+.status-error-cell {
+  background: var(--danger);
+  border-radius: 2px;
+  flex: 1 1 0;
+  height: 8px;
+  min-width: 2px;
+}
+
+.status-error-cell.is-clean {
+  background: var(--line-soft);
+  opacity: 1;
+}
+
 /* 请求数卡的背景趋势曲线：绝对定位铺在卡片下半部，最底层。 */
 .kpi-bg-spark {
   bottom: 0;
