@@ -505,6 +505,8 @@ if (dashboardTimePreset) {
       return;
     }
     dashboardTimeRange = value;
+    // 不同范围下的错误率没有可比性，环比基线随范围切换清零。
+    resetDashboardErrorRateBaseline();
     persistDashboardRange();
     syncDashboardRangeChips();
     loadDashboardData();
@@ -555,6 +557,7 @@ if (dashboardApplyCustom && dashboardStartDate && dashboardEndDate) {
     dashboardTimeRange = "custom";
     dashboardCustomStartDate = start;
     dashboardCustomEndDate = end;
+    resetDashboardErrorRateBaseline();
     persistDashboardRange();
     loadDashboardData();
   });

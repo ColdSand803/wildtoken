@@ -739,6 +739,32 @@ func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 	}
 }
 
+// AdminLogOverview returns range-scoped dashboard aggregates: request and
+// error totals, status buckets, latency stats, and a time-bucketed latency
+// series. The dashboard's KPI cards and charts read this instead of doing
+// client-side math over whatever logs happen to be loaded.
+func AdminLogOverview(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		selection, err := parseDashboardRange(
+			query.Get("range"), query.Get("start_date"), query.Get("end_date"), "today")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
+		overview, err := db.LogOverview(r.Context(), state.DB,
+			selection.Window, selection.StartAt, selection.EndAt)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		overview.Range = selection.Value
+		overview.RangeLabel = selection.Label
+		apperr.WriteJSON(w, http.StatusOK, overview)
+	}
+}
+
 // AdminTopLogStats ranks models and channels over a window.
 func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

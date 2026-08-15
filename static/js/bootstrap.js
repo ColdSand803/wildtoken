@@ -306,6 +306,8 @@ let dashboardLogItems = [];
 let dashboardTokenUsage = null;
 let dashboardRuntimeMetrics = null;
 let dashboardTopStats = null;
+// 按所选时间范围的服务端聚合（KPI 卡、状态分布、延迟趋势的数据源）。
+let dashboardOverview = null;
 // One range drives the token cards, the request cards, and the Top rankings.
 let dashboardTimeRange = (() => {
   try {

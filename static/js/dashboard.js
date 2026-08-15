@@ -170,7 +170,8 @@ function renderDashboardKpiCards(container, cards) {
       && (TONE_RANK[tone] ?? 0) > (TONE_RANK[before] ?? 0);
     /* valueHtml / labelHtml 是调用方已经拼好的安全 HTML（分母缩小、呼吸圆点、
        环比箭头这类富内容）；不传则照旧走转义的纯文本。hoverHint 为 true 时
-       说明文字挪进 title，鼠标滑过才显示，卡面留给数字。 */
+       说明文字挪进 title，鼠标滑过才显示，卡面留给数字。backgroundHtml 放在
+       卡片最底层（低透明度趋势曲线之类）。 */
     const valueHtml = card.valueHtml ?? escapeHtml(card.value);
     const labelHtml = card.labelHtml ?? escapeHtml(card.label);
     const hintTitle = card.hoverHint && card.hint ? ` title="${escapeHtml(card.hint)}"` : "";
@@ -179,6 +180,7 @@ function renderDashboardKpiCards(container, cards) {
       : `<div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>`;
     return `
     <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}${hintTitle}>
+      ${card.backgroundHtml || ""}
       <div class="dashboard-kpi-value">${valueHtml}</div>
       <div class="dashboard-kpi-label">${labelHtml}</div>
       ${hintBlock}
@@ -187,9 +189,99 @@ function renderDashboardKpiCards(container, cards) {
   }).join("");
   kpiToneMemory.set(container, next);
   container.innerHTML = html;
+  animateKpiNumbers(container);
+}
+
+/* ── KPI 数字滚动 ─────────────────────────────────────────────
+   卡片每次刷新都是整体重建 innerHTML，数字会瞬间跳变。带 data-count-to 的
+   .kpi-number 节点在重建后从上一次的数值缓动滚到新值，格式化函数逐帧套用，
+   所以滚动过程中显示的始终是合法格式（1.2k、6.0% 这类）。 */
+const kpiNumberMemory = new Map();
+const kpiNumberFrames = new Map();
+const KPI_COUNT_DURATION_MS = 560;
+
+function formatKpiCount(value, format) {
+  if (format === "percent") {
+    return `${value.toFixed(1).replace(/\.0$/, "")}%`;
+  }
+  if (format === "compact") {
+    return formatCompactNumber(Math.round(value));
+  }
+  return String(Math.round(value));
+}
+
+function animateKpiNumbers(container) {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  for (const node of container.querySelectorAll(".kpi-number[data-count-key]")) {
+    const key = node.dataset.countKey;
+    const target = Number(node.dataset.countTo);
+    if (!Number.isFinite(target)) {
+      // 本轮没有数值（显示 —），清掉记忆，下次有数据时不要从陈旧值滚起。
+      kpiNumberMemory.delete(key);
+      continue;
+    }
+    const from = kpiNumberMemory.get(key);
+    kpiNumberMemory.set(key, target);
+    if (reduceMotion || from === undefined || from === target) {
+      continue; // 文本里已经是最终值
+    }
+
+    const format = node.dataset.countFormat || "plain";
+    const startedAt = performance.now();
+    const previousFrame = kpiNumberFrames.get(key);
+    if (previousFrame) window.cancelAnimationFrame(previousFrame);
+
+    const step = (now) => {
+      // 节点可能已被下一轮重建换掉，别再往游离节点上写。
+      if (!node.isConnected) {
+        kpiNumberFrames.delete(key);
+        return;
+      }
+      const progress = Math.min((now - startedAt) / KPI_COUNT_DURATION_MS, 1);
+      const eased = 1 - (1 - progress) ** 3;
+      node.textContent = formatKpiCount(from + (target - from) * eased, format);
+      if (progress < 1) {
+        kpiNumberFrames.set(key, window.requestAnimationFrame(step));
+      } else {
+        kpiNumberFrames.delete(key);
+      }
+    };
+    kpiNumberFrames.set(key, window.requestAnimationFrame(step));
+  }
 }
 
 let dashboardSparkGradientSeq = 0;
+
+/* 请求数卡的背景趋势：压得很淡的平滑曲线，贴卡片底部，不抢数字。 */
+function buildKpiBackgroundSpark(values) {
+  if (!Array.isArray(values) || values.length < 2) return "";
+  const max = Math.max(...values);
+  const min = Math.min(...values);
+  const range = max - min || 1;
+  const coords = values.map((value, index) => ({
+    x: (index / (values.length - 1)) * 100,
+    y: 30 - ((value - min) / range) * 26,
+  }));
+  const { line, area } = buildSmoothSparkPaths(coords, {
+    baselineY: 32,
+    minY: 2,
+    maxY: 30,
+  });
+  const gradientId = `kpi-bg-gradient-${++dashboardSparkGradientSeq}`;
+  return `
+    <svg class="kpi-bg-spark" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="currentColor" stop-opacity="0.16" />
+          <stop offset="100%" stop-color="currentColor" stop-opacity="0.02" />
+        </linearGradient>
+      </defs>
+      <path d="${area}" fill="url(#${gradientId})" />
+      <path d="${line}" fill="none" stroke="currentColor" stroke-opacity="0.45"
+            stroke-width="1.2" vector-effect="non-scaling-stroke" />
+    </svg>
+  `;
+}
 
 function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
   if (!values.length) {
@@ -226,24 +318,20 @@ function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
   `;
 }
 
-function countStatusBuckets(items) {
-  let c2 = 0;
-  let c4 = 0;
-  let c5 = 0;
-  let cOther = 0;
-  for (const item of items) {
-    const code = item.status_code;
-    if (code === null || code === undefined) {
-      cOther += 1;
-      continue;
-    }
-    const value = Number(code);
-    if (value >= 200 && value < 300) c2 += 1;
-    else if (value >= 400 && value < 500) c4 += 1;
-    else if (value >= 500) c5 += 1;
-    else cOther += 1;
-  }
-  return { c2, c4, c5, cOther };
+/* 延迟序列的分桶宽度（秒）转成人话，给图表 meta 用。 */
+function formatBucketSpan(seconds) {
+  const value = Number(seconds) || 0;
+  if (value <= 0) return "—";
+  if (value < 3600) return `${Math.round(value / 60)} 分钟`;
+  if (value < 86400) return `${Math.round(value / 3600)} 小时`;
+  return `${Math.round(value / 86400)} 天`;
+}
+
+/* 切换时间范围时清掉错误率环比的基线：不同范围下的错误率没有可比性，
+   跨范围的"涨跌"是误导。 */
+function resetDashboardErrorRateBaseline() {
+  previousErrorRatePct = null;
+  lastErrorRateDelta = null;
 }
 
 function updateDashboardChannelNameToggle() {
@@ -362,56 +450,47 @@ let lastErrorRateDelta = null;
 
 function renderDashboard() {
   const items = Array.isArray(dashboardLogItems) ? dashboardLogItems : [];
-  const n = items.length;
   const totalChannels = upstreams.length;
   const enabledCount = upstreams.filter((item) => item.enabled).length;
   const disabledCount = totalChannels - enabledCount;
 
-  let errorCount = 0;
-  let durationSum = 0;
-  let durationCount = 0;
-  const durations = [];
-  for (const item of items) {
-    const statusCode = item.status_code;
-    if (statusCode === null || statusCode === undefined) {
-      errorCount += 1;
-    } else {
-      const code = Number(statusCode);
-      if (!Number.isFinite(code) || code < 200 || code >= 300) {
-        errorCount += 1;
-      }
-    }
-    const durationMs = Number(item.duration_ms);
-    if (Number.isFinite(durationMs) && durationMs >= 0) {
-      durationSum += durationMs;
-      durationCount += 1;
-      durations.push(durationMs);
-    }
-  }
+  /* KPI 卡、状态分布、延迟趋势读服务端按范围的聚合。"最近 200 条"是条数
+     窗口不是时间窗口——含义随流量漂移；积累/健康类指标统一跟着顶部的时间
+     范围选择器走，只有"最近失败"保持近窗列表语义（继续用 items）。 */
+  const overview = dashboardOverview;
+  const total = Number(overview?.total_requests) || 0;
+  const errorTotal = Number(overview?.error_requests) || 0;
+  const durationCount = Number(overview?.duration_count) || 0;
+  const avgMs = Number(overview?.avg_duration_ms) || 0;
+  const overviewRangeLabel = overview?.range_label || getTimeRangeLabel(dashboardTimeRange);
 
-  const errorRateLabel = n > 0
-    ? `${((errorCount / n) * 100).toFixed(1).replace(/\.0$/, "")}%`
+  const errorRateLabel = total > 0
+    ? `${((errorTotal / total) * 100).toFixed(1).replace(/\.0$/, "")}%`
     : "—";
   const avgDurationLabel = durationCount > 0
-    ? `${(durationSum / durationCount / 1000).toFixed(1)}s`
+    ? `${(avgMs / 1000).toFixed(1)}s`
     : "—";
 
   if (dashboardScope) {
-    dashboardScope.textContent = n > 0
-      ? `近窗图表基于已加载的近 ${n} 条日志与 ${totalChannels} 个渠道状态；Top 排行按所选周期查询日志库`
-      : "近窗图表基于已加载日志；Top 排行按所选周期查询日志库";
+    dashboardScope.textContent = total > 0
+      ? `指标与图表按「${overviewRangeLabel}」统计 ${formatCompactNumber(total)} 条请求；最近失败为实时近窗`
+      : `「${overviewRangeLabel}」内暂无请求；最近失败为实时近窗`;
+  }
+  const overviewMeta = document.querySelector("#dashboard-overview-meta");
+  if (overviewMeta) {
+    overviewMeta.textContent = overviewRangeLabel;
   }
 
-  const errorTone = n === 0
+  const errorTone = total === 0
     ? ""
-    : errorCount / n >= 0.2
+    : errorTotal / total >= 0.2
       ? "tone-danger"
-      : errorCount / n >= 0.05
+      : errorTotal / total >= 0.05
         ? "tone-warn"
         : "tone-ok";
 
   // 错误率的环比变化（百分点）。0.05pp 以下当作噪声，不算一次变化。
-  const errorRatePct = n > 0 ? (errorCount / n) * 100 : null;
+  const errorRatePct = total > 0 ? (errorTotal / total) * 100 : null;
   if (errorRatePct !== null && previousErrorRatePct !== null) {
     const delta = errorRatePct - previousErrorRatePct;
     if (Math.abs(delta) >= 0.05) {
@@ -427,20 +506,42 @@ function renderDashboard() {
     errorDeltaHtml = `<span class="kpi-delta ${up ? "kpi-delta--up" : "kpi-delta--down"}" title="较最近一次变化前">${up ? "↑" : "↓"}${Math.abs(lastErrorRateDelta).toFixed(1)}%</span>`;
   }
 
+  /* 请求数的环比增长率：对比上一同长周期（今天 vs 昨天同时段）。基数为 0
+     或没有上一周期（"全部"）时不显示——没有可比基数的百分比是误导。
+     配色语义与错误率相反：请求涨通常是好事，涨绿跌灰。 */
+  const previousTotal = overview?.previous_total;
+  let requestTrendHtml = "";
+  if (total > 0 && typeof previousTotal === "number" && previousTotal > 0) {
+    const growth = ((total - previousTotal) / previousTotal) * 100;
+    if (Math.abs(growth) >= 0.05) {
+      const up = growth > 0;
+      const magnitude = Math.abs(growth) >= 100
+        ? Math.round(Math.abs(growth)).toString()
+        : Math.abs(growth).toFixed(1);
+      requestTrendHtml = `<span class="kpi-trend ${up ? "kpi-trend--up" : "kpi-trend--down"}" title="较上一同长周期（${previousTotal} 条）">${up ? "↑" : "↓"}${magnitude}%</span>`;
+    }
+  }
+  const requestSeries = Array.isArray(overview?.request_series) ? overview.request_series : [];
+  const requestSparkHtml = buildKpiBackgroundSpark(requestSeries.map((bucket) => Number(bucket.count) || 0));
+
   renderDashboardKpiCards(dashboardKpis, [
     {
-      value: String(n),
-      label: "近窗请求",
-      hint: n ? "已加载日志条数" : "暂无近窗数据",
+      value: formatCompactNumber(total),
+      valueHtml: `<span class="kpi-number" data-count-key="dashboard-requests" data-count-to="${total}" data-count-format="compact">${escapeHtml(formatCompactNumber(total))}</span>${requestTrendHtml}`,
+      backgroundHtml: requestSparkHtml,
+      label: "请求数",
+      hint: total ? `${overviewRangeLabel} · 共 ${total} 条` : `${overviewRangeLabel} · 暂无请求`,
       hoverHint: true,
       tone: "",
     },
     {
       value: errorRateLabel,
-      valueHtml: `${escapeHtml(errorRateLabel)}${errorDeltaHtml}`,
+      valueHtml: errorRatePct === null
+        ? `<span class="kpi-number" data-count-key="dashboard-error-rate">—</span>`
+        : `<span class="kpi-number" data-count-key="dashboard-error-rate" data-count-to="${errorRatePct.toFixed(3)}" data-count-format="percent">${escapeHtml(errorRateLabel)}</span>${errorDeltaHtml}`,
       label: "错误率",
       labelHtml: '<span class="kpi-pulse-dot" aria-hidden="true"></span>错误率',
-      hint: n ? `${errorCount} / ${n} 条失败` : "暂无日志",
+      hint: total ? `${errorTotal} / ${total} 条失败` : "暂无日志",
       hoverHint: true,
       tone: errorTone,
     },
@@ -541,15 +642,18 @@ function renderDashboard() {
     },
   ]);
 
-  const { c2, c4, c5, cOther } = countStatusBuckets(items);
+  const c2 = Number(overview?.status_2xx) || 0;
+  const c4 = Number(overview?.status_4xx) || 0;
+  const c5 = Number(overview?.status_5xx) || 0;
+  const cOther = Number(overview?.status_other) || 0;
   if (dashboardStatusMeta) {
-    dashboardStatusMeta.textContent = `近 ${n} 条`;
+    dashboardStatusMeta.textContent = overviewRangeLabel;
   }
   if (dashboardStatusChart) {
-    if (n === 0) {
-      dashboardStatusChart.innerHTML = '<div class="dashboard-chart-empty">暂无近窗日志</div>';
+    if (total === 0) {
+      dashboardStatusChart.innerHTML = '<div class="dashboard-chart-empty">所选范围内暂无请求</div>';
     } else {
-      const pct = (count) => (count / n) * 100;
+      const pct = (count) => (count / total) * 100;
       const barSeg = (cls, count) => {
         const width = pct(count);
         if (width <= 0) return "";
@@ -569,24 +673,26 @@ function renderDashboard() {
     }
   }
 
-  // sparkline: reverse so oldest is left
-  const spark = durations.slice(0, 40).reverse();
+  // 延迟趋势：按时间分桶的平均耗时序列，横轴就是真实时间而不是"最近 N 条"。
+  const latencySeries = Array.isArray(overview?.latency_series) ? overview.latency_series : [];
+  const spark = latencySeries.map((bucket) => Number(bucket.avg_ms) || 0);
   if (dashboardLatencyMeta) {
-    dashboardLatencyMeta.textContent = durationCount ? `近窗有效 ${durationCount} 条` : "暂无数据";
+    dashboardLatencyMeta.textContent = latencySeries.length
+      ? `${overviewRangeLabel} · 每桶 ${formatBucketSpan(overview?.bucket_seconds)}`
+      : "暂无数据";
   }
   if (dashboardLatencyChart) {
-    if (!durationCount) {
-      dashboardLatencyChart.innerHTML = '<div class="dashboard-chart-empty">暂无近窗有效耗时</div>';
+    if (latencySeries.length === 0) {
+      dashboardLatencyChart.innerHTML = '<div class="dashboard-chart-empty">所选范围内暂无有效耗时</div>';
     } else {
-      const latestDuration = durations[0];
-      const minDuration = Math.min(...durations);
-      const maxDuration = Math.max(...durations);
-      const averageDuration = durationSum / durationCount;
+      const latestAvg = Number(latencySeries[latencySeries.length - 1].avg_ms) || 0;
+      const minDuration = Number(overview?.min_duration_ms) || 0;
+      const maxDuration = Number(overview?.max_duration_ms) || 0;
       dashboardLatencyChart.innerHTML = `
         ${buildSparklineSvg(spark, { width: 320, height: 100 })}
-        <dl class="dashboard-latency-summary" aria-label="已加载近窗 ${durationCount} 条有效耗时的延迟摘要">
-          <div><dt>最近</dt><dd>${escapeHtml(formatSeconds(latestDuration))}</dd></div>
-          <div><dt>平均</dt><dd>${escapeHtml(formatSeconds(averageDuration))}</dd></div>
+        <dl class="dashboard-latency-summary" aria-label="「${overviewRangeLabel}」${durationCount} 条有效耗时的延迟摘要">
+          <div><dt>最近</dt><dd>${escapeHtml(formatSeconds(latestAvg))}</dd></div>
+          <div><dt>平均</dt><dd>${escapeHtml(formatSeconds(avgMs))}</dd></div>
           <div><dt>范围</dt><dd>${escapeHtml(formatSeconds(minDuration))}–${escapeHtml(formatSeconds(maxDuration))}</dd></div>
         </dl>
       `;
@@ -633,7 +739,7 @@ function renderDashboard() {
       dashboardErrorRows.innerHTML = `
         <tr>
           <td colspan="5" class="empty">
-            <span class="muted">${n ? "近窗内暂无 4xx/5xx/无响应记录" : "暂无近窗日志"}</span>
+            <span class="muted">${items.length ? "近窗内暂无 4xx/5xx/无响应记录" : "暂无近窗日志"}</span>
           </td>
         </tr>
       `;
@@ -687,24 +793,33 @@ async function loadDashboardData() {
       offset: "0",
     });
 
-    // One range, two endpoints: token cards and rankings stay in agreement.
+    // One range, three endpoints: KPI/charts, token cards, and rankings all
+    // answer for the same window.
     const tokenUsageParams = dashboardRangeParams();
+    const overviewParams = dashboardRangeParams();
+    // "default" 是 Token 卡的多窗口对照模式；KPI/图表必须取单一窗口，
+    // 落到默认范围并让标签如实显示。
+    if (overviewParams.get("range") === "default") {
+      overviewParams.set("range", DASHBOARD_DEFAULT_RANGE);
+    }
     const topParams = dashboardRangeParams();
     // /logs/top names the parameter `window` and has no multi-window mode.
     topParams.set("window", topParams.get("range"));
     topParams.delete("range");
     topParams.set("limit", String(DASHBOARD_TOP_LIMIT));
 
-    const [page, tokenUsage, runtimeMetrics, topStats] = await Promise.all([
+    const [page, tokenUsage, runtimeMetrics, topStats, overview] = await Promise.all([
       api(`/api/admin/logs?${params}`),
       api(`/api/admin/logs/token-usage?${tokenUsageParams}`),
       api("/api/admin/system/metrics"),
       api(`/api/admin/logs/top?${topParams}`),
+      api(`/api/admin/logs/overview?${overviewParams}`),
     ]);
     dashboardLogItems = page.items || [];
     dashboardTokenUsage = tokenUsage;
     dashboardRuntimeMetrics = runtimeMetrics || null;
     dashboardTopStats = topStats || null;
+    dashboardOverview = overview || null;
     lastDashboardLoadError = "";
     renderDashboard();
   } catch (error) {

@@ -494,6 +494,42 @@ html[data-theme] .dashboard-date-field input[type="date"],
   color: var(--ok);
 }
 
+/* 请求数的环比增长率：语义与错误率相反，涨是好事标绿、跌降灰。 */
+.kpi-trend {
+  font-size: 0.45em;
+  font-weight: 700;
+  letter-spacing: 0;
+  margin-left: 8px;
+  vertical-align: 4px;
+}
+
+.kpi-trend--up {
+  color: var(--ok);
+}
+
+.kpi-trend--down {
+  color: var(--muted);
+}
+
+/* 请求数卡的背景趋势曲线：绝对定位铺在卡片下半部，最底层。 */
+.kpi-bg-spark {
+  bottom: 0;
+  color: var(--accent);
+  height: 58%;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  z-index: 0;
+}
+
+/* 曲线是 position:absolute，会盖在静态文本上面——文字层显式抬到曲线之上。 */
+.kpi-flip .dashboard-kpi-value,
+.kpi-flip .dashboard-kpi-label {
+  position: relative;
+  z-index: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kpi-pulse-dot {
     animation: none;
