@@ -352,6 +352,19 @@ func probeTimeout(seconds float64) time.Duration {
 	return time.Duration(max(seconds, 1.0) * float64(time.Second))
 }
 
+// billingUsageRange is the window the usage probe asks a provider for.
+//
+// The intent is "everything", which the endpoint expresses as a date range. It
+// was written as a literal pair ending in 2099, which reads as a date someone
+// chose rather than as the absence of one, and would quietly start excluding
+// usage if this outlived the guess. Anchoring the end to today says what it
+// means and cannot expire.
+func billingUsageRange() string {
+	const billingEpoch = "2020-01-01"
+	return "start_date=" + billingEpoch +
+		"&end_date=" + time.Now().AddDate(0, 0, 1).Format(time.DateOnly)
+}
+
 // redactHeaderPreview hides credential values in a preview shown to the console.
 func redactHeaderPreview(headers map[string]string) map[string]string {
 	preview := make(map[string]string, len(headers))
@@ -1156,8 +1169,7 @@ func AdminFetchUpstreamBalance(state *appstate.State) http.HandlerFunc {
 		timeout := probeTimeout(row.TimeoutSeconds)
 		headers := buildChannelRequestHeaders(nil, row.APIKey, extra)
 		subscriptionURL := buildProbeURL(row.BaseURL, "dashboard/billing/subscription", "")
-		usageURL := buildProbeURL(row.BaseURL, "dashboard/billing/usage",
-			"start_date=2020-01-01&end_date=2099-12-31")
+		usageURL := buildProbeURL(row.BaseURL, "dashboard/billing/usage", billingUsageRange())
 
 		subscription, err := sendAndLogProbe(r.Context(), state, consoleProbe{
 			clientType:   probeBalance,

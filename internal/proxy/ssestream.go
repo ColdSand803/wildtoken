@@ -115,12 +115,14 @@ func (s *sseStream) measure() int32 {
 	return int32(time.Since(s.start).Milliseconds())
 }
 
+// recordResponseHealth credits a stream that ran to its end.
+//
+// A stream is only built for a 2xx response, so reaching the end of one is
+// always a success. The status is not re-examined here: doing so implied this
+// type could carry a failing status, which it cannot, and left a branch that
+// looked covered while being unreachable.
 func (s *sseStream) recordResponseHealth() {
-	if s.upstreamStatus >= 200 && s.upstreamStatus < 300 {
-		s.deps.AutoWeight.RecordSuccess(s.upstreamID, s.autoWeightEnabled, s.policy)
-		return
-	}
-	s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
+	s.deps.AutoWeight.RecordSuccess(s.upstreamID, s.autoWeightEnabled, s.policy)
 }
 
 // finishComplete logs a stream that reached its end.

@@ -292,7 +292,7 @@ func hashLegacyPlaintextTokens(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 
-	markerPrefix, err := uniqueMarkerPrefix(legacy)
+	markerPrefix, err := uniqueMarkerPrefix()
 	if err != nil {
 		return err
 	}
@@ -309,8 +309,7 @@ func hashLegacyPlaintextTokens(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func uniqueMarkerPrefix[T any](rows []T) (string, error) {
-	_ = rows
+func uniqueMarkerPrefix() (string, error) {
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
