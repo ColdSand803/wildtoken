@@ -12,26 +12,26 @@ import (
 // previous client-side math over "the most recent ~200 loaded logs", whose
 // meaning drifted with traffic volume.
 type LogOverviewOut struct {
-	Range         string             `json:"range"`
-	RangeLabel    string             `json:"range_label"`
-	TotalRequests int64              `json:"total_requests"`
+	Range         string `json:"range"`
+	RangeLabel    string `json:"range_label"`
+	TotalRequests int64  `json:"total_requests"`
 	// PreviousTotal 是上一个同长周期的请求总数，给增长率当基数。今天对比
 	// 昨天同时段；固定窗口对比再往前一个窗口；自定义对比等长的前置区间；
 	// "全部"没有上一周期，字段为 null。
-	PreviousTotal *int64             `json:"previous_total"`
+	PreviousTotal *int64 `json:"previous_total"`
 	// PreviousStatus 是上一同长周期的分类计数，给状态分布图例的环比用。
-	PreviousStatus *StatusCounts     `json:"previous_status"`
-	ErrorRequests int64              `json:"error_requests"`
-	Status2xx     int64              `json:"status_2xx"`
-	Status4xx     int64              `json:"status_4xx"`
-	Status5xx     int64              `json:"status_5xx"`
-	StatusOther   int64              `json:"status_other"`
-	DurationCount int64              `json:"duration_count"`
-	AvgDurationMs float64            `json:"avg_duration_ms"`
-	MinDurationMs int64              `json:"min_duration_ms"`
-	MaxDurationMs int64              `json:"max_duration_ms"`
-	BucketSeconds int64              `json:"bucket_seconds"`
-	LatencySeries []LatencyBucketOut `json:"latency_series"`
+	PreviousStatus *StatusCounts      `json:"previous_status"`
+	ErrorRequests  int64              `json:"error_requests"`
+	Status2xx      int64              `json:"status_2xx"`
+	Status4xx      int64              `json:"status_4xx"`
+	Status5xx      int64              `json:"status_5xx"`
+	StatusOther    int64              `json:"status_other"`
+	DurationCount  int64              `json:"duration_count"`
+	AvgDurationMs  float64            `json:"avg_duration_ms"`
+	MinDurationMs  int64              `json:"min_duration_ms"`
+	MaxDurationMs  int64              `json:"max_duration_ms"`
+	BucketSeconds  int64              `json:"bucket_seconds"`
+	LatencySeries  []LatencyBucketOut `json:"latency_series"`
 	// RequestSeries 按同一套分桶统计全部请求（不过滤耗时），是请求量趋势的
 	// 数据源——LatencySeries 里的 count 只数有耗时的行，当请求量用会偏低。
 	RequestSeries []RequestBucketOut `json:"request_series"`
@@ -62,10 +62,13 @@ type StatusCounts struct {
 	StatusOther int64 `json:"status_other"`
 }
 
-/* latencyBucketSteps are the allowed bucket widths, smallest first. The series
-   aims for ~40 buckets over the selected span and rounds up to the next step,
-   so "today" gets half-hour buckets while "30 天" gets daily ones — the chart
-   stays readable at any range instead of scaling point count with traffic. */
+/*
+latencyBucketSteps are the allowed bucket widths, smallest first. The series
+
+	aims for ~40 buckets over the selected span and rounds up to the next step,
+	so "today" gets half-hour buckets while "30 天" gets daily ones — the chart
+	stays readable at any range instead of scaling point count with traffic.
+*/
 var latencyBucketSteps = []int64{
 	30 * 60,
 	60 * 60,
@@ -231,9 +234,12 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	return out, nil
 }
 
-/* previousWindowCounts 统计"上一个同长周期"的请求总数与分类计数。今天对比
-   昨天同时段（截至当前时刻），避免半天的今天永远输给完整的昨天；固定窗口
-   整体后移一个窗口长度；自定义区间取等长的前置区间；"全部"没有可比周期。 */
+/*
+previousWindowCounts 统计"上一个同长周期"的请求总数与分类计数。今天对比
+
+	昨天同时段（截至当前时刻），避免半天的今天永远输给完整的昨天；固定窗口
+	整体后移一个窗口长度；自定义区间取等长的前置区间；"全部"没有可比周期。
+*/
 func previousWindowCounts(ctx context.Context, database *sql.DB,
 	window LogTopWindow, startAt, endAt string) (StatusCounts, bool, error) {
 	var counts StatusCounts
