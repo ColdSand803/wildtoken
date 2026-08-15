@@ -204,6 +204,10 @@ const kpiNumberFrames = new Map();
 const kpiNumberContainerKeys = new Map();
 const KPI_COUNT_DURATION_MS = 560;
 
+/* 环比百分比要求的最小基数。低于这个数时百分比会放大成 28900% 这类量级，
+   描述的是"上期几乎没流量"而非真实倍数，此时改显绝对增量或干脆不显示。 */
+const GROWTH_RATE_MIN_BASE = 20;
+
 function formatKpiCount(value, format) {
   if (format === "percent") {
     return `${value.toFixed(1).replace(/\.0$/, "")}%`;
@@ -541,15 +545,28 @@ function renderDashboard() {
 
   /* 请求数的环比增长率：对比上一同长周期（今天 vs 昨天同时段）。基数为 0
      或没有上一周期（"全部"）时不显示——没有可比基数的百分比是误导。
-     配色语义与错误率相反：请求涨通常是好事，涨绿跌灰。 */
+     配色语义与错误率相反：请求涨通常是好事，涨绿跌灰。
+
+     小基数保护：上一周期只有个位数请求时，百分比会飙到 28900% 这种量级，
+     它描述的其实是"上期几乎没流量"，不是真的涨了 289 倍。这种情况下改显
+     绝对增量（+289 条），信息更诚实。 */
   const previousTotal = overview?.previous_total;
   let requestTrendHtml = "";
   if (total > 0 && typeof previousTotal === "number" && previousTotal > 0) {
-    const growth = ((total - previousTotal) / previousTotal) * 100;
-    if (Math.abs(growth) >= 0.05) {
-      const up = growth > 0;
-      const magnitude = Math.abs(growth);
-      requestTrendHtml = `<span class="kpi-trend ${up ? "kpi-trend--up" : "kpi-trend--down"}" title="较上一同长周期（${previousTotal} 条）">${up ? "↑" : "↓"}<span data-count-key="dashboard-request-growth" data-count-to="${magnitude.toFixed(3)}" data-count-format="growth">${formatKpiCount(magnitude, "growth")}</span></span>`;
+    const up = total > previousTotal;
+    const toneClass = up ? "kpi-trend--up" : "kpi-trend--down";
+    const title = `较上一同长周期（${previousTotal} 条）`;
+    if (previousTotal < GROWTH_RATE_MIN_BASE) {
+      const diff = Math.abs(total - previousTotal);
+      if (diff > 0) {
+        requestTrendHtml = `<span class="kpi-trend ${toneClass}" title="${title}">${up ? "↑" : "↓"}<span data-count-key="dashboard-request-growth-abs" data-count-to="${diff}" data-count-format="compact">${escapeHtml(formatCompactNumber(diff))}</span> 条</span>`;
+      }
+    } else {
+      const growth = ((total - previousTotal) / previousTotal) * 100;
+      if (Math.abs(growth) >= 0.05) {
+        const magnitude = Math.abs(growth);
+        requestTrendHtml = `<span class="kpi-trend ${toneClass}" title="${title}">${up ? "↑" : "↓"}<span data-count-key="dashboard-request-growth" data-count-to="${magnitude.toFixed(3)}" data-count-format="growth">${formatKpiCount(magnitude, "growth")}</span></span>`;
+      }
     }
   }
   const requestSeries = Array.isArray(overview?.request_series) ? overview.request_series : [];
@@ -697,7 +714,7 @@ function renderDashboard() {
          2xx 涨绿跌灰（跌通常只是流量降，报警交给错误类），错误类涨红跌绿。 */
       const prevStatus = overview?.previous_status;
       const legendDelta = (key, current, previous, upClass, downClass) => {
-        if (typeof previous !== "number" || previous < 10) return "";
+        if (typeof previous !== "number" || previous < GROWTH_RATE_MIN_BASE) return "";
         const growth = ((current - previous) / previous) * 100;
         if (Math.abs(growth) < 0.5) return "";
         const up = growth > 0;
