@@ -33,3 +33,7 @@ data/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Build output and local design references
+/target/
+/渠道卡片/
