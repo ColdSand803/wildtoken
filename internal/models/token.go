@@ -147,20 +147,33 @@ func NormalizeRateLimit(raw *string) (*string, error) {
 	return &value, nil
 }
 
-func validateTokenMetadata(name, description string) error {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" || utf8.RuneCountInString(name) > APITokenNameMaxChars {
+// validateTokenMetadata judges the name and description that will be stored, and
+// writes the trimmed values back through the pointers it is given.
+//
+// The stores trim before writing, so the check has to be against the trimmed
+// value or it answers about a different string than the one that lands in the
+// database: a name padded past the limit with spaces was refused for a length it
+// would not have had, and the emptiness check was already trimming while the
+// length check beside it was not.
+func validateTokenMetadata(name, description *string) error {
+	trimmedName := strings.TrimSpace(*name)
+	if trimmedName == "" || utf8.RuneCountInString(trimmedName) > APITokenNameMaxChars {
 		return ErrString("token name must be between 1 and 80 characters")
 	}
-	if strings.ContainsFunc(name, unicode.IsControl) {
+	if strings.ContainsFunc(trimmedName, unicode.IsControl) {
 		return ErrString("token name must not contain control characters")
 	}
-	if utf8.RuneCountInString(description) > APITokenDescriptionMaxChars {
+
+	trimmedDescription := strings.TrimSpace(*description)
+	if utf8.RuneCountInString(trimmedDescription) > APITokenDescriptionMaxChars {
 		return ErrString("token description must be at most 200 characters")
 	}
-	if strings.ContainsFunc(description, unicode.IsControl) {
+	if strings.ContainsFunc(trimmedDescription, unicode.IsControl) {
 		return ErrString("token description must not contain control characters")
 	}
+
+	*name = trimmedName
+	*description = trimmedDescription
 	return nil
 }
 
@@ -187,7 +200,7 @@ func validateTokenValue(token string) error {
 }
 
 func (t *APITokenIn) Validate() error {
-	if err := validateTokenMetadata(t.Name, t.Description); err != nil {
+	if err := validateTokenMetadata(&t.Name, &t.Description); err != nil {
 		return err
 	}
 	if _, err := t.NormalizedExpiresAt(); err != nil {
@@ -220,7 +233,7 @@ func (t *APITokenIn) NormalizedRateLimit() (*string, error) {
 }
 
 func (t *APITokenUpdateIn) Validate() error {
-	if err := validateTokenMetadata(t.Name, t.Description); err != nil {
+	if err := validateTokenMetadata(&t.Name, &t.Description); err != nil {
 		return err
 	}
 	if _, err := t.NormalizedExpiresAt(); err != nil {
