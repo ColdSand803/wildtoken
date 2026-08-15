@@ -58,9 +58,19 @@ func Init(ctx context.Context, db *sql.DB) error {
 		createRequestLogs,
 		createRequestLogPayloads,
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at);",
-		"CREATE INDEX IF NOT EXISTS idx_request_logs_created_at_id_desc ON request_logs(created_at DESC, id DESC);",
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_upstream_created_at ON request_logs(upstream_id, created_at);",
-		"CREATE INDEX IF NOT EXISTS idx_request_logs_upstream_created_at_id_desc ON request_logs(upstream_id, created_at DESC, id DESC);",
+		// The DESC pair these replace was never used. id is the rowid, which
+		// every index entry already carries, so the ASC indexes are (created_at,
+		// id) and (upstream_id, created_at, id) — a reverse scan of either
+		// satisfies ORDER BY created_at DESC, id DESC without a sort. The
+		// planner picked the ASC index even when both were present.
+		//
+		// Measured on 200k rows: dropping them left every query plan unchanged
+		// with no temporary B-tree, halved the time to insert 50k rows, and
+		// returned 20 MB of the 37 MB the indexes occupied. request_logs takes
+		// a row per proxied request, so that write cost was on the hot path.
+		"DROP INDEX IF EXISTS idx_request_logs_created_at_id_desc;",
+		"DROP INDEX IF EXISTS idx_request_logs_upstream_created_at_id_desc;",
 		// downstream_token_id carries ON DELETE SET NULL. Without an index
 		// SQLite has to scan every log row to apply it, so deleting one token
 		// took the write lock for as long as that scan, with every proxied
