@@ -190,7 +190,11 @@ func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter,
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Anthropic clients authenticate with x-api-key and expect their own
 			// error shape.
-			anthropic := strings.TrimRight(r.URL.Path, "/") == "/v1/messages"
+			// Derived the same way the handler and the header builder derive
+			// it. Comparing the raw path meant /v1//messages authenticated as
+			// OpenAI here while being forwarded as Anthropic, so a caller using
+			// x-api-key was refused on a route that would have accepted it.
+			anthropic := models.IsAnthropicMessages(models.ProxyPath(r.URL.Path))
 
 			token, ok := extractDownstreamToken(r, anthropic)
 			if !ok {

@@ -288,7 +288,7 @@ func BuildForwardHeaders(downstreamHeaders http.Header, upstream *models.Upstrea
 	// Uncompressed responses are preferred, so usage can be read from body text.
 	forwarded["accept-encoding"] = "identity"
 
-	isAnthropicMessages := strings.Trim(path, "/") == "messages"
+	isAnthropicMessages := models.IsAnthropicMessages(models.ProxyPath(path))
 
 	if upstream.APIKey != nil && *upstream.APIKey != "" {
 		key := *upstream.APIKey

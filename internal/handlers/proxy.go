@@ -64,7 +64,7 @@ func upstreamSelector(r *http.Request) *string {
 
 // writeProtocolError renders an error in the shape the caller's protocol expects.
 func writeProtocolError(w http.ResponseWriter, status int, path, message, errorType string) {
-	if strings.Trim(path, "/") == "messages" {
+	if models.IsAnthropicMessages(models.ProxyPath(path)) {
 		apperr.WriteJSON(w, status, map[string]any{
 			"type":  "error",
 			"error": map[string]string{"type": errorType, "message": message},
@@ -104,7 +104,7 @@ func writeUpstreamRateLimitRejection(w http.ResponseWriter, path string) {
 		"code":    UpstreamRateLimitedCode,
 		"message": UpstreamRateLimitedMessage,
 	}
-	if strings.Trim(path, "/") == "messages" {
+	if models.IsAnthropicMessages(models.ProxyPath(path)) {
 		body["type"] = "error"
 		body["error"] = map[string]string{"type": "rate_limit_error", "message": detail}
 	} else {
@@ -250,8 +250,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		}
 
 		// The path after /v1/, for example "chat/completions".
-		path := strings.TrimLeft(strings.TrimPrefix(
-			strings.TrimPrefix(r.URL.Path, "/v1"), "/"), "/")
+		path := models.ProxyPath(r.URL.Path)
 
 		guard := newAbortLogGuard(state.LogWriter, r.Method, path)
 		defer guard.finish()
