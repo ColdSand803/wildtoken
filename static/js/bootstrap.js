@@ -39,6 +39,10 @@ const selectPanel = document.querySelector("#select-panel");
 const upstreamActionMenu = document.querySelector("#upstream-action-menu");
 const rows = document.querySelector("#upstream-rows");
 const upstreamSummary = document.querySelector("#upstream-summary");
+const upstreamCardsContainer = document.querySelector("#upstream-cards");
+const viewGridBtn = document.querySelector("#upstream-view-grid");
+const viewListBtn = document.querySelector("#upstream-view-list");
+const upstreamTableWrap = document.querySelector(".view[data-view='upstreams'] .table-wrap");
 const form = document.querySelector("#upstream-form");
 const formTitle = document.querySelector("#form-title");
 const newButton = document.querySelector("#new-upstream");
@@ -1156,6 +1160,38 @@ function escapeHtml(value) {
     };
     return entities[char];
   });
+}
+
+/* Catmull-Rom 转三次贝塞尔的平滑折线，渠道卡片的 6h 请求量和看板的延迟趋势
+   共用这一个生成器，曲线手感才一致。coords 是已经换算到 SVG 坐标系的
+   {x, y} 数组；返回描边路径和向 baselineY 封口的面积路径。控制点的 y 会被
+   夹在 [minY, maxY] 里——Catmull-Rom 在陡峭拐点会过冲，不夹的话面积填充
+   可能戳破基线或顶出视口。 */
+function buildSmoothSparkPaths(coords, { baselineY, minY = -Infinity, maxY = Infinity } = {}) {
+  if (!coords.length) return { line: "", area: "" };
+  const fmt = (value) => value.toFixed(2);
+  if (coords.length === 1) {
+    const only = coords[0];
+    const line = `M ${fmt(only.x)} ${fmt(only.y)}`;
+    return { line, area: `${line} L ${fmt(only.x)} ${fmt(baselineY)} Z` };
+  }
+  const clampY = (value) => Math.min(Math.max(value, minY), maxY);
+  let line = `M ${fmt(coords[0].x)} ${fmt(coords[0].y)}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p0 = coords[i - 1] || coords[i];
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const p3 = coords[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = clampY(p1.y + (p2.y - p0.y) / 6);
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = clampY(p2.y - (p3.y - p1.y) / 6);
+    line += ` C ${fmt(c1x)} ${fmt(c1y)}, ${fmt(c2x)} ${fmt(c2y)}, ${fmt(p2.x)} ${fmt(p2.y)}`;
+  }
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  const area = `${line} L ${fmt(last.x)} ${fmt(baselineY)} L ${fmt(first.x)} ${fmt(baselineY)} Z`;
+  return { line, area };
 }
 
 function renderIcon(name) {

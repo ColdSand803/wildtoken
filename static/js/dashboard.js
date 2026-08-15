@@ -168,17 +168,28 @@ function renderDashboardKpiCards(container, cards) {
     // page that is already failing is a state, not an event.
     const escalated = before !== undefined
       && (TONE_RANK[tone] ?? 0) > (TONE_RANK[before] ?? 0);
+    /* valueHtml / labelHtml 是调用方已经拼好的安全 HTML（分母缩小、呼吸圆点、
+       环比箭头这类富内容）；不传则照旧走转义的纯文本。hoverHint 为 true 时
+       说明文字挪进 title，鼠标滑过才显示，卡面留给数字。 */
+    const valueHtml = card.valueHtml ?? escapeHtml(card.value);
+    const labelHtml = card.labelHtml ?? escapeHtml(card.label);
+    const hintTitle = card.hoverHint && card.hint ? ` title="${escapeHtml(card.hint)}"` : "";
+    const hintBlock = card.hoverHint
+      ? ""
+      : `<div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>`;
     return `
-    <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}>
-      <div class="dashboard-kpi-value">${escapeHtml(card.value)}</div>
-      <div class="dashboard-kpi-label">${escapeHtml(card.label)}</div>
-      <div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>
+    <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}${hintTitle}>
+      <div class="dashboard-kpi-value">${valueHtml}</div>
+      <div class="dashboard-kpi-label">${labelHtml}</div>
+      ${hintBlock}
     </div>
   `;
   }).join("");
   kpiToneMemory.set(container, next);
   container.innerHTML = html;
 }
+
+let dashboardSparkGradientSeq = 0;
 
 function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
   if (!values.length) {
@@ -188,16 +199,29 @@ function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
   const min = Math.min(...values, 0);
   const span = Math.max(max - min, 1);
   const pad = 2;
-  const points = values.map((value, index) => {
-    const x = pad + (index / Math.max(values.length - 1, 1)) * (width - pad * 2);
-    const y = height - pad - ((value - min) / span) * (height - pad * 2);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  const area = `${pad},${height - pad} ${points} ${width - pad},${height - pad}`;
+  const coords = values.map((value, index) => ({
+    x: pad + (index / Math.max(values.length - 1, 1)) * (width - pad * 2),
+    y: height - pad - ((value - min) / span) * (height - pad * 2),
+  }));
+  /* 跟渠道卡片同一个平滑生成器和渐变画法，两处图表手感一致。曲线本身的
+     数据带上下各留 pad 防描边被视口裁掉，但面积一直填到 viewBox 最底边——
+     图表下方紧贴延迟摘要的分隔线，中间不能露出一条底色缝。 */
+  const { line, area } = buildSmoothSparkPaths(coords, {
+    baselineY: height,
+    minY: pad,
+    maxY: height - pad,
+  });
+  const gradientId = `dashboard-spark-gradient-${++dashboardSparkGradientSeq}`;
   return `
     <svg class="ops-chart-svg dashboard-spark" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
-      <polyline fill="none" stroke="var(--accent)" stroke-width="1.8" points="${points}" />
-      <polygon fill="var(--accent-soft)" points="${area}" opacity="0.75" />
+      <defs>
+        <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="currentColor" stop-opacity="0.25" />
+          <stop offset="100%" stop-color="currentColor" stop-opacity="0.04" />
+        </linearGradient>
+      </defs>
+      <path d="${area}" fill="url(#${gradientId})" />
+      <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.8" vector-effect="non-scaling-stroke" />
     </svg>
   `;
 }
@@ -327,6 +351,15 @@ function dashboardTopWindowLabel(value) {
   }
 }
 
+/* 上一轮刷新的错误率（百分点），给卡片上的环比箭头当基线。只在拿到有效
+   数据时更新：中间夹一轮空窗不该把基线冲掉。 */
+let previousErrorRatePct = null;
+
+/* 最近一次真实变化的差值（百分点）。箭头渲染用它而不是逐轮差值：没有新
+   请求时逐轮差值是 0，箭头闪一轮就没了——应该一直挂着最近那次变化，直到
+   下一次变化把它换掉。 */
+let lastErrorRateDelta = null;
+
 function renderDashboard() {
   const items = Array.isArray(dashboardLogItems) ? dashboardLogItems : [];
   const n = items.length;
@@ -376,29 +409,54 @@ function renderDashboard() {
       : errorCount / n >= 0.05
         ? "tone-warn"
         : "tone-ok";
+
+  // 错误率的环比变化（百分点）。0.05pp 以下当作噪声，不算一次变化。
+  const errorRatePct = n > 0 ? (errorCount / n) * 100 : null;
+  if (errorRatePct !== null && previousErrorRatePct !== null) {
+    const delta = errorRatePct - previousErrorRatePct;
+    if (Math.abs(delta) >= 0.05) {
+      lastErrorRateDelta = delta;
+    }
+  }
+  if (errorRatePct !== null) {
+    previousErrorRatePct = errorRatePct;
+  }
+  let errorDeltaHtml = "";
+  if (errorRatePct !== null && lastErrorRateDelta !== null) {
+    const up = lastErrorRateDelta > 0;
+    errorDeltaHtml = `<span class="kpi-delta ${up ? "kpi-delta--up" : "kpi-delta--down"}" title="较最近一次变化前">${up ? "↑" : "↓"}${Math.abs(lastErrorRateDelta).toFixed(1)}%</span>`;
+  }
+
   renderDashboardKpiCards(dashboardKpis, [
     {
       value: String(n),
       label: "近窗请求",
       hint: n ? "已加载日志条数" : "暂无近窗数据",
+      hoverHint: true,
       tone: "",
     },
     {
       value: errorRateLabel,
+      valueHtml: `${escapeHtml(errorRateLabel)}${errorDeltaHtml}`,
       label: "错误率",
+      labelHtml: '<span class="kpi-pulse-dot" aria-hidden="true"></span>错误率',
       hint: n ? `${errorCount} / ${n} 条失败` : "暂无日志",
+      hoverHint: true,
       tone: errorTone,
     },
     {
       value: avgDurationLabel,
       label: "平均耗时",
       hint: durationCount ? `有效 ${durationCount} 条` : "暂无耗时",
+      hoverHint: true,
       tone: "",
     },
     {
       value: `${enabledCount}/${totalChannels}`,
+      valueHtml: `${enabledCount}<span class="kpi-denominator">/${totalChannels}</span>`,
       label: "启用渠道",
       hint: totalChannels ? `停用 ${disabledCount}` : "暂无渠道",
+      hoverHint: true,
       tone: "",
     },
   ]);

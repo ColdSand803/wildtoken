@@ -87,6 +87,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			upstreams.Post("/{id}/models", handlers.AdminFetchUpstreamModels(state))
 			upstreams.Post("/{id}/balance", handlers.AdminFetchUpstreamBalance(state))
 			upstreams.Post("/{id}/balance/sub2api", handlers.AdminFetchUpstreamSub2APIBalance(state))
+			upstreams.Get("/stats", handlers.AdminGetUpstreamsStats(state))
 		})
 
 		admin.Route("/groups", func(groups chi.Router) {

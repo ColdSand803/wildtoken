@@ -453,6 +453,41 @@ function formatZeroWeightNote(upstream, remainingRecovery) {
   return formatEffectiveZeroNote(remainingRecovery);
 }
 
+// View state: "list" or "grid"
+let currentUpstreamView = "list";
+
+// Restore saved view preference
+try {
+  const saved = localStorage.getItem("wildtoken_upstream_view");
+  if (saved === "grid" || saved === "list") {
+    currentUpstreamView = saved;
+  }
+} catch (e) {
+  // Ignore storage errors
+}
+
+function setUpstreamView(view) {
+  currentUpstreamView = view;
+  try {
+    localStorage.setItem("wildtoken_upstream_view", view);
+  } catch (e) {
+    // Ignore storage errors
+  }
+
+  if (view === "grid") {
+    if (upstreamTableWrap) upstreamTableWrap.hidden = true;
+    if (upstreamCardsContainer) upstreamCardsContainer.hidden = false;
+    if (viewGridBtn) viewGridBtn.setAttribute("aria-pressed", "true");
+    if (viewListBtn) viewListBtn.setAttribute("aria-pressed", "false");
+    renderCards();
+  } else {
+    if (upstreamTableWrap) upstreamTableWrap.hidden = false;
+    if (upstreamCardsContainer) upstreamCardsContainer.hidden = true;
+    if (viewGridBtn) viewGridBtn.setAttribute("aria-pressed", "false");
+    if (viewListBtn) viewListBtn.setAttribute("aria-pressed", "true");
+  }
+}
+
 function renderRows() {
   const openMenuId = activeActionMenuButton && !upstreamActionMenu.hidden
     ? Number(activeActionMenuButton.dataset.menuId)
@@ -603,6 +638,312 @@ function renderRows() {
       closeUpstreamActionMenu();
     }
   }
+
+  // Also update cards if in grid view
+  if (currentUpstreamView === "grid") {
+    renderCards();
+  }
+}
+
+function formatMetric(num) {
+  if (num >= 1000000) return (num / 1000000).toFixed(1) + "M";
+  if (num >= 1000) return (num / 1000).toFixed(1) + "k";
+  return num.toString();
+}
+
+let sparklineGradientSeq = 0;
+
+function renderSparkline(points) {
+  if (!points || points.length === 0) {
+    /* preserveAspectRatio="none" 让 100 单位的横线拉满整个容器——等比缩放时
+       viewBox 只占容器中间一段，虚线看起来就短了一截。虚线段长会随横向拉伸
+       放大（约 3~4.5 倍），所以这里用小间距，拉开后正好是普通虚线的密度。 */
+    return `
+      <svg class="sparkline-svg" viewBox="0 0 100 40" preserveAspectRatio="none"
+           role="img" aria-label="近 6 小时无请求">
+        <line x1="0" y1="38" x2="100" y2="38" stroke="currentColor" stroke-width="1"
+              stroke-dasharray="1.5 1.5" opacity="0.35" vector-effect="non-scaling-stroke"/>
+      </svg>
+    `;
+  }
+
+  const max = Math.max(...points);
+  const min = Math.min(...points);
+  const range = max - min || 1;
+
+  const coords = points.map((p, i) => ({
+    // A single bucket would divide by zero; pin it to the left edge instead.
+    x: points.length === 1 ? 0 : (i / (points.length - 1)) * 100,
+    y: 40 - ((p - min) / range) * 35,
+  }));
+  // 与看板延迟趋势共用的平滑曲线生成器（bootstrap.js）。
+  const { line, area } = buildSmoothSparkPaths(coords, {
+    baselineY: 40,
+    minY: 0,
+    maxY: 40,
+  });
+
+  // One id per chart: several cards render at once, and a duplicate id would
+  // make every later chart reuse the first card's gradient.
+  const gradientId = `sparkline-gradient-${++sparklineGradientSeq}`;
+
+  return `
+    <svg class="sparkline-svg" viewBox="0 0 100 40" preserveAspectRatio="none"
+         role="img" aria-label="近 6 小时请求量趋势">
+      <defs>
+        <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
+          <stop offset="0%" stop-color="currentColor" stop-opacity="0.25" />
+          <stop offset="100%" stop-color="currentColor" stop-opacity="0.04" />
+        </linearGradient>
+      </defs>
+      <path d="${area}" fill="url(#${gradientId})" />
+      <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.5"
+            vector-effect="non-scaling-stroke"/>
+    </svg>
+  `;
+}
+
+/* 统计数据按渠道缓存。渠道列表每 N 秒轮询一次，但统计的变化远没有那么快，
+   而且每张卡一个请求。没有缓存的话，每轮刷新都要等 N 个请求回来才能重建卡片，
+   那段空窗就是肉眼看到的闪烁。 */
+const upstreamStatsCache = new Map();
+const UPSTREAM_STATS_TTL_MS = 60_000;
+const EMPTY_UPSTREAM_STATS = {
+  sparkline: [],
+  totalRequests: 0,
+  cacheHitRate: 0,
+  avgTokensPer1M: 0,
+};
+
+/** 缓存里的统计数据；没有或已过期返回 null。 */
+function cachedUpstreamStats(upstreamId) {
+  const entry = upstreamStatsCache.get(upstreamId);
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > UPSTREAM_STATS_TTL_MS) return null;
+  return entry.stats;
+}
+
+/* 单飞（in-flight 去重）：缓存 60 秒后是所有渠道同时过期，而 renderCards 的
+   触发点很密（定时刷新、SSE 事件、操作后重载）。过期瞬间几个触发点挤在一起，
+   如果各自发请求，网络面板里就是 渠道数 × 触发次数 的一排 stats 并发。共享
+   同一个 Promise 后，同一时刻至多一个批量请求在飞。 */
+let statsRefreshPromise = null;
+
+// Uses the shared api() helper so admin-token handling and 401 re-auth match
+// the rest of the console. Returns whether the cache actually got refreshed.
+async function fetchAllUpstreamStats() {
+  try {
+    const payload = await api("/api/admin/upstreams/stats");
+    const byId = payload && typeof payload.stats === "object" && payload.stats !== null
+      ? payload.stats
+      : {};
+    const fetchedAt = Date.now();
+    /* 响应里没出现的渠道（还没有任何日志）也要写进缓存，否则它们永远是
+       stale，每一轮渲染都会再触发一次批量请求。 */
+    for (const upstream of upstreams) {
+      const raw = byId[String(upstream.id)];
+      upstreamStatsCache.set(upstream.id, {
+        fetchedAt,
+        stats: {
+          sparkline: Array.isArray(raw?.sparkline) ? raw.sparkline : [],
+          totalRequests: Number(raw?.totalRequests) || 0,
+          cacheHitRate: Number(raw?.cacheHitRate) || 0,
+          avgTokensPer1M: Number(raw?.avgTokensPer1M) || 0,
+        },
+      });
+    }
+    return true;
+  } catch (error) {
+    /* 拉不到就先用旧缓存/占位显示，下个刷新周期自然重试。 */
+    return false;
+  }
+}
+
+/* 同步渲染：统计只从缓存读。缓存是空的就先出骨架，等后台补齐后单独替换这张卡，
+   这样整个网格不会为了等统计而空掉。 */
+function createChannelCard(upstream) {
+  const card = document.createElement("div");
+  card.className = "channel-card";
+  if (!upstream.enabled) card.classList.add("channel-card--disabled");
+  card.dataset.cardUpstreamId = String(upstream.id);
+
+  const statusClass = upstream.enabled ? "live" : "offline";
+
+  const stats = cachedUpstreamStats(upstream.id);
+  const pending = stats === null;
+  const resolved = stats || EMPTY_UPSTREAM_STATS;
+  const sparklineData = resolved.sparkline.map(p => p.count);
+  const totalRequests = pending ? "—" : formatMetric(resolved.totalRequests);
+  const cacheHit = pending ? "—" : `${resolved.cacheHitRate.toFixed(1)}%`;
+  // 本项目没有存储任何单价/费用字段，所以这里给的是每千次请求的平均
+  // Token 消耗，作为成本的代理指标，而不是真实金额。
+  const avgTokens = pending ? "—" : formatMetric(Math.round(resolved.avgTokensPer1M));
+  const sixHourTotal = pending
+    ? "—"
+    : formatMetric(sparklineData.reduce((sum, n) => sum + n, 0));
+
+  card.innerHTML = `
+    <div class="channel-card-header">
+      <div class="channel-card-title">
+        <span class="status-dot status-dot--${statusClass}"></span>
+        <h3 title="${escapeHtml(upstream.name)}">${escapeHtml(upstream.name)}</h3>
+      </div>
+      <div class="channel-card-header-actions">
+        <span class="channel-card-badge">优先级 ${upstream.priority}</span>
+        <button
+          type="button"
+          class="status-switch ${upstream.enabled ? "on" : "off"}"
+          data-action="toggle-enabled"
+          data-id="${upstream.id}"
+          role="switch"
+          aria-checked="${upstream.enabled ? "true" : "false"}"
+          aria-label="${upstream.enabled ? "停用" : "启用"}渠道 ${escapeHtml(upstream.name)}"
+          title="${upstream.enabled ? "点击停用" : "点击启用"}"
+        >
+          <span class="status-switch-track" aria-hidden="true">
+            <span class="status-switch-thumb"></span>
+          </span>
+        </button>
+        <button
+          type="button"
+          class="secondary action-menu-trigger"
+          data-menu-id="${upstream.id}"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          aria-label="打开 ${escapeHtml(upstream.name)} 的操作菜单"
+          title="操作"
+        ><span aria-hidden="true">⋮</span></button>
+      </div>
+    </div>
+    <div class="channel-card-sparkline">
+      <div class="sparkline-header">
+        <span class="sparkline-label">请求量 (6h)</span>
+        <span class="sparkline-value">${sixHourTotal}</span>
+      </div>
+      ${renderSparkline(sparklineData)}
+    </div>
+    <div class="channel-card-metrics">
+      <div class="metric-tile">
+        <span class="metric-label">总请求</span>
+        <span class="metric-value">${totalRequests}</span>
+      </div>
+      <div class="metric-tile">
+        <span class="metric-label">缓存命中</span>
+        <span class="metric-value">${cacheHit}</span>
+      </div>
+      <div class="metric-tile metric-tile--wide" title="项目未存储价格数据，此处为每千次请求的平均 Token 消耗">
+        <span class="metric-label">平均 Token / 千次请求</span>
+        <span class="metric-value">${avgTokens}</span>
+      </div>
+    </div>
+    <button type="button" class="channel-card-action" data-card-detail="${upstream.id}">
+      查看详情 →
+    </button>
+  `;
+
+  return card;
+}
+
+/* 把缓存里没有的统计补齐，回来后只替换对应那张卡。 */
+async function hydrateVisibleCardStats(upstreamList) {
+  if (!upstreamList.some((item) => cachedUpstreamStats(item.id) === null)) return;
+
+  if (!statsRefreshPromise) {
+    statsRefreshPromise = fetchAllUpstreamStats().finally(() => {
+      statsRefreshPromise = null;
+    });
+  }
+  const refreshed = await statsRefreshPromise;
+  /* 失败时不重渲染也不递归重试——缓存仍是 stale，下一次 renderCards（定时
+     刷新触发）自然会再拉一次；在这里重试会变成失败循环。 */
+  if (!refreshed) return;
+  // 期间可能已经切回列表视图。
+  if (currentUpstreamView !== "grid" || !upstreamCardsContainer) return;
+
+  for (const upstream of getFilteredUpstreams()) {
+    const existing = upstreamCardsContainer.querySelector(
+      `[data-card-upstream-id="${upstream.id}"]`,
+    );
+    if (!existing) continue;
+    // 菜单开在这张卡上时先不动它，否则菜单会失去锚点。
+    if (existing.contains(activeActionMenuButton)) continue;
+    existing.replaceWith(createChannelCard(upstream));
+  }
+}
+
+/* 就地对齐已有卡片，不整体重建。渠道列表每 N 秒轮询，整体重建会让网格闪一下，
+   而且会打断正在打开的操作菜单。 */
+function renderCards() {
+  if (!upstreamCardsContainer) return;
+
+  const filtered = getFilteredUpstreams();
+
+  if (upstreamsLoading && !upstreamsLoadedOnce) {
+    upstreamCardsContainer.innerHTML = '<div class="cards-loading">加载中…</div>';
+    return;
+  }
+
+  if (upstreamsLoadedOnce && upstreams.length === 0 && !upstreamFiltersActive()) {
+    upstreamCardsContainer.innerHTML = `
+      <div class="cards-empty">
+        <p>暂无渠道</p>
+        <p class="cards-empty-sub">还没有配置上游渠道。创建后即可按优先级与模型规则路由请求。</p>
+        <button type="button" class="secondary" data-empty-action="new-upstream">新增渠道</button>
+      </div>
+    `;
+    return;
+  }
+
+  if (upstreamsLoadedOnce && filtered.length === 0) {
+    upstreamCardsContainer.innerHTML = `
+      <div class="cards-empty">
+        <p>无匹配渠道</p>
+        <p class="cards-empty-sub">当前筛选条件下没有结果。可调整搜索词或状态筛选。</p>
+        <button type="button" class="secondary" data-empty-action="clear-upstream-filters">清除筛选</button>
+      </div>
+    `;
+    return;
+  }
+
+  // 上一次留下的加载中/空状态占位要先清掉。
+  const placeholder = upstreamCardsContainer.querySelector(".cards-loading, .cards-empty");
+  if (placeholder) upstreamCardsContainer.innerHTML = "";
+
+  const existingCards = new Map();
+  for (const card of upstreamCardsContainer.querySelectorAll("[data-card-upstream-id]")) {
+    existingCards.set(Number(card.dataset.cardUpstreamId), card);
+  }
+
+  let position = null;
+  for (const upstream of filtered) {
+    const existing = existingCards.get(upstream.id);
+    existingCards.delete(upstream.id);
+
+    let card;
+    if (existing && existing.contains(activeActionMenuButton)) {
+      // 菜单开在这张卡上，保持这个节点，替换会让菜单丢掉锚点。
+      card = existing;
+    } else {
+      card = createChannelCard(upstream);
+      if (existing) {
+        existing.replaceWith(card);
+      }
+    }
+
+    // 按筛选顺序把卡片排好。位置已经正确时 insertBefore 不会触发重排。
+    const expectedNext = position ? position.nextSibling : upstreamCardsContainer.firstChild;
+    if (card !== expectedNext) {
+      upstreamCardsContainer.insertBefore(card, expectedNext);
+    }
+    position = card;
+  }
+
+  // 已被筛掉或删除的卡片。
+  for (const orphan of existingCards.values()) {
+    orphan.remove();
+  }
+
+  void hydrateVisibleCardStats(filtered);
 }
 
 function updateBatchToolbar() {
@@ -1122,3 +1463,55 @@ async function runChannelImport() {
     channelImportConfirm.disabled = !channelImportParsed;
   }
 }
+
+// View toggle event listeners
+if (viewGridBtn) {
+  viewGridBtn.addEventListener("click", () => setUpstreamView("grid"));
+}
+
+if (viewListBtn) {
+  viewListBtn.addEventListener("click", () => setUpstreamView("list"));
+}
+
+/* 卡片视图的点击代理。走的是列表视图那一套 openUpstreamActionMenu /
+   handleUpstreamAction，所以查余额、拉取模型、测试连接这些操作在两个视图里
+   行为完全一致。 */
+if (upstreamCardsContainer) {
+  upstreamCardsContainer.addEventListener("click", async (event) => {
+    const emptyAction = event.target.closest("button[data-empty-action]");
+    if (emptyAction) {
+      if (emptyAction.dataset.emptyAction === "new-upstream") {
+        resetForm();
+        openUpstreamDialog();
+      } else if (emptyAction.dataset.emptyAction === "clear-upstream-filters") {
+        clearUpstreamFilters();
+      }
+      return;
+    }
+
+    const menuButton = event.target.closest("button[data-menu-id]");
+    if (menuButton) {
+      openUpstreamActionMenu(menuButton);
+      return;
+    }
+
+    const detailBtn = event.target.closest("[data-card-detail]");
+    if (detailBtn) {
+      const upstream = upstreams.find((item) => item.id === Number(detailBtn.dataset.cardDetail));
+      if (upstream) await editUpstream(upstream);
+      return;
+    }
+
+    const actionButton = event.target.closest("button[data-action]");
+    if (actionButton) {
+      await handleUpstreamAction(actionButton);
+    }
+  });
+}
+
+// Initialize view on page load
+if (currentUpstreamView === "grid") {
+  setUpstreamView("grid");
+}
+
+

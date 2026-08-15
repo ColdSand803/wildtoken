@@ -288,3 +288,324 @@ html[data-density="compact"] .wt-seg-btn {
     transform: none;
   }
 }
+
+/* ── View toggle buttons ─────────────────────────────────── */
+
+.view-toggle-wrap {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px;
+  background: var(--panel-subtle);
+}
+
+.view-toggle-btn {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 150ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.view-toggle-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+}
+
+.view-toggle-btn:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.view-toggle-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: white;
+}
+
+/* ── Channel cards grid ─────────────────────────────────── */
+
+.upstream-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 16px;
+  padding: 1px;
+}
+
+/* display: grid 是作者样式，会压过 UA 样式表的 [hidden] { display: none }，
+   所以切回列表视图时 JS 设的 hidden 属性本身藏不住这个容器——需要显式兜底。 */
+.upstream-cards-grid[hidden] {
+  display: none;
+}
+
+.channel-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: all 200ms ease;
+  position: relative;
+  /* 卡片是网格里的一个网格项，默认 min-width 是 auto：浏览器会把它撑到至少
+     跟内部最长的不换行内容一样宽（这里是渠道名和成本提示），而不是收缩到
+     网格分配给它的轨道宽度。手机屏幕窄，轨道宽度早就不够那行文字自然展开，
+     于是卡片整体溢出，被祖先的 overflow-x: hidden 直接裁掉、显示不全。
+     标题和成本提示本来就配了 ellipsis，但撑爆容器发生在布局阶段、比省略号
+     生效更早，所以之前完全没用上。 */
+  min-width: 0;
+}
+
+.channel-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.channel-card--disabled {
+  opacity: 0.6;
+}
+
+.channel-card--disabled:hover {
+  border-color: var(--line);
+  box-shadow: none;
+  transform: none;
+}
+
+/* Card header */
+
+.channel-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.channel-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.channel-card-title h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot--live {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok-soft);
+}
+
+.status-dot--offline {
+  background: var(--muted);
+}
+
+.channel-card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.channel-card-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  background: var(--panel-subtle);
+  color: var(--muted);
+  border-radius: 4px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+/* Sparkline chart */
+
+.channel-card-sparkline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sparkline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.sparkline-label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.sparkline-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 曲线用 currentColor 描边和填充，颜色跟随主题的 --accent。 */
+.sparkline-svg {
+  width: 100%;
+  height: 48px;
+  color: var(--accent);
+}
+
+/* 停用的渠道用中性色，避免灰卡片上还挂着高亮曲线。 */
+.channel-card--disabled .sparkline-svg {
+  color: var(--muted);
+}
+
+/* Metrics tiles */
+
+.channel-card-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.metric-tile {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-tile--wide {
+  grid-column: 1 / -1;
+}
+
+.metric-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.metric-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Card action button */
+
+.channel-card-action {
+  width: 100%;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+  margin-top: auto;
+}
+
+.channel-card-action:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.channel-card--disabled .channel-card-action {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.channel-card--disabled .channel-card-action:hover {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--line);
+}
+
+/* Empty and loading states */
+
+.cards-loading,
+.cards-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+}
+
+.cards-empty p {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cards-empty-sub {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 20px !important;
+}
+
+.cards-empty button {
+  margin-top: 12px;
+}
+
+/* Responsive adjustments */
+
+@media (max-width: 900px) {
+  .upstream-cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .upstream-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .view-toggle-wrap {
+    order: -1;
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .channel-card {
+    transition: none;
+  }
+
+  .channel-card:hover {
+    transform: none;
+  }
+}

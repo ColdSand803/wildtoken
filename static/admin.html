@@ -195,7 +195,7 @@
                   </div>
                   <span class="dashboard-card-meta wt-meta">实时快照</span>
                 </div>
-                <div id="dashboard-kpis" class="dashboard-kpis wt-metric-grid" aria-live="polite"></div>
+                <div id="dashboard-kpis" class="dashboard-kpis wt-metric-grid kpi-flip" aria-live="polite"></div>
               </section>
 
               <div class="dashboard-ops wt-board">
@@ -368,6 +368,23 @@
                 <button type="button" id="upstream-col-menu-btn" class="secondary ghost col-menu-btn" aria-haspopup="true" aria-expanded="false">列</button>
                 <div id="upstream-col-menu" class="col-menu" hidden role="menu" aria-label="渠道列显示"></div>
               </div>
+              <div class="view-toggle-wrap">
+                <button type="button" id="upstream-view-list" class="secondary ghost view-toggle-btn" aria-pressed="true" aria-label="列表视图" title="列表视图">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <line x1="4" y1="6" x2="20" y2="6"/>
+                    <line x1="4" y1="12" x2="20" y2="12"/>
+                    <line x1="4" y1="18" x2="20" y2="18"/>
+                  </svg>
+                </button>
+                <button type="button" id="upstream-view-grid" class="secondary ghost view-toggle-btn" aria-pressed="false" aria-label="卡片视图" title="卡片视图">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/>
+                    <rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/>
+                    <rect x="14" y="14" width="7" height="7" rx="1"/>
+                  </svg>
+                </button>
+              </div>
               <div class="actions toolbar-actions">
                 <button id="channel-export" type="button" class="secondary">导出</button>
                 <button id="channel-import" type="button" class="secondary">导入</button>
@@ -394,6 +411,9 @@
                 </thead>
                 <tbody id="upstream-rows"></tbody>
               </table>
+            </div>
+            <div id="upstream-cards" class="upstream-cards-grid" hidden>
+              <!-- Cards will be rendered by upstreams.js -->
             </div>
           </section>
         </section>

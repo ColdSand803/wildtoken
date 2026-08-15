@@ -822,3 +822,112 @@ func optionalQueryString(value string) *string {
 func clampInt32(value, low, high int32) int32 { return min(max(value, low), high) }
 
 func clampInt64(value, low, high int64) int64 { return min(max(value, low), high) }
+
+// upstreamSparklinePoint is one 30-minute request-count bucket.
+type upstreamSparklinePoint struct {
+	Bucket string `json:"bucket"`
+	Count  int64  `json:"count"`
+}
+
+// upstreamChannelStats is the per-channel block of the bulk stats response.
+type upstreamChannelStats struct {
+	Sparkline      []upstreamSparklinePoint `json:"sparkline"`
+	TotalRequests  int64                    `json:"totalRequests"`
+	CacheHitRate   float64                  `json:"cacheHitRate"`
+	AvgTokensPer1M float64                  `json:"avgTokensPer1M"`
+}
+
+// AdminGetUpstreamsStats returns card statistics for every channel in one
+// response, keyed by upstream id. One request replaces the per-channel
+// endpoint the card view used before: with N channels that meant N HTTP
+// round trips and 4N queries firing together every time the console's stats
+// cache expired.
+func AdminGetUpstreamsStats(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		stats := map[string]*upstreamChannelStats{}
+		channel := func(id int64) *upstreamChannelStats {
+			key := strconv.FormatInt(id, 10)
+			entry, ok := stats[key]
+			if !ok {
+				entry = &upstreamChannelStats{Sparkline: []upstreamSparklinePoint{}}
+				stats[key] = entry
+			}
+			return entry
+		}
+
+		// 6-hour sparkline: 30-minute buckets, grouped per channel.
+		sixHoursAgo := time.Now().Add(-6 * time.Hour)
+		rows, err := state.DB.QueryContext(r.Context(), `
+			SELECT
+				upstream_id,
+				strftime('%Y-%m-%d %H:%M:00', created_at,
+					'-' || (strftime('%M', created_at) % 30) || ' minutes') AS bucket,
+				COUNT(*) AS count
+			FROM request_logs
+			WHERE upstream_id IS NOT NULL AND created_at >= datetime(?, 'unixepoch')
+			GROUP BY upstream_id, bucket
+			ORDER BY upstream_id, bucket ASC
+		`, sixHoursAgo.Unix())
+		if err != nil {
+			apperr.WriteError(w, apperr.Internal("failed to fetch sparkline data"))
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var upstreamID int64
+			var point upstreamSparklinePoint
+			if err := rows.Scan(&upstreamID, &point.Bucket, &point.Count); err != nil {
+				apperr.WriteError(w, apperr.Internal("failed to scan sparkline row"))
+				return
+			}
+			entry := channel(upstreamID)
+			entry.Sparkline = append(entry.Sparkline, point)
+		}
+		if err := rows.Err(); err != nil {
+			apperr.WriteError(w, apperr.Internal("failed to read sparkline data"))
+			return
+		}
+
+		// Lifetime totals per channel: request count, cache hit rate over
+		// prompt tokens, and average tokens per thousand requests (the
+		// cost proxy — no pricing data is stored anywhere in this project).
+		totals, err := state.DB.QueryContext(r.Context(), `
+			SELECT
+				upstream_id,
+				COUNT(*),
+				COALESCE(SUM(prompt_cached_tokens), 0),
+				COALESCE(SUM(prompt_tokens), 0),
+				COALESCE(SUM(total_tokens), 0)
+			FROM request_logs
+			WHERE upstream_id IS NOT NULL
+			GROUP BY upstream_id
+		`)
+		if err != nil {
+			apperr.WriteError(w, apperr.Internal("failed to fetch channel totals"))
+			return
+		}
+		defer totals.Close()
+		for totals.Next() {
+			var upstreamID, requests, cachedTokens, promptTokens, totalTokens int64
+			if err := totals.Scan(&upstreamID, &requests, &cachedTokens, &promptTokens, &totalTokens); err != nil {
+				apperr.WriteError(w, apperr.Internal("failed to scan channel totals"))
+				return
+			}
+			entry := channel(upstreamID)
+			entry.TotalRequests = requests
+			if promptTokens > 0 {
+				entry.CacheHitRate = float64(cachedTokens) / float64(promptTokens) * 100
+			}
+			if requests > 0 {
+				entry.AvgTokensPer1M = float64(totalTokens) / float64(requests) * 1000
+			}
+		}
+		if err := totals.Err(); err != nil {
+			apperr.WriteError(w, apperr.Internal("failed to read channel totals"))
+			return
+		}
+
+		apperr.WriteJSON(w, http.StatusOK, map[string]any{"stats": stats})
+	}
+}
+
