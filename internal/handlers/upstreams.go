@@ -710,6 +710,10 @@ func AdminTestUpstream(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
+		if err := input.Validate(); err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
+			return
+		}
 		if input.Path == "" {
 			input.Path = "/v1/models"
 		}

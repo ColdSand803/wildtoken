@@ -1,6 +1,9 @@
 package models
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // RequestLogOut is the list representation of a proxied request.
 type RequestLogOut struct {
@@ -119,6 +122,36 @@ type RequestLogTopStatsOut struct {
 
 type TestRequest struct {
 	Path string `json:"path"`
+}
+
+// Validate keeps the probe path to something that can be appended to a base URL.
+//
+// The path is concatenated onto the channel's base URL, so a query string or
+// fragment here lands in the middle of the request rather than where it was
+// written — the same reason ValidateBaseURL refuses them on the other side of
+// the join. Dot segments are refused because the upstream, not this service,
+// resolves them, which makes the request reach a path the operator did not name.
+func (t *TestRequest) Validate() error {
+	path := strings.TrimSpace(t.Path)
+	if path == "" {
+		return nil
+	}
+	if len(path) > 512 {
+		return ErrString("path must be at most 512 bytes")
+	}
+	if strings.ContainsAny(path, "?#") {
+		return ErrString("path must not carry a query string or fragment")
+	}
+	if strings.ContainsFunc(path, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return ErrString("path must not contain control characters")
+	}
+	for segment := range strings.SplitSeq(path, "/") {
+		if segment == "." || segment == ".." {
+			return ErrString("path must not contain . or .. segments")
+		}
+	}
+	t.Path = path
+	return nil
 }
 
 // DefaultTestRequest supplies the `/v1/models` default for an absent path.

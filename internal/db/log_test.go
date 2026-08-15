@@ -504,7 +504,7 @@ func TestRetentionDeletesEverythingExpiredAcrossBatches(t *testing.T) {
 	// More rows than one batch, so the loop has to come back for the rest.
 	// Deleting the window in one statement is what this replaces: the amount
 	// waiting is not bounded by anything the gateway controls.
-	total := int(logDeleteBatchSize) * 2 + 37
+	total := int(logDeleteBatchSize)*2 + 37
 	for i := range total {
 		if _, err := database.Exec(`INSERT INTO request_logs
            (created_at, method, path, client_type, stream)

@@ -151,8 +151,9 @@ func TestTokenPreviewNeverContainsAShortTokenInFull(t *testing.T) {
 	for _, testCase := range []struct{ token, want string }{
 		{"", "…"},
 		{"x", "…"},
-		{"short", "sh…"},
-		{"long-enough-token", "long-eno…"},
+		// A quarter, not a half: half of a five-character token is most of it.
+		{"short", "s…"},
+		{"long-enough-token", "long…"},
 	} {
 		if got := TokenPreview(testCase.token); got != testCase.want {
 			t.Errorf("TokenPreview(%q) = %q, want %q", testCase.token, got, testCase.want)
@@ -1141,5 +1142,24 @@ func TestCreatingATokenRejectsAGroupThatDoesNotExist(t *testing.T) {
 	}
 	if count != 0 {
 		t.Errorf("%d tokens were left behind by a rejected create", count)
+	}
+}
+
+func TestTokenPreviewNeverShowsMostOfAShortToken(t *testing.T) {
+	// A generated token is 32 characters and still shows eight, which is what
+	// tells two credentials apart in a list.
+	if preview := TokenPreview("abcdefghijklmnopqrstuvwxyz012345"); preview != "abcdefgh…" {
+		t.Errorf("preview = %q, want the first eight characters", preview)
+	}
+
+	// A custom one can be much shorter, and half of a short token is most of
+	// it: nine characters used to reveal eight of them.
+	for _, token := range []string{"a", "abcd", "abcdefgh", "abcdefghi", "abcdefghijklmnop"} {
+		preview := TokenPreview(token)
+		shown := len([]rune(preview)) - 1 // the ellipsis
+		if shown*4 > len([]rune(token)) {
+			t.Errorf("preview of a %d-character token showed %d of them",
+				len([]rune(token)), shown)
+		}
 	}
 }

@@ -27,8 +27,8 @@ const (
 	//
 	// Larger than the body batch because the work per row is a delete rather
 	// than a JSON rewrite, and retention has a whole window to get through.
-	logDeleteBatchSize int64 = 500
-	logDeleteBatchPause      = 25 * time.Millisecond
+	logDeleteBatchSize  int64 = 500
+	logDeleteBatchPause       = 25 * time.Millisecond
 	// actualModelExpression prefers the model actually sent to the upstream.
 	// `model` is retained as a compatibility fallback for logs written before
 	// `upstream_model` was added.

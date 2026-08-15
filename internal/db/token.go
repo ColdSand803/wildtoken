@@ -87,6 +87,13 @@ func TokenPreview(token string) string {
 	if len(runes) > tokenPreviewChars {
 		visible = tokenPreviewChars
 	}
+	// Half of a short token is most of it: the previous rule showed eight of a
+	// nine-character value. A preview exists to tell two credentials apart in a
+	// list, which a few characters do, so it never shows more than a quarter of
+	// a short one.
+	if quarter := len(runes) / 4; visible > quarter {
+		visible = quarter
+	}
 	return string(runes[:visible]) + "…"
 }
 
