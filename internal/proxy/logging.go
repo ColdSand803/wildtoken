@@ -757,7 +757,15 @@ func RunCleanupPass(ctx context.Context, database *sql.DB, settings *models.Runt
 	cleanupSucceeded := true
 	metrics.BeginCleanup()
 
+	// A pass interrupted by shutdown is neither a success nor a fault: it
+	// reports what stopped it and the next start picks the work up. Counting it
+	// as an error would make every restart look like a cleanup failure, and
+	// counting it as success would claim work that was not done.
 	if _, err := db.ClearOldLogBodies(ctx, database, settings.LogBodyKeepCount, metrics); err != nil {
+		if errors.Is(err, context.Canceled) {
+			slog.Info("log body cleanup stopped for shutdown")
+			return
+		}
 		cleanupSucceeded = false
 		slog.Error("clearing old log bodies failed", "error", err)
 	}

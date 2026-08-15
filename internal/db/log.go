@@ -14,8 +14,21 @@ import (
 )
 
 const (
-	logBodyCleanupBatchSize  int64 = 8
+	// logBodyCleanupBatchSize is how many payload rows one pass clears.
+	//
+	// Each row's JSON is parsed and rewritten outside the transaction, so the
+	// batch bounds the work between yields rather than the lock hold itself. At
+	// eight rows per 25ms the pass cleared about 320 a second, which a gateway
+	// serving more than that outruns — the stored bodies then grow without the
+	// keep-count policy ever catching up.
+	logBodyCleanupBatchSize  int64 = 64
 	logBodyCleanupBatchPause       = 25 * time.Millisecond
+	// logDeleteBatchSize is how many expired log rows one delete removes.
+	//
+	// Larger than the body batch because the work per row is a delete rather
+	// than a JSON rewrite, and retention has a whole window to get through.
+	logDeleteBatchSize int64 = 500
+	logDeleteBatchPause      = 25 * time.Millisecond
 	// actualModelExpression prefers the model actually sent to the upstream.
 	// `model` is retained as a compatibility fallback for logs written before
 	// `upstream_model` was added.
@@ -488,7 +501,9 @@ func ClearOldLogBodies(ctx context.Context, database *sql.DB, keepCount int64,
 
 		select {
 		case <-ctx.Done():
-			return totalAffected, nil
+			// Shutdown, not completion. Reported as such so the cleanup pass
+			// does not record a successful run it did not finish.
+			return totalAffected, ctx.Err()
 		case <-time.After(logBodyCleanupBatchPause):
 		}
 	}
@@ -658,33 +673,56 @@ func ReclaimFreePages(ctx context.Context, database *sql.DB, maxPages uint32) (u
 	return uint64(before - after), nil
 }
 
-// DeleteOldLogs drops logs past the retention window, payloads first so the
-// foreign key never blocks the delete.
+// DeleteOldLogs drops logs past the retention window in bounded batches.
+//
+// Deleting the whole window in one statement held the write lock for as long as
+// that took, and the amount waiting is not bounded by anything the gateway
+// controls: enabling retention for the first time, or shortening it from ten
+// years to a week, presents every row at once. Meanwhile every proxied request's
+// log write — and the quota increment it carries — queues behind it. Batching
+// puts an upper bound on how long any one transaction can block them, at the
+// cost of taking several to finish, which nothing depends on.
+//
+// The payload rows go with their parent through ON DELETE CASCADE, so only the
+// parents are named here.
 func DeleteOldLogs(ctx context.Context, database *sql.DB, retentionDays int64) error {
-	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		return apperr.Database(err)
-	}
-	defer tx.Rollback()
+	for {
+		affected, err := deleteOldLogsBatch(ctx, database, retentionDays, logDeleteBatchSize)
+		if err != nil {
+			return err
+		}
+		if affected < logDeleteBatchSize {
+			return nil
+		}
 
-	_, err = tx.ExecContext(ctx, `DELETE FROM request_log_payloads
-       WHERE request_log_id IN (
+		// Yield the write lock between batches so a proxied request's log does
+		// not wait out the whole cleanup.
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(logDeleteBatchPause):
+		}
+	}
+}
+
+// deleteOldLogsBatch removes up to batchSize expired rows and reports how many
+// it deleted.
+func deleteOldLogsBatch(ctx context.Context, database *sql.DB,
+	retentionDays, batchSize int64) (int64, error) {
+	result, err := database.ExecContext(ctx, `DELETE FROM request_logs
+       WHERE id IN (
            SELECT id FROM request_logs
            WHERE created_at < datetime('now', '-' || ? || ' days')
-       )`, retentionDays)
+           LIMIT ?
+       )`, retentionDays, batchSize)
 	if err != nil {
-		return apperr.Database(err)
+		return 0, apperr.Database(err)
 	}
-	_, err = tx.ExecContext(ctx,
-		"DELETE FROM request_logs WHERE created_at < datetime('now', '-' || ? || ' days')",
-		retentionDays)
+	affected, err := result.RowsAffected()
 	if err != nil {
-		return apperr.Database(err)
+		return 0, apperr.Database(err)
 	}
-	if err := tx.Commit(); err != nil {
-		return apperr.Database(err)
-	}
-	return nil
+	return affected, nil
 }
 
 func nullStringPtr(value sql.NullString) *string {

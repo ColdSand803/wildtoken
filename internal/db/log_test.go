@@ -496,3 +496,74 @@ func TestPruneDoesNotSortWhileTheMapIsWithinItsCap(t *testing.T) {
 		t.Errorf("held %d entries, want all 128 kept below the cap", held)
 	}
 }
+
+func TestRetentionDeletesEverythingExpiredAcrossBatches(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+
+	// More rows than one batch, so the loop has to come back for the rest.
+	// Deleting the window in one statement is what this replaces: the amount
+	// waiting is not bounded by anything the gateway controls.
+	total := int(logDeleteBatchSize) * 2 + 37
+	for i := range total {
+		if _, err := database.Exec(`INSERT INTO request_logs
+           (created_at, method, path, client_type, stream)
+           VALUES (datetime('now', '-40 days'), 'POST', '/v1/responses', 'codex', 0)`); err != nil {
+			t.Fatalf("insert %d: %v", i, err)
+		}
+	}
+	// One row inside the window, which must survive.
+	if _, err := database.Exec(`INSERT INTO request_logs
+       (created_at, method, path, client_type, stream)
+       VALUES (datetime('now'), 'POST', '/v1/responses', 'codex', 0)`); err != nil {
+		t.Fatalf("insert recent: %v", err)
+	}
+
+	if err := DeleteOldLogs(ctx, database, 30); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	var remaining int64
+	if err := database.QueryRow("SELECT COUNT(*) FROM request_logs").Scan(&remaining); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if remaining != 1 {
+		t.Errorf("%d rows left, want only the one inside the window", remaining)
+	}
+}
+
+func TestRetentionTakesThePayloadRowsWithIt(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+
+	result, err := database.Exec(`INSERT INTO request_logs
+       (created_at, method, path, client_type, stream)
+       VALUES (datetime('now', '-40 days'), 'POST', '/v1/responses', 'codex', 0)`)
+	if err != nil {
+		t.Fatalf("insert log: %v", err)
+	}
+	logID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("last insert id: %v", err)
+	}
+	if _, err := database.Exec(`INSERT INTO request_log_payloads
+       (request_log_id, request_snapshot, response_snapshot)
+       VALUES (?, '{"body":"x"}', '{"body":"y"}')`, logID); err != nil {
+		t.Fatalf("insert payload: %v", err)
+	}
+
+	if err := DeleteOldLogs(ctx, database, 30); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// The payload goes with its parent through ON DELETE CASCADE, which is why
+	// the delete no longer names it separately.
+	var payloads int64
+	if err := database.QueryRow(
+		"SELECT COUNT(*) FROM request_log_payloads").Scan(&payloads); err != nil {
+		t.Fatalf("count payloads: %v", err)
+	}
+	if payloads != 0 {
+		t.Errorf("%d payload rows survived their log row", payloads)
+	}
+}
