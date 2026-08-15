@@ -16,6 +16,11 @@ import "sync"
 //
 // The figure is a plausible request rather than a worst case. Too high refuses
 // requests that would have fit; too low admits a burst the budget cannot cover.
+//
+// One charge covers a downstream request however many upstream attempts it
+// takes. The attempts are sequential, and each one's usage is metered exactly as
+// it becomes known, so the charge only ever stands in for the attempt currently
+// running — the ones already finished are accounted for at their real cost.
 const ProvisionalCost int64 = 4096
 
 // Tracker accounts for the usage a token has committed to but that its stored

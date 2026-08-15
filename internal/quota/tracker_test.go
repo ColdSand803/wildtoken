@@ -152,3 +152,33 @@ func TestTrackerConcurrentAdmission(t *testing.T) {
 		t.Fatalf("expected 10 concurrent admissions, got %d", admitted)
 	}
 }
+
+func TestRetriesAreCoveredByOneReservation(t *testing.T) {
+	tracker := NewTracker()
+
+	// A downstream request that retries takes one reservation and meters each
+	// attempt as its usage becomes known. The attempts run one after another,
+	// so the provisional charge only ever stands in for the one in flight;
+	// this asserts the finished ones are held at their real cost rather than
+	// at another provisional charge each.
+	reservation, ok := tracker.Admit(1, 0, limitOf(1<<40))
+	if !ok {
+		t.Fatal("a token with room should be admitted")
+	}
+	if held := tracker.Outstanding(1); held != ProvisionalCost {
+		t.Fatalf("outstanding = %d, want one provisional charge", held)
+	}
+
+	tracker.Meter(1, 500) // the attempt that failed
+	tracker.Meter(1, 800) // the attempt that succeeded
+	reservation.Release()
+
+	if held := tracker.Outstanding(1); held != 1300 {
+		t.Errorf("outstanding = %d, want the exact 1300 the two attempts used", held)
+	}
+
+	tracker.Settle(1, 1300)
+	if tracked := tracker.Tracked(); tracked != 0 {
+		t.Errorf("%d tokens still held after both rows committed", tracked)
+	}
+}
