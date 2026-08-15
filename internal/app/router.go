@@ -32,7 +32,7 @@ func NewRouter(state *appstate.State) http.Handler {
 	router.Get("/api/themes", handlers.ListPublicThemePacks(state))
 
 	router.Mount("/static", noStore(http.StripPrefix("/static",
-		http.FileServer(http.Dir("static")))))
+		noDirectoryListing(http.FileServer(http.Dir("static"))))))
 	router.Mount("/theme-packs", noStore(http.StripPrefix("/theme-packs",
 		serveThemePackCSS(state.Settings.Themes.Dir))))
 
@@ -136,6 +136,21 @@ func serveThemePackCSS(dir string) http.Handler {
 			return
 		}
 		files.ServeHTTP(w, r)
+	})
+}
+
+// noDirectoryListing refuses the trailing-slash paths a FileServer answers with
+// a listing of the directory.
+//
+// The console needs the files under /static by name; nothing needs an index of
+// them, and this route is outside the admin credential like the theme one.
+func noDirectoryListing(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

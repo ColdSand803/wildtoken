@@ -1163,3 +1163,37 @@ func TestTokenPreviewNeverShowsMostOfAShortToken(t *testing.T) {
 		}
 	}
 }
+
+func TestInitSurvivesAGroupsTableThatAlreadyUsesTheDefaultSlot(t *testing.T) {
+	ctx := context.Background()
+
+	// Either unique column can be the one already taken, and Init has to start
+	// the service either way — it is the only thing that could let an operator
+	// in to fix the row.
+	for name, occupy := range map[string]string{
+		"id 1 belongs to another group": `INSERT INTO groups (id, name, description)
+             VALUES (1, 'not-default', '')`,
+		"the default name has another id": `INSERT INTO groups (id, name, description)
+             VALUES (7, 'default', '')`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			database, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			database.SetMaxOpenConns(1)
+			t.Cleanup(func() { database.Close() })
+
+			if _, err := database.ExecContext(ctx, createGroups); err != nil {
+				t.Fatalf("create groups: %v", err)
+			}
+			if _, err := database.ExecContext(ctx, occupy); err != nil {
+				t.Fatalf("occupy: %v", err)
+			}
+
+			if err := Init(ctx, database); err != nil {
+				t.Fatalf("init refused to start: %v", err)
+			}
+		})
+	}
+}
