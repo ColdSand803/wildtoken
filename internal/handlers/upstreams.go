@@ -1426,7 +1426,7 @@ func parseSub2APIBalancePayload(payload map[string]any) (map[string]any, bool) {
 func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ExportUpstreamsRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSON(w, r, &req); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -1499,7 +1499,7 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ImportUpstreamsRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSON(w, r, &req); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
