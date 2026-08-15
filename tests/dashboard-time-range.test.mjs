@@ -206,11 +206,12 @@ test("no markup pre-selects a range that JS would then contradict", () => {
 
 test("the custom range panel toggles via the hidden attribute", () => {
   const markup = read("static/admin.html");
-  const events = read("static/js/events.js");
+  const dashboard = read("static/js/dashboard.js");
 
   assert.match(markup, /id="dashboard-custom-range"[^>]*hidden/);
   assert.doesNotMatch(markup, /id="dashboard-custom-range"[^>]*style="display/);
-  assert.match(events, /dashboardCustomRange\.hidden = /);
+  assert.match(dashboard, /el\.hidden = false/);
+  assert.match(dashboard, /el\.hidden = true/);
 });
 
 test("the selected range and its custom dates are persisted", () => {

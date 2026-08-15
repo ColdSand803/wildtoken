@@ -21,7 +21,21 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 	"github.com/liguangsheng/wildtoken/internal/ratelimit"
+)
+
+const (
+	// requestDrainTimeout is how long shutdown waits for in-flight requests. A
+	// streaming answer can outlive it, which is why the log writer has to be
+	// safe to schedule onto afterwards.
+	requestDrainTimeout = 15 * time.Second
+	// logDrainTimeout bounds the wait for the log queue, so a database that has
+	// stopped answering cannot hold the process open indefinitely.
+	logDrainTimeout = 30 * time.Second
+	// readHeaderTimeout bounds how long a caller may take to send its request
+	// headers.
+	readHeaderTimeout = 20 * time.Second
 )
 
 // ReadyInfo reports the bound port and console URL once the server is listening.
@@ -87,8 +101,9 @@ func New(ctx context.Context) (*Server, error) {
 	}
 
 	jobsCtx, cancelJobs := context.WithCancel(context.Background())
+	quotas := quota.NewTracker()
 	logWriter := proxy.NewLogWriter(jobsCtx, database, runtimeMetrics, logStats,
-		settings.Logging.LogQueueCapacity)
+		settings.Logging.LogQueueCapacity, quotas)
 
 	state := &appstate.State{
 		DB:                  database,
@@ -105,6 +120,7 @@ func New(ctx context.Context) (*Server, error) {
 		Routing:             proxy.NewRoutingCache(),
 		TokenRateLimiter:    ratelimit.NewLimiter(),
 		UpstreamRateLimiter: ratelimit.NewLimiter(),
+		Quotas:              quotas,
 		StartedAt:           time.Now(),
 	}
 
@@ -123,8 +139,16 @@ func New(ctx context.Context) (*Server, error) {
 
 	port := uint16(listener.Addr().(*net.TCPAddr).Port)
 	return &Server{
-		state:      state,
-		httpServer: &http.Server{Handler: NewRouter(state)},
+		state: state,
+		httpServer: &http.Server{
+			Handler: NewRouter(state),
+			// Only the header deadline is set. A connection that opens and then
+			// dribbles its request line held a goroutine and a descriptor for
+			// as long as it liked; bounding the headers alone costs a streaming
+			// response nothing, whereas ReadTimeout would cap a long request
+			// body and WriteTimeout would cut every SSE answer short.
+			ReadHeaderTimeout: readHeaderTimeout,
+		},
 		listener:   listener,
 		logWriter:  logWriter,
 		cancelJobs: cancelJobs,
@@ -156,7 +180,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	slog.Info("shutdown signal received")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), requestDrainTimeout)
 	defer cancel()
 	err := s.httpServer.Shutdown(shutdownCtx)
 	s.shutdownResources()
@@ -164,13 +188,26 @@ func (s *Server) Serve(ctx context.Context) error {
 	return err
 }
 
-// shutdownResources stops the background jobs and drains the log queue, so
+// shutdownResources drains the log queue and then stops the background jobs, so
 // requests served just before shutdown still reach the database.
+//
+// The queue is drained first on purpose. Cancelling the jobs context ahead of it
+// left every queued row to be written under a context that was already done, so
+// the drain this function exists for failed in full — taking the quota
+// increments those rows carry with it.
 func (s *Server) shutdownResources() {
+	drained := s.logWriter.CloseWithin(logDrainTimeout)
 	s.cancelJobs()
-	s.logWriter.Close()
 	s.state.TokenRateLimiter.Close()
 	s.state.UpstreamRateLimiter.Close()
+
+	if !drained {
+		// The writer is still working. Closing the database under it would turn
+		// every batch it has left into an error about a closed database, which
+		// says nothing about the actual cause: that shutdown stopped waiting.
+		// The process is exiting either way, so the handle goes with it.
+		return
+	}
 	s.state.DB.Close()
 }
 
@@ -231,14 +268,31 @@ func sqliteDSN(settings config.DatabaseSettings) (string, error) {
 	return path + "?" + values.Encode(), nil
 }
 
+// maxUpstreamRedirects bounds how far a channel may forward the gateway.
+//
+// A provider that moved an endpoint is worth following; a chain longer than this
+// is a channel leading the gateway somewhere it was not configured to go.
+const maxUpstreamRedirects = 3
+
 func newHTTPClient(defaultTimeoutSeconds float64) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConnsPerHost = 20
 	// A streamed response must reach the client as it arrives, so the transport
 	// is told not to buffer by requesting compression itself.
 	transport.DisableCompression = true
+	// No ResponseHeaderTimeout: this transport is shared by every channel, so a
+	// value here is a ceiling on all of them. Setting it to the default cut off
+	// channels configured with a longer one, and did it in a way the caller
+	// could not tell from a channel failing outright. Waiting for the response
+	// headers is already bounded per attempt, against the channel's own timeout.
 	return &http.Client{
 		Transport: transport,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= maxUpstreamRedirects {
+				return fmt.Errorf("upstream redirected more than %d times", maxUpstreamRedirects)
+			}
+			return nil
+		},
 		// Per-request deadlines carry the real timeout, because a streaming
 		// response legitimately outlives any client-wide limit.
 		Timeout: 0,

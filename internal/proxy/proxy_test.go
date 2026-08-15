@@ -14,6 +14,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 )
 
 // proxyHarness wires the dependencies a forwarded request needs.
@@ -37,7 +38,7 @@ func newProxyHarness(t *testing.T) *proxyHarness {
 
 	runtimeMetrics := metrics.New()
 	ctx, cancel := context.WithCancel(context.Background())
-	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 64)
+	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 64, quota.NewTracker())
 	t.Cleanup(func() {
 		writer.Close()
 		cancel()
@@ -389,5 +390,299 @@ func TestAnUnreachableUpstreamIsReportedAndCharged(t *testing.T) {
 	}
 	if statusCode != 502 {
 		t.Errorf("status = %d, want 502 for a failed dial", statusCode)
+	}
+}
+
+func TestAStreamCancelledByTheClientIsNotChargedToTheChannel(t *testing.T) {
+	released := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		// The upstream is still working; the client is the one that leaves.
+		<-released
+	}))
+	defer server.Close()
+	defer close(released)
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m","stream":true}`),
+		requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	response, err := ProxyRequest(ctx, harness.deps, testPolicy(), &upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+
+	buffer := make([]byte, 64)
+	if _, err := response.Body.Read(buffer); err != nil {
+		t.Fatalf("read first event: %v", err)
+	}
+
+	// Cancelling while a read is waiting for the next event is where a client
+	// walking away actually surfaces: as a read error indistinguishable from an
+	// upstream one.
+	cancel()
+	if _, err := response.Body.Read(buffer); err == nil {
+		t.Fatal("the cancelled request did not fail the read")
+	}
+	response.Body.Close()
+
+	harness.waitForLogs(t, 1)
+
+	var statusCode int64
+	if err := harness.database.QueryRow(
+		"SELECT status_code FROM request_logs WHERE id = 1").Scan(&statusCode); err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if statusCode != 499 {
+		t.Errorf("status = %d, want 499 for a client that walked away", statusCode)
+	}
+
+	// The channel did nothing wrong. Charging it is what let ordinary use — a
+	// user pressing escape — drive a healthy channel's weight to zero.
+	health := harness.deps.AutoWeight.Snapshot(upstream.ID, upstream.Weight, true, testPolicy())
+	if health.Score != 100 {
+		t.Errorf("health score = %d, want 100 after a client cancellation", health.Score)
+	}
+
+	snapshot := harness.metrics.Snapshot()
+	if snapshot.SSEClientDisconnectsTotal != 1 {
+		t.Errorf("client disconnects = %d, want 1", snapshot.SSEClientDisconnectsTotal)
+	}
+	if snapshot.SSEUpstreamErrorsTotal != 0 {
+		t.Errorf("upstream errors = %d, want 0", snapshot.SSEUpstreamErrorsTotal)
+	}
+}
+
+func TestACompletedStreamIsNotChargedForTheReadThatFollowsIt(t *testing.T) {
+	released := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		flusher, _ := w.(http.Flusher)
+		w.Write([]byte("data: {\"type\":\"response.output_text.delta\",\"delta\":\"hi\"}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		// The answer is complete, but the connection stays open until the
+		// attempt's clock runs out — which is what an upstream that does not
+		// close after its terminal event looks like.
+		<-released
+	}))
+	defer server.Close()
+	defer close(released)
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL, TimeoutSeconds: 0.3,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m","stream":true}`),
+		requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	response, err := ProxyRequest(context.Background(), harness.deps, testPolicy(),
+		&upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+
+	buffer := make([]byte, 256)
+	for {
+		if _, err := response.Body.Read(buffer); err != nil {
+			break
+		}
+	}
+	response.Body.Close()
+
+	harness.waitForLogs(t, 1)
+
+	var statusCode int64
+	if err := harness.database.QueryRow(
+		"SELECT status_code FROM request_logs WHERE id = 1").Scan(&statusCode); err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if statusCode != 200 {
+		t.Errorf("status = %d, want 200 for a stream that reached its terminal event", statusCode)
+	}
+
+	// The log recorded a success, so the health score has to agree. Scoring
+	// outside the same guard let one stream be counted as both.
+	health := harness.deps.AutoWeight.Snapshot(upstream.ID, upstream.Weight, true, testPolicy())
+	if health.Score != 100 {
+		t.Errorf("health score = %d, want 100 for a completed stream", health.Score)
+	}
+}
+
+func TestAChannelThatCannotBuildARequestIsChargedForIt(t *testing.T) {
+	harness := newProxyHarness(t)
+	// A base URL that survived storage but that the request builder will not
+	// accept. Such a channel fails every request it is given, so it has to lose
+	// health — otherwise it keeps full weight and keeps being chosen.
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: "http://example.com/\x7f",
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m"}`), requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	if _, err := ProxyRequest(context.Background(), harness.deps, testPolicy(),
+		&upstream, requestCtx, prepared); err == nil {
+		t.Fatal("expected the request build to fail")
+	}
+
+	health := harness.deps.AutoWeight.Snapshot(upstream.ID, upstream.Weight, true, testPolicy())
+	if health.Score == 100 {
+		t.Error("a channel that cannot build a request kept full health")
+	}
+
+	// It still leaves a log row, which is what makes the failure visible.
+	harness.waitForLogs(t, 1)
+}
+
+func TestABufferedResponseTheClientLeftIsLoggedAsAClientAbort(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`))
+	}))
+	defer server.Close()
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m"}`), requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	response, err := ProxyRequest(ctx, harness.deps, testPolicy(), &upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+
+	// The upstream answered in full, but the client goes before the handler
+	// has delivered it. The streaming path records that as a 499; this one
+	// used to record the upstream's 200, so the console's client-abort filter
+	// showed only the requests that happened to stream.
+	cancel()
+	response.Body.Close()
+
+	harness.waitForLogs(t, 1)
+
+	var statusCode int64
+	var logError sql.NullString
+	if err := harness.database.QueryRow(
+		"SELECT status_code, error FROM request_logs WHERE id = 1").
+		Scan(&statusCode, &logError); err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if statusCode != 499 {
+		t.Errorf("status = %d, want 499 for a client that left mid-delivery", statusCode)
+	}
+	if !logError.Valid || logError.String == "" {
+		t.Error("the abort was logged without an explanation")
+	}
+}
+
+func TestABufferedResponseDeliveredInFullKeepsTheUpstreamStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`))
+	}))
+	defer server.Close()
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m"}`), requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	response, err := ProxyRequest(context.Background(), harness.deps, testPolicy(),
+		&upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if len(body) == 0 {
+		t.Error("the buffered body was empty")
+	}
+	// Closed twice, the way a retry abandoning a response and then the handler
+	// writing it out would.
+	response.Body.Close()
+	response.Body.Close()
+
+	harness.waitForLogs(t, 1)
+
+	var rows int64
+	if err := harness.database.QueryRow("SELECT COUNT(*) FROM request_logs").Scan(&rows); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rows != 1 {
+		t.Errorf("%d log rows, want exactly one", rows)
+	}
+
+	var statusCode int64
+	var totalTokens sql.NullInt64
+	if err := harness.database.QueryRow(
+		"SELECT status_code, total_tokens FROM request_logs WHERE id = 1").
+		Scan(&statusCode, &totalTokens); err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if statusCode != 200 {
+		t.Errorf("status = %d, want the upstream's 200", statusCode)
+	}
+	if !totalTokens.Valid || totalTokens.Int64 != 18 {
+		t.Errorf("total tokens = %v, want the usage to survive the deferral", totalTokens)
 	}
 }

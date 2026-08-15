@@ -37,6 +37,8 @@ type GroupIn struct {
 	Description string `json:"description"`
 }
 
+// Validate judges the values that will be stored and normalizes them, so the
+// description is measured after trimming like the name already was.
 func (g *GroupIn) Validate() error {
 	name := strings.TrimSpace(g.Name)
 	if name == "" || utf8.RuneCountInString(name) > GroupNameMaxChars {
@@ -45,11 +47,16 @@ func (g *GroupIn) Validate() error {
 	if strings.ContainsFunc(name, unicode.IsControl) {
 		return ErrString("group name must not contain control characters")
 	}
-	if utf8.RuneCountInString(g.Description) > GroupDescriptionMaxChars {
+
+	description := strings.TrimSpace(g.Description)
+	if utf8.RuneCountInString(description) > GroupDescriptionMaxChars {
 		return ErrString("group description must be at most 200 characters")
 	}
-	if strings.ContainsFunc(g.Description, unicode.IsControl) {
+	if strings.ContainsFunc(description, unicode.IsControl) {
 		return ErrString("group description must not contain control characters")
 	}
+
+	g.Name = name
+	g.Description = description
 	return nil
 }

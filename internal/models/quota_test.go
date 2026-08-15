@@ -1,6 +1,9 @@
 package models
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseQuotaExpressionAcceptsTheFormsOperatorsType(t *testing.T) {
 	for _, testCase := range []struct {
@@ -155,5 +158,80 @@ func TestAnUnlimitedTokenReportsNoRemainingOrExhaustion(t *testing.T) {
 	}
 	if state.UsedTokens != 999_999_999 {
 		t.Errorf("used = %d, want it still reported", state.UsedTokens)
+	}
+}
+
+func TestValidateBaseURLRejectsWhatTheProxyCannotDial(t *testing.T) {
+	for _, value := range []string{
+		"https://api.example.com",
+		"https://api.example.com/v1",
+		"http://127.0.0.1:11434",
+		"http://192.168.1.10:8080/v1",
+		"  https://api.example.com  ",
+	} {
+		if _, err := ValidateBaseURL(value); err != nil {
+			t.Errorf("ValidateBaseURL(%q) = %v, want it accepted", value, err)
+		}
+	}
+
+	// A self-hosted model server is a first-class use of this gateway, so a
+	// local or private address is deliberately not on this list.
+	for _, value := range []string{
+		"",
+		"   ",
+		"api.example.com",
+		"file:///etc/passwd",
+		"ftp://api.example.com",
+		"https://",
+		"https://api.example.com?key=secret",
+		"https://api.example.com#fragment",
+	} {
+		if _, err := ValidateBaseURL(value); err == nil {
+			t.Errorf("ValidateBaseURL(%q) was accepted", value)
+		}
+	}
+
+	// The stored value is trimmed, so the console echoes back what it will dial.
+	normalized, err := ValidateBaseURL("  https://api.example.com/v1  ")
+	if err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if normalized != "https://api.example.com/v1" {
+		t.Errorf("normalized = %q, want the trimmed URL", normalized)
+	}
+}
+
+func TestNameLengthIsMeasuredAfterTrimmingLikeStorageDoes(t *testing.T) {
+	padding := strings.Repeat(" ", 40)
+
+	// The stores trim before writing, so a name padded past the limit with
+	// spaces was refused for a length it would never have had — the emptiness
+	// check was already trimming while the length check beside it was not.
+	token := APITokenIn{Name: padding + "caller" + padding, Enabled: true}
+	if err := token.Validate(); err != nil {
+		t.Errorf("a padded token name was refused: %v", err)
+	}
+	if token.Name != "caller" {
+		t.Errorf("token name = %q, want it normalized to what gets stored", token.Name)
+	}
+
+	group := GroupIn{Name: padding + "team" + padding, Description: padding + "notes" + padding}
+	if err := group.Validate(); err != nil {
+		t.Errorf("a padded group name was refused: %v", err)
+	}
+	if group.Name != "team" || group.Description != "notes" {
+		t.Errorf("group normalized to %q / %q", group.Name, group.Description)
+	}
+
+	// A name that is genuinely too long is still refused.
+	long := APITokenIn{Name: strings.Repeat("x", APITokenNameMaxChars+1), Enabled: true}
+	if err := long.Validate(); err == nil {
+		t.Error("a name past the limit was accepted")
+	}
+
+	// And one that is only whitespace is still empty.
+	blank := APITokenIn{Name: padding, Enabled: true}
+	if err := blank.Validate(); err == nil {
+		t.Error("a whitespace-only name was accepted")
 	}
 }

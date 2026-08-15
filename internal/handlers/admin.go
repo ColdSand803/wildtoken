@@ -3,10 +3,12 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -24,7 +26,13 @@ import (
 //
 // The release workflow parses this line to check that a tag matches, so its
 // shape must stay `const Version = "..."`.
-const Version = "0.2.0"
+const Version = "0.2.1"
+
+// maxLogListOffset caps how deep the offset-paged log list may reach.
+const maxLogListOffset int32 = 100_000
+
+// maxLogSearchChars caps a log search term.
+const maxLogSearchChars = 200
 
 // decodeJSON reads a JSON request body, ignoring fields the target does not
 // declare.
@@ -33,19 +41,22 @@ const Version = "0.2.0"
 // what an endpoint reads. The channel form is the clearest case: it serves both
 // create and update, so it always sends `clear_api_key`, which only the update
 // payload declares.
-func decodeJSON(r *http.Request, target any) error {
-	return decodeBody(r, target, false)
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	return decodeBody(w, r, target, false)
 }
 
 // decodeStrictJSON additionally rejects unknown fields, so a typo is reported
 // rather than silently ignored. It is reserved for payloads whose clients send
 // exactly the declared shape.
-func decodeStrictJSON(r *http.Request, target any) error {
-	return decodeBody(r, target, true)
+func decodeStrictJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	return decodeBody(w, r, target, true)
 }
 
-func decodeBody(r *http.Request, target any, rejectUnknown bool) error {
-	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 4*1024*1024))
+func decodeBody(w http.ResponseWriter, r *http.Request, target any, rejectUnknown bool) error {
+	// The writer is what lets MaxBytesReader mark the connection for closing
+	// when a body runs over. Passing nil left an oversized request reading on
+	// against a connection the server would go on to reuse.
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4*1024*1024))
 	if rejectUnknown {
 		decoder.DisallowUnknownFields()
 	}
@@ -105,7 +116,7 @@ func AdminGetRuntimeSettings(state *appstate.State) http.HandlerFunc {
 func AdminUpdateRuntimeSettings(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.RuntimeSettingsIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -143,7 +154,7 @@ func AdminListModelTestPromptTemplates(state *appstate.State) http.HandlerFunc {
 func AdminCreateModelTestPromptTemplate(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.ModelTestPromptTemplateIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -173,7 +184,7 @@ func AdminUpdateModelTestPromptTemplate(state *appstate.State) http.HandlerFunc 
 			return
 		}
 		var input models.ModelTestPromptTemplateIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -225,7 +236,7 @@ func AdminRotateAdminToken(state *appstate.State) http.HandlerFunc {
 		}
 
 		var input models.AdminTokenRotateIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -288,9 +299,13 @@ func AdminSystemInfo(state *appstate.State) http.HandlerFunc {
 		}
 
 		var enabledUpstreamCount, totalUpstreamCount int64
-		state.DB.QueryRowContext(r.Context(),
+		if err := state.DB.QueryRowContext(r.Context(),
 			"SELECT COALESCE(SUM(CASE WHEN enabled = 1 THEN 1 ELSE 0 END), 0), COUNT(*) FROM upstreams").
-			Scan(&enabledUpstreamCount, &totalUpstreamCount)
+			Scan(&enabledUpstreamCount, &totalUpstreamCount); err != nil {
+			// The page still renders, but the zeros it would otherwise show are
+			// indistinguishable from having no channels at all.
+			slog.Warn("could not count channels for the system info panel", "error", err)
+		}
 
 		settings := state.Runtime.Get()
 		apperr.WriteJSON(w, http.StatusOK, models.SystemInfoOut{
@@ -388,7 +403,7 @@ func AdminGetToken(state *appstate.State) http.HandlerFunc {
 func AdminCreateToken(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		input := models.APITokenIn{Enabled: true}
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -418,7 +433,7 @@ func AdminUpdateToken(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.APITokenUpdateIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -445,9 +460,14 @@ func AdminSetTokenEnabled(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-		var input models.UpstreamEnabledIn
-		if err := decodeJSON(r, &input); err != nil {
+		var input models.TokenEnabledIn
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+		enabled, err := input.Value()
+		if err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
 			return
 		}
 
@@ -459,7 +479,7 @@ func AdminSetTokenEnabled(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		updated, err := db.SetTokenEnabled(r.Context(), state.DB, id, input.Enabled)
+		updated, err := db.SetTokenEnabled(r.Context(), state.DB, id, enabled)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -510,12 +530,20 @@ func AdminListLogs(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
 		limit := clampInt32(queryInt32(query.Get("limit"), 50), 1, 200)
-		offset := max(queryInt32(query.Get("offset"), 0), 0)
+		// SQLite reaches an OFFSET by scanning and discarding the rows before
+		// it, so an unbounded one lets a single request walk the whole log
+		// table and hold one of the few pooled connections for as long as that
+		// takes. Deep pages are what the cursor endpoint is for.
+		offset := clampInt32(queryInt32(query.Get("offset"), 0), 0, maxLogListOffset)
 
+		// The search term becomes eight LIKE patterns evaluated against every
+		// row the query examines, so its length is a multiplier on the cost of
+		// the whole scan. Nothing an operator types to find a request is longer
+		// than this.
 		filter := db.LogFilter{
 			UpstreamID: optionalQueryInt64(query.Get("upstream_id")),
-			Search:     optionalQueryString(query.Get("search")),
-			ClientType: optionalQueryString(query.Get("client_type")),
+			Search:     boundedQueryString(query.Get("search"), maxLogSearchChars),
+			ClientType: boundedQueryString(query.Get("client_type"), maxLogSearchChars),
 		}
 		if status := query.Get("status"); status == "2xx" || status == "4xx" ||
 			status == "5xx" || status == "none" {
@@ -629,29 +657,161 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 	}
 }
 
-// AdminTokenUsageStats reports the cached token usage windows.
+const dashboardDateLayout = "2006-01-02"
+
+type dashboardRangeSelection struct {
+	Value   string
+	Label   string
+	Window  db.LogTopWindow
+	StartAt string
+	EndAt   string
+}
+
+func parseDashboardRange(value, startValue, endValue, fallback string) (dashboardRangeSelection, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = fallback
+	}
+	window, ok := db.ParseLogTopWindow(value)
+	if !ok {
+		return dashboardRangeSelection{}, apperr.BadRequest(
+			"range must be one of: today, 1d, 3d, 7d, 30d, all, default, custom")
+	}
+
+	selection := dashboardRangeSelection{Value: value, Window: window}
+	switch value {
+	case "today":
+		selection.Label = "今天"
+	case "1d":
+		selection.Label = "最近 24 小时"
+	case "3d":
+		selection.Label = "最近 3 天"
+	case "7d":
+		selection.Label = "最近 7 天"
+	case "30d":
+		selection.Label = "最近 30 天"
+	case "all":
+		selection.Label = "全部时间"
+	case "default":
+		selection.Label = "所有窗口"
+	case "custom":
+		startValue = strings.TrimSpace(startValue)
+		endValue = strings.TrimSpace(endValue)
+		if startValue == "" || endValue == "" {
+			return dashboardRangeSelection{}, apperr.BadRequest(
+				"start_date and end_date are required when range is custom")
+		}
+		startDate, startErr := time.ParseInLocation(dashboardDateLayout, startValue, time.Local)
+		endDate, endErr := time.ParseInLocation(dashboardDateLayout, endValue, time.Local)
+		if startErr != nil || endErr != nil {
+			return dashboardRangeSelection{}, apperr.BadRequest(
+				"start_date and end_date must use YYYY-MM-DD")
+		}
+		if startDate.After(endDate) {
+			return dashboardRangeSelection{}, apperr.BadRequest(
+				"start_date must not be after end_date")
+		}
+		if endDate.After(startDate.AddDate(0, 0, 365)) {
+			return dashboardRangeSelection{}, apperr.BadRequest(
+				"custom date range must not exceed 366 days")
+		}
+		selection.Label = startValue + " 至 " + endValue
+		selection.StartAt = startDate.UTC().Format(models.TimestampFormat)
+		selection.EndAt = endDate.AddDate(0, 0, 1).UTC().Format(models.TimestampFormat)
+	}
+	return selection, nil
+}
+
+// AdminTokenUsageStats reports token usage for the selected dashboard range.
 func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		apperr.WriteJSON(w, http.StatusOK, state.LogStats.Snapshot().TokenUsage)
+		query := r.URL.Query()
+		selection, err := parseDashboardRange(
+			query.Get("range"), query.Get("start_date"), query.Get("end_date"), "default")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
+		stats := state.LogStats.Snapshot().TokenUsage
+		if selection.Value == "default" {
+			apperr.WriteJSON(w, http.StatusOK, stats)
+			return
+		}
+
+		var usage models.TokenUsageWindowOut
+		switch selection.Window {
+		case db.LogTopWindowToday:
+			usage = stats.Today
+		case db.LogTopWindowOneDay:
+			usage = stats.OneDay
+		case db.LogTopWindowSevenDays:
+			usage = stats.SevenDays
+		case db.LogTopWindowThirtyDays:
+			usage = stats.ThirtyDays
+		case db.LogTopWindowAll:
+			usage = stats.AllTime
+		default:
+			usage, err = db.QueryTokenUsage(r.Context(), state.DB, selection.Window,
+				selection.StartAt, selection.EndAt)
+			if err != nil {
+				apperr.WriteError(w, err)
+				return
+			}
+		}
+
+		stats.Today = usage
+		stats.Range = selection.Value
+		stats.RangeLabel = selection.Label
+		apperr.WriteJSON(w, http.StatusOK, stats)
+	}
+}
+
+// AdminLogOverview returns range-scoped dashboard aggregates: request and
+// error totals, status buckets, latency stats, and a time-bucketed latency
+// series. The dashboard's KPI cards and charts read this instead of doing
+// client-side math over whatever logs happen to be loaded.
+func AdminLogOverview(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		selection, err := parseDashboardRange(
+			query.Get("range"), query.Get("start_date"), query.Get("end_date"), "today")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
+		overview, err := db.LogOverview(r.Context(), state.DB,
+			selection.Window, selection.StartAt, selection.EndAt)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		overview.Range = selection.Value
+		overview.RangeLabel = selection.Label
+		apperr.WriteJSON(w, http.StatusOK, overview)
 	}
 }
 
 // AdminTopLogStats ranks models and channels over a window.
 func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		windowValue := strings.TrimSpace(r.URL.Query().Get("window"))
-		if windowValue == "" {
-			windowValue = "today"
-		}
-		window, ok := db.ParseLogTopWindow(windowValue)
-		if !ok {
-			apperr.WriteError(w, apperr.BadRequest(
-				"window must be one of: today, 1d, 3d, 7d, 30d"))
+		query := r.URL.Query()
+		selection, err := parseDashboardRange(
+			query.Get("window"), query.Get("start_date"), query.Get("end_date"), "today")
+		if err != nil {
+			apperr.WriteError(w, err)
 			return
 		}
-		limit := clampInt64(queryInt64(r.URL.Query().Get("limit"), 10), 1, 20)
+		limit := clampInt64(queryInt64(query.Get("limit"), 10), 1, 20)
 
-		stats, err := db.TopLogStats(r.Context(), state.DB, window, limit)
+		var stats models.RequestLogTopStatsOut
+		if selection.Window == db.LogTopWindowCustom {
+			stats, err = db.TopLogStatsCustom(r.Context(), state.DB,
+				selection.StartAt, selection.EndAt, limit)
+		} else {
+			stats, err = db.TopLogStats(r.Context(), state.DB, selection.Window, limit)
+		}
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -713,6 +873,128 @@ func optionalQueryString(value string) *string {
 	return &trimmed
 }
 
+// boundedQueryString is optionalQueryString with a ceiling on the length, for
+// values that end up inside a query's cost rather than beside it.
+func boundedQueryString(value string, maxChars int) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	if utf8.RuneCountInString(trimmed) > maxChars {
+		trimmed = truncateRunes(trimmed, maxChars)
+	}
+	return &trimmed
+}
+
 func clampInt32(value, low, high int32) int32 { return min(max(value, low), high) }
 
 func clampInt64(value, low, high int64) int64 { return min(max(value, low), high) }
+
+// upstreamSparklinePoint is one 30-minute request-count bucket.
+type upstreamSparklinePoint struct {
+	Bucket string `json:"bucket"`
+	Count  int64  `json:"count"`
+}
+
+// upstreamChannelStats is the per-channel block of the bulk stats response.
+type upstreamChannelStats struct {
+	Sparkline      []upstreamSparklinePoint `json:"sparkline"`
+	TotalRequests  int64                    `json:"totalRequests"`
+	CacheHitRate   float64                  `json:"cacheHitRate"`
+	AvgTokensPer1M float64                  `json:"avgTokensPer1M"`
+}
+
+// AdminGetUpstreamsStats returns card statistics for every channel in one
+// response, keyed by upstream id. One request replaces the per-channel
+// endpoint the card view used before: with N channels that meant N HTTP
+// round trips and 4N queries firing together every time the console's stats
+// cache expired.
+func AdminGetUpstreamsStats(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		stats := map[string]*upstreamChannelStats{}
+		channel := func(id int64) *upstreamChannelStats {
+			key := strconv.FormatInt(id, 10)
+			entry, ok := stats[key]
+			if !ok {
+				entry = &upstreamChannelStats{Sparkline: []upstreamSparklinePoint{}}
+				stats[key] = entry
+			}
+			return entry
+		}
+
+		// 6-hour sparkline: 30-minute buckets, grouped per channel.
+		sixHoursAgo := time.Now().Add(-6 * time.Hour)
+		rows, err := state.DB.QueryContext(r.Context(), `
+			SELECT
+				upstream_id,
+				strftime('%Y-%m-%d %H:%M:00', created_at,
+					'-' || (strftime('%M', created_at) % 30) || ' minutes') AS bucket,
+				COUNT(*) AS count
+			FROM request_logs
+			WHERE upstream_id IS NOT NULL AND created_at >= datetime(?, 'unixepoch')
+			GROUP BY upstream_id, bucket
+			ORDER BY upstream_id, bucket ASC
+		`, sixHoursAgo.Unix())
+		if err != nil {
+			apperr.WriteError(w, apperr.Internal("failed to fetch sparkline data"))
+			return
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var upstreamID int64
+			var point upstreamSparklinePoint
+			if err := rows.Scan(&upstreamID, &point.Bucket, &point.Count); err != nil {
+				apperr.WriteError(w, apperr.Internal("failed to scan sparkline row"))
+				return
+			}
+			entry := channel(upstreamID)
+			entry.Sparkline = append(entry.Sparkline, point)
+		}
+		if err := rows.Err(); err != nil {
+			apperr.WriteError(w, apperr.Internal("failed to read sparkline data"))
+			return
+		}
+
+		// Lifetime totals per channel: request count, cache hit rate over
+		// prompt tokens, and average tokens per thousand requests (the
+		// cost proxy — no pricing data is stored anywhere in this project).
+		totals, err := state.DB.QueryContext(r.Context(), `
+			SELECT
+				upstream_id,
+				COUNT(*),
+				COALESCE(SUM(prompt_cached_tokens), 0),
+				COALESCE(SUM(prompt_tokens), 0),
+				COALESCE(SUM(total_tokens), 0)
+			FROM request_logs
+			WHERE upstream_id IS NOT NULL
+			GROUP BY upstream_id
+		`)
+		if err != nil {
+			apperr.WriteError(w, apperr.Internal("failed to fetch channel totals"))
+			return
+		}
+		defer totals.Close()
+		for totals.Next() {
+			var upstreamID, requests, cachedTokens, promptTokens, totalTokens int64
+			if err := totals.Scan(&upstreamID, &requests, &cachedTokens, &promptTokens, &totalTokens); err != nil {
+				apperr.WriteError(w, apperr.Internal("failed to scan channel totals"))
+				return
+			}
+			entry := channel(upstreamID)
+			entry.TotalRequests = requests
+			if promptTokens > 0 {
+				entry.CacheHitRate = float64(cachedTokens) / float64(promptTokens) * 100
+			}
+			if requests > 0 {
+				entry.AvgTokensPer1M = float64(totalTokens) / float64(requests) * 1000
+			}
+		}
+		if err := totals.Err(); err != nil {
+			apperr.WriteError(w, apperr.Internal("failed to read channel totals"))
+			return
+		}
+
+		apperr.WriteJSON(w, http.StatusOK, map[string]any{"stats": stats})
+	}
+}
+

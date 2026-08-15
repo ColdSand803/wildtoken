@@ -14,8 +14,21 @@ import (
 )
 
 const (
-	logBodyCleanupBatchSize  int64 = 8
+	// logBodyCleanupBatchSize is how many payload rows one pass clears.
+	//
+	// Each row's JSON is parsed and rewritten outside the transaction, so the
+	// batch bounds the work between yields rather than the lock hold itself. At
+	// eight rows per 25ms the pass cleared about 320 a second, which a gateway
+	// serving more than that outruns — the stored bodies then grow without the
+	// keep-count policy ever catching up.
+	logBodyCleanupBatchSize  int64 = 64
 	logBodyCleanupBatchPause       = 25 * time.Millisecond
+	// logDeleteBatchSize is how many expired log rows one delete removes.
+	//
+	// Larger than the body batch because the work per row is a delete rather
+	// than a JSON rewrite, and retention has a whole window to get through.
+	logDeleteBatchSize  int64 = 500
+	logDeleteBatchPause       = 25 * time.Millisecond
 	// actualModelExpression prefers the model actually sent to the upstream.
 	// `model` is retained as a compatibility fallback for logs written before
 	// `upstream_model` was added.
@@ -43,6 +56,8 @@ const (
 	LogTopWindowThreeDays
 	LogTopWindowSevenDays
 	LogTopWindowThirtyDays
+	LogTopWindowAll
+	LogTopWindowCustom
 )
 
 // ParseLogTopWindow maps a query value onto a window.
@@ -58,6 +73,12 @@ func ParseLogTopWindow(value string) (LogTopWindow, bool) {
 		return LogTopWindowSevenDays, true
 	case "30d":
 		return LogTopWindowThirtyDays, true
+	case "all":
+		return LogTopWindowAll, true
+	case "default":
+		return LogTopWindowThirtyDays, true
+	case "custom":
+		return LogTopWindowCustom, true
 	default:
 		return 0, false
 	}
@@ -73,8 +94,14 @@ func (w LogTopWindow) QueryValue() string {
 		return "3d"
 	case LogTopWindowSevenDays:
 		return "7d"
-	default:
+	case LogTopWindowThirtyDays:
 		return "30d"
+	case LogTopWindowAll:
+		return "all"
+	case LogTopWindowCustom:
+		return "custom"
+	default:
+		return ""
 	}
 }
 
@@ -88,9 +115,32 @@ func (w LogTopWindow) cutoffExpression() string {
 		return "datetime('now', '-3 days')"
 	case LogTopWindowSevenDays:
 		return "datetime('now', '-7 days')"
-	default:
+	case LogTopWindowThirtyDays:
 		return "datetime('now', '-30 days')"
+	default:
+		return ""
 	}
+}
+
+func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWindow,
+	startAt, endAt string) ([]any, error) {
+	switch window {
+	case LogTopWindowAll:
+		query.WriteString("1 = 1")
+	case LogTopWindowCustom:
+		if startAt == "" || endAt == "" {
+			return nil, apperr.BadRequest("custom window requires start_date and end_date")
+		}
+		query.WriteString("created_at >= ? AND created_at < ?")
+		args = append(args, startAt, endAt)
+	default:
+		cutoff := window.cutoffExpression()
+		if cutoff == "" {
+			return nil, apperr.BadRequest("invalid log statistics window")
+		}
+		fmt.Fprintf(query, "created_at >= %s", cutoff)
+	}
+	return args, nil
 }
 
 // LogFilter narrows a log listing. A nil field means the filter is not applied.
@@ -192,10 +242,23 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	return entry, nil
 }
 
+// LogQueryTimeout bounds how long one log listing may run.
+//
+// None of the filters can use an index: client_type and status_code have none,
+// and the search is a leading-wildcard LIKE, which nothing can. LIMIT bounds the
+// rows returned, not the rows examined, so a filter matching little or nothing
+// reads the whole table — holding one of the few pooled connections while the
+// proxy path waits for one. The deadline turns that into an error the operator
+// sees rather than a stall the gateway absorbs.
+const LogQueryTimeout = 10 * time.Second
+
 // ListLogs returns one page, newest first. A cursor takes precedence over the
 // offset, so a page boundary stays stable while new rows arrive.
 func ListLogs(ctx context.Context, database *sql.DB, limit, offset int32,
 	cursor *LogCursor, filter LogFilter) ([]models.RequestLogOut, error) {
+	ctx, cancel := context.WithTimeout(ctx, LogQueryTimeout)
+	defer cancel()
+
 	var query strings.Builder
 	query.WriteString("SELECT " + logListColumns + " FROM request_logs WHERE 1 = 1")
 
@@ -358,6 +421,17 @@ const tokenMetricFilter = "total_tokens IS NOT NULL AND total_tokens > 0"
 
 // TopLogStats ranks models and channels by request count and token usage.
 func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, limit int64) (models.RequestLogTopStatsOut, error) {
+	return topLogStats(ctx, database, window, "", "", limit)
+}
+
+// TopLogStatsCustom ranks logs in the half-open UTC interval [startAt, endAt).
+func TopLogStatsCustom(ctx context.Context, database *sql.DB, startAt, endAt string,
+	limit int64) (models.RequestLogTopStatsOut, error) {
+	return topLogStats(ctx, database, LogTopWindowCustom, startAt, endAt, limit)
+}
+
+func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
+	startAt, endAt string, limit int64) (models.RequestLogTopStatsOut, error) {
 	limit = min(max(limit, 1), 20)
 
 	// Channels aggregate by upstream_id so renamed or same-name channels stay
@@ -395,7 +469,7 @@ func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, lim
 
 	var rankings [4][]models.RequestLogTopItemOut
 	for i, spec := range specs {
-		items, err := topLogCounts(ctx, database, window, spec, limit)
+		items, err := topLogCounts(ctx, database, window, startAt, endAt, spec, limit)
 		if err != nil {
 			return models.RequestLogTopStatsOut{}, err
 		}
@@ -412,7 +486,7 @@ func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, lim
 }
 
 func topLogCounts(ctx context.Context, database *sql.DB, window LogTopWindow,
-	spec topLogCountSpec, limit int64) ([]models.RequestLogTopItemOut, error) {
+	startAt, endAt string, spec topLogCountSpec, limit int64) ([]models.RequestLogTopItemOut, error) {
 	// Rows group by groupExpression (e.g. upstream_id) but surface a display
 	// name. When several names share one group key, MAX(name) picks a stable
 	// non-null label.
@@ -422,17 +496,22 @@ func topLogCounts(ctx context.Context, database *sql.DB, window LogTopWindow,
 	}
 
 	var query strings.Builder
-	fmt.Fprintf(&query, "SELECT MAX(name) AS name, SUM(value) AS count, %s FROM (SELECT %s AS group_key, %s AS name, %s AS value FROM request_logs WHERE created_at >= %s AND (%s)",
-		idSelect, spec.groupExpression, spec.nameExpression, spec.metricExpression,
-		window.cutoffExpression(), spec.sourceFilter)
+	fmt.Fprintf(&query, "SELECT MAX(name) AS name, SUM(value) AS count, %s FROM (SELECT %s AS group_key, %s AS name, %s AS value FROM request_logs WHERE ",
+		idSelect, spec.groupExpression, spec.nameExpression, spec.metricExpression)
+	args, err := appendLogTimePredicate(&query, nil, window, startAt, endAt)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(&query, " AND (%s)", spec.sourceFilter)
 	if spec.metricFilter != "" {
 		fmt.Fprintf(&query, " AND (%s)", spec.metricFilter)
 	}
 	query.WriteString(`) WHERE group_key IS NOT NULL AND name IS NOT NULL AND name <> '' ` +
 		`GROUP BY group_key HAVING count > 0 ` +
 		`ORDER BY count DESC, name COLLATE NOCASE ASC LIMIT ?`)
+	args = append(args, limit)
 
-	rows, err := database.QueryContext(ctx, query.String(), limit)
+	rows, err := database.QueryContext(ctx, query.String(), args...)
 	if err != nil {
 		return nil, apperr.Database(err)
 	}
@@ -488,7 +567,9 @@ func ClearOldLogBodies(ctx context.Context, database *sql.DB, keepCount int64,
 
 		select {
 		case <-ctx.Done():
-			return totalAffected, nil
+			// Shutdown, not completion. Reported as such so the cleanup pass
+			// does not record a successful run it did not finish.
+			return totalAffected, ctx.Err()
 		case <-time.After(logBodyCleanupBatchPause):
 		}
 	}
@@ -658,33 +739,56 @@ func ReclaimFreePages(ctx context.Context, database *sql.DB, maxPages uint32) (u
 	return uint64(before - after), nil
 }
 
-// DeleteOldLogs drops logs past the retention window, payloads first so the
-// foreign key never blocks the delete.
+// DeleteOldLogs drops logs past the retention window in bounded batches.
+//
+// Deleting the whole window in one statement held the write lock for as long as
+// that took, and the amount waiting is not bounded by anything the gateway
+// controls: enabling retention for the first time, or shortening it from ten
+// years to a week, presents every row at once. Meanwhile every proxied request's
+// log write — and the quota increment it carries — queues behind it. Batching
+// puts an upper bound on how long any one transaction can block them, at the
+// cost of taking several to finish, which nothing depends on.
+//
+// The payload rows go with their parent through ON DELETE CASCADE, so only the
+// parents are named here.
 func DeleteOldLogs(ctx context.Context, database *sql.DB, retentionDays int64) error {
-	tx, err := database.BeginTx(ctx, nil)
-	if err != nil {
-		return apperr.Database(err)
-	}
-	defer tx.Rollback()
+	for {
+		affected, err := deleteOldLogsBatch(ctx, database, retentionDays, logDeleteBatchSize)
+		if err != nil {
+			return err
+		}
+		if affected < logDeleteBatchSize {
+			return nil
+		}
 
-	_, err = tx.ExecContext(ctx, `DELETE FROM request_log_payloads
-       WHERE request_log_id IN (
+		// Yield the write lock between batches so a proxied request's log does
+		// not wait out the whole cleanup.
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(logDeleteBatchPause):
+		}
+	}
+}
+
+// deleteOldLogsBatch removes up to batchSize expired rows and reports how many
+// it deleted.
+func deleteOldLogsBatch(ctx context.Context, database *sql.DB,
+	retentionDays, batchSize int64) (int64, error) {
+	result, err := database.ExecContext(ctx, `DELETE FROM request_logs
+       WHERE id IN (
            SELECT id FROM request_logs
            WHERE created_at < datetime('now', '-' || ? || ' days')
-       )`, retentionDays)
+           LIMIT ?
+       )`, retentionDays, batchSize)
 	if err != nil {
-		return apperr.Database(err)
+		return 0, apperr.Database(err)
 	}
-	_, err = tx.ExecContext(ctx,
-		"DELETE FROM request_logs WHERE created_at < datetime('now', '-' || ? || ' days')",
-		retentionDays)
+	affected, err := result.RowsAffected()
 	if err != nil {
-		return apperr.Database(err)
+		return 0, apperr.Database(err)
 	}
-	if err := tx.Commit(); err != nil {
-		return apperr.Database(err)
-	}
-	return nil
+	return affected, nil
 }
 
 func nullStringPtr(value sql.NullString) *string {

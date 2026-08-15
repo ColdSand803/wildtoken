@@ -69,6 +69,25 @@ func parseExtraHeaders(stored string) (map[string]string, error) {
 	return overrides, nil
 }
 
+// parseJSONArray decodes a stored list column, naming it in the failure so the
+// operator learns which one is damaged rather than that "something" is.
+func parseJSONArray(stored, column string) ([]string, error) {
+	values := []string{}
+	if err := json.Unmarshal([]byte(stored), &values); err != nil {
+		return nil, apperr.BadRequest("channel " + column + " JSON is invalid: " + err.Error())
+	}
+	return values, nil
+}
+
+// parseJSONMap decodes a stored mapping column.
+func parseJSONMap(stored, column string) (map[string]string, error) {
+	values := map[string]string{}
+	if err := json.Unmarshal([]byte(stored), &values); err != nil {
+		return nil, apperr.BadRequest("channel " + column + " JSON is invalid: " + err.Error())
+	}
+	return values, nil
+}
+
 func validateOverrides(overrides map[string]string) error {
 	if err := proxy.ValidateHeaderOverrides(overrides); err != nil {
 		return apperr.BadRequest(err.Error())
@@ -287,7 +306,7 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 		}
 	}
 
-	body, err := io.ReadAll(response.Body)
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxProbeResponseBytes))
 	if err != nil {
 		entry := newEntry()
 		entry.StatusCode = &statusCode
@@ -333,6 +352,19 @@ func probeTimeout(seconds float64) time.Duration {
 	return time.Duration(max(seconds, 1.0) * float64(time.Second))
 }
 
+// billingUsageRange is the window the usage probe asks a provider for.
+//
+// The intent is "everything", which the endpoint expresses as a date range. It
+// was written as a literal pair ending in 2099, which reads as a date someone
+// chose rather than as the absence of one, and would quietly start excluding
+// usage if this outlived the guess. Anchoring the end to today says what it
+// means and cannot expire.
+func billingUsageRange() string {
+	const billingEpoch = "2020-01-01"
+	return "start_date=" + billingEpoch +
+		"&end_date=" + time.Now().AddDate(0, 0, 1).Format(time.DateOnly)
+}
+
 // redactHeaderPreview hides credential values in a preview shown to the console.
 func redactHeaderPreview(headers map[string]string) map[string]string {
 	preview := make(map[string]string, len(headers))
@@ -346,13 +378,32 @@ func redactHeaderPreview(headers map[string]string) map[string]string {
 	return preview
 }
 
+// maxProbeResponseBytes bounds what a probe reads back from an upstream.
+//
+// A probe answers a click in the console, and everything done with the body
+// afterwards is a preview measured in hundreds of characters. Reading it without
+// a limit let one click pull an entire upstream response into memory. The
+// preview endpoint takes a base URL straight from the form, so triggering it did
+// not even require a stored channel.
+const maxProbeResponseBytes = 8 << 20
+
 // truncateRunes bounds a preview string without splitting a rune.
+//
+// It walks the string rather than converting it, because a rune slice of the
+// whole value is a second copy of it — four times its size — paid for before
+// discovering the value is too long to show.
 func truncateRunes(value string, limit int) string {
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
+	if limit <= 0 {
+		return ""
 	}
-	return string(runes[:limit])
+	count := 0
+	for index := range value {
+		count++
+		if count > limit {
+			return value[:index]
+		}
+	}
+	return value
 }
 
 // AdminListUpstreams returns every channel with its live health.
@@ -392,12 +443,26 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 		health := state.AutoWeight.Snapshot(row.ID, row.Weight,
 			row.AutoWeightEnabled == 1, state.AutoWeightPolicy())
 
-		modelNames := []string{}
-		json.Unmarshal([]byte(row.ModelNames), &modelNames)
-		modelPrefixes := []string{}
-		json.Unmarshal([]byte(row.ModelPrefixes), &modelPrefixes)
-		modelMappings := map[string]string{}
-		json.Unmarshal([]byte(row.ModelMappings), &modelMappings)
+		// A parse failure is reported rather than swallowed. The console fills
+		// the edit form from this response, so decoding a damaged column to an
+		// empty list showed the channel as having no models — and saving that
+		// form wrote the emptiness back, destroying the routing configuration
+		// the operator came to look at.
+		modelNames, err := parseJSONArray(row.ModelNames, "model_names")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		modelPrefixes, err := parseJSONArray(row.ModelPrefixes, "model_prefixes")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		modelMappings, err := parseJSONMap(row.ModelMappings, "model_mappings")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 
 		extraHeaders, err := parseExtraHeaders(row.ExtraHeaders)
 		if err != nil {
@@ -448,7 +513,7 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 func AdminCreateUpstream(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		input := models.DefaultUpstreamIn()
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -489,7 +554,7 @@ func AdminUpdateUpstream(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		input := models.UpstreamUpdate{UpstreamIn: models.DefaultUpstreamIn()}
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -544,8 +609,13 @@ func AdminSetUpstreamEnabled(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.UpstreamEnabledIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+		enabled, err := input.Value()
+		if err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
 			return
 		}
 
@@ -557,7 +627,7 @@ func AdminSetUpstreamEnabled(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		updated, err := db.SetUpstreamEnabled(r.Context(), state.DB, id, input.Enabled)
+		updated, err := db.SetUpstreamEnabled(r.Context(), state.DB, id, enabled)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -567,7 +637,7 @@ func AdminSetUpstreamEnabled(state *appstate.State) http.HandlerFunc {
 		state.Routing.Invalidate()
 		// Re-enabling gives a channel a clean slate rather than the health it
 		// had when the operator turned it off.
-		if input.Enabled {
+		if enabled {
 			state.AutoWeight.Reset(id)
 		}
 		applyRuntimeHealth(state, state.AutoWeightPolicy(), &updated)
@@ -584,8 +654,13 @@ func AdminSetUpstreamPriority(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.UpstreamPriorityIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+		priority, err := input.Value()
+		if err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
 			return
 		}
 
@@ -597,7 +672,7 @@ func AdminSetUpstreamPriority(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		updated, err := db.SetUpstreamPriority(r.Context(), state.DB, id, input.Priority)
+		updated, err := db.SetUpstreamPriority(r.Context(), state.DB, id, priority)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -644,8 +719,12 @@ func AdminTestUpstream(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		input := models.DefaultTestRequest()
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+		if err := input.Validate(); err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
 			return
 		}
 		if input.Path == "" {
@@ -719,7 +798,7 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.ModelTestRequest
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -1020,8 +1099,16 @@ func AdminFetchUpstreamModels(state *appstate.State) http.HandlerFunc {
 func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.ModelFetchIn
-		if err := decodeJSON(r, &input); err != nil {
+		if err := decodeJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+
+		// The preview dials whatever the form holds, so the URL is checked here
+		// too rather than only on the path that saves a channel.
+		baseURL, err := models.ValidateBaseURL(input.BaseURL)
+		if err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
 			return
 		}
 
@@ -1042,7 +1129,7 @@ func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 		// The channel form's preview probes a typed-in base URL, so there is no
 		// channel row to attribute the log row to.
 		list, err := fetchModelsForTarget(r.Context(), state, nil, nil,
-			input.BaseURL, input.APIKey, extra, timeout)
+			baseURL, input.APIKey, extra, timeout)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -1082,8 +1169,7 @@ func AdminFetchUpstreamBalance(state *appstate.State) http.HandlerFunc {
 		timeout := probeTimeout(row.TimeoutSeconds)
 		headers := buildChannelRequestHeaders(nil, row.APIKey, extra)
 		subscriptionURL := buildProbeURL(row.BaseURL, "dashboard/billing/subscription", "")
-		usageURL := buildProbeURL(row.BaseURL, "dashboard/billing/usage",
-			"start_date=2020-01-01&end_date=2099-12-31")
+		usageURL := buildProbeURL(row.BaseURL, "dashboard/billing/usage", billingUsageRange())
 
 		subscription, err := sendAndLogProbe(r.Context(), state, consoleProbe{
 			clientType:   probeBalance,
@@ -1340,7 +1426,7 @@ func parseSub2APIBalancePayload(payload map[string]any) (map[string]any, bool) {
 func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ExportUpstreamsRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSON(w, r, &req); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -1413,7 +1499,7 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req models.ImportUpstreamsRequest
-		if err := decodeJSON(r, &req); err != nil {
+		if err := decodeJSON(w, r, &req); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -1545,4 +1631,3 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 		apperr.WriteJSON(w, http.StatusOK, result)
 	}
 }
-

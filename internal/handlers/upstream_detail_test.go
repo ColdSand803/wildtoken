@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 )
 
 func upstreamTestState(t *testing.T) *appstate.State {
@@ -41,6 +43,7 @@ func upstreamTestState(t *testing.T) *appstate.State {
 		Metrics:     metrics.New(),
 		ModelsCache: appstate.NewModelsListCache(),
 		Routing:     proxy.NewRoutingCache(),
+		Quotas:      quota.NewTracker(),
 		StartedAt:   time.Now(),
 	}
 }
@@ -195,5 +198,49 @@ func TestAChannelInNoGroupReportsAnEmptyListNotNull(t *testing.T) {
 	}
 	if string(raw["group_ids"]) != "[]" {
 		t.Errorf("group_ids = %s, want []", raw["group_ids"])
+	}
+}
+
+func TestTogglingAChannelRefusesABodyThatNamesNothing(t *testing.T) {
+	state := upstreamTestState(t)
+	input := models.DefaultUpstreamIn()
+	input.Name = "primary"
+	input.BaseURL = "https://api.example.com"
+	created, err := db.CreateUpstream(context.Background(), state.DB, &input, 300)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	router := chi.NewRouter()
+	router.Patch("/api/admin/upstreams/{id}/enabled", AdminSetUpstreamEnabled(state))
+
+	patch := func(body string) int {
+		request := httptest.NewRequest(http.MethodPatch,
+			"/api/admin/upstreams/"+itoa(created.ID)+"/enabled", strings.NewReader(body))
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		return recorder.Code
+	}
+
+	// The field is not a pointer, so an absent one reads as false. Decoding
+	// loosely turned an empty body and a misspelled key into "disable this
+	// channel", with nothing reported to the caller who meant the opposite.
+	if status := patch(`{}`); status != http.StatusBadRequest {
+		t.Errorf("an empty body got %d, want 400", status)
+	}
+	if status := patch(`{"enable":true}`); status != http.StatusBadRequest {
+		t.Errorf("a misspelled field got %d, want 400", status)
+	}
+
+	row, found, reloadErr := db.GetUpstream(context.Background(), state.DB, created.ID)
+	if reloadErr != nil || !found {
+		t.Fatalf("reload: %v", reloadErr)
+	}
+	if row.Enabled != 1 {
+		t.Error("a refused request disabled the channel anyway")
+	}
+
+	if status := patch(`{"enabled":false}`); status != http.StatusOK {
+		t.Fatalf("a well-formed request got %d, want 200", status)
 	}
 }

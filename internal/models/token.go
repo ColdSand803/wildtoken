@@ -147,20 +147,33 @@ func NormalizeRateLimit(raw *string) (*string, error) {
 	return &value, nil
 }
 
-func validateTokenMetadata(name, description string) error {
-	trimmed := strings.TrimSpace(name)
-	if trimmed == "" || utf8.RuneCountInString(name) > APITokenNameMaxChars {
+// validateTokenMetadata judges the name and description that will be stored, and
+// writes the trimmed values back through the pointers it is given.
+//
+// The stores trim before writing, so the check has to be against the trimmed
+// value or it answers about a different string than the one that lands in the
+// database: a name padded past the limit with spaces was refused for a length it
+// would not have had, and the emptiness check was already trimming while the
+// length check beside it was not.
+func validateTokenMetadata(name, description *string) error {
+	trimmedName := strings.TrimSpace(*name)
+	if trimmedName == "" || utf8.RuneCountInString(trimmedName) > APITokenNameMaxChars {
 		return ErrString("token name must be between 1 and 80 characters")
 	}
-	if strings.ContainsFunc(name, unicode.IsControl) {
+	if strings.ContainsFunc(trimmedName, unicode.IsControl) {
 		return ErrString("token name must not contain control characters")
 	}
-	if utf8.RuneCountInString(description) > APITokenDescriptionMaxChars {
+
+	trimmedDescription := strings.TrimSpace(*description)
+	if utf8.RuneCountInString(trimmedDescription) > APITokenDescriptionMaxChars {
 		return ErrString("token description must be at most 200 characters")
 	}
-	if strings.ContainsFunc(description, unicode.IsControl) {
+	if strings.ContainsFunc(trimmedDescription, unicode.IsControl) {
 		return ErrString("token description must not contain control characters")
 	}
+
+	*name = trimmedName
+	*description = trimmedDescription
 	return nil
 }
 
@@ -187,7 +200,7 @@ func validateTokenValue(token string) error {
 }
 
 func (t *APITokenIn) Validate() error {
-	if err := validateTokenMetadata(t.Name, t.Description); err != nil {
+	if err := validateTokenMetadata(&t.Name, &t.Description); err != nil {
 		return err
 	}
 	if _, err := t.NormalizedExpiresAt(); err != nil {
@@ -220,7 +233,7 @@ func (t *APITokenIn) NormalizedRateLimit() (*string, error) {
 }
 
 func (t *APITokenUpdateIn) Validate() error {
-	if err := validateTokenMetadata(t.Name, t.Description); err != nil {
+	if err := validateTokenMetadata(&t.Name, &t.Description); err != nil {
 		return err
 	}
 	if _, err := t.NormalizedExpiresAt(); err != nil {
@@ -274,8 +287,12 @@ type APITokenOut struct {
 	RateLimit    *string    `json:"rate_limit"`
 }
 
-// APITokenCreatedOut is returned only by the creation endpoint, so the full
-// token can be shown once.
+// APITokenCreatedOut is what the creation endpoint answers with.
+//
+// It carries the full token, but so does APITokenOut: the console lets an
+// operator copy a credential back out at any time, so token_plain is stored and
+// the list and detail endpoints return it too. This is not a one-time reveal,
+// and reading it as one understates where plaintext tokens are exposed.
 type APITokenCreatedOut struct {
 	ID           int64      `json:"id"`
 	Name         string     `json:"name"`
@@ -290,4 +307,21 @@ type APITokenCreatedOut struct {
 	GroupName    string     `json:"group_name"`
 	Quota        QuotaState `json:"quota"`
 	RateLimit    *string    `json:"rate_limit"`
+}
+
+// TokenEnabledIn toggles a token.
+//
+// It mirrors UpstreamEnabledIn rather than reusing it, so the endpoint's
+// contract names what it operates on, and it is a pointer for the same reason:
+// a body of {} must not read as "disable this credential".
+type TokenEnabledIn struct {
+	Enabled *bool `json:"enabled"`
+}
+
+// Value returns the requested state, or an error when the body named none.
+func (t *TokenEnabledIn) Value() (bool, error) {
+	if t.Enabled == nil {
+		return false, ErrString("enabled is required")
+	}
+	return *t.Enabled, nil
 }

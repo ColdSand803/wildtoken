@@ -1,6 +1,7 @@
 package models
 
 import (
+	"fmt"
 	"strings"
 	"unicode/utf8"
 )
@@ -70,21 +71,30 @@ type AdminTokenRotateIn struct {
 }
 
 func (r *AdminTokenRotateIn) ValidatedToken() (string, error) {
-	return ValidateAdminTokenValue(r.Token)
+	return validateAdminTokenValue(r.Token, AdminTokenRotateMinLen)
 }
 
-// AdminTokenMinLen is the minimum admin token length.
+// AdminTokenMinLen is the minimum admin token length at bootstrap.
 //
 // Throttling bounds how fast a token can be guessed; length is what makes the
 // bound irrelevant. Existing credentials are unaffected — only bootstrap and
 // rotation pass through here.
 const AdminTokenMinLen = 24
 
+// AdminTokenRotateMinLen is the minimum length for a token chosen from the
+// console. Rotation is already behind the current credential, so the operator
+// keeps the choice the bootstrap path cannot leave open to an unattended value.
+const AdminTokenRotateMinLen = 8
+
 // ValidateAdminTokenValue returns the trimmed token when it is strong enough.
 func ValidateAdminTokenValue(value string) (string, error) {
+	return validateAdminTokenValue(value, AdminTokenMinLen)
+}
+
+func validateAdminTokenValue(value string, minLen int) (string, error) {
 	token := strings.TrimSpace(value)
-	if len(token) < AdminTokenMinLen || len(token) > 256 {
-		return "", ErrString("admin token must be between 24 and 256 bytes")
+	if len(token) < minLen || len(token) > 256 {
+		return "", ErrString(fmt.Sprintf("admin token must be between %d and 256 bytes", minLen))
 	}
 	if !isASCIIGraphic(token) {
 		return "", ErrString("admin token must contain only printable ASCII characters without spaces")

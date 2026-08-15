@@ -187,15 +187,28 @@ jobs:
             '.object == "list" and (.data | type == "array")' \
             "$RUNNER_TEMP/wildtoken-models.json" >/dev/null
 
+          # The detail endpoint returns the token in full, on purpose: the
+          # console lets an operator copy a credential back out at any time,
+          # which is why the plaintext is stored alongside the digest. This
+          # asserted the opposite and had been failing since that feature
+          # landed. Asserted in its current direction so a change either way
+          # is caught rather than only one of them.
           curl --fail --silent --show-error \
             --header "x-admin-token: $admin_token" \
             "http://127.0.0.1:3110/api/admin/tokens/$token_id" \
             --output "$RUNNER_TEMP/wildtoken-token-detail.json"
-          jq --exit-status 'has("token") | not' \
+          jq --exit-status --arg token "$api_token" \
+            '.token == $token and (.token_preview | strings | length > 0)' \
             "$RUNNER_TEMP/wildtoken-token-detail.json" >/dev/null
-          if grep --fixed-strings --quiet -- "$api_token" \
-            "$RUNNER_TEMP/wildtoken-token-detail.json"; then
-            echo "Token detail response exposed the full token" >&2
+
+          # The endpoint is behind the admin credential, so that is the part
+          # worth holding: without the header it must not answer at all.
+          unauthorized_detail_status="$(curl --silent --show-error \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            "http://127.0.0.1:3110/api/admin/tokens/$token_id")"
+          if [[ "$unauthorized_detail_status" != 401 ]]; then
+            echo "Token detail served without an admin token" >&2
             exit 1
           fi
 

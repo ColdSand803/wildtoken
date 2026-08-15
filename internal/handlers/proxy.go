@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -63,7 +64,7 @@ func upstreamSelector(r *http.Request) *string {
 
 // writeProtocolError renders an error in the shape the caller's protocol expects.
 func writeProtocolError(w http.ResponseWriter, status int, path, message, errorType string) {
-	if strings.Trim(path, "/") == "messages" {
+	if models.IsAnthropicMessages(models.ProxyPath(path)) {
 		apperr.WriteJSON(w, status, map[string]any{
 			"type":  "error",
 			"error": map[string]string{"type": errorType, "message": message},
@@ -103,7 +104,7 @@ func writeUpstreamRateLimitRejection(w http.ResponseWriter, path string) {
 		"code":    UpstreamRateLimitedCode,
 		"message": UpstreamRateLimitedMessage,
 	}
-	if strings.Trim(path, "/") == "messages" {
+	if models.IsAnthropicMessages(models.ProxyPath(path)) {
 		body["type"] = "error"
 		body["error"] = map[string]string{"type": "rate_limit_error", "message": detail}
 	} else {
@@ -249,8 +250,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		}
 
 		// The path after /v1/, for example "chat/completions".
-		path := strings.TrimLeft(strings.TrimPrefix(
-			strings.TrimPrefix(r.URL.Path, "/v1"), "/"), "/")
+		path := models.ProxyPath(r.URL.Path)
 
 		guard := newAbortLogGuard(state.LogWriter, r.Method, path)
 		defer guard.finish()
@@ -306,6 +306,12 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			runtimeSettings: runtimeSettings,
 		})
 		if err != nil {
+			// Every failing path inside runProxyAttempts logs the attempt it
+			// failed on, with the status that describes it. Leaving the guard
+			// armed added a second row for the same request, blaming a client
+			// disconnect for what was an upstream failure and leaving the
+			// console unable to tell the two apart.
+			guard.disarm()
 			apperr.WriteError(w, err)
 			return
 		}
@@ -335,8 +341,9 @@ type proxyAttemptConfig struct {
 }
 
 // runProxyAttempts forwards the request, retrying a failure up to the
-// configured limit. A nil response with a nil error means routing found no
-// upstream and the 503 has already been written.
+// configured limit. A nil response with a nil error means routing produced no
+// attempt and the refusal has already been written and logged: a 429 when every
+// candidate was rate limited, a 503 when there was no route at all.
 func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.State,
 	config proxyAttemptConfig) (*proxy.Response, error) {
 	maxRetries := int(config.runtimeSettings.MaxRetries)
@@ -408,6 +415,10 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			config.runtimeSettings.SameUpstreamRetryIntervalMs > 0 {
 			select {
 			case <-r.Context().Done():
+				// Logged here because no attempt was made to log it: this is
+				// the one error path out of this function that ProxyRequest
+				// never saw.
+				config.guard.logAndDisarm(499, "client disconnected during retry backoff")
 				return nil, apperr.Upstream("client disconnected during retry backoff")
 			case <-time.After(time.Duration(config.runtimeSettings.SameUpstreamRetryIntervalMs) *
 				time.Millisecond):
@@ -423,6 +434,12 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		prepared, err := proxy.PrepareRequest(r.Header, &selected.Upstream, r.Method,
 			config.path, r.URL.RawQuery, selected.ForwardModel, config.body, logBodyMaxBytes)
 		if err != nil {
+			// The channel's stored header configuration is what fails here, so
+			// the channel is charged for it. A channel that cannot build a
+			// request fails every one it is given, and without a penalty it
+			// keeps full weight and keeps being chosen to fail again.
+			state.AutoWeight.RecordFailure(selected.Upstream.ID,
+				selected.Upstream.AutoWeightEnabled == 1, config.policy)
 			config.guard.logAndDisarm(502, err.Error())
 			return nil, err
 		}
@@ -444,12 +461,21 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		if !failed || attempt >= maxRetries {
 			return response, err
 		}
+		// A client that has gone is not owed another attempt. Retrying spent
+		// another channel's rate-limit allowance and wrote another log row for
+		// a request nobody was waiting for, so one disconnect could leave a
+		// handful of 499s behind it.
+		if r.Context().Err() != nil {
+			return response, err
+		}
 
-		// A failed attempt's body is abandoned, so its connection is released
-		// rather than left for the garbage collector.
+		// A failed attempt's body is buffered rather than discarded. Its
+		// connection is released either way, but if no channel is left to try
+		// this response is what the caller receives: draining it delivered the
+		// upstream's status and headers with an empty body, throwing away the
+		// only explanation of what went wrong.
 		if response != nil {
-			io.Copy(io.Discard, response.Body)
-			response.Body.Close()
+			response.Body = bufferFailedBody(response.Body)
 		}
 
 		upstreamID := selected.Upstream.ID
@@ -461,6 +487,29 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 type attemptResult struct {
 	response *proxy.Response
 	err      error
+}
+
+// maxBufferedFailureBytes caps what is kept from a failed attempt. A provider's
+// error body is a small piece of JSON, so this only bounds a channel that is
+// answering a rejection with something unreasonable.
+const maxBufferedFailureBytes = 1 << 20
+
+// bufferFailedBody reads a failed attempt's body into memory and closes the
+// original, returning a reader over what it held.
+//
+// The body is normally already buffered by the time it gets here, but reading it
+// again is what makes the release of the connection unconditional rather than a
+// property of which path produced the response.
+func bufferFailedBody(body io.ReadCloser) io.ReadCloser {
+	defer body.Close()
+
+	buffered, err := io.ReadAll(io.LimitReader(body, maxBufferedFailureBytes))
+	if err != nil {
+		// Whatever could not be read is not worth failing the retry over; the
+		// status and headers still describe the attempt.
+		buffered = nil
+	}
+	return io.NopCloser(bytes.NewReader(buffered))
 }
 
 // writeProxiedResponse copies an upstream response downstream, streaming it as

@@ -3,6 +3,7 @@ package apperr
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -77,6 +78,10 @@ func (e *AppError) StatusAndMessage() (int, string) {
 		slog.Error("JSON error", "error", e.Err)
 		return http.StatusInternalServerError, "internal JSON error"
 	default:
+		// KindInternal used to fall through here without logging, so every
+		// diagnostic an Internal() carried was discarded on the way out: the
+		// operator saw a bare 500 and the reason existed nowhere.
+		slog.Error("internal error", "detail", e.Msg, "error", e.Err)
 		return http.StatusInternalServerError, "internal server error"
 	}
 }
@@ -103,11 +108,13 @@ func WriteJSON(w http.ResponseWriter, status int, value any) {
 }
 
 // WriteError renders any error, treating non-AppError values as internal.
+//
+// The match is errors.As rather than a type assertion, so an AppError that some
+// layer wrapped with %w still answers with its own status. A bare assertion
+// turned every wrapped not-found into a 500.
 func WriteError(w http.ResponseWriter, err error) {
 	var appErr *AppError
-	if e, ok := err.(*AppError); ok {
-		appErr = e
-	} else {
+	if !errors.As(err, &appErr) {
 		appErr = Internal(err.Error())
 	}
 	appErr.Write(w)

@@ -16,6 +16,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
@@ -100,7 +101,10 @@ type State struct {
 	// channel with the same id count against each other.
 	TokenRateLimiter    *ratelimit.Limiter
 	UpstreamRateLimiter *ratelimit.Limiter
-	StartedAt           time.Time
+	// Quotas holds the usage that a token has committed to but that its stored
+	// total does not show yet, so admission weighs requests still in flight.
+	Quotas    *quota.Tracker
+	StartedAt time.Time
 }
 
 // ProxyDeps assembles the dependencies one forwarded request needs.

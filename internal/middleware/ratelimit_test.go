@@ -9,6 +9,7 @@ import (
 
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
@@ -26,7 +27,7 @@ func TestARateLimitedTokenIsRefusedOnceItsWindowFills(t *testing.T) {
 
 	limiter := ratelimit.NewLimiter()
 	defer limiter.Close()
-	handler := RequireDownstream(database, limiter)(http.HandlerFunc(
+	handler := RequireDownstream(database, limiter, quota.NewTracker())(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 
 	send := func(path string) (int, []byte) {
@@ -95,7 +96,7 @@ func TestATokenWithoutARateLimitIsNeverThrottled(t *testing.T) {
 
 	limiter := ratelimit.NewLimiter()
 	defer limiter.Close()
-	handler := RequireDownstream(database, limiter)(http.HandlerFunc(
+	handler := RequireDownstream(database, limiter, quota.NewTracker())(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 
 	for i := range 50 {

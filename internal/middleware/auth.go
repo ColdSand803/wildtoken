@@ -15,6 +15,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/authstate"
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
@@ -94,11 +95,18 @@ func writeUnauthorized(w http.ResponseWriter) {
 
 // adminClient identifies the caller for throttling purposes.
 //
-// A forwarded header is only consulted when the operator has named one, and an
-// address learned that way is always treated as remote — otherwise anyone could
-// claim 127.0.0.1 and inherit the loopback exemption.
+// A forwarded header is only consulted when the operator has named one and the
+// connection came from somewhere that proxy could be: a reverse proxy reaches
+// the gateway over loopback or a private network. Honouring the header from any
+// peer at all would let a caller that can reach the port directly invent a fresh
+// address per request and never accumulate a failure streak to be blocked for.
+//
+// An address learned that way is always treated as remote — otherwise anyone
+// could claim 127.0.0.1 and count against the operator's own gate.
 func adminClient(r *http.Request, clientIPHeader string) authstate.Client {
-	if clientIPHeader != "" {
+	peer := peerAddr(r)
+
+	if clientIPHeader != "" && couldBeProxy(peer) {
 		forwarded := r.Header.Get(clientIPHeader)
 		if forwarded != "" {
 			first, _, _ := strings.Cut(forwarded, ",")
@@ -108,15 +116,43 @@ func adminClient(r *http.Request, clientIPHeader string) authstate.Client {
 		}
 	}
 
+	if !peer.IsValid() {
+		return authstate.UnknownClient()
+	}
+	return authstate.ClientFromAddr(peer)
+}
+
+// peerAddr is the address of the machine that opened the connection, which is
+// the one piece of the request a caller cannot choose.
+func peerAddr(r *http.Request) netip.Addr {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		host = r.RemoteAddr
 	}
 	addr, err := netip.ParseAddr(host)
 	if err != nil {
-		return authstate.UnknownClient()
+		return netip.Addr{}
 	}
-	return authstate.ClientFromAddr(addr.Unmap())
+	return addr.Unmap()
+}
+
+// carrierGradeNAT is 100.64.0.0/10, which is not covered by Addr.IsPrivate but
+// is where a mesh VPN such as Tailscale puts its nodes — a reverse proxy there
+// is a real deployment, and ignoring its forwarded header would collapse every
+// operator onto one throttle entry.
+var carrierGradeNAT = netip.MustParsePrefix("100.64.0.0/10")
+
+// couldBeProxy reports whether a connection plausibly came from the operator's
+// own reverse proxy rather than straight off the internet.
+//
+// A proxy on a public address cannot be recognised from the connection alone,
+// so its forwarded header is ignored and its callers are tracked by the proxy's
+// own address. That is the safe direction — a forged header cannot shed a
+// failure streak — but it is worth knowing before putting one there.
+func couldBeProxy(addr netip.Addr) bool {
+	return addr.IsValid() &&
+		(addr.IsLoopback() || addr.IsPrivate() || addr.IsLinkLocalUnicast() ||
+			carrierGradeNAT.Contains(addr))
 }
 
 // parseForwardedAddr accepts the bare address, `host:port` and `[v6]:port`
@@ -148,12 +184,17 @@ func parseForwardedAddr(value string) (netip.Addr, bool) {
 
 // RequireDownstream validates the caller's API token against the api_tokens
 // table, accepting only enabled and unexpired rows.
-func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter) func(http.Handler) http.Handler {
+func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter,
+	quotas *quota.Tracker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Anthropic clients authenticate with x-api-key and expect their own
 			// error shape.
-			anthropic := strings.TrimRight(r.URL.Path, "/") == "/v1/messages"
+			// Derived the same way the handler and the header builder derive
+			// it. Comparing the raw path meant /v1//messages authenticated as
+			// OpenAI here while being forwarded as Anthropic, so a caller using
+			// x-api-key was refused on a route that would have accepted it.
+			anthropic := models.IsAnthropicMessages(models.ProxyPath(r.URL.Path))
 
 			token, ok := extractDownstreamToken(r, anthropic)
 			if !ok {
@@ -175,10 +216,25 @@ func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter) func(http.H
 			}
 
 			/* An exhausted quota is refused before the request reaches an
-			   upstream. The check is on the total recorded so far, so the request
-			   that crosses the limit is allowed to finish: its cost is only known
-			   once the response completes. */
-			if credential.LimitTokens != nil && credential.UsedTokens >= *credential.LimitTokens {
+			   upstream. The stored total is not the whole of what is spent:
+			   requests still running have a cost nobody knows yet, and requests
+			   that just finished have one the batched writer has not committed.
+			   Both are weighed here, because on the stored total alone every
+			   request of a burst read the same figure, each found the same room,
+			   and each was admitted — overshooting the limit by as much as
+			   happened to arrive at once.
+
+			   The request that crosses the limit is still allowed to finish: its
+			   cost is only known once the response completes. */
+			reservation, admitted := quotas.Admit(credential.TokenID,
+				credential.UsedTokens, credential.LimitTokens)
+			defer reservation.Release()
+			if !admitted {
+				// The message reports the stored total, not what admission
+				// weighed. The weighed figure counts a provisional charge for
+				// requests still running, so reporting it as "used" would name a
+				// quantity that matches no record the operator can look at and
+				// that changes with the concurrency of the moment.
 				writeDownstreamQuotaRejection(w, anthropic,
 					models.QuotaExceededMessage(credential.UsedTokens, *credential.LimitTokens))
 				return
