@@ -569,3 +569,120 @@ func TestAChannelThatCannotBuildARequestIsChargedForIt(t *testing.T) {
 	// It still leaves a log row, which is what makes the failure visible.
 	harness.waitForLogs(t, 1)
 }
+
+func TestABufferedResponseTheClientLeftIsLoggedAsAClientAbort(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`))
+	}))
+	defer server.Close()
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m"}`), requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	response, err := ProxyRequest(ctx, harness.deps, testPolicy(), &upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+
+	// The upstream answered in full, but the client goes before the handler
+	// has delivered it. The streaming path records that as a 499; this one
+	// used to record the upstream's 200, so the console's client-abort filter
+	// showed only the requests that happened to stream.
+	cancel()
+	response.Body.Close()
+
+	harness.waitForLogs(t, 1)
+
+	var statusCode int64
+	var logError sql.NullString
+	if err := harness.database.QueryRow(
+		"SELECT status_code, error FROM request_logs WHERE id = 1").
+		Scan(&statusCode, &logError); err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if statusCode != 499 {
+		t.Errorf("status = %d, want 499 for a client that left mid-delivery", statusCode)
+	}
+	if !logError.Valid || logError.String == "" {
+		t.Error("the abort was logged without an explanation")
+	}
+}
+
+func TestABufferedResponseDeliveredInFullKeepsTheUpstreamStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"usage":{"prompt_tokens":11,"completion_tokens":7,"total_tokens":18}}`))
+	}))
+	defer server.Close()
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m"}`), requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+
+	response, err := ProxyRequest(context.Background(), harness.deps, testPolicy(),
+		&upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if len(body) == 0 {
+		t.Error("the buffered body was empty")
+	}
+	// Closed twice, the way a retry abandoning a response and then the handler
+	// writing it out would.
+	response.Body.Close()
+	response.Body.Close()
+
+	harness.waitForLogs(t, 1)
+
+	var rows int64
+	if err := harness.database.QueryRow("SELECT COUNT(*) FROM request_logs").Scan(&rows); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if rows != 1 {
+		t.Errorf("%d log rows, want exactly one", rows)
+	}
+
+	var statusCode int64
+	var totalTokens sql.NullInt64
+	if err := harness.database.QueryRow(
+		"SELECT status_code, total_tokens FROM request_logs WHERE id = 1").
+		Scan(&statusCode, &totalTokens); err != nil {
+		t.Fatalf("read log: %v", err)
+	}
+	if statusCode != 200 {
+		t.Errorf("status = %d, want the upstream's 200", statusCode)
+	}
+	if !totalTokens.Valid || totalTokens.Int64 != 18 {
+		t.Errorf("total tokens = %v, want the usage to survive the deferral", totalTokens)
+	}
+}

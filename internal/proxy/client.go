@@ -372,12 +372,14 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	entry.DurationMs = elapsedMs(start)
 	entry.UpstreamResponse = responseSnapshot
 	entry.DownstreamResponse = responseSnapshot
-	deps.LogWriter.Schedule(entry)
 
+	// Scheduled when the body is closed rather than here. Here is before the
+	// response has reached the client at all, so a client that leaves during
+	// delivery would be recorded as having received what the upstream sent.
 	return &Response{
 		Status:  status,
 		Headers: responseHeaders,
-		Body:    io.NopCloser(bytes.NewReader(bodyBytes)),
+		Body:    newBufferedStream(ctx, bodyBytes, entry, deps, statusCode),
 	}, nil
 }
 
