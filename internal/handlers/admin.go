@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -29,6 +30,9 @@ const Version = "0.2.0"
 
 // maxLogListOffset caps how deep the offset-paged log list may reach.
 const maxLogListOffset int32 = 100_000
+
+// maxLogSearchChars caps a log search term.
+const maxLogSearchChars = 200
 
 // decodeJSON reads a JSON request body, ignoring fields the target does not
 // declare.
@@ -532,10 +536,14 @@ func AdminListLogs(state *appstate.State) http.HandlerFunc {
 		// takes. Deep pages are what the cursor endpoint is for.
 		offset := clampInt32(queryInt32(query.Get("offset"), 0), 0, maxLogListOffset)
 
+		// The search term becomes eight LIKE patterns evaluated against every
+		// row the query examines, so its length is a multiplier on the cost of
+		// the whole scan. Nothing an operator types to find a request is longer
+		// than this.
 		filter := db.LogFilter{
 			UpstreamID: optionalQueryInt64(query.Get("upstream_id")),
-			Search:     optionalQueryString(query.Get("search")),
-			ClientType: optionalQueryString(query.Get("client_type")),
+			Search:     boundedQueryString(query.Get("search"), maxLogSearchChars),
+			ClientType: boundedQueryString(query.Get("client_type"), maxLogSearchChars),
 		}
 		if status := query.Get("status"); status == "2xx" || status == "4xx" ||
 			status == "5xx" || status == "none" {
@@ -729,6 +737,19 @@ func optionalQueryString(value string) *string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
 		return nil
+	}
+	return &trimmed
+}
+
+// boundedQueryString is optionalQueryString with a ceiling on the length, for
+// values that end up inside a query's cost rather than beside it.
+func boundedQueryString(value string, maxChars int) *string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	if utf8.RuneCountInString(trimmed) > maxChars {
+		trimmed = truncateRunes(trimmed, maxChars)
 	}
 	return &trimmed
 }

@@ -567,3 +567,51 @@ func TestRetentionTakesThePayloadRowsWithIt(t *testing.T) {
 		t.Errorf("%d payload rows survived their log row", payloads)
 	}
 }
+
+func TestALogListingGivesUpRatherThanHoldingItsConnection(t *testing.T) {
+	database := memoryDB(t)
+
+	// None of the filters can use an index, so a filter matching nothing reads
+	// the whole table while holding one of the few pooled connections. An
+	// already-cancelled context stands in for the deadline expiring: what
+	// matters is that the query reports it instead of running to completion.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	search := "needle"
+	_, err := ListLogs(ctx, database, 50, 0, nil, LogFilter{Search: &search})
+	if err == nil {
+		t.Fatal("a cancelled listing returned as though it had finished")
+	}
+}
+
+func TestLogSearchIsBoundedBeforeItReachesTheQuery(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+
+	if _, err := database.Exec(`INSERT INTO request_logs
+       (created_at, method, path, client_type, stream, upstream_name)
+       VALUES (datetime('now'), 'POST', '/v1/responses', 'codex', 0, 'primary')`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// A bounded term still finds what it names.
+	search := "primary"
+	entries, err := ListLogs(ctx, database, 50, 0, nil, LogFilter{Search: &search})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("found %d rows, want the one matching the search", len(entries))
+	}
+
+	// And the wildcards inside it stay literal.
+	wildcard := "%"
+	entries, err = ListLogs(ctx, database, 50, 0, nil, LogFilter{Search: &wildcard})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("a literal %% matched %d rows, want none", len(entries))
+	}
+}

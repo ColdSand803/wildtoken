@@ -205,10 +205,23 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	return entry, nil
 }
 
+// LogQueryTimeout bounds how long one log listing may run.
+//
+// None of the filters can use an index: client_type and status_code have none,
+// and the search is a leading-wildcard LIKE, which nothing can. LIMIT bounds the
+// rows returned, not the rows examined, so a filter matching little or nothing
+// reads the whole table — holding one of the few pooled connections while the
+// proxy path waits for one. The deadline turns that into an error the operator
+// sees rather than a stall the gateway absorbs.
+const LogQueryTimeout = 10 * time.Second
+
 // ListLogs returns one page, newest first. A cursor takes precedence over the
 // offset, so a page boundary stays stable while new rows arrive.
 func ListLogs(ctx context.Context, database *sql.DB, limit, offset int32,
 	cursor *LogCursor, filter LogFilter) ([]models.RequestLogOut, error) {
+	ctx, cancel := context.WithTimeout(ctx, LogQueryTimeout)
+	defer cancel()
+
 	var query strings.Builder
 	query.WriteString("SELECT " + logListColumns + " FROM request_logs WHERE 1 = 1")
 
