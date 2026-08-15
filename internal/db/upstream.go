@@ -240,11 +240,11 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 	if err := ReplaceUpstreamGroups(ctx, tx, id, input.GroupIDs); err != nil {
 		return models.UpstreamOut{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return models.UpstreamOut{}, apperr.Database(err)
-	}
 
-	row, ok, err := GetUpstream(ctx, db, id)
+	// Read back inside the transaction, so the response describes the channel
+	// this call created rather than what a concurrent edit had made of it by
+	// the time the read ran.
+	row, ok, err := GetUpstream(ctx, tx, id)
 	if err != nil {
 		return models.UpstreamOut{}, err
 	}
@@ -255,8 +255,14 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 	if err != nil {
 		return out, err
 	}
-	out.GroupIDs, err = ListUpstreamGroupIDs(ctx, db, id)
-	return out, err
+	if out.GroupIDs, err = ListUpstreamGroupIDs(ctx, tx, id); err != nil {
+		return out, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return models.UpstreamOut{}, apperr.Database(err)
+	}
+	return out, nil
 }
 
 func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.UpstreamUpdate) (models.UpstreamOut, error) {
