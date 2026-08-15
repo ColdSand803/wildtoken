@@ -22,6 +22,29 @@ func ensureColumn(ctx context.Context, db *sql.DB, table, column, definition str
 	return err
 }
 
+// seedPromptTemplatesOnce inserts the starting model-test templates, but only
+// into a table that has never held any.
+//
+// Seeding on every start meant a template the operator deleted came back at the
+// next restart, and one they renamed came back alongside the rename as a
+// duplicate. ON CONFLICT(name) DO NOTHING protects a row that still exists; it
+// says nothing about one that was removed on purpose. These rows are starting
+// examples, not an invariant to restore.
+func seedPromptTemplatesOnce(ctx context.Context, db *sql.DB) error {
+	var existing int64
+	if err := db.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM model_test_prompt_templates").Scan(&existing); err != nil {
+		return fmt.Errorf("count prompt templates: %w", err)
+	}
+	if existing != 0 {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, seedModelTestPromptTemplates); err != nil {
+		return fmt.Errorf("seed prompt templates: %w", err)
+	}
+	return nil
+}
+
 // Init creates the current database schema, seeds defaults, and enables the
 // SQLite runtime settings WildToken depends on.
 func Init(ctx context.Context, db *sql.DB) error {
@@ -30,15 +53,29 @@ func Init(ctx context.Context, db *sql.DB) error {
 		"PRAGMA foreign_keys=ON;",
 		createUpstreams,
 		createModelTestPromptTemplates,
-		seedModelTestPromptTemplates,
 		createAdminCredential,
 		"CREATE INDEX IF NOT EXISTS idx_upstreams_enabled_priority ON upstreams(enabled, priority, id);",
 		createRequestLogs,
 		createRequestLogPayloads,
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_created_at ON request_logs(created_at);",
-		"CREATE INDEX IF NOT EXISTS idx_request_logs_created_at_id_desc ON request_logs(created_at DESC, id DESC);",
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_upstream_created_at ON request_logs(upstream_id, created_at);",
-		"CREATE INDEX IF NOT EXISTS idx_request_logs_upstream_created_at_id_desc ON request_logs(upstream_id, created_at DESC, id DESC);",
+		// The DESC pair these replace was never used. id is the rowid, which
+		// every index entry already carries, so the ASC indexes are (created_at,
+		// id) and (upstream_id, created_at, id) — a reverse scan of either
+		// satisfies ORDER BY created_at DESC, id DESC without a sort. The
+		// planner picked the ASC index even when both were present.
+		//
+		// Measured on 200k rows: dropping them left every query plan unchanged
+		// with no temporary B-tree, halved the time to insert 50k rows, and
+		// returned 20 MB of the 37 MB the indexes occupied. request_logs takes
+		// a row per proxied request, so that write cost was on the hot path.
+		"DROP INDEX IF EXISTS idx_request_logs_created_at_id_desc;",
+		"DROP INDEX IF EXISTS idx_request_logs_upstream_created_at_id_desc;",
+		// downstream_token_id carries ON DELETE SET NULL. Without an index
+		// SQLite has to scan every log row to apply it, so deleting one token
+		// took the write lock for as long as that scan, with every proxied
+		// request's log write queued behind it.
+		"CREATE INDEX IF NOT EXISTS idx_request_logs_downstream_token_created_at ON request_logs(downstream_token_id, created_at);",
 		"CREATE INDEX IF NOT EXISTS idx_request_log_payloads_bodies_cleared ON request_log_payloads(bodies_cleared, request_log_id);",
 		createAPITokens,
 		createGroups,
@@ -50,6 +87,10 @@ func Init(ctx context.Context, db *sql.DB) error {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("schema statement failed: %w", err)
 		}
+	}
+
+	if err := seedPromptTemplatesOnce(ctx, db); err != nil {
+		return err
 	}
 
 	for _, column := range []struct{ name, definition string }{

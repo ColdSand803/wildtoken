@@ -146,7 +146,7 @@ func ListEnabledUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamRow
 }
 
 // GetUpstream returns ok=false when no row carries the id.
-func GetUpstream(ctx context.Context, db *sql.DB, id int64) (models.UpstreamRow, bool, error) {
+func GetUpstream(ctx context.Context, db Queryer, id int64) (models.UpstreamRow, bool, error) {
 	row := db.QueryRowContext(ctx, "SELECT "+upstreamColumns+" FROM upstreams WHERE id = ?", id)
 	upstream, err := scanUpstreamRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -240,11 +240,11 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 	if err := ReplaceUpstreamGroups(ctx, tx, id, input.GroupIDs); err != nil {
 		return models.UpstreamOut{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return models.UpstreamOut{}, apperr.Database(err)
-	}
 
-	row, ok, err := GetUpstream(ctx, db, id)
+	// Read back inside the transaction, so the response describes the channel
+	// this call created rather than what a concurrent edit had made of it by
+	// the time the read ran.
+	row, ok, err := GetUpstream(ctx, tx, id)
 	if err != nil {
 		return models.UpstreamOut{}, err
 	}
@@ -255,12 +255,38 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 	if err != nil {
 		return out, err
 	}
-	out.GroupIDs, err = ListUpstreamGroupIDs(ctx, db, id)
-	return out, err
+	if out.GroupIDs, err = ListUpstreamGroupIDs(ctx, tx, id); err != nil {
+		return out, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return models.UpstreamOut{}, apperr.Database(err)
+	}
+	return out, nil
 }
 
 func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.UpstreamUpdate) (models.UpstreamOut, error) {
-	existing, ok, err := GetUpstream(ctx, db, id)
+	modelNames, modelPrefixes, modelMappings, extraHeaders, err := encodeUpstreamCollections(&input.UpstreamIn)
+	if err != nil {
+		return models.UpstreamOut{}, err
+	}
+	rateLimit, err := input.NormalizedRateLimit()
+	if err != nil {
+		return models.UpstreamOut{}, apperr.BadRequest(err.Error())
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.UpstreamOut{}, apperr.Database(err)
+	}
+	defer tx.Rollback()
+
+	// The fields this edit does not carry are read inside the transaction that
+	// writes them back. Reading them before it meant a save could carry a value
+	// another edit had already replaced — restoring an API key that had just
+	// been cleared, because the form that did not mention the key still wrote
+	// the one it had loaded.
+	existing, ok, err := GetUpstream(ctx, tx, id)
 	if err != nil {
 		return models.UpstreamOut{}, err
 	}
@@ -280,21 +306,6 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 	if input.TimeoutSeconds != nil {
 		timeout = *input.TimeoutSeconds
 	}
-
-	modelNames, modelPrefixes, modelMappings, extraHeaders, err := encodeUpstreamCollections(&input.UpstreamIn)
-	if err != nil {
-		return models.UpstreamOut{}, err
-	}
-	rateLimit, err := input.NormalizedRateLimit()
-	if err != nil {
-		return models.UpstreamOut{}, apperr.BadRequest(err.Error())
-	}
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return models.UpstreamOut{}, apperr.Database(err)
-	}
-	defer tx.Rollback()
 
 	_, err = tx.ExecContext(ctx, `UPDATE upstreams
         SET name = ?, base_url = ?, api_key = ?,

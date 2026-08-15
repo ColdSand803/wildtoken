@@ -130,8 +130,11 @@ func (c *RoutingCache) get() *routingSnapshot {
 	return c.value
 }
 
-// Invalidate drops the snapshot and advances the revision, so a load already in
-// flight cannot publish data that predates this call.
+// Invalidate advances the revision and then drops the snapshot, so a load
+// already in flight cannot publish data that predates this call.
+//
+// The revision moves first on purpose: a loader compares it before publishing,
+// so raising it is what makes an in-flight load give up.
 func (c *RoutingCache) Invalidate() {
 	c.revision.Add(1)
 	c.mu.Lock()
@@ -220,9 +223,17 @@ func matchesModel(upstream *parsedUpstream, model *string) bool {
 // selectForwardModel picks the model name sent upstream.
 //
 //  1. An exact mapping key returns the mapped value.
-//  2. Else a model_names candidate that starts with or equals the request.
-//  3. Else a model_names candidate that ends with the request.
-//  4. Otherwise the original model is forwarded unchanged.
+//  2. Else a model_names candidate equal to the request.
+//  3. Else a model_names candidate that starts with the request.
+//  4. Else a model_names candidate that ends with the request.
+//  5. Otherwise the original model is forwarded unchanged.
+//
+// Each rank is a full pass over model_names, which is what modelMatchScore
+// already ranks by. Testing equality inside the prefix pass made the answer
+// depend on the order the operator happened to list the models in: a channel
+// serving both gpt-4o-mini and gpt-4o answered a request for gpt-4o with
+// whichever came first, so asking for the larger model silently got the
+// smaller one.
 func selectForwardModel(upstream *parsedUpstream, requestedModel *string) *string {
 	if requestedModel == nil {
 		return nil
@@ -236,7 +247,13 @@ func selectForwardModel(upstream *parsedUpstream, requestedModel *string) *strin
 		}
 	}
 	for _, name := range upstream.modelNames {
-		if strings.HasPrefix(name.normalized, request) || name.normalized == request {
+		if name.normalized == request {
+			original := name.original
+			return &original
+		}
+	}
+	for _, name := range upstream.modelNames {
+		if strings.HasPrefix(name.normalized, request) {
 			original := name.original
 			return &original
 		}
@@ -261,8 +278,12 @@ type Selection struct {
 // SelectUpstream chooses the upstream that serves a request.
 //
 //  1. Direct selection via `x-wildtoken-upstream` header or `upstream` query
-//     parameter (the value can be an id or a name).
-//  2. Otherwise every enabled upstream is considered.
+//     parameter (the value can be an id or a name). A direct selection still has
+//     to serve the caller's group and match the model.
+//  2. Otherwise every enabled upstream is considered, narrowed first to the ones
+//     serving the caller's group. This filter comes before all the others: a
+//     model reachable from one group and not from another is group membership
+//     doing its job, not a routing fault.
 //  3. Channels in `exclude` are dropped as if disabled — the caller found their
 //     rate limit full this round, so re-selection falls over to the rest.
 //  4. Candidates are filtered by model match score, keeping only the highest.

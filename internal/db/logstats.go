@@ -1,6 +1,7 @@
 package db
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"log/slog"
@@ -126,6 +127,11 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
 		return apperr.Database(err)
 	}
 
+	// Bounded by the same watermark the count came from. The two statements run
+	// on their own snapshots, so a row committing between them landed in these
+	// buckets while still counting as pending — and the carry-over below then
+	// added it a second time, inflating the console's usage windows on every
+	// refresh that overlapped a write.
 	rows, err := database.QueryContext(ctx, `SELECT
            CAST((CAST(strftime('%s', created_at) AS INTEGER) / 60) * 60 AS INTEGER)
                AS bucket_start_unix_seconds,
@@ -136,9 +142,9 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
            COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
            COALESCE(SUM(prompt_cached_tokens), 0) AS prompt_cached_tokens
        FROM request_logs
-       WHERE created_at >= datetime('now', '-30 days')
+       WHERE created_at >= datetime('now', '-30 days') AND id <= ?
        GROUP BY bucket_start_unix_seconds
-       ORDER BY bucket_start_unix_seconds`)
+       ORDER BY bucket_start_unix_seconds`, maxLogID.Int64)
 	if err != nil {
 		return apperr.Database(err)
 	}
@@ -170,7 +176,7 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
 	// rebuilt buckets yet, so carry them over rather than losing the count.
 	pending := slices.Collect(maps.Values(c.state.pendingEntries))
 	slices.SortFunc(pending, func(left, right PersistedLogStats) int {
-		return int(left.ID - right.ID)
+		return cmp.Compare(left.ID, right.ID)
 	})
 	for _, entry := range pending {
 		if entry.ID <= refreshed.maxRefreshedLogID {
@@ -254,12 +260,45 @@ func (s *logStatsState) applyPersistedEntry(entry PersistedLogStats, now time.Ti
 	}
 }
 
+const (
+	// maxPendingEntries caps the rows held between refreshes.
+	//
+	// A pending entry exists to be carried across the next rebuild. If rebuilds
+	// stop happening — a locked database, a full disk — nothing trimmed the map
+	// and it grew with every request the gateway served until the process ran
+	// out of memory. The cap keeps the failure to stale statistics, which is
+	// what a failing refresh already means.
+	maxPendingEntries = 100_000
+	// pendingLowWater is what an over-cap trim reduces the map to.
+	//
+	// Trimming to the cap exactly put the map back over it on the very next
+	// batch, so every batch and every console poll paid for a full sort of
+	// every key — while holding the lock the console reads through. The gap
+	// amortizes one sort over the entries it takes to close it.
+	pendingLowWater = maxPendingEntries * 9 / 10
+)
+
 func (s *logStatsState) prune(now time.Time) {
 	oldestBucket := floorToMinute(oldestWindowStart(now))
 	for bucketStart := range s.minuteBuckets {
 		if bucketStart < oldestBucket {
 			delete(s.minuteBuckets, bucketStart)
 		}
+	}
+
+	// Nothing else to do until the map is over its cap. Entries are held only
+	// until the next rebuild carries them across, so in ordinary operation this
+	// is where prune returns.
+	if len(s.pendingEntries) <= maxPendingEntries {
+		return
+	}
+
+	// Over the cap: drop the lowest ids, which are the ones a rebuild is most
+	// likely to have accounted for already. Their counts stay in the buckets;
+	// only the ability to replay them across a rebuild is given up.
+	ids := slices.Sorted(maps.Keys(s.pendingEntries))
+	for _, id := range ids[:len(ids)-pendingLowWater] {
+		delete(s.pendingEntries, id)
 	}
 }
 

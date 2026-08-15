@@ -400,3 +400,46 @@ func TestWeightedSelectionHonorsWeightRatios(t *testing.T) {
 		t.Error("the light upstream was never selected")
 	}
 }
+
+func TestExactModelNameWinsOverALongerCandidateListedFirst(t *testing.T) {
+	// The forwarded name used to be decided by one pass that accepted a prefix
+	// match as readily as an equal one, so the answer depended on the order the
+	// operator listed the models in: asking for gpt-4o on this channel got
+	// gpt-4o-mini, silently serving a smaller model than the caller paid for.
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", Enabled: 1, Weight: 100,
+		ModelNames:    `["gpt-4o-mini","gpt-4o"]`,
+		ModelPrefixes: "[]", ModelMappings: "{}", ExtraHeaders: "{}",
+	}
+	parsed := newParsedUpstream(upstream, []int64{models.DefaultGroupID})
+
+	requested := "gpt-4o"
+	forwarded := selectForwardModel(parsed, &requested)
+	if forwarded == nil || *forwarded != "gpt-4o" {
+		t.Fatalf("forwarded model = %v, want the exact match gpt-4o", forwarded)
+	}
+
+	// A request with no exact match still falls back to the prefix candidate.
+	partial := "gpt-4"
+	forwarded = selectForwardModel(parsed, &partial)
+	if forwarded == nil || *forwarded != "gpt-4o-mini" {
+		t.Fatalf("forwarded model = %v, want the first prefix candidate", forwarded)
+	}
+}
+
+func TestHeaderNamesAreCheckedAgainstTheTokenSet(t *testing.T) {
+	for _, name := range []string{"x-tenant", "X-Tenant", "authorization", "a1", "x_y", "a.b"} {
+		if !validHeaderName(name) {
+			t.Errorf("validHeaderName(%q) = false, want it accepted", name)
+		}
+	}
+	// These used to pass, be stored, and then be rejected by the transport when
+	// the request was written — a channel that failed every request without
+	// naming why.
+	for _, name := range []string{"", "x tenant", "x(tenant)", "x,tenant", "x@tenant",
+		"x:tenant", "x\ttenant", "x\r\ntenant", "x{y}"} {
+		if validHeaderName(name) {
+			t.Errorf("validHeaderName(%q) = true, want it rejected", name)
+		}
+	}
+}

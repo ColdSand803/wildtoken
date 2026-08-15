@@ -4,15 +4,57 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/apperr"
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 )
+
+// attemptTimeout bounds one upstream attempt and reports whether it was the
+// thing that ended it.
+//
+// The bound is on silence, not on total duration. A deadline over the whole
+// attempt cut off streaming answers for the offence of being long, which is
+// exactly what a reasoning model produces; each chunk that arrives restarts the
+// clock, so what remains bounded is "the upstream stopped sending".
+//
+// Knowing whether the clock ran out is what separates a gateway timeout from a
+// client that walked away, since both reach the read as a cancelled context.
+type attemptTimeout struct {
+	cancel  context.CancelFunc
+	timer   *time.Timer
+	window  time.Duration
+	expired atomic.Bool
+}
+
+func newAttemptTimeout(cancel context.CancelFunc, window time.Duration) *attemptTimeout {
+	timeout := &attemptTimeout{cancel: cancel, window: window}
+	timeout.timer = time.AfterFunc(window, func() {
+		// Recorded before cancelling, so a reader woken by the cancellation
+		// always sees the reason for it.
+		timeout.expired.Store(true)
+		cancel()
+	})
+	return timeout
+}
+
+// extend restarts the clock after the upstream made progress.
+func (t *attemptTimeout) extend() { t.timer.Reset(t.window) }
+
+// Expired reports whether this timeout ended the attempt.
+func (t *attemptTimeout) Expired() bool { return t.expired.Load() }
+
+// stop releases the timer and the attempt's context.
+func (t *attemptTimeout) stop() {
+	t.timer.Stop()
+	t.cancel()
+}
 
 // BuildUpstreamURL builds the full upstream URL for a proxied path.
 func BuildUpstreamURL(upstream *models.UpstreamRow, path, queryParams string) string {
@@ -191,25 +233,57 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	if upstream.TimeoutSeconds > 0 {
 		timeout = time.Duration(upstream.TimeoutSeconds * float64(time.Second))
 	}
-	attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+	attemptCtx, cancel := context.WithCancel(ctx)
+	attempt := newAttemptTimeout(cancel, timeout)
 
 	request, err := buildUpstreamRequest(attemptCtx, requestCtx.Method, prepared)
 	if err != nil {
-		cancel()
+		attempt.stop()
+
+		// The channel's own configuration is what fails here — a base URL the
+		// request builder will not accept. Charging it is what eventually takes
+		// it out of routing; without that it keeps full weight and is chosen
+		// again for every request it is going to fail in the same way.
+		deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
+
+		// Logged here because the caller disarms its own fallback entry on any
+		// error, trusting that the attempt logged itself. This was the one path
+		// that did not, so the request left no trace at all.
+		message := err.Error()
+		statusCode := int32(502)
+		entry := baseLogEntry(requestCtx, upstream, prepared)
+		entry.StatusCode = &statusCode
+		entry.DurationMs = elapsedMs(start)
+		entry.Error = &message
+		deps.LogWriter.Schedule(entry)
+
+		// Returned unwrapped: buildUpstreamRequest already answers with an
+		// upstream error, and wrapping it again repeated the prefix in both the
+		// response and the log.
 		return nil, err
 	}
 
 	response, err := deps.HTTPClient.Do(request)
 	if err != nil {
-		cancel()
-		deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
+		attempt.stop()
 
-		// A deadline that elapsed is reported as a gateway timeout; anything
-		// else is a bad gateway.
+		// A client that walks away cancels this request, and the failure that
+		// surfaces here looks like any other. It is not the channel's doing, so
+		// it is reported as a client abort and left out of the health score.
+		clientGone := !attempt.Expired() && ctx.Err() != nil
+
 		statusCode := int32(502)
-		if attemptCtx.Err() == context.DeadlineExceeded {
+		switch {
+		case clientGone:
+			statusCode = 499
+		case attempt.Expired():
+			// The attempt's own clock ran out: a gateway timeout.
 			statusCode = 504
 		}
+		if !clientGone {
+			deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
+		}
+
 		message := err.Error()
 		entry := baseLogEntry(requestCtx, upstream, prepared)
 		entry.StatusCode = &statusCode
@@ -230,17 +304,28 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		statusCode := int32(status)
 		entry.StatusCode = &statusCode
 
-		stream := newSSEStream(response.Body, cancel, start, status, responseHeaders,
+		stream := newSSEStream(ctx, response.Body, attempt, start, status, responseHeaders,
 			requestCtx.LogBodyMaxBytes, entry, deps, policy, autoWeightEnabled, upstream.ID)
 		return &Response{Status: status, Headers: responseHeaders, Body: stream}, nil
 	}
 
-	bodyBytes, streamedFirstTokenMs, err := readResponseBody(response.Body, start)
+	bodyBytes, streamedFirstTokenMs, err := readResponseBody(response.Body, start, attempt.extend)
 	response.Body.Close()
-	cancel()
+	attempt.stop()
 	if err != nil {
-		deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
+		clientGone := !attempt.Expired() && ctx.Err() != nil
+
 		statusCode := int32(502)
+		switch {
+		case clientGone:
+			statusCode = 499
+		case attempt.Expired():
+			statusCode = 504
+		}
+		if !clientGone {
+			deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
+		}
+
 		message := err.Error()
 		entry := baseLogEntry(requestCtx, upstream, prepared)
 		entry.StatusCode = &statusCode
@@ -287,12 +372,14 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	entry.DurationMs = elapsedMs(start)
 	entry.UpstreamResponse = responseSnapshot
 	entry.DownstreamResponse = responseSnapshot
-	deps.LogWriter.Schedule(entry)
 
+	// Scheduled when the body is closed rather than here. Here is before the
+	// response has reached the client at all, so a client that leaves during
+	// delivery would be recorded as having received what the upstream sent.
 	return &Response{
 		Status:  status,
 		Headers: responseHeaders,
-		Body:    io.NopCloser(bytes.NewReader(bodyBytes)),
+		Body:    newBufferedStream(ctx, bodyBytes, entry, deps, statusCode),
 	}, nil
 }
 
@@ -356,9 +443,24 @@ func flattenHeaders(headers http.Header) map[string]string {
 	return flattened
 }
 
+// MaxUpstreamResponseBytes caps a buffered upstream response.
+//
+// The downstream request body is already bounded, but the response was not: a
+// misbehaving or compromised channel could return a body large enough to exhaust
+// the gateway's memory, and a handful of concurrent ones could do it outright.
+// The limit is far above any real completion, so it only ever catches a channel
+// that is not answering in good faith.
+const MaxUpstreamResponseBytes = 128 << 20
+
+// ErrUpstreamResponseTooLarge reports a buffered response that ran past the cap.
+var ErrUpstreamResponseTooLarge = errors.New("upstream response exceeded the maximum buffered size")
+
 // readResponseBody reads a full upstream body while recording the true
 // time-to-first-token for SSE streams.
-func readResponseBody(body io.Reader, start time.Time) ([]byte, *int32, error) {
+//
+// progress is called for each chunk, so the attempt's clock measures silence
+// from the upstream rather than the total time a long body takes to arrive.
+func readResponseBody(body io.Reader, start time.Time, progress func()) ([]byte, *int32, error) {
 	var collected bytes.Buffer
 	observation := &sseObservation{}
 	measure := func() int32 { return int32(time.Since(start).Milliseconds()) }
@@ -367,6 +469,10 @@ func readResponseBody(body io.Reader, start time.Time) ([]byte, *int32, error) {
 	for {
 		read, err := body.Read(buffer)
 		if read > 0 {
+			if collected.Len()+read > MaxUpstreamResponseBytes {
+				return nil, nil, ErrUpstreamResponseTooLarge
+			}
+			progress()
 			chunk := buffer[:read]
 			collected.Write(chunk)
 			observation.observeChunk(chunk, measure)

@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 	"github.com/liguangsheng/wildtoken/internal/ratelimit"
 )
 
@@ -86,7 +90,7 @@ func TestAQuotaRefusalCarriesBothATopLevelCodeAndTheVendorShape(t *testing.T) {
 	} {
 		t.Run(route.name, func(t *testing.T) {
 			limiter := ratelimit.NewLimiter()
-			handler := RequireDownstream(database, limiter)(http.HandlerFunc(
+			handler := RequireDownstream(database, limiter, quota.NewTracker())(http.HandlerFunc(
 				func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 			request := httptest.NewRequest(http.MethodPost, route.path, nil)
 			request.Header.Set("authorization", "Bearer "+created.Token)
@@ -193,7 +197,7 @@ func TestTheAdmittedRequestCarriesItsQuotaState(t *testing.T) {
 
 	var seen DownstreamAuth
 	limiter := ratelimit.NewLimiter()
-	handler := RequireDownstream(database, limiter)(http.HandlerFunc(
+	handler := RequireDownstream(database, limiter, quota.NewTracker())(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
 			seen, _ = DownstreamAuthFrom(r.Context())
 		}))
@@ -215,7 +219,7 @@ func TestTheAdmittedRequestCarriesItsQuotaState(t *testing.T) {
 func probeDownstream(t *testing.T, database *sql.DB, token string) (int, []byte) {
 	t.Helper()
 	limiter := ratelimit.NewLimiter()
-	handler := RequireDownstream(database, limiter)(http.HandlerFunc(
+	handler := RequireDownstream(database, limiter, quota.NewTracker())(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 
 	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
@@ -223,4 +227,126 @@ func probeDownstream(t *testing.T, database *sql.DB, token string) (int, []byte)
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 	return recorder.Code, recorder.Body.Bytes()
+}
+
+func TestConcurrentRequestsCannotEachSpendTheLastOfTheQuota(t *testing.T) {
+	database := authTestDB(t)
+	ctx := context.Background()
+
+	// A budget with room for a handful of provisional charges, not for the
+	// fifty callers that arrive at once.
+	limit := 4 * quota.ProvisionalCost
+	created, err := db.CreateToken(ctx, database, &models.APITokenIn{
+		Name: "limited", Enabled: true,
+		LimitExpression: strconv.FormatInt(limit, 10),
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	limiter := ratelimit.NewLimiter()
+	defer limiter.Close()
+
+	release := make(chan struct{})
+	admitted := make(chan struct{}, 64)
+	handler := RequireDownstream(database, limiter, quota.NewTracker())(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			// Held open so every caller is in flight at once, which is the
+			// window a check against the stored total alone could not see.
+			admitted <- struct{}{}
+			<-release
+			w.WriteHeader(http.StatusOK)
+		}))
+
+	var wg sync.WaitGroup
+	statuses := make(chan int, 64)
+	for range 64 {
+		wg.Go(func() {
+			request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			request.Header.Set("authorization", "Bearer "+created.Token)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			statuses <- recorder.Code
+		})
+	}
+
+	// Every caller has to be decided before any of them is released, or the
+	// ones that finish first hand their budget back and the later arrivals find
+	// room that was never theirs. The refused have reported; the admitted are
+	// parked in the handler.
+	deadline := time.Now().Add(10 * time.Second)
+	for len(statuses)+len(admitted) < 64 {
+		if time.Now().After(deadline) {
+			t.Fatalf("only %d of 64 callers reached a decision",
+				len(statuses)+len(admitted))
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	close(release)
+	wg.Wait()
+	close(statuses)
+
+	allowed := 0
+	for status := range statuses {
+		if status == http.StatusOK {
+			allowed++
+		}
+	}
+	if allowed != 4 {
+		t.Errorf("%d concurrent requests were admitted against a budget for 4", allowed)
+	}
+}
+
+func TestAdmissionWeighsUsageTheStoredTotalDoesNotShowYet(t *testing.T) {
+	database := authTestDB(t)
+	ctx := context.Background()
+
+	created, err := db.CreateToken(ctx, database, &models.APITokenIn{
+		Name: "limited", Enabled: true, LimitExpression: "1K",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	tracker := quota.NewTracker()
+	limiter := ratelimit.NewLimiter()
+	defer limiter.Close()
+
+	handler := RequireDownstream(database, limiter, tracker)(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+
+	probe := func() int {
+		request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+		request.Header.Set("authorization", "Bearer "+created.Token)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		return recorder.Code
+	}
+
+	if status := probe(); status != http.StatusOK {
+		t.Fatalf("an unused token got %d, want 200", status)
+	}
+
+	// A request that has finished but whose row is still queued has spent the
+	// budget even though the stored total reads zero. Admitting against the
+	// stored total alone handed the same tokens out twice.
+	tracker.Meter(created.ID, 1000)
+	if status := probe(); status != http.StatusTooManyRequests {
+		t.Errorf("a token whose usage was still queued got %d, want 429", status)
+	}
+
+	// Once the row commits, the hold is released and the stored total carries
+	// it instead.
+	tracker.Settle(created.ID, 1000)
+	if _, err := database.Exec(
+		"UPDATE api_tokens SET used_tokens = 1000 WHERE id = ?", created.ID); err != nil {
+		t.Fatalf("commit usage: %v", err)
+	}
+	if status := probe(); status != http.StatusTooManyRequests {
+		t.Errorf("an exhausted token got %d, want 429", status)
+	}
+	if held := tracker.Outstanding(created.ID); held != 0 {
+		t.Errorf("tracker still holds %d after the row committed", held)
+	}
 }

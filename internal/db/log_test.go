@@ -538,3 +538,183 @@ func TestRefreshPreservesPendingEntriesNewerThanTheWatermark(t *testing.T) {
 		t.Errorf("window = %+v, want the pending entry merged in", window)
 	}
 }
+
+func TestPendingEntriesAreBoundedWhenRefreshesStopHappening(t *testing.T) {
+	cache := NewLogStatsCache()
+	now := nowUnix()
+
+	// Every committed row is held until the next successful rebuild carries it
+	// across. Nothing trimmed the map, so a database that stopped answering
+	// turned steady traffic into unbounded memory.
+	surplus := 1000
+	entries := make([]PersistedLogStats, 0, maxPendingEntries+surplus)
+	for id := range int64(maxPendingEntries + surplus) {
+		entries = append(entries, PersistedLogStats{ID: id + 1, CreatedAtUnixSeconds: now})
+	}
+	cache.RecordPersistedEntries(entries)
+
+	// Snapshot prunes, which is where the cap applies.
+	snapshot := cache.Snapshot()
+
+	cache.mu.Lock()
+	held := len(cache.state.pendingEntries)
+	cache.mu.Unlock()
+
+	if held > maxPendingEntries {
+		t.Errorf("held %d pending entries, want at most %d", held, maxPendingEntries)
+	}
+	// Trimming leaves headroom rather than stopping at the cap, so the next
+	// batch does not put the map straight back over it and pay for another
+	// full sort of every key.
+	if held > pendingLowWater {
+		t.Errorf("trimmed to %d, want the low-water mark %d so the sort amortizes",
+			held, pendingLowWater)
+	}
+	// The counts the dropped entries contributed stay in the buckets; only the
+	// ability to replay them across a rebuild is given up.
+	if snapshot.TotalLogCount != int64(maxPendingEntries+surplus) {
+		t.Errorf("total = %d, want every entry counted once", snapshot.TotalLogCount)
+	}
+}
+
+func TestPruneDoesNotSortWhileTheMapIsWithinItsCap(t *testing.T) {
+	cache := NewLogStatsCache()
+	now := nowUnix()
+
+	// The ordinary case is a map holding one refresh interval of rows. Prune
+	// runs on every batch and every console poll, so it must not touch the
+	// entries at all until the cap is actually reached.
+	entries := make([]PersistedLogStats, 0, 128)
+	for id := range int64(128) {
+		entries = append(entries, PersistedLogStats{ID: id + 1, CreatedAtUnixSeconds: now})
+	}
+	cache.RecordPersistedEntries(entries)
+	cache.Snapshot()
+
+	cache.mu.Lock()
+	held := len(cache.state.pendingEntries)
+	cache.mu.Unlock()
+
+	if held != 128 {
+		t.Errorf("held %d entries, want all 128 kept below the cap", held)
+	}
+}
+
+func TestRetentionDeletesEverythingExpiredAcrossBatches(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+
+	// More rows than one batch, so the loop has to come back for the rest.
+	// Deleting the window in one statement is what this replaces: the amount
+	// waiting is not bounded by anything the gateway controls.
+	total := int(logDeleteBatchSize)*2 + 37
+	for i := range total {
+		if _, err := database.Exec(`INSERT INTO request_logs
+           (created_at, method, path, client_type, stream)
+           VALUES (datetime('now', '-40 days'), 'POST', '/v1/responses', 'codex', 0)`); err != nil {
+			t.Fatalf("insert %d: %v", i, err)
+		}
+	}
+	// One row inside the window, which must survive.
+	if _, err := database.Exec(`INSERT INTO request_logs
+       (created_at, method, path, client_type, stream)
+       VALUES (datetime('now'), 'POST', '/v1/responses', 'codex', 0)`); err != nil {
+		t.Fatalf("insert recent: %v", err)
+	}
+
+	if err := DeleteOldLogs(ctx, database, 30); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	var remaining int64
+	if err := database.QueryRow("SELECT COUNT(*) FROM request_logs").Scan(&remaining); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if remaining != 1 {
+		t.Errorf("%d rows left, want only the one inside the window", remaining)
+	}
+}
+
+func TestRetentionTakesThePayloadRowsWithIt(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+
+	result, err := database.Exec(`INSERT INTO request_logs
+       (created_at, method, path, client_type, stream)
+       VALUES (datetime('now', '-40 days'), 'POST', '/v1/responses', 'codex', 0)`)
+	if err != nil {
+		t.Fatalf("insert log: %v", err)
+	}
+	logID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("last insert id: %v", err)
+	}
+	if _, err := database.Exec(`INSERT INTO request_log_payloads
+       (request_log_id, request_snapshot, response_snapshot)
+       VALUES (?, '{"body":"x"}', '{"body":"y"}')`, logID); err != nil {
+		t.Fatalf("insert payload: %v", err)
+	}
+
+	if err := DeleteOldLogs(ctx, database, 30); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	// The payload goes with its parent through ON DELETE CASCADE, which is why
+	// the delete no longer names it separately.
+	var payloads int64
+	if err := database.QueryRow(
+		"SELECT COUNT(*) FROM request_log_payloads").Scan(&payloads); err != nil {
+		t.Fatalf("count payloads: %v", err)
+	}
+	if payloads != 0 {
+		t.Errorf("%d payload rows survived their log row", payloads)
+	}
+}
+
+func TestALogListingGivesUpRatherThanHoldingItsConnection(t *testing.T) {
+	database := memoryDB(t)
+
+	// None of the filters can use an index, so a filter matching nothing reads
+	// the whole table while holding one of the few pooled connections. An
+	// already-cancelled context stands in for the deadline expiring: what
+	// matters is that the query reports it instead of running to completion.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	search := "needle"
+	_, err := ListLogs(ctx, database, 50, 0, nil, LogFilter{Search: &search})
+	if err == nil {
+		t.Fatal("a cancelled listing returned as though it had finished")
+	}
+}
+
+func TestLogSearchIsBoundedBeforeItReachesTheQuery(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+
+	if _, err := database.Exec(`INSERT INTO request_logs
+       (created_at, method, path, client_type, stream, upstream_name)
+       VALUES (datetime('now'), 'POST', '/v1/responses', 'codex', 0, 'primary')`); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	// A bounded term still finds what it names.
+	search := "primary"
+	entries, err := ListLogs(ctx, database, 50, 0, nil, LogFilter{Search: &search})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("found %d rows, want the one matching the search", len(entries))
+	}
+
+	// And the wildcards inside it stay literal.
+	wildcard := "%"
+	entries, err = ListLogs(ctx, database, 50, 0, nil, LogFilter{Search: &wildcard})
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("a literal %% matched %d rows, want none", len(entries))
+	}
+}

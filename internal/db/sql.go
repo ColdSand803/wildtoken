@@ -138,9 +138,12 @@ CREATE TABLE IF NOT EXISTS groups (
 // DefaultGroupName is the group every channel and token falls back to.
 const DefaultGroupName = "default"
 
-const seedDefaultGroup = `INSERT INTO groups (id, name, description)
-    VALUES (1, 'default', '默认分组')
-    ON CONFLICT(name) DO NOTHING`
+// OR IGNORE rather than a named conflict target, because either unique column
+// can be the one already taken. Naming only `name` meant a database whose id 1
+// belonged to some other group failed Init on the primary key instead, and the
+// service could not start to let anyone fix it.
+const seedDefaultGroup = `INSERT OR IGNORE INTO groups (id, name, description)
+    VALUES (1, 'default', '默认分组')`
 
 // A channel may serve several groups, so membership is a join table. A token
 // belongs to exactly one group, which is a column on api_tokens instead.

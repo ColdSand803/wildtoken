@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/quota"
 )
 
 func decodeSnapshotMap(t *testing.T, raw json.RawMessage) map[string]any {
@@ -228,7 +230,7 @@ func TestLogWriterBatchesQueuedEntriesAndUpdatesMetrics(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := NewLogWriter(ctx, database, runtimeMetrics, logStats, 16)
+	writer := NewLogWriter(ctx, database, runtimeMetrics, logStats, 16, quota.NewTracker())
 	events, unsubscribe := writer.Subscribe()
 	defer unsubscribe()
 
@@ -308,7 +310,7 @@ func TestLogWriterDropsEntriesRatherThanBlockingWhenTheQueueIsFull(t *testing.T)
 	// A zero capacity is raised to one, so exactly one entry can be queued while
 	// the writer is busy.
 	ctx, cancel := context.WithCancel(context.Background())
-	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 1)
+	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 1, quota.NewTracker())
 
 	// Stop the writer before scheduling, so nothing drains the queue.
 	cancel()
@@ -443,4 +445,44 @@ func TestARequestWithoutUsageLeavesTheQuotaUntouched(t *testing.T) {
 	if reloaded.Quota.UsedTokens != 0 {
 		t.Errorf("used = %d, want 0 for a request with no usage", reloaded.Quota.UsedTokens)
 	}
+}
+
+func TestSchedulingAfterCloseDropsTheEntryRatherThanPanicking(t *testing.T) {
+	database := loggingTestDB(t)
+	runtimeMetrics := metrics.New()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 8, quota.NewTracker())
+	writer.Close()
+
+	// A stream still running when the server stopped waiting for it schedules
+	// its log after shutdown has closed the queue. Sending on a closed channel
+	// panics, and the select's default case does not prevent that.
+	writer.Schedule(LogEntry{Method: "POST", Path: "/v1/responses"})
+
+	if dropped := runtimeMetrics.Snapshot().LogDroppedTotal; dropped != 1 {
+		t.Errorf("dropped = %d, want the entry to be dropped once", dropped)
+	}
+}
+
+func TestSchedulingConcurrentlyWithCloseNeverPanics(t *testing.T) {
+	database := loggingTestDB(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := NewLogWriter(ctx, database, metrics.New(), db.NewLogStatsCache(), 8, quota.NewTracker())
+
+	// Close races the schedulers rather than following them, which is the order
+	// a shutdown that timed out on its in-flight requests produces.
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			for range 32 {
+				writer.Schedule(LogEntry{Method: "POST", Path: "/v1/responses"})
+			}
+		})
+	}
+	wg.Go(writer.Close)
+	wg.Wait()
 }

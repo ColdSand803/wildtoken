@@ -10,6 +10,12 @@ import (
 // sseRecentDisconnectWindow bounds the rolling disconnect count.
 const sseRecentDisconnectWindow = 10 * time.Minute
 
+// disconnectBucket counts the disconnects recorded during one whole second.
+type disconnectBucket struct {
+	second int64
+	count  uint64
+}
+
 // Snapshot is a consistent read of every counter.
 type Snapshot struct {
 	ActiveSSEStreams          uint64
@@ -62,8 +68,13 @@ type Runtime struct {
 	cleanupLastDurationMs          atomic.Uint64
 	cleanupLastRowsCleared         atomic.Uint64
 
-	recentMu             sync.Mutex
-	recentSSEDisconnects []time.Time
+	recentMu sync.Mutex
+	// recentSSEDisconnects counts per whole second rather than holding a
+	// timestamp per disconnect. A client can open and abandon streams as fast
+	// as it likes, and the window kept every one of them: ten minutes of that
+	// was hundreds of megabytes of timestamps for a number the console renders
+	// as one integer. Counting by second bounds it to the window's length.
+	recentSSEDisconnects []disconnectBucket
 }
 
 func New() *Runtime { return &Runtime{} }
@@ -88,10 +99,21 @@ func (r *Runtime) RecordSSEComplete() { r.sseCompletedTotal.Add(1) }
 func (r *Runtime) RecordSSEClientDisconnect() {
 	r.sseClientDisconnectsTotal.Add(1)
 
+	now := time.Now()
 	r.recentMu.Lock()
 	defer r.recentMu.Unlock()
-	r.recentSSEDisconnects = append(r.recentSSEDisconnects, time.Now())
-	r.pruneRecentLocked(time.Now())
+	r.pruneRecentLocked(now)
+
+	second := now.Unix()
+	if last := len(r.recentSSEDisconnects) - 1; last >= 0 &&
+		r.recentSSEDisconnects[last].second >= second {
+		// A clock stepping backwards must not break the ascending order the
+		// window relies on, so an out-of-order tick joins the newest bucket.
+		r.recentSSEDisconnects[last].count++
+		return
+	}
+	r.recentSSEDisconnects = append(r.recentSSEDisconnects,
+		disconnectBucket{second: second, count: 1})
 }
 
 func (r *Runtime) RecordSSEUpstreamError() { r.sseUpstreamErrorsTotal.Add(1) }
@@ -158,7 +180,10 @@ func (r *Runtime) FinishCleanup(success bool, duration time.Duration) {
 func (r *Runtime) Snapshot() Snapshot {
 	r.recentMu.Lock()
 	r.pruneRecentLocked(time.Now())
-	recentDisconnects := uint64(len(r.recentSSEDisconnects))
+	var recentDisconnects uint64
+	for _, bucket := range r.recentSSEDisconnects {
+		recentDisconnects += bucket.count
+	}
 	r.recentMu.Unlock()
 
 	return Snapshot{
@@ -191,17 +216,19 @@ func (r *Runtime) Snapshot() Snapshot {
 // pruneRecentLocked drops disconnects that fell out of the window. The caller
 // must hold recentMu.
 func (r *Runtime) pruneRecentLocked(now time.Time) {
-	cutoff := now.Add(-sseRecentDisconnectWindow)
-	kept := 0
-	for _, at := range r.recentSSEDisconnects {
-		if at.After(cutoff) || at.Equal(cutoff) {
-			break
-		}
-		kept++
+	cutoff := now.Add(-sseRecentDisconnectWindow).Unix()
+	dropped := 0
+	for dropped < len(r.recentSSEDisconnects) &&
+		r.recentSSEDisconnects[dropped].second < cutoff {
+		dropped++
 	}
-	if kept > 0 {
-		r.recentSSEDisconnects = r.recentSSEDisconnects[kept:]
+	if dropped == 0 {
+		return
 	}
+	// The window holds one bucket per second at most, so moving the survivors
+	// to the front is cheap and keeps the backing array from creeping forward.
+	r.recentSSEDisconnects = append(r.recentSSEDisconnects[:0],
+		r.recentSSEDisconnects[dropped:]...)
 }
 
 func nonZeroInt64(value int64) *int64 {

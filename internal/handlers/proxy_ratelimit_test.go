@@ -30,7 +30,7 @@ func proxyRateLimitState(t *testing.T) *appstate.State {
 	state.UpstreamRateLimiter = ratelimit.NewLimiter()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 64)
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 64, state.Quotas)
 	t.Cleanup(func() {
 		state.LogWriter.Close()
 		state.TokenRateLimiter.Close()
@@ -44,7 +44,7 @@ func proxyRateLimitState(t *testing.T) *appstate.State {
 // request travels the same path production traffic does.
 func proxyRateLimitRouter(state *appstate.State) http.Handler {
 	router := chi.NewRouter()
-	router.Use(middleware.RequireDownstream(state.DB, state.TokenRateLimiter))
+	router.Use(middleware.RequireDownstream(state.DB, state.TokenRateLimiter, state.Quotas))
 	router.Handle("/v1/*", ProxyHandler(state))
 	return router
 }

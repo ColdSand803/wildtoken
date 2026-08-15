@@ -194,13 +194,26 @@ func TestForwardedAddressesAreParsedAndAlwaysTreatedAsRemote(t *testing.T) {
 		}
 	}
 
-	// A forwarded loopback address must not inherit the loopback exemption,
-	// or any caller could claim it and shed their failure history.
-	request := requestWithHeaders(map[string]string{"x-forwarded-for": "127.0.0.1"})
-	request.RemoteAddr = "203.0.113.9:5000"
-	client := adminClient(request, "x-forwarded-for")
-	if client.Kind != authstate.ClientRemote {
+	// A forwarded loopback address must not be classified as loopback, or any
+	// caller could claim it and count against the operator's own gate.
+	forgedLoopback := requestWithHeaders(map[string]string{"x-forwarded-for": "127.0.0.1"})
+	forgedLoopback.RemoteAddr = "10.0.0.1:5000"
+	if client := adminClient(forgedLoopback, "x-forwarded-for"); client.Kind != authstate.ClientRemote {
 		t.Error("a forwarded loopback address was not classified as remote")
+	}
+
+	// A peer that reached the port directly off the internet is not a proxy, so
+	// its header is ignored and it is tracked by the address it actually came
+	// from. Otherwise it could rotate the header per request and never build up
+	// the failure streak that blocks it.
+	direct := requestWithHeaders(map[string]string{"x-forwarded-for": "198.51.100.4"})
+	direct.RemoteAddr = "203.0.113.9:5000"
+	client := adminClient(direct, "x-forwarded-for")
+	if client.Kind != authstate.ClientRemote {
+		t.Error("a direct caller was not classified as remote")
+	}
+	if client.Addr != netip.MustParseAddr("203.0.113.9") {
+		t.Errorf("client address = %v, want the peer address rather than its own claim", client.Addr)
 	}
 
 	// Only the first entry of a chain is honored.
@@ -211,10 +224,10 @@ func TestForwardedAddressesAreParsedAndAlwaysTreatedAsRemote(t *testing.T) {
 	}
 
 	// Without a configured header the peer address decides, so a real loopback
-	// caller keeps its exemption.
-	direct := requestWithHeaders(map[string]string{"x-forwarded-for": "203.0.113.7"})
-	direct.RemoteAddr = "127.0.0.1:5000"
-	if client := adminClient(direct, ""); client.Kind != authstate.ClientLoopback {
+	// caller is still recognised as one.
+	unconfigured := requestWithHeaders(map[string]string{"x-forwarded-for": "203.0.113.7"})
+	unconfigured.RemoteAddr = "127.0.0.1:5000"
+	if client := adminClient(unconfigured, ""); client.Kind != authstate.ClientLoopback {
 		t.Error("an unconfigured header let a caller override its identity")
 	}
 }

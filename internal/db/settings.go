@@ -40,14 +40,24 @@ func ListModelTestPromptTemplates(ctx context.Context, db *sql.DB) ([]models.Mod
 	return templates, nil
 }
 
-func getModelTestPromptTemplate(ctx context.Context, db *sql.DB, id int64) (models.ModelTestPromptTemplate, error) {
+func getModelTestPromptTemplate(ctx context.Context, db Queryer, id int64) (models.ModelTestPromptTemplate, error) {
 	row := db.QueryRowContext(ctx,
 		"SELECT "+modelTestPromptColumns+" FROM model_test_prompt_templates WHERE id = ?", id)
 	return scanModelTestPromptTemplate(row)
 }
 
+// CreateModelTestPromptTemplate inserts a template and returns the row it made.
+//
+// The read back shares the transaction with the write, so it reports this
+// insert rather than a later edit's work.
 func CreateModelTestPromptTemplate(ctx context.Context, db *sql.DB, input *models.ModelTestPromptTemplateIn) (models.ModelTestPromptTemplate, error) {
-	result, err := db.ExecContext(ctx,
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.ModelTestPromptTemplate{}, apperr.Database(err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx,
 		"INSERT INTO model_test_prompt_templates (name, prompt, created_at, updated_at) VALUES (?, ?, datetime('now'), datetime('now'))",
 		trimSpace(input.Name), input.Prompt)
 	if err != nil {
@@ -57,15 +67,24 @@ func CreateModelTestPromptTemplate(ctx context.Context, db *sql.DB, input *model
 	if err != nil {
 		return models.ModelTestPromptTemplate{}, apperr.Database(err)
 	}
-	template, err := getModelTestPromptTemplate(ctx, db, id)
+	template, err := getModelTestPromptTemplate(ctx, tx, id)
 	if err != nil {
+		return models.ModelTestPromptTemplate{}, apperr.Database(err)
+	}
+	if err := tx.Commit(); err != nil {
 		return models.ModelTestPromptTemplate{}, apperr.Database(err)
 	}
 	return template, nil
 }
 
 func UpdateModelTestPromptTemplate(ctx context.Context, db *sql.DB, id int64, input *models.ModelTestPromptTemplateIn) (models.ModelTestPromptTemplate, bool, error) {
-	result, err := db.ExecContext(ctx,
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.ModelTestPromptTemplate{}, false, apperr.Database(err)
+	}
+	defer tx.Rollback()
+
+	result, err := tx.ExecContext(ctx,
 		"UPDATE model_test_prompt_templates SET name = ?, prompt = ?, updated_at = datetime('now') WHERE id = ?",
 		trimSpace(input.Name), input.Prompt, id)
 	if err != nil {
@@ -78,8 +97,11 @@ func UpdateModelTestPromptTemplate(ctx context.Context, db *sql.DB, id int64, in
 	if affected == 0 {
 		return models.ModelTestPromptTemplate{}, false, nil
 	}
-	template, err := getModelTestPromptTemplate(ctx, db, id)
+	template, err := getModelTestPromptTemplate(ctx, tx, id)
 	if err != nil {
+		return models.ModelTestPromptTemplate{}, false, apperr.Database(err)
+	}
+	if err := tx.Commit(); err != nil {
 		return models.ModelTestPromptTemplate{}, false, apperr.Database(err)
 	}
 	return template, true, nil

@@ -191,3 +191,125 @@ func TestLimiter_SlidingWindow(t *testing.T) {
 		t.Fatal("expected request to be allowed after window slid")
 	}
 }
+
+// age moves a window's recorded buckets into the past, standing in for elapsed
+// time so a day-long window can be tested without waiting one out.
+func age(t *testing.T, limiter *Limiter, tokenID int64, by time.Duration) {
+	t.Helper()
+
+	limiter.mu.RLock()
+	window, ok := limiter.windows[tokenID]
+	limiter.mu.RUnlock()
+	if !ok {
+		t.Fatalf("token %d should be tracked", tokenID)
+	}
+
+	window.mu.Lock()
+	defer window.mu.Unlock()
+	for i := range window.buckets {
+		window.buckets[i].second -= int64(by.Seconds())
+	}
+	window.lastUsed = window.lastUsed.Add(-by)
+}
+
+func TestLimiter_CleanupKeepsLongWindowCounts(t *testing.T) {
+	limiter := NewLimiter()
+	defer limiter.Close()
+
+	// Cleanup used to drop every bucket older than a fixed span, regardless of
+	// the window the limit actually configured. A daily budget was handed out
+	// again every couple of hours, admitting several times what it allowed.
+	rateLimit := &RateLimit{Requests: 3, Window: 24 * time.Hour}
+	tokenID := int64(11)
+
+	for i := range 3 {
+		if !limiter.Check(tokenID, rateLimit) {
+			t.Fatalf("request %d should be allowed", i)
+		}
+	}
+
+	age(t, limiter, tokenID, 3*time.Hour)
+	limiter.cleanup()
+
+	if limiter.Check(tokenID, rateLimit) {
+		t.Fatal("expected a daily limit to stay exhausted three hours in")
+	}
+}
+
+func TestLimiter_CleanupReclaimsIdleWindows(t *testing.T) {
+	limiter := NewLimiter()
+	defer limiter.Close()
+
+	tokenID := int64(12)
+	if !limiter.Check(tokenID, &RateLimit{Requests: 5, Window: time.Minute}) {
+		t.Fatal("first request should be allowed")
+	}
+
+	age(t, limiter, tokenID, 2*time.Hour)
+	limiter.cleanup()
+
+	limiter.mu.RLock()
+	_, tracked := limiter.windows[tokenID]
+	limiter.mu.RUnlock()
+	if tracked {
+		t.Fatal("expected an idle window to be reclaimed rather than tracked for the life of the process")
+	}
+}
+
+func TestLimiter_CleanupKeepsWindowInUse(t *testing.T) {
+	limiter := NewLimiter()
+	defer limiter.Close()
+
+	rateLimit := &RateLimit{Requests: 2, Window: time.Hour}
+	tokenID := int64(13)
+
+	for i := range 2 {
+		if !limiter.Check(tokenID, rateLimit) {
+			t.Fatalf("request %d should be allowed", i)
+		}
+	}
+
+	// Nothing has expired, so cleanup must leave the counts alone.
+	limiter.cleanup()
+
+	if limiter.Check(tokenID, rateLimit) {
+		t.Fatal("expected the limit to remain exhausted across a cleanup pass")
+	}
+}
+
+func TestLimiter_ExpiryReleasesBuckets(t *testing.T) {
+	limiter := NewLimiter()
+	defer limiter.Close()
+
+	rateLimit := &RateLimit{Requests: 100, Window: 2 * time.Second}
+	tokenID := int64(14)
+
+	for range 50 {
+		if !limiter.Check(tokenID, rateLimit) {
+			t.Fatal("request should be allowed")
+		}
+	}
+
+	// Buckets that leave the window must be released rather than accumulating
+	// for as long as the token keeps making requests.
+	age(t, limiter, tokenID, time.Hour)
+	if !limiter.Check(tokenID, rateLimit) {
+		t.Fatal("expected a request after the window slid to be allowed")
+	}
+
+	limiter.mu.RLock()
+	window := limiter.windows[tokenID]
+	limiter.mu.RUnlock()
+
+	window.mu.Lock()
+	live := len(window.buckets) - window.head
+	total := window.total
+	window.mu.Unlock()
+
+	if live != 1 {
+		t.Fatalf("expected 1 live bucket after expiry, got %d", live)
+	}
+	if total != 1 {
+		t.Fatalf("expected the running total to track the live buckets, got %d", total)
+	}
+}

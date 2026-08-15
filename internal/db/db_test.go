@@ -151,8 +151,9 @@ func TestTokenPreviewNeverContainsAShortTokenInFull(t *testing.T) {
 	for _, testCase := range []struct{ token, want string }{
 		{"", "…"},
 		{"x", "…"},
-		{"short", "sh…"},
-		{"long-enough-token", "long-eno…"},
+		// A quarter, not a half: half of a five-character token is most of it.
+		{"short", "s…"},
+		{"long-enough-token", "long…"},
 	} {
 		if got := TokenPreview(testCase.token); got != testCase.want {
 			t.Errorf("TokenPreview(%q) = %q, want %q", testCase.token, got, testCase.want)
@@ -1062,5 +1063,137 @@ func TestUpstreamRateLimitRoundTrips(t *testing.T) {
 	update.RateLimit = &invalid
 	if _, err := UpdateUpstream(ctx, db, created.ID, &update); err == nil {
 		t.Error("an invalid rate limit expression was accepted")
+	}
+}
+
+func TestDeletingAGroupRehomesTheChannelsItWasTheLastGroupOf(t *testing.T) {
+	db := memoryDB(t)
+	ctx := context.Background()
+
+	group, err := CreateGroup(ctx, db, &models.GroupIn{Name: "team-a"})
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+
+	// One channel serves only the doomed group; the other also serves default.
+	only := models.DefaultUpstreamIn()
+	only.Name = "only-in-team-a"
+	only.BaseURL = "https://api.example.com"
+	only.GroupIDs = []int64{group.ID}
+	onlyCreated, err := CreateUpstream(ctx, db, &only, 300)
+	if err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	shared := models.DefaultUpstreamIn()
+	shared.Name = "in-both"
+	shared.BaseURL = "https://api.example.com"
+	shared.GroupIDs = []int64{group.ID, models.DefaultGroupID}
+	sharedCreated, err := CreateUpstream(ctx, db, &shared, 300)
+	if err != nil {
+		t.Fatalf("create shared channel: %v", err)
+	}
+
+	if _, err := DeleteGroup(ctx, db, group.ID); err != nil {
+		t.Fatalf("delete group: %v", err)
+	}
+
+	// The cascade alone left this channel in no group at all: still enabled,
+	// still listed, and reachable by no token in the system.
+	groups, err := ListUpstreamGroupIDs(ctx, db, onlyCreated.ID)
+	if err != nil {
+		t.Fatalf("list groups: %v", err)
+	}
+	if len(groups) != 1 || groups[0] != models.DefaultGroupID {
+		t.Errorf("channel groups = %v, want the default group", groups)
+	}
+
+	// A channel that had somewhere else to go is left where it was.
+	sharedGroups, err := ListUpstreamGroupIDs(ctx, db, sharedCreated.ID)
+	if err != nil {
+		t.Fatalf("list shared groups: %v", err)
+	}
+	if len(sharedGroups) != 1 || sharedGroups[0] != models.DefaultGroupID {
+		t.Errorf("shared channel groups = %v, want only the default group", sharedGroups)
+	}
+
+	reachable, err := ListEnabledUpstreamsInGroup(ctx, db, models.DefaultGroupID)
+	if err != nil {
+		t.Fatalf("list reachable: %v", err)
+	}
+	if len(reachable) != 2 {
+		t.Errorf("default group reaches %d channels, want 2", len(reachable))
+	}
+}
+
+func TestCreatingATokenRejectsAGroupThatDoesNotExist(t *testing.T) {
+	db := memoryDB(t)
+	ctx := context.Background()
+
+	missing := int64(4242)
+	input := models.APITokenIn{Name: "caller", Enabled: true, GroupID: &missing}
+	if _, err := CreateToken(ctx, db, &input); err == nil {
+		t.Fatal("a token was created pointing at a group that does not exist")
+	}
+
+	var count int64
+	if err := db.QueryRow("SELECT COUNT(*) FROM api_tokens").Scan(&count); err != nil {
+		t.Fatalf("count tokens: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("%d tokens were left behind by a rejected create", count)
+	}
+}
+
+func TestTokenPreviewNeverShowsMostOfAShortToken(t *testing.T) {
+	// A generated token is 32 characters and still shows eight, which is what
+	// tells two credentials apart in a list.
+	if preview := TokenPreview("abcdefghijklmnopqrstuvwxyz012345"); preview != "abcdefgh…" {
+		t.Errorf("preview = %q, want the first eight characters", preview)
+	}
+
+	// A custom one can be much shorter, and half of a short token is most of
+	// it: nine characters used to reveal eight of them.
+	for _, token := range []string{"a", "abcd", "abcdefgh", "abcdefghi", "abcdefghijklmnop"} {
+		preview := TokenPreview(token)
+		shown := len([]rune(preview)) - 1 // the ellipsis
+		if shown*4 > len([]rune(token)) {
+			t.Errorf("preview of a %d-character token showed %d of them",
+				len([]rune(token)), shown)
+		}
+	}
+}
+
+func TestInitSurvivesAGroupsTableThatAlreadyUsesTheDefaultSlot(t *testing.T) {
+	ctx := context.Background()
+
+	// Either unique column can be the one already taken, and Init has to start
+	// the service either way — it is the only thing that could let an operator
+	// in to fix the row.
+	for name, occupy := range map[string]string{
+		"id 1 belongs to another group": `INSERT INTO groups (id, name, description)
+             VALUES (1, 'not-default', '')`,
+		"the default name has another id": `INSERT INTO groups (id, name, description)
+             VALUES (7, 'default', '')`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			database, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+			if err != nil {
+				t.Fatalf("open: %v", err)
+			}
+			database.SetMaxOpenConns(1)
+			t.Cleanup(func() { database.Close() })
+
+			if _, err := database.ExecContext(ctx, createGroups); err != nil {
+				t.Fatalf("create groups: %v", err)
+			}
+			if _, err := database.ExecContext(ctx, occupy); err != nil {
+				t.Fatalf("occupy: %v", err)
+			}
+
+			if err := Init(ctx, database); err != nil {
+				t.Fatalf("init refused to start: %v", err)
+			}
+		})
 	}
 }

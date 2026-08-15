@@ -44,7 +44,7 @@ func AdminGetGroup(state *appstate.State) http.HandlerFunc {
 func AdminCreateGroup(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var input models.GroupIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
@@ -76,7 +76,7 @@ func AdminUpdateGroup(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		var input models.GroupIn
-		if err := decodeStrictJSON(r, &input); err != nil {
+		if err := decodeStrictJSON(w, r, &input); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}

@@ -32,9 +32,9 @@ func NewRouter(state *appstate.State) http.Handler {
 	router.Get("/api/themes", handlers.ListPublicThemePacks(state))
 
 	router.Mount("/static", noStore(http.StripPrefix("/static",
-		http.FileServer(http.Dir("static")))))
+		noDirectoryListing(http.FileServer(http.Dir("static"))))))
 	router.Mount("/theme-packs", noStore(http.StripPrefix("/theme-packs",
-		http.FileServer(http.Dir(state.Settings.Themes.Dir)))))
+		serveThemePackCSS(state.Settings.Themes.Dir))))
 
 	router.Group(func(admin chi.Router) {
 		admin.Use(middleware.RequireAdmin(state.Credentials, state.Settings.Admin.ClientIPHeader))
@@ -47,7 +47,7 @@ func NewRouter(state *appstate.State) http.Handler {
 	// surface.
 	router.Group(func(proxyRoutes chi.Router) {
 		proxyRoutes.Use(allowAnyOrigin)
-		proxyRoutes.Use(middleware.RequireDownstream(state.DB, state.TokenRateLimiter))
+		proxyRoutes.Use(middleware.RequireDownstream(state.DB, state.TokenRateLimiter, state.Quotas))
 		proxyRoutes.Get("/v1/models", handlers.ListModelsHandler(state))
 		proxyRoutes.Handle("/v1/*", handlers.ProxyHandler(state))
 	})
@@ -116,6 +116,45 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			logs.Get("/overview", handlers.AdminLogOverview(state))
 			logs.Get("/{id}", handlers.AdminGetLogDetail(state))
 		})
+	})
+}
+
+// serveThemePackCSS serves the stylesheets under the configured theme directory.
+//
+// A plain FileServer over that directory answered any path ending in a slash
+// with a listing of it, and this route is deliberately outside the admin
+// credential. The directory is whatever the operator configured — the
+// WILDTOKEN_THEME_DIR override accepts any path at all — so the listing named
+// every file under it to anyone who asked.
+//
+// What remains reachable is any .css file anywhere below that directory,
+// including through a symlink pointing out of it. That is wider than the
+// manifests describe; it is bounded to a file type the console actually loads,
+// which is what closes the enumeration. Pointing the theme directory at
+// something that is not a theme directory is still the operator's to get right.
+func serveThemePackCSS(dir string) http.Handler {
+	files := http.FileServer(http.Dir(dir))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, ".css") {
+			http.NotFound(w, r)
+			return
+		}
+		files.ServeHTTP(w, r)
+	})
+}
+
+// noDirectoryListing refuses the trailing-slash paths a FileServer answers with
+// a listing of the directory.
+//
+// The console needs the files under /static by name; nothing needs an index of
+// them, and this route is outside the admin credential like the theme one.
+func noDirectoryListing(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
 	})
 }
 

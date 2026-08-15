@@ -87,6 +87,13 @@ func TokenPreview(token string) string {
 	if len(runes) > tokenPreviewChars {
 		visible = tokenPreviewChars
 	}
+	// Half of a short token is most of it: the previous rule showed eight of a
+	// nine-character value. A preview exists to tell two credentials apart in a
+	// list, which a few characters do, so it never shows more than a quarter of
+	// a short one.
+	if quarter := len(runes) / 4; visible > quarter {
+		visible = quarter
+	}
 	return string(runes[:visible]) + "…"
 }
 
@@ -198,16 +205,22 @@ func MigrateLegacyTokenStorage(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
-	if !hasTokenHash {
+	// Driven by the rows that actually need repair rather than by whether the
+	// column had to be added. The two agree only on a first migration: a
+	// database whose column already exists but whose rows were left without a
+	// digest — added by hand, restored from a partial copy — never reached the
+	// repair and failed the check below on every start, with no way out.
+	missingHashes, err := countMissingTokenHashes(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if missingHashes != 0 {
 		if err := hashLegacyPlaintextTokens(ctx, tx); err != nil {
 			return err
 		}
-	}
-
-	var missingHashes int64
-	if err := tx.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM api_tokens WHERE token_hash IS NULL").Scan(&missingHashes); err != nil {
-		return err
+		if missingHashes, err = countMissingTokenHashes(ctx, tx); err != nil {
+			return err
+		}
 	}
 	if missingHashes != 0 {
 		return errors.New("api_tokens contains rows without a token digest")
@@ -246,6 +259,14 @@ func tableColumns(ctx context.Context, tx *sql.Tx, table string) (map[string]boo
 	return columns, rows.Err()
 }
 
+// countMissingTokenHashes reports how many rows still lack a digest.
+func countMissingTokenHashes(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var missing int64
+	err := tx.QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM api_tokens WHERE token_hash IS NULL").Scan(&missing)
+	return missing, err
+}
+
 // hashLegacyPlaintextTokens replaces every plaintext value with its digest,
 // using a collision-free marker for the legacy UNIQUE column.
 func hashLegacyPlaintextTokens(ctx context.Context, tx *sql.Tx) error {
@@ -271,7 +292,7 @@ func hashLegacyPlaintextTokens(ctx context.Context, tx *sql.Tx) error {
 		return err
 	}
 
-	markerPrefix, err := uniqueMarkerPrefix(legacy)
+	markerPrefix, err := uniqueMarkerPrefix()
 	if err != nil {
 		return err
 	}
@@ -288,8 +309,7 @@ func hashLegacyPlaintextTokens(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func uniqueMarkerPrefix[T any](rows []T) (string, error) {
-	_ = rows
+func uniqueMarkerPrefix() (string, error) {
 	bytes := make([]byte, 16)
 	if _, err := rand.Read(bytes); err != nil {
 		return "", err
@@ -357,11 +377,6 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 	digest := TokenDigest(tokenValue)
 	preview := TokenPreview(tokenValue)
 
-	groupID, err := resolveTokenGroup(ctx, db, input.GroupID)
-	if err != nil {
-		return models.APITokenCreatedOut{}, err
-	}
-
 	limitTokens, err := input.ParsedLimit()
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
@@ -371,7 +386,24 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
 	}
 
-	result, err := db.ExecContext(ctx, `INSERT INTO api_tokens
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return models.APITokenCreatedOut{}, apperr.Database(err)
+	}
+	defer tx.Rollback()
+
+	// The group is checked inside the transaction that writes the reference to
+	// it. api_tokens.group_id carries no foreign key, so nothing but this
+	// ordering stops a group deleted between the check and the insert from
+	// leaving a token pointing at one that no longer exists — a token that then
+	// authenticates but reaches no channel at all, with nothing in the console
+	// to say why. UpdateToken already reads it this way.
+	groupID, err := resolveTokenGroup(ctx, tx, input.GroupID)
+	if err != nil {
+		return models.APITokenCreatedOut{}, err
+	}
+
+	result, err := tx.ExecContext(ctx, `INSERT INTO api_tokens
         (name, description, token, token_hash, token_preview, token_plain, enabled, expires_at, group_id, limit_tokens, rate_limit, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		trimSpace(input.Name), trimSpace(input.Description), digest, digest, preview,
@@ -384,12 +416,19 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 		return models.APITokenCreatedOut{}, apperr.Database(err)
 	}
 
-	created, ok, err := GetToken(ctx, db, id)
+	// Read back inside the transaction: it describes the row this insert made,
+	// where a read after the commit could pick up a later edit and report it as
+	// this one's result.
+	created, ok, err := GetToken(ctx, tx, id)
 	if err != nil {
 		return models.APITokenCreatedOut{}, err
 	}
 	if !ok {
 		return models.APITokenCreatedOut{}, apperr.Internal("token was not persisted")
+	}
+
+	if err := tx.Commit(); err != nil {
+		return models.APITokenCreatedOut{}, apperr.Database(err)
 	}
 
 	return models.APITokenCreatedOut{
