@@ -997,4 +997,3 @@ func AdminGetUpstreamsStats(state *appstate.State) http.HandlerFunc {
 		apperr.WriteJSON(w, http.StatusOK, map[string]any{"stats": stats})
 	}
 }
-
