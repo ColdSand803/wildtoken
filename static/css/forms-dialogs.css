@@ -750,6 +750,37 @@ button.model-selection-remove:focus-visible {
   padding: 18px;
 }
 
+/* Scope line in the export dialog and parse/result feedback in the import
+   dialog. Tones follow the toast palette so success and failure read the same
+   way here as they do elsewhere. */
+.channel-transfer-summary {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: var(--text-base);
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+
+.channel-transfer-summary:empty {
+  display: none;
+}
+
+.channel-transfer-summary[data-tone="ok"] {
+  color: var(--text-secondary);
+}
+
+.channel-transfer-summary[data-tone="error"] {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.channel-import-modes {
+  display: grid;
+  gap: 8px;
+}
+
 .admin-token-panel {
   background: transparent;
   gap: 16px;

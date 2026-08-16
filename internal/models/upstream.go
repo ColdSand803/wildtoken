@@ -239,6 +239,62 @@ type UpstreamOut struct {
 	GroupIDs                       []int64           `json:"group_ids"`
 }
 
+// ExportUpstreamsRequest is the request payload for /api/admin/upstreams/export.
+type ExportUpstreamsRequest struct {
+	IDs            []int64 `json:"ids"`
+	IncludeAPIKeys bool    `json:"include_api_keys"`
+}
+
+// ChannelExportItem is one channel in an export document.
+type ChannelExportItem struct {
+	Name              string            `json:"name"`
+	BaseURL           string            `json:"base_url"`
+	APIKey            *string           `json:"api_key,omitempty"`
+	ModelNames        []string          `json:"model_names"`
+	ModelPrefixes     []string          `json:"model_prefixes"`
+	ModelMappings     map[string]string `json:"model_mappings"`
+	Priority          int32             `json:"priority"`
+	Weight            int64             `json:"weight"`
+	AutoWeightEnabled bool              `json:"auto_weight_enabled"`
+	Enabled           bool              `json:"enabled"`
+	ExtraHeaders      map[string]string `json:"extra_headers"`
+	TimeoutSeconds    float64           `json:"timeout_seconds"`
+	RateLimit         *string           `json:"rate_limit,omitempty"`
+	GroupIDs          []int64           `json:"group_ids"`
+}
+
+// ExportUpstreamsResponse is the response envelope for /api/admin/upstreams/export.
+type ExportUpstreamsResponse struct {
+	Kind       string              `json:"kind"`
+	Version    int                 `json:"version"`
+	ExportedAt string              `json:"exported_at"`
+	Channels   []ChannelExportItem `json:"channels"`
+}
+
+// ImportUpstreamsRequest is the request payload for /api/admin/upstreams/import.
+type ImportUpstreamsRequest struct {
+	Kind     string              `json:"kind"`
+	Version  int                 `json:"version"`
+	Channels []ChannelExportItem `json:"channels"`
+	Mode     string              `json:"mode"` // "skip" or "overwrite"
+}
+
+// ImportResultItem represents one channel's import outcome.
+type ImportResultItem struct {
+	Name    string  `json:"name"`
+	Action  string  `json:"action"` // "created", "updated", "skipped", "failed"
+	Message *string `json:"message,omitempty"`
+}
+
+// ImportUpstreamsResponse is the response body for /api/admin/upstreams/import.
+type ImportUpstreamsResponse struct {
+	Created int                `json:"created"`
+	Updated int                `json:"updated"`
+	Skipped int                `json:"skipped"`
+	Failed  int                `json:"failed"`
+	Items   []ImportResultItem `json:"items"`
+}
+
 // UpstreamDetailOut adds the channel's API key for the single-item endpoint,
 // which the console's edit form needs in order to save the channel back.
 //

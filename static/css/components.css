@@ -1,0 +1,611 @@
+/* ── WildToken console primitives ─────────────────────────
+   Theme packs restyle these through CSS variables and the
+   existing dashboard-* hooks. Keep both class families. */
+
+.wt-sr-only {
+  border: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.wt-page {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.wt-page-body {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.wt-toolbar {
+  align-items: flex-end;
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.wt-field {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  gap: 8px;
+  letter-spacing: 0.03em;
+  min-width: 0;
+}
+
+.wt-select,
+.wt-input {
+  background: var(--panel-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  min-height: 34px;
+  min-width: 0;
+  padding: 6px 10px;
+}
+
+.wt-seg {
+  background: var(--panel-muted);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  max-width: 100%;
+  padding: 4px;
+  position: relative;
+}
+
+.wt-seg-thumb {
+  background: var(--panel-elevated);
+  border: 1px solid var(--accent-border, var(--line));
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: var(--shadow-xs);
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  transition:
+    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 160ms ease;
+}
+
+button.wt-seg-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius) - 2px);
+  box-shadow: none;
+  color: var(--muted-strong, var(--muted));
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  min-height: 28px;
+  padding: 0 10px;
+  position: relative;
+  transition: background var(--transition), border-color var(--transition), color var(--transition), transform 160ms ease;
+  z-index: 1;
+}
+
+button.wt-seg-btn:active {
+  transform: translateY(1px);
+}
+
+button.wt-seg-btn:hover,
+button.wt-seg-btn:focus-visible {
+  background: var(--panel-elevated);
+  border-color: var(--line);
+  box-shadow: none;
+  color: var(--text);
+}
+
+button.wt-seg-btn.is-active,
+button.wt-seg-btn.is-active:hover,
+button.wt-seg-btn.is-active:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.wt-section {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wt-section-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.wt-section-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wt-metric-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-width: 0;
+}
+
+.wt-card {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.wt-card-head {
+  align-items: baseline;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  min-width: 0;
+}
+
+.wt-card-head h3,
+.wt-section-head h3 {
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.25;
+  margin: 0;
+}
+
+.wt-meta {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.wt-sub {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  margin: 2px 0 0;
+}
+
+.wt-board {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wt-inline-range {
+  align-items: center;
+  background: var(--panel-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 5px 8px;
+}
+
+.wt-inline-range[hidden] {
+  display: none;
+}
+
+.wt-inline-range input[type="date"] {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--text-sm);
+  min-height: 32px;
+  padding: 4px 8px;
+}
+
+.wt-inline-range button {
+  min-height: 32px;
+}
+
+html[data-density="compact"] .wt-page,
+html[data-density="compact"] .wt-page-body {
+  gap: var(--space-4);
+}
+
+html[data-density="compact"] .wt-card {
+  padding: 10px 12px;
+}
+
+html[data-density="compact"] .wt-metric-grid,
+html[data-density="compact"] .wt-board {
+  gap: 8px;
+}
+
+html[data-density="compact"] .wt-seg-btn {
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+@media (max-width: 1100px) {
+  .wt-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .wt-toolbar {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .wt-seg,
+  .wt-field,
+  .wt-select {
+    width: 100%;
+  }
+
+  .wt-metric-grid,
+  .wt-board {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wt-seg-thumb,
+  button.wt-seg-btn {
+    transition: none;
+  }
+
+  button.wt-seg-btn:active {
+    transform: none;
+  }
+}
+
+/* ── View toggle buttons ─────────────────────────────────── */
+
+.view-toggle-wrap {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px;
+  background: var(--panel-subtle);
+}
+
+.view-toggle-btn {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 6px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 150ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.view-toggle-btn svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  stroke-linecap: round;
+}
+
+.view-toggle-btn:hover {
+  background: var(--panel);
+  color: var(--text);
+}
+
+.view-toggle-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: white;
+}
+
+/* ── Channel cards grid ─────────────────────────────────── */
+
+.upstream-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 16px;
+  padding: 1px;
+}
+
+/* display: grid 是作者样式，会压过 UA 样式表的 [hidden] { display: none }，
+   所以切回列表视图时 JS 设的 hidden 属性本身藏不住这个容器——需要显式兜底。 */
+.upstream-cards-grid[hidden] {
+  display: none;
+}
+
+.channel-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transition: all 200ms ease;
+  position: relative;
+  /* 卡片是网格里的一个网格项，默认 min-width 是 auto：浏览器会把它撑到至少
+     跟内部最长的不换行内容一样宽（这里是渠道名和成本提示），而不是收缩到
+     网格分配给它的轨道宽度。手机屏幕窄，轨道宽度早就不够那行文字自然展开，
+     于是卡片整体溢出，被祖先的 overflow-x: hidden 直接裁掉、显示不全。
+     标题和成本提示本来就配了 ellipsis，但撑爆容器发生在布局阶段、比省略号
+     生效更早，所以之前完全没用上。 */
+  min-width: 0;
+}
+
+.channel-card:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transform: translateY(-2px);
+}
+
+.channel-card--disabled {
+  opacity: 0.6;
+}
+
+.channel-card--disabled:hover {
+  border-color: var(--line);
+  box-shadow: none;
+  transform: none;
+}
+
+/* Card header */
+
+.channel-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.channel-card-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.channel-card-title h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status-dot--live {
+  background: var(--ok);
+  box-shadow: 0 0 8px var(--ok-soft);
+}
+
+.status-dot--offline {
+  background: var(--muted);
+}
+
+.channel-card-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.channel-card-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 8px;
+  background: var(--panel-subtle);
+  color: var(--muted);
+  border-radius: 4px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+/* Sparkline chart */
+
+.channel-card-sparkline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sparkline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.sparkline-label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.sparkline-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 曲线用 currentColor 描边和填充，颜色跟随主题的 --accent。 */
+.sparkline-svg {
+  width: 100%;
+  height: 48px;
+  color: var(--accent);
+}
+
+/* 停用的渠道用中性色，避免灰卡片上还挂着高亮曲线。 */
+.channel-card--disabled .sparkline-svg {
+  color: var(--muted);
+}
+
+/* Metrics tiles */
+
+.channel-card-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.metric-tile {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.metric-tile--wide {
+  grid-column: 1 / -1;
+}
+
+.metric-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.metric-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Card action button */
+
+.channel-card-action {
+  width: 100%;
+  padding: 10px;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease;
+  margin-top: auto;
+}
+
+.channel-card-action:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.channel-card--disabled .channel-card-action {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.channel-card--disabled .channel-card-action:hover {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--line);
+}
+
+/* Empty and loading states */
+
+.cards-loading,
+.cards-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--muted);
+}
+
+.cards-empty p {
+  margin: 0 0 8px 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cards-empty-sub {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 20px !important;
+}
+
+.cards-empty button {
+  margin-top: 12px;
+}
+
+/* Responsive adjustments */
+
+@media (max-width: 900px) {
+  .upstream-cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  }
+}
+
+@media (max-width: 680px) {
+  .upstream-cards-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .view-toggle-wrap {
+    order: -1;
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .channel-card {
+    transition: none;
+  }
+
+  .channel-card:hover {
+    transform: none;
+  }
+}

@@ -1,5 +1,11 @@
 /* ── Dashboard ─────────────────────────────────────────── */
 
+.dashboard-layout {
+  display: grid;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
 .dashboard-kpis,
 .dashboard-window-kpis {
   display: grid;
@@ -11,12 +17,173 @@
   margin-bottom: 0;
 }
 
-.dashboard-metric-section {
-  margin: 0 0 22px;
+.dashboard-metric-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  min-width: 0;
+}
+
+.dashboard-metric-head > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dashboard-ops {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.dashboard-ops-usage {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.dashboard-panel[data-dashboard-window="single"] .dashboard-ops {
+  align-items: start;
+  grid-template-areas: "usage runtime";
+  grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+}
+
+.dashboard-panel[data-dashboard-window="single"] .dashboard-ops-usage {
+  align-items: start;
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  display: grid;
+  gap: 12px 16px;
+  grid-area: usage;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.dashboard-panel[data-dashboard-window="single"] .dashboard-ops-tokens,
+.dashboard-panel[data-dashboard-window="single"] .dashboard-ops-requests {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  display: grid;
+  gap: 12px;
+  grid-row: 1 / span 2;
+  grid-template-rows: subgrid;
+  min-width: 0;
   padding: 0;
 }
 
-.dashboard-top-window-field {
+.dashboard-panel[data-dashboard-window="single"] .dashboard-ops-tokens {
+  grid-column: 1;
+}
+
+.dashboard-panel[data-dashboard-window="single"] .dashboard-ops-requests {
+  border-left: 1px solid var(--line-soft);
+  grid-column: 2;
+  padding-left: 16px;
+}
+
+.dashboard-panel[data-dashboard-window="single"] .dashboard-ops-runtime {
+  grid-area: runtime;
+}
+
+.dashboard-panel[data-dashboard-window="single"] #dashboard-token-kpis {
+  align-content: start;
+  align-items: stretch;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dashboard-panel[data-dashboard-window="single"] #dashboard-request-kpis {
+  align-content: start;
+  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.dashboard-panel[data-dashboard-window="single"] #dashboard-token-kpis .dashboard-kpi,
+.dashboard-panel[data-dashboard-window="single"] #dashboard-request-kpis .dashboard-kpi {
+  height: 100%;
+  min-height: 0;
+}
+
+.dashboard-panel[data-dashboard-window="single"] #dashboard-runtime-kpis {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@supports not (grid-template-rows: subgrid) {
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-tokens,
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-requests {
+    grid-row: auto;
+    grid-template-rows: none;
+  }
+
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-usage .dashboard-kpi {
+    min-height: 92px;
+  }
+}
+
+.dashboard-panel[data-dashboard-window="multi"] .dashboard-ops-usage {
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+}
+
+.dashboard-panel[data-dashboard-window="multi"] #dashboard-runtime-kpis {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dashboard-panel[data-dashboard-window="multi"] #dashboard-token-kpis,
+.dashboard-panel[data-dashboard-window="multi"] #dashboard-request-kpis {
+  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+}
+
+.dashboard-ops .dashboard-metric-section {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-xs);
+  margin: 0;
+  padding: 14px 16px;
+}
+
+.dashboard-insight,
+.dashboard-rank-grid {
+  align-items: stretch;
+}
+
+.dashboard-rankings {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Sits in the dashboard panel head as the single range control for the whole
+   view: token cards, request cards, and the Top rankings. */
+.dashboard-time-filter {
+  align-items: center;
+  align-self: flex-end;
+  display: flex;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  gap: 8px;
+  justify-content: flex-end;
+  max-width: 100%;
+  min-width: 0;
+  position: relative;
+}
+
+.dashboard-panel .panel-head {
+  align-items: flex-end;
+  padding-bottom: 8px;
+}
+
+.dashboard-panel .panel-head .wt-page-copy {
+  padding-bottom: 0;
+}
+
+.dashboard-range-field {
   align-items: center;
   color: var(--muted);
   display: inline-flex;
@@ -27,15 +194,127 @@
   text-transform: uppercase;
 }
 
-.dashboard-top-window-field select {
+.dashboard-time-filter select {
+  background: var(--panel-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 500;
   min-height: 34px;
-  min-width: 88px;
+  min-width: 140px;
+  padding: 6px 10px;
 }
 
+.dashboard-custom-range-inner {
+  align-items: center;
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  height: 28px;
+  max-width: none;
+  min-width: max-content;
+  padding: 0 2px 0 4px;
+  width: max-content;
+}
+
+.dashboard-time-filter .wt-sr-only {
+  display: none;
+}
+
+html[data-theme] button.dashboard-apply-custom,
+.dashboard-apply-custom {
+  box-shadow: none;
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  height: 28px;
+  letter-spacing: 0;
+  line-height: 1;
+  max-height: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+}
+
+.dashboard-date-field {
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) - 2px);
+  box-sizing: border-box;
+  color: var(--text);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  max-height: 28px;
+  min-height: 28px;
+  overflow: hidden;
+  padding: 0 8px;
+  position: relative;
+  transition: border-color var(--transition);
+  width: 8.25rem;
+}
+
+.dashboard-date-field:hover,
+.dashboard-date-field:focus-within {
+  border-color: var(--accent-border, var(--line-strong, var(--line)));
+}
+
+.dashboard-date-text {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  line-height: 26px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.dashboard-date-field.is-empty .dashboard-date-text {
+  color: var(--muted);
+}
+
+html[data-theme] .dashboard-date-field input[type="date"],
+.dashboard-date-field input[type="date"] {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  height: 100%;
+  inset: 0;
+  margin: 0;
+  max-height: none;
+  max-width: none;
+  min-height: 0;
+  min-width: 0;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  width: 100%;
+}
+
+.dashboard-date-sep {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  line-height: 28px;
+  white-space: nowrap;
+}
+
+.dashboard-metric-section {
+  margin: 0 0 22px;
+  padding: 0;
+}
+
+.dashboard-layout .dashboard-metric-section {
+  margin-bottom: 0;
+}
+
+.dashboard-hero + .dashboard-ops,
 .dashboard-metric-section + .dashboard-metric-section,
-.dashboard-grid {
-  border-top: 1px solid var(--line-soft);
-  padding-top: 20px;
+.dashboard-ops .dashboard-metric-section + .dashboard-metric-section {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .kpi-card,
@@ -129,6 +408,223 @@
   line-height: 1.3;
 }
 
+/* ── 近窗四卡的翻转布局：标签在上、放大的数字在下 ─────────── */
+
+.kpi-flip .dashboard-kpi {
+  gap: 6px;
+}
+
+.kpi-flip .dashboard-kpi-label {
+  order: 1;
+}
+
+.kpi-flip .dashboard-kpi-value {
+  font-size: clamp(1.7rem, 3vw, 2.3rem);
+  order: 2;
+}
+
+/* 说明文字在 title 里，给个可悬浮的暗示。 */
+.kpi-flip .dashboard-kpi[title] {
+  cursor: help;
+}
+
+/* 启用渠道的分母：压小、降灰，突出启用数。 */
+.kpi-denominator {
+  color: var(--muted);
+  font-size: 0.52em;
+  font-weight: 600;
+  letter-spacing: 0;
+  margin-left: 1px;
+}
+
+/* 错误率标签前的呼吸圆点，颜色跟数字同一套 tone。 */
+.kpi-pulse-dot {
+  animation: kpi-breathe 2.4s ease-in-out infinite;
+  background: var(--text);
+  border-radius: 50%;
+  display: inline-block;
+  height: 8px;
+  margin-right: 6px;
+  vertical-align: -1px;
+  width: 8px;
+}
+
+.dashboard-kpi.tone-ok .kpi-pulse-dot {
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok-soft);
+}
+
+.dashboard-kpi.tone-warn .kpi-pulse-dot {
+  background: var(--warning);
+  box-shadow: 0 0 6px var(--warning-soft);
+}
+
+.dashboard-kpi.tone-danger .kpi-pulse-dot {
+  background: var(--danger);
+  box-shadow: 0 0 6px var(--danger-soft);
+}
+
+@keyframes kpi-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+/* 错误率旁的环比箭头：涨是坏事标红，降标绿。 */
+.kpi-delta {
+  font-size: 0.45em;
+  font-weight: 700;
+  letter-spacing: 0;
+  margin-left: 8px;
+  vertical-align: 4px;
+}
+
+.kpi-delta--up {
+  color: var(--danger);
+}
+
+.kpi-delta--down {
+  color: var(--ok);
+}
+
+/* 请求数的环比增长率：语义与错误率相反，涨是好事标绿、跌降灰。 */
+.kpi-trend {
+  font-size: 0.45em;
+  font-weight: 700;
+  letter-spacing: 0;
+  margin-left: 8px;
+  vertical-align: 4px;
+}
+
+.kpi-trend--up {
+  color: var(--ok);
+}
+
+.kpi-trend--down {
+  color: var(--muted);
+}
+
+/* ── 状态分布：增强图例 + 错误时间细带 ─────────────────────── */
+
+.status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin-top: 2px;
+}
+
+.status-legend-item {
+  align-items: baseline;
+  display: inline-flex;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* 复用 ops-bar-seg 的四色，几何在这里压回小圆点（enhancements.css 在本文件
+   之后加载，同名属性要靠更高优先级取胜）。 */
+.status-legend .status-legend-dot {
+  border-radius: 50%;
+  flex: none;
+  height: 8px;
+  width: 8px;
+  align-self: center;
+}
+
+.status-legend-label {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.status-legend-count {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.status-delta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.status-delta--good {
+  color: var(--ok);
+}
+
+.status-delta--bad {
+  color: var(--danger);
+}
+
+.status-delta--calm {
+  color: var(--muted);
+}
+
+.status-error-strip-wrap {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.status-error-strip-label {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.status-error-strip {
+  display: flex;
+  gap: 2px;
+}
+
+.status-error-cell {
+  background: var(--danger);
+  border-radius: 2px;
+  flex: 1 1 0;
+  height: 8px;
+  min-width: 2px;
+}
+
+.status-error-cell.is-clean {
+  background: var(--line-soft);
+  opacity: 1;
+}
+
+/* 请求数卡的背景趋势曲线：绝对定位铺在卡片下半部，最底层。 */
+.kpi-bg-spark {
+  bottom: 0;
+  color: var(--accent);
+  height: 58%;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  z-index: 0;
+}
+
+/* 曲线是 position:absolute，会盖在静态文本上面——文字层显式抬到曲线之上。 */
+.kpi-flip .dashboard-kpi-value,
+.kpi-flip .dashboard-kpi-label {
+  position: relative;
+  z-index: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kpi-pulse-dot {
+    animation: none;
+  }
+}
+
 .dashboard-grid {
   display: grid;
   gap: 12px;
@@ -154,7 +650,6 @@
   align-items: center;
   display: flex;
   gap: 12px;
-  grid-column: 1 / -1;
   justify-content: space-between;
   min-width: 0;
 }
@@ -275,9 +770,17 @@
 
 .dashboard-chart .ops-chart-svg,
 .dashboard-spark {
+  /* 描边和渐变都用 currentColor，颜色在这里统一跟主题的 --accent 走。 */
+  color: var(--accent);
   display: block;
   height: 100px;
   width: 100%;
+}
+
+/* 延迟图的曲线要贴着摘要的分隔线：去掉 .dashboard-chart 默认的 10px 纵向
+   间距（只影响这一个图表，状态分布图保持原样）。 */
+#dashboard-latency-chart {
+  gap: 0;
 }
 
 .dashboard-latency-summary {
@@ -433,9 +936,18 @@ html[data-density="compact"] .dashboard-metric-section {
   padding: 0;
 }
 
+html[data-density="compact"] .dashboard-layout .dashboard-metric-section {
+  margin-bottom: 0;
+}
+
+html[data-density="compact"] .dashboard-ops .dashboard-metric-section,
+html[data-density="compact"] .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-usage {
+  padding: 10px 12px;
+}
+
 html[data-density="compact"] .dashboard-grid {
   gap: 8px;
-  padding-top: 14px;
+  padding-top: 0;
 }
 
 @media (max-width: 1100px) {
@@ -443,20 +955,113 @@ html[data-density="compact"] .dashboard-grid {
   .dashboard-window-kpis {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops,
+  .dashboard-panel[data-dashboard-window="multi"] .dashboard-ops-usage {
+    grid-template-areas: none;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-usage,
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-tokens,
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-requests,
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-runtime {
+    grid-area: unset;
+    grid-column: 1 / -1;
+    grid-row: auto;
+    width: 100%;
+  }
+
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-usage {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+  }
+
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-tokens,
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-requests {
+    grid-template-rows: none;
+  }
+
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-requests {
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+    padding-left: 0;
+    padding-top: 12px;
+  }
+
+  .dashboard-panel[data-dashboard-window="single"] #dashboard-token-kpis,
+  .dashboard-panel[data-dashboard-window="single"] #dashboard-runtime-kpis,
+  .dashboard-panel[data-dashboard-window="multi"] #dashboard-runtime-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
-@media (max-width: 760px) {
-  .dashboard-kpis,
-  .dashboard-window-kpis {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  .dashboard-layout,
+  .dashboard-ops,
+  .dashboard-ops-usage,
+  .dashboard-insight,
+  .dashboard-rank-grid,
   .dashboard-grid {
+    grid-template-areas: none;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops,
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-usage,
+  .dashboard-panel[data-dashboard-window="multi"] .dashboard-ops-usage {
+    align-items: stretch;
+    grid-template-areas: none;
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .dashboard-hero,
+  .dashboard-ops,
+  .dashboard-ops-usage,
+  .dashboard-ops-tokens,
+  .dashboard-ops-requests,
+  .dashboard-ops-runtime,
+  .dashboard-insight,
+  .dashboard-rankings,
+  .dashboard-card,
   .dashboard-card-wide {
-    grid-column: auto;
+    grid-area: unset;
+    grid-column: 1 / -1;
+    max-width: 100%;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-tokens,
+  .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-requests {
+    display: grid;
+    grid-template-rows: none;
+  }
+
+  .dashboard-kpis,
+  .dashboard-window-kpis,
+  .dashboard-panel[data-dashboard-window="single"] #dashboard-token-kpis,
+  .dashboard-panel[data-dashboard-window="single"] #dashboard-request-kpis,
+  .dashboard-panel[data-dashboard-window="single"] #dashboard-runtime-kpis,
+  .dashboard-panel[data-dashboard-window="multi"] #dashboard-token-kpis,
+  .dashboard-panel[data-dashboard-window="multi"] #dashboard-request-kpis,
+  .dashboard-panel[data-dashboard-window="multi"] #dashboard-runtime-kpis {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-metric-head,
+  .dashboard-card-head,
+  .wt-section-head {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .dashboard-card-meta,
+  .wt-meta {
+    white-space: normal;
   }
 
   .dashboard-ranking-toolbar {
@@ -470,11 +1075,27 @@ html[data-density="compact"] .dashboard-grid {
 
   .dashboard-latency-summary {
     gap: 6px;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .dashboard-chart,
   .dashboard-list {
     min-height: 140px;
+  }
+
+  .dashboard-time-filter {
+    align-self: stretch;
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .dashboard-time-filter .wt-seg {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  .dashboard-date-field {
+    width: 8.25rem;
   }
 }
 
@@ -484,3 +1105,140 @@ html[data-density="compact"] .dashboard-grid {
     font-size: 1.15rem;
   }
 }
+
+html[data-theme] button.wt-seg-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  box-shadow: none;
+  color: var(--muted-strong, var(--muted));
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+html[data-theme] button.wt-seg-btn:hover,
+html[data-theme] button.wt-seg-btn:focus-visible {
+  background: var(--panel-elevated);
+  border-color: var(--line);
+  box-shadow: none;
+  color: var(--text);
+}
+
+html[data-theme] button.wt-seg-btn.is-active,
+html[data-theme] button.wt-seg-btn.is-active:hover,
+html[data-theme] button.wt-seg-btn.is-active:focus-visible {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--text);
+}
+
+.dashboard-kpi {
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dashboard-kpi.is-entering {
+  animation: wt-kpi-in 420ms var(--ease-out, cubic-bezier(0.2, 0.8, 0.2, 1)) backwards;
+  animation-delay: calc(var(--kpi-i, 0) * 45ms);
+}
+
+.dashboard-kpi:hover {
+  border-color: var(--line-strong, var(--line));
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+#dashboard-time-chips {
+  align-items: center;
+  box-sizing: border-box;
+  flex-wrap: nowrap;
+  height: 36px;
+  max-height: 36px;
+  max-width: 100%;
+  min-height: 36px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+}
+
+.dashboard-custom-chip {
+  max-width: 4.75rem;
+  overflow: hidden;
+  transition:
+    max-width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 160ms ease,
+    padding 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    margin 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+#dashboard-time-chips.is-custom .dashboard-custom-chip {
+  margin: 0;
+  max-width: 0;
+  opacity: 0;
+  padding-left: 0;
+  padding-right: 0;
+  pointer-events: none;
+}
+
+.dashboard-custom-range {
+  display: grid;
+  flex: 0 0 auto;
+  grid-template-columns: 0fr;
+  max-width: 0;
+  min-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  position: static;
+  transform: none;
+  transition:
+    grid-template-columns 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    max-width 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 180ms ease;
+}
+
+.dashboard-custom-range.is-open {
+  flex-shrink: 0;
+  grid-template-columns: 1fr;
+  max-width: none;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dashboard-custom-range[hidden]:not(.is-open) {
+  display: none;
+}
+
+@keyframes wt-kpi-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+
+@media (max-width: 760px) {
+  .dashboard-custom-range.is-open {
+    max-width: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-kpi,
+  .dashboard-custom-range,
+  .dashboard-custom-range-inner {
+    animation: none;
+    transition: none;
+  }
+
+  .dashboard-kpi:hover {
+    transform: none;
+  }
+}
+

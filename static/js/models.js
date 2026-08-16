@@ -873,6 +873,29 @@ quickImportFillButton.addEventListener("click", async () => {
   }
 });
 
+channelExportButton.addEventListener("click", openChannelExportDialog);
+channelExportClose.addEventListener("click", closeChannelExportDialog);
+channelExportCancel.addEventListener("click", closeChannelExportDialog);
+dismissOnBackdropClick(channelExportDialog, closeChannelExportDialog);
+channelExportConfirm.addEventListener("click", runChannelExport);
+
+channelImportButton.addEventListener("click", openChannelImportDialog);
+channelImportClose.addEventListener("click", closeChannelImportDialog);
+channelImportCancel.addEventListener("click", closeChannelImportDialog);
+dismissOnBackdropClick(channelImportDialog, closeChannelImportDialog);
+channelImportFile.addEventListener("change", (event) => {
+  loadChannelImportFile(event.target.files?.[0]);
+});
+channelImportText.addEventListener("input", debounce(refreshChannelImportPreview, 150));
+channelImportDialog.addEventListener("change", (event) => {
+  // The overwrite/skip choice changes what the preview says about same-name
+  // channels, so re-render when it flips.
+  if (event.target.name === "channel-import-mode") {
+    refreshChannelImportPreview();
+  }
+});
+channelImportConfirm.addEventListener("click", runChannelImport);
+
 fetchModelsButton.addEventListener("click", async () => {
   await fetchModelsFromForm();
 });

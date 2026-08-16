@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,6 +67,7 @@ func (b logStatsBucket) window() models.TokenUsageWindowOut {
 type logStatsState struct {
 	totalLogCount     int64
 	maxRefreshedLogID int64
+	allTime           logStatsBucket
 	// minuteBuckets is keyed by the bucket's start second.
 	minuteBuckets  map[int64]*logStatsBucket
 	pendingEntries map[int64]PersistedLogStats
@@ -108,11 +110,19 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
 
-	var totalLogCount int64
 	var maxLogID sql.NullInt64
-	err := database.QueryRowContext(ctx,
-		"SELECT COUNT(*) AS total_log_count, MAX(id) AS max_log_id FROM request_logs").
-		Scan(&totalLogCount, &maxLogID)
+	allTime := logStatsBucket{}
+	err := database.QueryRowContext(ctx, `SELECT
+           COUNT(*) AS request_count,
+           MAX(id) AS max_log_id,
+           COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END), 0)
+               AS token_request_count,
+           COALESCE(SUM(total_tokens), 0) AS total_tokens,
+           COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+           COALESCE(SUM(prompt_cached_tokens), 0) AS prompt_cached_tokens
+       FROM request_logs`).Scan(&allTime.requestCount, &maxLogID,
+		&allTime.tokenRequestCount, &allTime.totalTokens,
+		&allTime.promptTokens, &allTime.promptCachedTokens)
 	if err != nil {
 		return apperr.Database(err)
 	}
@@ -141,8 +151,9 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
 	defer rows.Close()
 
 	refreshed := newLogStatsState()
-	refreshed.totalLogCount = totalLogCount
+	refreshed.totalLogCount = allTime.requestCount
 	refreshed.maxRefreshedLogID = maxLogID.Int64
+	refreshed.allTime = allTime
 	for rows.Next() {
 		var bucketStart int64
 		bucket := &logStatsBucket{}
@@ -215,6 +226,17 @@ func (c *LogStatsCache) Snapshot() LogStatsSnapshot {
 
 func (s *logStatsState) applyPersistedEntry(entry PersistedLogStats, now time.Time) {
 	s.totalLogCount++
+	s.allTime.requestCount++
+	if entry.TotalTokens != nil {
+		s.allTime.tokenRequestCount++
+		s.allTime.totalTokens += *entry.TotalTokens
+	}
+	if entry.PromptTokens != nil {
+		s.allTime.promptTokens += *entry.PromptTokens
+	}
+	if entry.PromptCachedTokens != nil {
+		s.allTime.promptCachedTokens += *entry.PromptCachedTokens
+	}
 	if entry.CreatedAtUnixSeconds < oldestWindowStart(now) {
 		return
 	}
@@ -310,8 +332,40 @@ func (s *logStatsState) snapshot(now time.Time) LogStatsSnapshot {
 			OneDay:     oneDay.window(),
 			SevenDays:  sevenDays.window(),
 			ThirtyDays: thirtyDays.window(),
+			AllTime:    s.allTime.window(),
 		},
 	}
+}
+
+// QueryTokenUsage aggregates one window that is not available from the cache.
+// Custom bounds are UTC timestamps and form a half-open interval [startAt, endAt).
+func QueryTokenUsage(ctx context.Context, database *sql.DB, window LogTopWindow,
+	startAt, endAt string) (models.TokenUsageWindowOut, error) {
+	var query strings.Builder
+	query.WriteString(`SELECT
+           COALESCE(SUM(total_tokens), 0),
+           COALESCE(SUM(prompt_tokens), 0),
+           COALESCE(SUM(prompt_cached_tokens), 0),
+           COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END), 0),
+           COUNT(*)
+       FROM request_logs WHERE `)
+	args, err := appendLogTimePredicate(&query, nil, window, startAt, endAt)
+	if err != nil {
+		return models.TokenUsageWindowOut{}, err
+	}
+
+	var usage models.TokenUsageWindowOut
+	err = database.QueryRowContext(ctx, query.String(), args...).Scan(
+		&usage.TotalTokens,
+		&usage.PromptTokens,
+		&usage.PromptCachedTokens,
+		&usage.RequestCount,
+		&usage.AllRequestCount,
+	)
+	if err != nil {
+		return models.TokenUsageWindowOut{}, apperr.Database(err)
+	}
+	return usage, nil
 }
 
 func oldestWindowStart(now time.Time) int64 {

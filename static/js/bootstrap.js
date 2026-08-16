@@ -39,6 +39,10 @@ const selectPanel = document.querySelector("#select-panel");
 const upstreamActionMenu = document.querySelector("#upstream-action-menu");
 const rows = document.querySelector("#upstream-rows");
 const upstreamSummary = document.querySelector("#upstream-summary");
+const upstreamCardsContainer = document.querySelector("#upstream-cards");
+const viewGridBtn = document.querySelector("#upstream-view-grid");
+const viewListBtn = document.querySelector("#upstream-view-list");
+const upstreamTableWrap = document.querySelector(".view[data-view='upstreams'] .table-wrap");
 const form = document.querySelector("#upstream-form");
 const formTitle = document.querySelector("#form-title");
 const newButton = document.querySelector("#new-upstream");
@@ -59,6 +63,30 @@ const quickImportFillButton = document.querySelector("#quick-import-fill");
 const QUICK_IMPORT_DEFAULT_PRIORITY = 999;
 const QUICK_IMPORT_FILL_LABEL = "填入并拉取模型";
 let quickImportFetchController = null;
+
+const channelExportButton = document.querySelector("#channel-export");
+const channelExportDialog = document.querySelector("#channel-export-dialog");
+const channelExportClose = document.querySelector("#channel-export-close");
+const channelExportCancel = document.querySelector("#channel-export-cancel");
+const channelExportConfirm = document.querySelector("#channel-export-confirm");
+const channelExportScopeEl = document.querySelector("#channel-export-scope");
+const channelExportIncludeKeys = document.querySelector("#channel-export-include-keys");
+
+const channelImportButton = document.querySelector("#channel-import");
+const channelImportDialog = document.querySelector("#channel-import-dialog");
+const channelImportClose = document.querySelector("#channel-import-close");
+const channelImportCancel = document.querySelector("#channel-import-cancel");
+const channelImportConfirm = document.querySelector("#channel-import-confirm");
+const channelImportFile = document.querySelector("#channel-import-file");
+const channelImportText = document.querySelector("#channel-import-text");
+const channelImportPreview = document.querySelector("#channel-import-preview");
+const CHANNEL_DOCUMENT_KIND = "wildtoken.channels";
+const CHANNEL_DOCUMENT_VERSION = 1;
+const CHANNEL_IMPORT_MAX_ENTRIES = 500;
+// Mirrors the server's request body limit so an oversized paste fails locally
+// with a readable message instead of a bare HTTP 413.
+const CHANNEL_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
+let channelImportParsed = null;
 
 const confirmDialog = document.querySelector("#confirm-dialog");
 const confirmTitle = document.querySelector("#confirm-title");
@@ -218,9 +246,29 @@ const DEFAULT_REFRESH_MS = 10000;
 const DASHBOARD_REFRESH_MS = 15000;
 const DASHBOARD_LOG_LIMIT = 200;
 const DASHBOARD_TOP_LIMIT = 10;
+// Legacy key, read once so an existing ranking-period preference carries over.
 const DASHBOARD_TOP_WINDOW_KEY = "wildtoken_dashboard_top_window";
-const DASHBOARD_TOP_WINDOW_VALUES = new Set(["today", "1d", "3d", "7d", "30d"]);
+const DASHBOARD_RANGE_KEY = "wildtoken_dashboard_range";
+const DASHBOARD_CUSTOM_RANGE_KEY = "wildtoken_dashboard_custom_range";
+// "default" is the multi-window comparison; the rest are single windows. Must
+// stay in step with DashboardRange::from_query on the server.
+const DASHBOARD_RANGE_VALUES = new Set([
+  "today",
+  "1d",
+  "3d",
+  "7d",
+  "30d",
+  "all",
+  "default",
+  "custom",
+]);
+const DASHBOARD_DEFAULT_RANGE = "30d";
+const DASHBOARD_MAX_CUSTOM_RANGE_DAYS = 366;
 const DASHBOARD_CHANNEL_NAME_HIDDEN_KEY = "wildtoken_dashboard_channel_name_hidden";
+
+function isDashboardDateValue(value) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
 const DENSITY_KEY = "wildtoken_density";
 const LOG_COLUMNS_KEY = "wildtoken_log_columns";
 const UPSTREAM_COLUMNS_KEY = "wildtoken_upstream_columns";
@@ -258,18 +306,44 @@ let dashboardLogItems = [];
 let dashboardTokenUsage = null;
 let dashboardRuntimeMetrics = null;
 let dashboardTopStats = null;
-let dashboardTopWindow = (() => {
+// 按所选时间范围的服务端聚合（KPI 卡、状态分布、延迟趋势的数据源）。
+let dashboardOverview = null;
+// One range drives the token cards, the request cards, and the Top rankings.
+let dashboardTimeRange = (() => {
   try {
-    const saved = localStorage.getItem(DASHBOARD_TOP_WINDOW_KEY);
-    return DASHBOARD_TOP_WINDOW_VALUES.has(saved) ? saved : "today";
+    const saved = localStorage.getItem(DASHBOARD_RANGE_KEY)
+      // Migrate the old ranking-only preference; its values are all still valid.
+      || localStorage.getItem(DASHBOARD_TOP_WINDOW_KEY);
+    return DASHBOARD_RANGE_VALUES.has(saved) ? saved : DASHBOARD_DEFAULT_RANGE;
   } catch {
-    return "today";
+    return DASHBOARD_DEFAULT_RANGE;
   }
 })();
+let dashboardCustomStartDate = null;
+let dashboardCustomEndDate = null;
+(() => {
+  try {
+    const saved = localStorage.getItem(DASHBOARD_CUSTOM_RANGE_KEY);
+    if (!saved) return;
+    const [start, end] = saved.split("~");
+    if (isDashboardDateValue(start) && isDashboardDateValue(end) && start <= end) {
+      dashboardCustomStartDate = start;
+      dashboardCustomEndDate = end;
+    }
+  } catch {
+    // A missing custom range just leaves the pickers empty.
+  }
+})();
+// A stored "custom" needs its dates; without them fall back to a preset so the
+// dashboard never opens in a state it cannot query.
+if (dashboardTimeRange === "custom" && !(dashboardCustomStartDate && dashboardCustomEndDate)) {
+  dashboardTimeRange = DASHBOARD_DEFAULT_RANGE;
+}
 let dashboardRefreshTimer = null;
 let dashboardLoading = false;
 let lastDashboardLoadError = "";
 
+const dashboardPanel = document.querySelector(".dashboard-panel");
 const dashboardScope = document.querySelector("#dashboard-scope");
 const dashboardKpis = document.querySelector("#dashboard-kpis");
 const dashboardTokenKpis = document.querySelector("#dashboard-token-kpis");
@@ -287,12 +361,29 @@ const dashboardTopChannels = document.querySelector("#dashboard-top-channels");
 const dashboardChannelsMeta = document.querySelector("#dashboard-channels-meta");
 const dashboardTopChannelTokens = document.querySelector("#dashboard-top-channel-tokens");
 const dashboardChannelTokensMeta = document.querySelector("#dashboard-channel-tokens-meta");
-const dashboardTopWindowSelect = document.querySelector("#dashboard-top-window");
 const dashboardChannelNameToggle = document.querySelector("#dashboard-channel-name-toggle");
 const dashboardErrorRows = document.querySelector("#dashboard-error-rows");
+const dashboardTokenRangeMeta = document.querySelector("#dashboard-token-range");
+const dashboardSelectedRangeMeta = document.querySelector("#dashboard-selected-range");
+const dashboardTimePreset = document.querySelector("#dashboard-time-preset");
+const dashboardCustomRange = document.querySelector("#dashboard-custom-range");
+const dashboardStartDate = document.querySelector("#dashboard-start-date");
+const dashboardEndDate = document.querySelector("#dashboard-end-date");
+const dashboardApplyCustom = document.querySelector("#dashboard-apply-custom");
 
-if (dashboardTopWindowSelect) {
-  dashboardTopWindowSelect.value = dashboardTopWindow;
+// Reflect the restored range in the control before the first paint, so the
+// dropdown, the label, and the query all agree from the start.
+if (dashboardTimePreset) {
+  dashboardTimePreset.value = dashboardTimeRange;
+}
+if (dashboardStartDate && dashboardCustomStartDate) {
+  dashboardStartDate.value = dashboardCustomStartDate;
+}
+if (dashboardEndDate && dashboardCustomEndDate) {
+  dashboardEndDate.value = dashboardCustomEndDate;
+}
+if (dashboardCustomRange) {
+  dashboardCustomRange.hidden = dashboardTimeRange !== "custom";
 }
 
 let dashboardChannelNameHidden = (() => {
@@ -1071,6 +1162,38 @@ function escapeHtml(value) {
     };
     return entities[char];
   });
+}
+
+/* Catmull-Rom 转三次贝塞尔的平滑折线，渠道卡片的 6h 请求量和看板的延迟趋势
+   共用这一个生成器，曲线手感才一致。coords 是已经换算到 SVG 坐标系的
+   {x, y} 数组；返回描边路径和向 baselineY 封口的面积路径。控制点的 y 会被
+   夹在 [minY, maxY] 里——Catmull-Rom 在陡峭拐点会过冲，不夹的话面积填充
+   可能戳破基线或顶出视口。 */
+function buildSmoothSparkPaths(coords, { baselineY, minY = -Infinity, maxY = Infinity } = {}) {
+  if (!coords.length) return { line: "", area: "" };
+  const fmt = (value) => value.toFixed(2);
+  if (coords.length === 1) {
+    const only = coords[0];
+    const line = `M ${fmt(only.x)} ${fmt(only.y)}`;
+    return { line, area: `${line} L ${fmt(only.x)} ${fmt(baselineY)} Z` };
+  }
+  const clampY = (value) => Math.min(Math.max(value, minY), maxY);
+  let line = `M ${fmt(coords[0].x)} ${fmt(coords[0].y)}`;
+  for (let i = 0; i < coords.length - 1; i++) {
+    const p0 = coords[i - 1] || coords[i];
+    const p1 = coords[i];
+    const p2 = coords[i + 1];
+    const p3 = coords[i + 2] || p2;
+    const c1x = p1.x + (p2.x - p0.x) / 6;
+    const c1y = clampY(p1.y + (p2.y - p0.y) / 6);
+    const c2x = p2.x - (p3.x - p1.x) / 6;
+    const c2y = clampY(p2.y - (p3.y - p1.y) / 6);
+    line += ` C ${fmt(c1x)} ${fmt(c1y)}, ${fmt(c2x)} ${fmt(c2y)}, ${fmt(p2.x)} ${fmt(p2.y)}`;
+  }
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  const area = `${line} L ${fmt(last.x)} ${fmt(baselineY)} L ${fmt(first.x)} ${fmt(baselineY)} Z`;
+  return { line, area };
 }
 
 function renderIcon(name) {

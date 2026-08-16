@@ -73,6 +73,8 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 
 		admin.Route("/upstreams", func(upstreams chi.Router) {
 			upstreams.Post("/fetch-models", handlers.AdminFetchModelsPreview(state))
+			upstreams.Post("/export", handlers.AdminExportUpstreams(state))
+			upstreams.Post("/import", handlers.AdminImportUpstreams(state))
 			upstreams.Get("/", handlers.AdminListUpstreams(state))
 			upstreams.Post("/", handlers.AdminCreateUpstream(state))
 			upstreams.Get("/{id}", handlers.AdminGetUpstream(state))
@@ -85,6 +87,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			upstreams.Post("/{id}/models", handlers.AdminFetchUpstreamModels(state))
 			upstreams.Post("/{id}/balance", handlers.AdminFetchUpstreamBalance(state))
 			upstreams.Post("/{id}/balance/sub2api", handlers.AdminFetchUpstreamSub2APIBalance(state))
+			upstreams.Get("/stats", handlers.AdminGetUpstreamsStats(state))
 		})
 
 		admin.Route("/groups", func(groups chi.Router) {
@@ -110,6 +113,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			logs.Get("/stream", handlers.AdminStreamLogs(state))
 			logs.Get("/token-usage", handlers.AdminTokenUsageStats(state))
 			logs.Get("/top", handlers.AdminTopLogStats(state))
+			logs.Get("/overview", handlers.AdminLogOverview(state))
 			logs.Get("/{id}", handlers.AdminGetLogDetail(state))
 		})
 	})

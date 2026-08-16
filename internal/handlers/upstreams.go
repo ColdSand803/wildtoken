@@ -1421,3 +1421,213 @@ func parseSub2APIBalancePayload(payload map[string]any) (map[string]any, bool) {
 		"mode":     jsonStringAt(payload, [][]string{{"mode"}}),
 	}, true
 }
+
+// AdminExportUpstreams exports channels as a JSON document.
+func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req models.ExportUpstreamsRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
+		ctx := r.Context()
+		rows, err := db.ListUpstreams(ctx, state.DB)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
+		// Filter by IDs if provided
+		filtered := rows
+		if len(req.IDs) > 0 {
+			idSet := make(map[int64]bool)
+			for _, id := range req.IDs {
+				idSet[id] = true
+			}
+			filtered = []models.UpstreamOut{}
+			for _, row := range rows {
+				if idSet[row.ID] {
+					filtered = append(filtered, row)
+				}
+			}
+		}
+
+		// Build export items
+		channels := make([]models.ChannelExportItem, 0, len(filtered))
+		for _, out := range filtered {
+			item := models.ChannelExportItem{
+				Name:              out.Name,
+				BaseURL:           out.BaseURL,
+				ModelNames:        out.ModelNames,
+				ModelPrefixes:     out.ModelPrefixes,
+				ModelMappings:     out.ModelMappings,
+				Priority:          out.Priority,
+				Weight:            out.Weight,
+				AutoWeightEnabled: out.AutoWeightEnabled,
+				Enabled:           out.Enabled,
+				ExtraHeaders:      out.ExtraHeaders,
+				TimeoutSeconds:    out.TimeoutSeconds,
+				RateLimit:         out.RateLimit,
+				GroupIDs:          out.GroupIDs,
+			}
+			// Include API key if requested and present
+			if req.IncludeAPIKeys {
+				row, found, err := db.GetUpstream(ctx, state.DB, out.ID)
+				if err != nil {
+					apperr.WriteError(w, err)
+					return
+				}
+				if found && row.APIKey != nil {
+					item.APIKey = row.APIKey
+				}
+			}
+			channels = append(channels, item)
+		}
+
+		resp := models.ExportUpstreamsResponse{
+			Kind:       "wildtoken-channels",
+			Version:    1,
+			ExportedAt: time.Now().UTC().Format(time.RFC3339),
+			Channels:   channels,
+		}
+		apperr.WriteJSON(w, http.StatusOK, resp)
+	}
+}
+
+// AdminImportUpstreams imports channels from a JSON document.
+func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req models.ImportUpstreamsRequest
+		if err := decodeJSON(w, r, &req); err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
+		if req.Mode != "skip" && req.Mode != "overwrite" {
+			apperr.WriteError(w, apperr.BadRequest("mode must be 'skip' or 'overwrite'"))
+			return
+		}
+
+		ctx := r.Context()
+		result := models.ImportUpstreamsResponse{
+			Items: make([]models.ImportResultItem, 0, len(req.Channels)),
+		}
+
+		for _, item := range req.Channels {
+			// Convert to UpstreamIn
+			input := models.UpstreamIn{
+				Name:              item.Name,
+				BaseURL:           item.BaseURL,
+				APIKey:            item.APIKey,
+				ModelNames:        item.ModelNames,
+				ModelPrefixes:     item.ModelPrefixes,
+				ModelMappings:     item.ModelMappings,
+				Priority:          item.Priority,
+				Weight:            item.Weight,
+				AutoWeightEnabled: item.AutoWeightEnabled,
+				Enabled:           item.Enabled,
+				ExtraHeaders:      item.ExtraHeaders,
+				TimeoutSeconds:    &item.TimeoutSeconds,
+				RateLimit:         item.RateLimit,
+				GroupIDs:          item.GroupIDs,
+			}
+
+			// Validate
+			if err := input.Validate(); err != nil {
+				msg := err.Error()
+				result.Items = append(result.Items, models.ImportResultItem{
+					Name:    item.Name,
+					Action:  "failed",
+					Message: &msg,
+				})
+				result.Failed++
+				continue
+			}
+
+			if err := validateOverrides(input.ExtraHeaders); err != nil {
+				msg := err.Error()
+				result.Items = append(result.Items, models.ImportResultItem{
+					Name:    item.Name,
+					Action:  "failed",
+					Message: &msg,
+				})
+				result.Failed++
+				continue
+			}
+
+			// Check if exists
+			existing, found, err := db.GetUpstreamByName(ctx, state.DB, item.Name)
+			if err != nil {
+				msg := "database error: " + err.Error()
+				result.Items = append(result.Items, models.ImportResultItem{
+					Name:    item.Name,
+					Action:  "failed",
+					Message: &msg,
+				})
+				result.Failed++
+				continue
+			}
+
+			if found {
+				if req.Mode == "skip" {
+					result.Items = append(result.Items, models.ImportResultItem{
+						Name:   item.Name,
+						Action: "skipped",
+					})
+					result.Skipped++
+					continue
+				}
+
+				// Overwrite
+				update := models.UpstreamUpdate{
+					UpstreamIn:  input,
+					ClearAPIKey: false, // Keep existing key if import has none
+				}
+				_, err := db.UpdateUpstream(ctx, state.DB, existing.ID, &update)
+				if err != nil {
+					msg := "update failed: " + err.Error()
+					result.Items = append(result.Items, models.ImportResultItem{
+						Name:    item.Name,
+						Action:  "failed",
+						Message: &msg,
+					})
+					result.Failed++
+					continue
+				}
+
+				state.AutoWeight.Reset(existing.ID)
+				result.Items = append(result.Items, models.ImportResultItem{
+					Name:   item.Name,
+					Action: "updated",
+				})
+				result.Updated++
+			} else {
+				// Create new
+				_, err := db.CreateUpstream(ctx, state.DB, &input, state.Settings.Upstream.DefaultTimeoutSeconds)
+				if err != nil {
+					msg := "create failed: " + err.Error()
+					result.Items = append(result.Items, models.ImportResultItem{
+						Name:    item.Name,
+						Action:  "failed",
+						Message: &msg,
+					})
+					result.Failed++
+					continue
+				}
+
+				result.Items = append(result.Items, models.ImportResultItem{
+					Name:   item.Name,
+					Action: "created",
+				})
+				result.Created++
+			}
+		}
+
+		// Invalidate caches after all changes
+		state.ModelsCache.Invalidate()
+		state.Routing.Invalidate()
+
+		apperr.WriteJSON(w, http.StatusOK, result)
+	}
+}

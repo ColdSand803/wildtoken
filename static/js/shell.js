@@ -62,6 +62,14 @@ function closeDialogElement(dialog) {
     closeQuickImportDialog();
     return true;
   }
+  if (dialog === channelExportDialog) {
+    closeChannelExportDialog();
+    return true;
+  }
+  if (dialog === channelImportDialog) {
+    closeChannelImportDialog();
+    return true;
+  }
   if (dialog === modelDialog) {
     closeModelDialog();
     return true;

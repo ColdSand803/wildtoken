@@ -104,6 +104,18 @@
     width: 100%;
   }
 
+  /* The panel head stacks here, so the range control gets its own full-width
+     row instead of being squeezed against the title. */
+  .dashboard-time-filter {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .dashboard-range-field,
+  .dashboard-range-field select {
+    width: 100%;
+  }
+
   .actions {
     gap: 8px;
   }

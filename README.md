@@ -51,9 +51,13 @@ an admin console for day-to-day operations.
   over to the next candidate, and 429 is returned only when every candidate is
   exhausted. Counting uses in-memory sliding windows, so limits reset on restart.
 - 📊 **Admin dashboard:** inspect channel status, request logs, token usage, top
-  models/channels, latency, runtime metrics, and request/response snapshots.
+  models/channels, latency, runtime metrics, and request/response snapshots. One
+  time-range control covers today, 24h, 3d, 7d, 30d, all time, and custom dates.
 - 🧰 **Channel tools:** fetch model lists, test connectivity, test a selected model,
   and query new-api/sub2api-style balances from the console.
+- 📦 **Channel import/export:** move channel configuration between instances as JSON.
+  Exports optionally include API keys, and same-name channels can be skipped or
+  overwritten on import.
 - 🧹 **Body retention controls:** keep metadata while pruning old request/response
   bodies to limit SQLite growth.
 - 🎨 **Theme packs:** optional CSS-only admin themes under `themes/`, loaded without
