@@ -181,7 +181,7 @@ function renderDashboardKpiCards(container, cards) {
     const cardKeyAttr = card.cardKey ? ` data-card-key="${escapeHtml(card.cardKey)}"` : "";
     // 背景曲线（SVG）包在绝对定位容器里铺满卡片下半部
     const backgroundBlock = card.backgroundHtml
-      ? `<div class="kpi-bg-spark">${card.backgroundHtml}</div>`
+      ? `<div class="kpi-bg-spark"><div class="kpi-spark-hit-layer"></div>${card.backgroundHtml}</div>`
       : "";
     return `
     <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}${hintTitle}${cardKeyAttr}>
@@ -412,6 +412,58 @@ function kpiBackgroundSparkPaths(records) {
   });
 }
 
+function bindKpiRequestSparkInteraction(card, values) {
+  const svg = card?.querySelector(".kpi-bg-spark-svg");
+  const hitArea = card?.querySelector(".kpi-spark-hit-area");
+  const hoverLayer = card?.querySelector(".kpi-spark-hit-layer");
+  const guide = svg?.querySelector(".kpi-spark-hover-guide");
+  const dot = svg?.querySelector(".kpi-spark-hover-dot");
+  const tooltip = card?.querySelector(".kpi-spark-tooltip");
+  if (!svg || !hoverLayer || !hitArea || !guide || !dot || !tooltip || !Array.isArray(values) || values.length < 2) return;
+  let frameId = null;
+  let pendingEvent = null;
+  const update = (event) => {
+    pendingEvent = event;
+    if (frameId != null) return;
+    frameId = window.requestAnimationFrame(() => {
+      frameId = null;
+      const bounds = svg.getBoundingClientRect();
+      if (!pendingEvent) return;
+      const ratio = Math.max(0, Math.min(1, (pendingEvent.clientX - bounds.left) / bounds.width));
+      const dotScaleX = (bounds.height * 100) / Math.max(bounds.width * 32, 1);
+      const x = ratio * 100;
+      const position = ratio * (values.length - 1);
+      const index = Math.min(values.length - 1, Math.floor(position));
+      const next = Math.min(values.length - 1, index + 1);
+      const progress = next === index ? 0 : position - index;
+      const value = values[index] + (values[next] - values[index]) * progress;
+      const y = 30 - ((value - Math.min(...values)) / (Math.max(...values) - Math.min(...values) || 1)) * 26;
+      guide.setAttribute("x1", x);
+      guide.setAttribute("x2", x);
+      dot.setAttribute("transform", `scale(${dotScaleX} 1)`);
+      dot.setAttribute("cx", x / dotScaleX);
+      dot.setAttribute("cy", y);
+      tooltip.innerHTML = `<strong>请求数</strong><span>${formatCompactNumber(Math.round(value))}</span>`;
+      tooltip.hidden = false;
+      tooltip.style.left = `${Math.min(Math.max(6, x + 8), card.clientWidth - tooltip.offsetWidth - 6)}px`;
+      tooltip.style.top = `${Math.max(6, y - 34)}px`;
+    });
+  };
+  const clear = () => {
+    pendingEvent = null;
+    if (frameId != null) window.cancelAnimationFrame(frameId);
+    frameId = null;
+    tooltip.hidden = true;
+    svg.removeAttribute("data-hovering");
+  };
+  hoverLayer.addEventListener("pointerenter", (event) => {
+    svg.dataset.hovering = "true";
+    update(event);
+  });
+  hoverLayer.addEventListener("pointermove", update);
+  hoverLayer.addEventListener("pointerleave", clear);
+}
+
 /* 请求数卡的背景趋势：压得很淡的平滑曲线，贴卡片底部，不抢数字。 */
 function buildKpiBackgroundSpark(values) {
   if (!Array.isArray(values) || values.length < 2) return "";
@@ -428,15 +480,20 @@ function buildKpiBackgroundSpark(values) {
       <path class="spark-morph-area" d="${area}" fill="url(#${gradientId})" />
       <path class="spark-morph-line" d="${line}" fill="none" stroke="currentColor" stroke-opacity="0.45"
             stroke-width="1.2" vector-effect="non-scaling-stroke" />
+      <line class="kpi-spark-hover-guide" x1="0" y1="2" x2="0" y2="32" vector-effect="non-scaling-stroke" />
+      <circle class="kpi-spark-hover-dot" r="2.5" cx="0" cy="0" />
+      <rect class="kpi-spark-hit-area" x="0" y="0" width="100" height="32" />
     </svg>
+    <div class="kpi-spark-tooltip" role="status" hidden></div>
   `;
 }
+
 
 /// 延迟趋势曲线的记录（{a: 均值, p: P95}）→ 路径映射。两条序列共享同一
 /// 套纵向比例，P95 恒在均值上方。曲线数据带上下各留 pad 防描边被视口
 /// 裁掉，但面积一直填到 viewBox 最底边——图表下方紧贴延迟摘要的分隔线，
 /// 中间不能露出一条底色缝。
-function latencySparkPaths(records, width, height) {
+function latencySparkPointSeries(records, width, height) {
   const avg = smoothSeries(records.map((record) => record.a));
   const p95 = smoothSeries(records.map((record) => record.p));
   const max = Math.max(...avg, ...p95, 1);
@@ -445,22 +502,24 @@ function latencySparkPaths(records, width, height) {
   const pad = 2;
   const xOf = (index) => pad + (index / Math.max(records.length - 1, 1)) * (width - pad * 2);
   const yOf = (value) => height - pad - ((value - min) / span) * (height - pad * 2);
+  return {
+    avg: avg.map((value, index) => ({ x: xOf(index), y: yOf(value), value })),
+    p95: p95.map((value, index) => ({ x: xOf(index), y: yOf(value), value })),
+  };
+}
+
+function latencySparkPaths(records, width, height) {
+  const points = latencySparkPointSeries(records, width, height);
   /* 跟渠道卡片同一个平滑生成器和渐变画法，两处图表手感一致。 */
-  const { line, area } = buildSmoothSparkPaths(avg.map((value, index) => ({
-    x: xOf(index),
-    y: yOf(value),
-  })), {
+  const { line, area } = buildSmoothSparkPaths(points.avg, {
     baselineY: height,
-    minY: pad,
-    maxY: height - pad,
+    minY: 2,
+    maxY: height - 2,
   });
-  const { line: p95Line } = buildSmoothSparkPaths(p95.map((value, index) => ({
-    x: xOf(index),
-    y: yOf(value),
-  })), {
+  const { line: p95Line } = buildSmoothSparkPaths(points.p95, {
     baselineY: height,
-    minY: pad,
-    maxY: height - pad,
+    minY: 2,
+    maxY: height - 2,
   });
   return { line, area, p95: p95Line };
 }
@@ -483,8 +542,118 @@ function buildSparklineSvg(records, { width = 240, height = 44 } = {}) {
       <path class="spark-morph-p95" d="${p95}" fill="none" stroke="currentColor" stroke-opacity="0.35"
             stroke-width="1.2" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" />
       <path class="spark-morph-line" d="${line}" fill="none" stroke="currentColor" stroke-width="1.8" vector-effect="non-scaling-stroke" />
+      <line class="spark-hover-guide" x1="0" y1="2" x2="0" y2="100" vector-effect="non-scaling-stroke" />
+      <circle class="spark-hover-dot spark-hover-dot--avg" r="3" cx="0" cy="0" />
+      <circle class="spark-hover-dot spark-hover-dot--p95" r="3" cx="0" cy="0" />
+      <rect class="spark-hit-area" x="0" y="0" width="${width}" height="${height}" />
     </svg>
   `;
+}
+
+function bindLatencySparkInteractions(container, records) {
+  const svg = container?.querySelector(".dashboard-spark");
+  const tooltip = container?.querySelector(".dashboard-chart-tooltip");
+  if (!svg || !tooltip || !Array.isArray(records) || !records.length) return;
+  const width = 320;
+  const height = 100;
+  const points = latencySparkPointSeries(records, width, height);
+  const guide = svg.querySelector(".spark-hover-guide");
+  const avgPath = svg.querySelector(".spark-morph-line");
+  const p95Path = svg.querySelector(".spark-morph-p95");
+  const avgDot = svg.querySelector(".spark-hover-dot--avg");
+  const p95Dot = svg.querySelector(".spark-hover-dot--p95");
+  const pathPointAtX = (path, x) => {
+    const length = path.getTotalLength();
+    let low = 0;
+    let high = length;
+    for (let iteration = 0; iteration < 14; iteration++) {
+      const mid = (low + high) / 2;
+      if (path.getPointAtLength(mid).x < x) low = mid;
+      else high = mid;
+    }
+    return path.getPointAtLength((low + high) / 2);
+  };
+  const svgBounds = svg.getBoundingClientRect();
+  const dotScaleX = (svgBounds.height * width) / Math.max(svgBounds.width * height, 1);
+  avgDot.setAttribute("transform", `scale(${dotScaleX} 1)`);
+  p95Dot.setAttribute("transform", `scale(${dotScaleX} 1)`);
+  let activeSeries = "avg";
+  let pendingEvent = null;
+  let frameId = null;
+
+  const positionTooltip = (point) => {
+    const bounds = container.getBoundingClientRect();
+    const gap = 12;
+    const svgBounds = svg.getBoundingClientRect();
+    const x = svgBounds.left - bounds.left + (point.x / width) * svgBounds.width;
+    const y = svgBounds.top - bounds.top + (point.y / height) * svgBounds.height;
+    const preferLeft = x > bounds.width * 0.62;
+    const left = preferLeft ? x - tooltip.offsetWidth - gap : x + gap;
+    const top = Math.min(
+      Math.max(gap, y - tooltip.offsetHeight - gap),
+      Math.max(gap, bounds.height - tooltip.offsetHeight - gap),
+    );
+    tooltip.style.left = `${Math.max(gap, Math.min(left, bounds.width - tooltip.offsetWidth - gap))}px`;
+    tooltip.style.top = `${top}px`;
+  };
+  const formatPointTime = (record) => {
+    const epoch = Number(record.bucket_epoch);
+    return Number.isFinite(epoch) && epoch > 0
+      ? logTimeFormatter.format(new Date(epoch * 1000))
+      : "当前时间桶";
+  };
+  const renderAtPointer = (event) => {
+    const bounds = svg.getBoundingClientRect();
+    const ratio = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width));
+    const position = ratio * Math.max(records.length - 1, 1);
+    const index = Math.min(records.length - 1, Math.floor(position));
+    const nextIndex = Math.min(records.length - 1, index + 1);
+    const progress = index === nextIndex ? 0 : position - index;
+    const x = points.avg[index].x + (points.avg[nextIndex].x - points.avg[index].x) * progress;
+    const svgY = Math.max(0, Math.min(height, (event.clientY - bounds.top) / bounds.height * height));
+    const avg = pathPointAtX(avgPath, x);
+    const p95 = pathPointAtX(p95Path, x);
+    activeSeries = Math.abs(svgY - p95.y) < Math.abs(svgY - avg.y) ? "p95" : "avg";
+    svg.dataset.activeSeries = activeSeries;
+    guide.setAttribute("x1", x);
+    guide.setAttribute("x2", x);
+    avgDot.setAttribute("cx", avg.x / dotScaleX);
+    avgDot.setAttribute("cy", avg.y);
+    p95Dot.setAttribute("cx", p95.x / dotScaleX);
+    p95Dot.setAttribute("cy", p95.y);
+
+    const leftRecord = records[index];
+    const rightRecord = records[nextIndex];
+    const avgValue = Number(leftRecord.a) + (Number(rightRecord.a) - Number(leftRecord.a)) * progress;
+    const p95Value = Number(leftRecord.p) + (Number(rightRecord.p) - Number(leftRecord.p)) * progress;
+    const pointLabel = activeSeries === "p95" ? "P95" : "平均耗时";
+    const pointValue = activeSeries === "p95" ? p95Value : avgValue;
+    const displayRecord = progress >= 0.5 ? rightRecord : leftRecord;
+    tooltip.innerHTML = `<strong>${escapeHtml(formatPointTime(displayRecord))}</strong><span>${pointLabel} ${escapeHtml(formatSeconds(pointValue))}</span>`;
+    tooltip.hidden = false;
+    positionTooltip(activeSeries === "p95" ? p95 : avg);
+  };
+  const update = (event) => {
+    pendingEvent = event;
+    if (frameId != null) return;
+    frameId = window.requestAnimationFrame(() => {
+      frameId = null;
+      if (pendingEvent) renderAtPointer(pendingEvent);
+    });
+  };
+  const clear = () => {
+    pendingEvent = null;
+    if (frameId != null) {
+      window.cancelAnimationFrame(frameId);
+      frameId = null;
+    }
+    delete svg.dataset.activeSeries;
+    tooltip.hidden = true;
+  };
+  const hitArea = svg.querySelector(".spark-hit-area");
+  hitArea.addEventListener("pointerenter", update);
+  hitArea.addEventListener("pointermove", update);
+  hitArea.addEventListener("pointerleave", clear);
 }
 
 /* 延迟序列的分桶宽度（秒）转成人话，给图表 meta 用。 */
@@ -753,6 +922,10 @@ function renderDashboard() {
     const sparkSvg = dashboardKpis.querySelector('[data-card-key="requests"] .kpi-bg-spark-svg');
     const sparkRecords = requestSparkValues.map((value) => ({ v: value }));
     animateSparkMorph(sparkSvg, lastRequestSparkRecords, sparkRecords, ["v"], kpiBackgroundSparkPaths);
+    bindKpiRequestSparkInteraction(
+      dashboardKpis.querySelector('[data-card-key="requests"]'),
+      requestSparkValues,
+    );
     lastRequestSparkRecords = sparkRecords;
   } else {
     lastRequestSparkRecords = null;
@@ -944,6 +1117,7 @@ function renderDashboard() {
       const maxDuration = Number(overview?.max_duration_ms) || 0;
       dashboardLatencyChart.innerHTML = `
         ${buildSparklineSvg(sparkRecords, { width: 320, height: 100 })}
+        <div class="dashboard-chart-tooltip" role="status" hidden></div>
         <dl class="dashboard-latency-summary" aria-label="「${overviewRangeLabel}」${durationCount} 条有效耗时的延迟摘要">
           <div><dt>最近</dt><dd>${escapeHtml(formatSeconds(latestAvg))}</dd></div>
           <div><dt>平均</dt><dd>${escapeHtml(formatSeconds(avgMs))}</dd></div>
@@ -961,6 +1135,7 @@ function renderDashboard() {
         ["a", "p"],
         (records) => latencySparkPaths(records, 320, 100),
       );
+      bindLatencySparkInteractions(dashboardLatencyChart, sparkRecords);
       lastLatencySparkRecords = sparkRecords;
     }
   }

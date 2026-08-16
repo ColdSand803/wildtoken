@@ -699,10 +699,68 @@ function renderSparkline(points) {
       <path d="${area}" fill="url(#${gradientId})" />
       <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.5"
             vector-effect="non-scaling-stroke"/>
+      <line class="channel-spark-hover-guide" x1="0" y1="0" x2="0" y2="40" vector-effect="non-scaling-stroke" />
+      <circle class="channel-spark-hover-dot" r="2.5" cx="0" cy="0" />
+      <rect class="channel-spark-hit-area" x="0" y="0" width="100" height="40" />
     </svg>
+    <div class="channel-spark-tooltip" role="status" hidden></div>
   `;
 }
 
+function bindChannelSparklineInteraction(container, values) {
+  const svg = container?.querySelector(".sparkline-svg");
+  const hitArea = svg?.querySelector(".channel-spark-hit-area");
+  const guide = svg?.querySelector(".channel-spark-hover-guide");
+  const dot = svg?.querySelector(".channel-spark-hover-dot");
+  const tooltip = container?.querySelector(".channel-spark-tooltip");
+  if (!svg || !hitArea || !guide || !dot || !tooltip || !Array.isArray(values) || values.length < 2) return;
+  let frameId = null;
+  let pendingEvent = null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const update = (event) => {
+    pendingEvent = event;
+    if (frameId != null) return;
+    frameId = window.requestAnimationFrame(() => {
+      frameId = null;
+      if (!pendingEvent) return;
+      const bounds = svg.getBoundingClientRect();
+      const ratio = Math.max(0, Math.min(1, (pendingEvent.clientX - bounds.left) / bounds.width));
+      const position = ratio * (values.length - 1);
+      const index = Math.min(values.length - 1, Math.floor(position));
+      const next = Math.min(values.length - 1, index + 1);
+      const progress = next === index ? 0 : position - index;
+      const value = values[index] + (values[next] - values[index]) * progress;
+      const x = ratio * 100;
+      const y = 40 - ((value - min) / range) * 35;
+      guide.setAttribute("x1", x);
+      guide.setAttribute("x2", x);
+      dot.setAttribute("cx", x);
+      dot.setAttribute("cy", y);
+      tooltip.innerHTML = `<strong>请求量 (6h)</strong><span>${formatMetric(Math.round(value))}</span>`;
+      tooltip.hidden = false;
+      tooltip.style.left = `${Math.min(Math.max(6, x * bounds.width / 100 + 8), container.clientWidth - tooltip.offsetWidth - 6)}px`;
+      tooltip.style.top = `${Math.max(6, y * bounds.height / 40 - 32)}px`;
+    });
+  };
+  const clear = () => {
+    pendingEvent = null;
+    if (frameId != null) window.cancelAnimationFrame(frameId);
+    frameId = null;
+    tooltip.hidden = true;
+    svg.removeAttribute("data-hovering");
+    svg.removeAttribute("data-hovering");
+  };
+  hitArea.addEventListener("pointerenter", (event) => {
+    svg.dataset.hovering = "true";
+    update(event);
+  });
+  hitArea.addEventListener("pointermove", update);
+  hitArea.addEventListener("pointerleave", clear);
+}
+
+/* 统计数据按渠道缓存。渠道列表每 N 秒轮询一次，但统计的变化远没有那么快，
 /* 统计数据按渠道缓存。渠道列表每 N 秒轮询一次，但统计的变化远没有那么快，
    而且每张卡一个请求。没有缓存的话，每轮刷新都要等 N 个请求回来才能重建卡片，
    那段空窗就是肉眼看到的闪烁。 */
@@ -916,6 +974,7 @@ function createChannelCard(upstream) {
       查看详情 →
     </button>
   `;
+  bindChannelSparklineInteraction(card.querySelector(".channel-card-sparkline"), sparklineData);
 
   return card;
 }
