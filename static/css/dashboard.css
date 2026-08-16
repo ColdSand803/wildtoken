@@ -166,7 +166,7 @@
   align-self: flex-end;
   display: flex;
   flex: 0 1 auto;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
   max-width: 100%;
@@ -257,6 +257,14 @@ html[data-theme] button.dashboard-apply-custom,
 .dashboard-date-field:hover,
 .dashboard-date-field:focus-within {
   border-color: var(--accent-border, var(--line-strong, var(--line)));
+}
+
+/* Visual hint that the whole field opens the date picker. */
+.dashboard-date-field::after {
+  color: var(--muted);
+  content: "▾";
+  font-size: 10px;
+  margin-left: 4px;
 }
 
 .dashboard-date-text {
@@ -598,6 +606,40 @@ html[data-theme] .dashboard-date-field input[type="date"],
 .status-error-cell.is-clean {
   background: var(--line-soft);
   opacity: 1;
+}
+
+/* ── 时间范围切换的图表过渡动画 ───────────────────────────────── */
+
+/* 延迟趋势和请求数曲线在时间范围切换时不生硬跳变：旧图向左滑出并淡出、
+   新图从右滑入并淡入，符合"时间轴向前/向后移动"的语义。容器相对定位，
+   新旧内容绝对定位叠加 300ms。 */
+@keyframes chart-transition-out {
+  to {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+}
+
+@keyframes chart-transition-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+
+.chart-transition-container {
+  position: relative;
+}
+
+.chart-transition-old {
+  animation: chart-transition-out 300ms ease-out forwards;
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+
+.chart-transition-new {
+  animation: chart-transition-in 300ms ease-out;
 }
 
 /* 请求数卡的背景趋势曲线：绝对定位铺在卡片下半部，最底层。 */
@@ -1164,51 +1206,58 @@ html[data-theme] button.wt-seg-btn.is-active:focus-visible {
   scrollbar-width: thin;
 }
 
-.dashboard-custom-chip {
-  max-width: 4.75rem;
-  overflow: hidden;
-  transition:
-    max-width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 160ms ease,
-    padding 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    margin 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-#dashboard-time-chips.is-custom .dashboard-custom-chip {
-  margin: 0;
-  max-width: 0;
-  opacity: 0;
-  padding-left: 0;
-  padding-right: 0;
-  pointer-events: none;
-}
-
+/* Sits next to the segmented chips (not inside them) so the date inputs stay
+   clickable: the chips row scrolls horizontally and paints a thumb overlay,
+   both of which swallow clicks on anything embedded in it. */
+/* Slides out from the active chip: fade + gentle overshoot on enter, a
+   slightly quicker settle on exit so switching ranges feels snappy. */
 .dashboard-custom-range {
-  display: grid;
+  align-items: center;
+  display: inline-flex;
   flex: 0 0 auto;
-  grid-template-columns: 0fr;
-  max-width: 0;
-  min-width: 0;
   opacity: 0;
-  overflow: hidden;
   pointer-events: none;
-  position: static;
-  transform: none;
+  transform: translateX(12px) scale(0.96);
+  transform-origin: left center;
   transition:
-    grid-template-columns 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    max-width 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    opacity 180ms ease;
+    opacity 140ms ease,
+    transform 160ms cubic-bezier(0.4, 0, 0.9, 0.6);
 }
 
 .dashboard-custom-range.is-open {
-  flex-shrink: 0;
-  grid-template-columns: 1fr;
-  max-width: none;
   opacity: 1;
   pointer-events: auto;
+  transform: none;
+  transition:
+    opacity 160ms ease,
+    transform 260ms cubic-bezier(0.2, 0.9, 0.25, 1.1);
 }
 
-.dashboard-custom-range[hidden]:not(.is-open) {
+/* Stagger the fields so the panel unfolds instead of moving as one block. */
+.dashboard-custom-range-inner > * {
+  opacity: 0;
+  transform: translateX(6px);
+  transition:
+    opacity 140ms ease,
+    transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition-delay: 0ms;
+}
+
+.dashboard-custom-range.is-open .dashboard-custom-range-inner > * {
+  opacity: 1;
+  transform: none;
+  transition-delay: 60ms;
+}
+
+.dashboard-custom-range.is-open .dashboard-custom-range-inner > *:nth-child(2) {
+  transition-delay: 90ms;
+}
+
+.dashboard-custom-range.is-open .dashboard-custom-range-inner > *:nth-child(n+3) {
+  transition-delay: 120ms;
+}
+
+.dashboard-custom-range[hidden] {
   display: none;
 }
 
@@ -1224,11 +1273,6 @@ html[data-theme] button.wt-seg-btn.is-active:focus-visible {
 }
 
 
-@media (max-width: 760px) {
-  .dashboard-custom-range.is-open {
-    max-width: none;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .dashboard-kpi,
   .dashboard-custom-range,

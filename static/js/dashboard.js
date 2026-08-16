@@ -171,15 +171,16 @@ function renderDashboardKpiCards(container, cards) {
     /* valueHtml / labelHtml 是调用方已经拼好的安全 HTML（分母缩小、呼吸圆点、
        环比箭头这类富内容）；不传则照旧走转义的纯文本。hoverHint 为 true 时
        说明文字挪进 title，鼠标滑过才显示，卡面留给数字。backgroundHtml 放在
-       卡片最底层（低透明度趋势曲线之类）。 */
+       卡片最底层（低透明度趋势曲线之类）。cardKey 用于识别需要背景曲线过渡的卡。 */
     const valueHtml = card.valueHtml ?? escapeHtml(card.value);
     const labelHtml = card.labelHtml ?? escapeHtml(card.label);
     const hintTitle = card.hoverHint && card.hint ? ` title="${escapeHtml(card.hint)}"` : "";
     const hintBlock = card.hoverHint
       ? ""
       : `<div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>`;
+    const cardKeyAttr = card.cardKey ? ` data-card-key="${escapeHtml(card.cardKey)}"` : "";
     return `
-    <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}${hintTitle}>
+    <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}${hintTitle}${cardKeyAttr}>
       ${card.backgroundHtml || ""}
       <div class="dashboard-kpi-value">${valueHtml}</div>
       <div class="dashboard-kpi-label">${labelHtml}</div>
@@ -284,6 +285,47 @@ function animateKpiNumbers(container) {
     }
   }
   kpiNumberContainerKeys.set(container, seenKeys);
+}
+
+/* ── 图表时间范围过渡 ─────────────────────────────────────────
+   时间范围切换时，图表不生硬跳变：旧内容向左滑出并淡出、新内容从右滑入
+   并淡入。容器需有 chart-transition-container 类、data-transition-key
+   属性记住当前范围，内容包在一个子节点里。 */
+function transitionChartContent(container, newKey, buildNewContent) {
+  if (!container) return;
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const oldKey = container.dataset.transitionKey;
+  const wrap = container.querySelector(".chart-content-wrap");
+
+  if (!wrap || reduceMotion || oldKey === newKey) {
+    // 首次渲染、用户偏好减少动效、或范围未变：直接替换
+    if (wrap) {
+      wrap.innerHTML = buildNewContent();
+    } else {
+      container.innerHTML = `<div class="chart-content-wrap">${buildNewContent()}</div>`;
+    }
+    container.dataset.transitionKey = newKey;
+    return;
+  }
+
+  // 克隆旧内容作为退出动画
+  const oldWrap = wrap.cloneNode(true);
+  oldWrap.classList.add("chart-transition-old");
+  container.appendChild(oldWrap);
+
+  // 更新主 wrap 为新内容并标记进入动画
+  wrap.innerHTML = buildNewContent();
+  wrap.classList.add("chart-transition-new");
+
+  container.dataset.transitionKey = newKey;
+
+  // 300ms 后清理旧节点和新节点的动画类
+  setTimeout(() => {
+    if (oldWrap.parentNode === container) {
+      container.removeChild(oldWrap);
+    }
+    wrap.classList.remove("chart-transition-new");
+  }, 300);
 }
 
 let dashboardSparkGradientSeq = 0;
@@ -581,6 +623,7 @@ function renderDashboard() {
       hint: total ? `${overviewRangeLabel} · 共 ${total} 条` : `${overviewRangeLabel} · 暂无请求`,
       hoverHint: true,
       tone: "",
+      cardKey: "requests",
     },
     {
       value: errorRateLabel,
@@ -783,13 +826,14 @@ function renderDashboard() {
       : "暂无数据";
   }
   if (dashboardLatencyChart) {
-    if (latencySeries.length === 0) {
-      dashboardLatencyChart.innerHTML = '<div class="dashboard-chart-empty">所选范围内暂无有效耗时</div>';
-    } else {
+    transitionChartContent(dashboardLatencyChart, dashboardTimeRange, () => {
+      if (latencySeries.length === 0) {
+        return '<div class="dashboard-chart-empty">所选范围内暂无有效耗时</div>';
+      }
       const latestAvg = Number(latencySeries[latencySeries.length - 1].avg_ms) || 0;
       const minDuration = Number(overview?.min_duration_ms) || 0;
       const maxDuration = Number(overview?.max_duration_ms) || 0;
-      dashboardLatencyChart.innerHTML = `
+      return `
         ${buildSparklineSvg(spark, { width: 320, height: 100 })}
         <dl class="dashboard-latency-summary" aria-label="「${overviewRangeLabel}」${durationCount} 条有效耗时的延迟摘要">
           <div><dt>最近</dt><dd>${escapeHtml(formatSeconds(latestAvg))}</dd></div>
@@ -797,7 +841,7 @@ function renderDashboard() {
           <div><dt>范围</dt><dd>${escapeHtml(formatSeconds(minDuration))}–${escapeHtml(formatSeconds(maxDuration))}</dd></div>
         </dl>
       `;
-    }
+    });
   }
 
   const topModelRequests = Array.isArray(dashboardTopStats?.models) ? dashboardTopStats.models : [];
@@ -942,7 +986,7 @@ const scheduleRenderUpstreamSummary = debounce(() => {
 }, 120);
 
 let dashboardCustomRangeHideTimer = 0;
-const DASHBOARD_CUSTOM_RANGE_MOTION_MS = 260;
+const DASHBOARD_CUSTOM_RANGE_MOTION_MS = 220;
 
 function prefersReducedDashboardMotion() {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -969,44 +1013,22 @@ function syncDashboardDateMirrors() {
 function setDashboardCustomRangeOpen(open) {
   if (!dashboardCustomRange) return;
   const el = dashboardCustomRange;
-  const chips = document.querySelector("#dashboard-time-chips");
   window.clearTimeout(dashboardCustomRangeHideTimer);
-  chips?.classList.toggle("is-custom", open);
+
+  if (open) {
+    el.hidden = false;
+    el.setAttribute("aria-hidden", "false");
+    el.classList.add("is-open");
+    syncDashboardDateMirrors();
+    window.requestAnimationFrame(syncDashboardRangeThumb);
+    return;
+  }
 
   const finishHide = () => {
     if (el.classList.contains("is-open")) return;
     el.hidden = true;
-    window.requestAnimationFrame(syncDashboardRangeThumb);
   };
-
-  if (open) {
-    const alreadyOpen = el.classList.contains("is-open") && !el.hidden;
-    el.hidden = false;
-    el.setAttribute("aria-hidden", "false");
-    syncDashboardDateMirrors();
-    if (alreadyOpen) {
-      window.requestAnimationFrame(syncDashboardRangeThumb);
-      return;
-    }
-    const reveal = () => {
-      el.classList.add("is-open");
-      window.requestAnimationFrame(() => {
-        syncDashboardRangeThumb();
-        el.scrollIntoView({ inline: "end", block: "nearest", behavior: "smooth" });
-      });
-    };
-    if (prefersReducedDashboardMotion()) {
-      reveal();
-      return;
-    }
-    window.requestAnimationFrame(reveal);
-    return;
-  }
-
-  if (el.hidden && !el.classList.contains("is-open")) {
-    window.requestAnimationFrame(syncDashboardRangeThumb);
-    return;
-  }
+  if (el.hidden && !el.classList.contains("is-open")) return;
   el.setAttribute("aria-hidden", "true");
   el.classList.remove("is-open");
   window.requestAnimationFrame(syncDashboardRangeThumb);
@@ -1020,11 +1042,8 @@ function setDashboardCustomRangeOpen(open) {
 function syncDashboardRangeThumb() {
   const chips = document.querySelector("#dashboard-time-chips");
   const thumb = chips?.querySelector(".wt-seg-thumb");
-  const customOpen = chips?.classList.contains("is-custom");
-  const active = customOpen
-    ? chips.querySelector(".dashboard-custom-range")
-    : chips?.querySelector("[data-dashboard-range].is-active");
-  if (!chips || !thumb || !active || (customOpen && active.hidden)) {
+  const active = chips?.querySelector("[data-dashboard-range].is-active");
+  if (!chips || !thumb || !active) {
     if (thumb) thumb.style.opacity = "0";
     return;
   }
@@ -1050,6 +1069,20 @@ syncDashboardRangeChips();
   const input = document.querySelector(selector);
   input?.addEventListener("input", syncDashboardDateMirrors);
   input?.addEventListener("change", syncDashboardDateMirrors);
+});
+// The native calendar indicator is invisible (opacity 0 overlay), so clicks on
+// the field text only focus the input. Show the picker for the whole field.
+document.querySelectorAll(".dashboard-date-field").forEach((field) => {
+  const input = field.querySelector("input[type='date']");
+  if (!input) return;
+  field.addEventListener("click", () => {
+    input.focus();
+    try {
+      input.showPicker();
+    } catch {
+      // Browsers without showPicker fall back to the native indicator click.
+    }
+  });
 });
 window.addEventListener("resize", () => {
   window.requestAnimationFrame(syncDashboardRangeThumb);

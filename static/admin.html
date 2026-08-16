@@ -155,19 +155,19 @@
                   <button type="button" class="wt-seg-btn" data-dashboard-range="all">全部</button>
                   <button type="button" class="wt-seg-btn" data-dashboard-range="default">对比</button>
                   <button type="button" class="wt-seg-btn dashboard-custom-chip" data-dashboard-range="custom">自定义</button>
-                  <div id="dashboard-custom-range" class="dashboard-custom-range" hidden>
-                    <div class="dashboard-custom-range-inner">
-                      <label class="dashboard-date-field" data-placeholder="开始">
-                        <span class="dashboard-date-text">开始</span>
-                        <input type="date" id="dashboard-start-date" aria-label="开始日期" />
-                      </label>
-                      <span class="dashboard-date-sep">至</span>
-                      <label class="dashboard-date-field" data-placeholder="结束">
-                        <span class="dashboard-date-text">结束</span>
-                        <input type="date" id="dashboard-end-date" aria-label="结束日期" />
-                      </label>
-                      <button type="button" id="dashboard-apply-custom" class="secondary dashboard-apply-custom">应用</button>
-                    </div>
+                </div>
+                <div id="dashboard-custom-range" class="dashboard-custom-range" hidden>
+                  <div class="dashboard-custom-range-inner">
+                    <label class="dashboard-date-field" data-placeholder="开始">
+                      <span class="dashboard-date-text">开始</span>
+                      <input type="date" id="dashboard-start-date" aria-label="开始日期" />
+                    </label>
+                    <span class="dashboard-date-sep">至</span>
+                    <label class="dashboard-date-field" data-placeholder="结束">
+                      <span class="dashboard-date-text">结束</span>
+                      <input type="date" id="dashboard-end-date" aria-label="结束日期" />
+                    </label>
+                    <button type="button" id="dashboard-apply-custom" class="secondary dashboard-apply-custom">应用</button>
                   </div>
                 </div>
                 <label class="dashboard-range-field wt-field" for="dashboard-time-preset">
@@ -246,7 +246,7 @@
                     <h3>延迟趋势</h3>
                     <span class="dashboard-card-meta wt-meta" id="dashboard-latency-meta">近 N 条</span>
                   </div>
-                  <div id="dashboard-latency-chart" class="dashboard-chart"></div>
+                  <div id="dashboard-latency-chart" class="dashboard-chart chart-transition-container"></div>
                 </article>
               </div>
 
