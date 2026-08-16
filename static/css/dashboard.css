@@ -267,6 +267,18 @@ html[data-theme] button.dashboard-apply-custom,
   margin-left: 4px;
 }
 
+/* 原生日历指示器拉伸铺满整个输入区域：点击字段任意位置都等价于点击
+   日历图标，不依赖 JS 的 showPicker（showPicker 不可用时依然生效）。 */
+.dashboard-date-field input[type="date"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  height: 100%;
+  left: 0;
+  opacity: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
 .dashboard-date-text {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
@@ -608,40 +620,8 @@ html[data-theme] .dashboard-date-field input[type="date"],
   opacity: 1;
 }
 
-/* ── 时间范围切换的图表过渡动画 ───────────────────────────────── */
-
-/* 曲线在时间范围切换时平滑过渡：旧曲线淡出、新曲线淡入，叠加 300ms，
-   视觉上看起来像形态溶解变形。这比真实的路径插值简单，且对任意点数
-   的数据系列都适用（今天 48 桶，30 天可能只有 30 桶）。 */
-@keyframes chart-fade-out {
-  to {
-    opacity: 0;
-  }
-}
-
-@keyframes chart-fade-in {
-  from {
-    opacity: 0;
-  }
-}
-
-.chart-transition-container {
-  position: relative;
-}
-
-.chart-transition-old {
-  animation: chart-fade-out 300ms ease-out forwards;
-  pointer-events: none;
-  position: absolute;
-  inset: 0;
-}
-
-.chart-transition-new {
-  animation: chart-fade-in 300ms ease-out;
-}
-
 /* 请求数卡的背景趋势曲线：绝对定位铺在卡片下半部，最底层。
-   .kpi-bg-spark 是过渡容器，内层 SVG 继承尺寸填满。 */
+   曲线形态的切换过渡由 JS 逐帧插值 path 完成（见 animateSparkMorph）。 */
 .kpi-bg-spark {
   bottom: 0;
   color: var(--accent);

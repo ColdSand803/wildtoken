@@ -179,9 +179,9 @@ function renderDashboardKpiCards(container, cards) {
       ? ""
       : `<div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>`;
     const cardKeyAttr = card.cardKey ? ` data-card-key="${escapeHtml(card.cardKey)}"` : "";
-    // 背景曲线（SVG）包在过渡容器里，支持时间范围切换的淡入淡出动画
+    // 背景曲线（SVG）包在绝对定位容器里铺满卡片下半部
     const backgroundBlock = card.backgroundHtml
-      ? `<div class="kpi-bg-spark chart-transition-container">${card.backgroundHtml}</div>`
+      ? `<div class="kpi-bg-spark">${card.backgroundHtml}</div>`
       : "";
     return `
     <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}${hintTitle}${cardKeyAttr}>
@@ -292,52 +292,87 @@ function animateKpiNumbers(container) {
 }
 
 /* ── 图表时间范围过渡 ─────────────────────────────────────────
-   时间范围切换时，图表不生硬跳变：旧内容向左滑出并淡出、新内容从右滑入
-   并淡入。容器需有 chart-transition-container 类、data-transition-key
-   属性记住当前范围，内容包在一个子节点里。 */
-function transitionChartContent(container, newKey, buildNewContent) {
-  if (!container) return;
-  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const oldKey = container.dataset.transitionKey;
-  const wrap = container.querySelector(".chart-content-wrap");
+   时间范围切换时曲线的起伏逐帧插值：把旧/新序列都重采样到固定点数，
+   插值出中间序列并重算平滑路径，曲线连续变形而不是整图淡入淡出。
+   对任意桶数的数据都适用（今天 48 桶、30 天可能只有 30 桶）。 */
+const SPARK_MORPH_SAMPLES = 72;
+const SPARK_MORPH_MS = 420;
 
-  if (!wrap || reduceMotion || oldKey === newKey) {
-    // 首次渲染、用户偏好减少动效、或范围未变：直接替换
-    if (wrap) {
-      wrap.innerHTML = buildNewContent();
-    } else {
-      container.innerHTML = `<div class="chart-content-wrap">${buildNewContent()}</div>`;
+function resampleSeries(values, samples) {
+  if (!values.length) return new Array(samples).fill(0);
+  if (values.length === 1) return new Array(samples).fill(values[0]);
+  const out = new Array(samples);
+  for (let i = 0; i < samples; i++) {
+    const pos = (i / (samples - 1)) * (values.length - 1);
+    const lo = Math.floor(pos);
+    const hi = Math.min(lo + 1, values.length - 1);
+    out[i] = values[lo] + (values[hi] - values[lo]) * (pos - lo);
+  }
+  return out;
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - ((-2 * t + 2) ** 3) / 2;
+}
+
+/// 轻度数值平滑：两遍 [1,2,1]/4 对称移动平均，压制逐桶抖动，让曲线
+/// 圆滑但不过度削峰。端点保持原值，边界不被拉平。
+function smoothSeries(values, passes = 2) {
+  let current = values;
+  for (let pass = 0; pass < passes; pass++) {
+    const next = current.slice();
+    for (let i = 1; i < current.length - 1; i++) {
+      next[i] = (current[i - 1] + current[i] * 2 + current[i + 1]) / 4;
     }
-    container.dataset.transitionKey = newKey;
+    current = next;
+  }
+  return current;
+}
+
+/// svg 内的面积/描边 path 带 spark-morph-area / spark-morph-line 类，
+/// pathsForValues 把一组数值映射成该图表坐标系的 { line, area } 路径。
+/// 卡片每次刷新都整体重建 innerHTML，所以上一序列由调用方按图表记在
+/// 模块级变量里传进来；数据没变（实时刷新）时插值结果相同，直接落位。
+function animateSparkMorph(svg, previousValues, nextValues, pathsForValues) {
+  if (!svg) return;
+  const line = svg.querySelector(".spark-morph-line");
+  const area = svg.querySelector(".spark-morph-area");
+  if (!line || !area) return;
+  const from = resampleSeries(
+    Array.isArray(previousValues) && previousValues.length >= 2 ? previousValues : nextValues,
+    SPARK_MORPH_SAMPLES,
+  );
+  const to = resampleSeries(nextValues, SPARK_MORPH_SAMPLES);
+  const apply = (t) => {
+    const mid = from.map((value, index) => value + (to[index] - value) * t);
+    const paths = pathsForValues(mid);
+    line.setAttribute("d", paths.line);
+    area.setAttribute("d", paths.area);
+  };
+  const unchanged = from.every((value, index) => Math.abs(value - to[index]) < 1e-9);
+  if (unchanged || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    apply(1);
     return;
   }
-
-  // 克隆旧内容作为退出动画
-  const oldWrap = wrap.cloneNode(true);
-  oldWrap.classList.add("chart-transition-old");
-  container.appendChild(oldWrap);
-
-  // 更新主 wrap 为新内容并标记进入动画
-  wrap.innerHTML = buildNewContent();
-  wrap.classList.add("chart-transition-new");
-
-  container.dataset.transitionKey = newKey;
-
-  // 300ms 后清理旧节点和新节点的动画类
-  setTimeout(() => {
-    if (oldWrap.parentNode === container) {
-      container.removeChild(oldWrap);
-    }
-    wrap.classList.remove("chart-transition-new");
-  }, 300);
+  // 同步先摆到旧形态，避免首帧闪现最终曲线。
+  apply(0);
+  const start = performance.now();
+  const tick = (now) => {
+    const t = Math.min(1, (now - start) / SPARK_MORPH_MS);
+    apply(easeInOutCubic(t));
+    if (t < 1) window.requestAnimationFrame(tick);
+  };
+  window.requestAnimationFrame(tick);
 }
 
 let dashboardSparkGradientSeq = 0;
+let lastRequestSparkValues = null;
+let lastLatencySparkValues = null;
 
-/* 请求数卡的背景趋势：压得很淡的平滑曲线，贴卡片底部，不抢数字。
-   返回纯 SVG，由调用方决定是否包在过渡容器里。 */
-function buildKpiBackgroundSpark(values) {
-  if (!Array.isArray(values) || values.length < 2) return "";
+/// 请求数卡背景曲线的数值 → 路径映射（viewBox 0 0 100 32）。
+/// 渲染和形态插值动画共用，保证动画帧和落位形态完全一致。
+function kpiBackgroundSparkPaths(rawValues) {
+  const values = smoothSeries(rawValues);
   const max = Math.max(...values);
   const min = Math.min(...values);
   const range = max - min || 1;
@@ -345,11 +380,17 @@ function buildKpiBackgroundSpark(values) {
     x: (index / (values.length - 1)) * 100,
     y: 30 - ((value - min) / range) * 26,
   }));
-  const { line, area } = buildSmoothSparkPaths(coords, {
+  return buildSmoothSparkPaths(coords, {
     baselineY: 32,
     minY: 2,
     maxY: 30,
   });
+}
+
+/* 请求数卡的背景趋势：压得很淡的平滑曲线，贴卡片底部，不抢数字。 */
+function buildKpiBackgroundSpark(values) {
+  if (!Array.isArray(values) || values.length < 2) return "";
+  const { line, area } = kpiBackgroundSparkPaths(values);
   const gradientId = `kpi-bg-gradient-${++dashboardSparkGradientSeq}`;
   return `
     <svg class="kpi-bg-spark-svg" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
@@ -359,17 +400,18 @@ function buildKpiBackgroundSpark(values) {
           <stop offset="100%" stop-color="currentColor" stop-opacity="0.02" />
         </linearGradient>
       </defs>
-      <path d="${area}" fill="url(#${gradientId})" />
-      <path d="${line}" fill="none" stroke="currentColor" stroke-opacity="0.45"
+      <path class="spark-morph-area" d="${area}" fill="url(#${gradientId})" />
+      <path class="spark-morph-line" d="${line}" fill="none" stroke="currentColor" stroke-opacity="0.45"
             stroke-width="1.2" vector-effect="non-scaling-stroke" />
     </svg>
   `;
 }
 
-function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
-  if (!values.length) {
-    return '<div class="dashboard-chart-empty">暂无耗时数据</div>';
-  }
+/// 延迟趋势曲线的数值 → 路径映射。曲线数据带上下各留 pad 防描边被视口
+/// 裁掉，但面积一直填到 viewBox 最底边——图表下方紧贴延迟摘要的分隔线，
+/// 中间不能露出一条底色缝。
+function latencySparkPaths(rawValues, width, height) {
+  const values = smoothSeries(rawValues);
   const max = Math.max(...values, 1);
   const min = Math.min(...values, 0);
   const span = Math.max(max - min, 1);
@@ -378,14 +420,19 @@ function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
     x: pad + (index / Math.max(values.length - 1, 1)) * (width - pad * 2),
     y: height - pad - ((value - min) / span) * (height - pad * 2),
   }));
-  /* 跟渠道卡片同一个平滑生成器和渐变画法，两处图表手感一致。曲线本身的
-     数据带上下各留 pad 防描边被视口裁掉，但面积一直填到 viewBox 最底边——
-     图表下方紧贴延迟摘要的分隔线，中间不能露出一条底色缝。 */
-  const { line, area } = buildSmoothSparkPaths(coords, {
+  /* 跟渠道卡片同一个平滑生成器和渐变画法，两处图表手感一致。 */
+  return buildSmoothSparkPaths(coords, {
     baselineY: height,
     minY: pad,
     maxY: height - pad,
   });
+}
+
+function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
+  if (!values.length) {
+    return '<div class="dashboard-chart-empty">暂无耗时数据</div>';
+  }
+  const { line, area } = latencySparkPaths(values, width, height);
   const gradientId = `dashboard-spark-gradient-${++dashboardSparkGradientSeq}`;
   return `
     <svg class="ops-chart-svg dashboard-spark" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
@@ -395,8 +442,8 @@ function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
           <stop offset="100%" stop-color="currentColor" stop-opacity="0.04" />
         </linearGradient>
       </defs>
-      <path d="${area}" fill="url(#${gradientId})" />
-      <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.8" vector-effect="non-scaling-stroke" />
+      <path class="spark-morph-area" d="${area}" fill="url(#${gradientId})" />
+      <path class="spark-morph-line" d="${line}" fill="none" stroke="currentColor" stroke-width="1.8" vector-effect="non-scaling-stroke" />
     </svg>
   `;
 }
@@ -617,7 +664,8 @@ function renderDashboard() {
     }
   }
   const requestSeries = Array.isArray(overview?.request_series) ? overview.request_series : [];
-  const requestSparkHtml = buildKpiBackgroundSpark(requestSeries.map((bucket) => Number(bucket.count) || 0));
+  const requestSparkValues = requestSeries.map((bucket) => Number(bucket.count) || 0);
+  const requestSparkHtml = buildKpiBackgroundSpark(requestSparkValues);
 
   renderDashboardKpiCards(dashboardKpis, [
     {
@@ -658,14 +706,12 @@ function renderDashboard() {
     },
   ]);
 
-  // 请求数卡的背景曲线在时间范围切换时需要触发淡入淡出过渡
-  if (dashboardKpis && requestSparkHtml) {
-    const requestsCard = dashboardKpis.querySelector('[data-card-key="requests"]');
-    const bgSparkContainer = requestsCard?.querySelector(".kpi-bg-spark");
-    if (bgSparkContainer) {
-      transitionChartContent(bgSparkContainer, dashboardTimeRange, () => requestSparkHtml);
-    }
+  // 请求数卡的背景曲线在范围切换时逐帧变形到新形态
+  if (dashboardKpis && requestSparkValues.length >= 2) {
+    const sparkSvg = dashboardKpis.querySelector('[data-card-key="requests"] .kpi-bg-spark-svg');
+    animateSparkMorph(sparkSvg, lastRequestSparkValues, requestSparkValues, kpiBackgroundSparkPaths);
   }
+  lastRequestSparkValues = requestSparkValues;
 
   // Prefer the label the server echoed for the range it actually served, so a
   // stale local state cannot mislabel the numbers on screen.
@@ -840,14 +886,14 @@ function renderDashboard() {
       : "暂无数据";
   }
   if (dashboardLatencyChart) {
-    transitionChartContent(dashboardLatencyChart, dashboardTimeRange, () => {
-      if (latencySeries.length === 0) {
-        return '<div class="dashboard-chart-empty">所选范围内暂无有效耗时</div>';
-      }
+    if (latencySeries.length === 0) {
+      dashboardLatencyChart.innerHTML = '<div class="dashboard-chart-empty">所选范围内暂无有效耗时</div>';
+      lastLatencySparkValues = null;
+    } else {
       const latestAvg = Number(latencySeries[latencySeries.length - 1].avg_ms) || 0;
       const minDuration = Number(overview?.min_duration_ms) || 0;
       const maxDuration = Number(overview?.max_duration_ms) || 0;
-      return `
+      dashboardLatencyChart.innerHTML = `
         ${buildSparklineSvg(spark, { width: 320, height: 100 })}
         <dl class="dashboard-latency-summary" aria-label="「${overviewRangeLabel}」${durationCount} 条有效耗时的延迟摘要">
           <div><dt>最近</dt><dd>${escapeHtml(formatSeconds(latestAvg))}</dd></div>
@@ -855,7 +901,15 @@ function renderDashboard() {
           <div><dt>范围</dt><dd>${escapeHtml(formatSeconds(minDuration))}–${escapeHtml(formatSeconds(maxDuration))}</dd></div>
         </dl>
       `;
-    });
+      // 曲线起伏从上一形态逐帧变形到新形态，而不是整图跳变
+      animateSparkMorph(
+        dashboardLatencyChart.querySelector(".ops-chart-svg"),
+        lastLatencySparkValues,
+        spark,
+        (values) => latencySparkPaths(values, 320, 100),
+      );
+      lastLatencySparkValues = spark;
+    }
   }
 
   const topModelRequests = Array.isArray(dashboardTopStats?.models) ? dashboardTopStats.models : [];
