@@ -814,13 +814,23 @@ html[data-theme] .dashboard-date-field input[type="date"],
   border-top: 1px solid var(--line-soft);
   display: grid;
   gap: 8px;
+  /* 六项两行：最近/平均/范围 + P50/P95/P99。 */
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin: 0;
   padding-top: 9px;
+  row-gap: 6px;
 }
 
 .dashboard-latency-summary div {
   min-width: 0;
+}
+
+/* Top 模型请求行的次要信息：平均耗时 · 错误率。 */
+.dashboard-rank-meta {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  margin-left: 6px;
+  white-space: nowrap;
 }
 
 .dashboard-latency-summary dt {

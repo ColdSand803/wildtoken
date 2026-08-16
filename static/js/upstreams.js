@@ -723,6 +723,17 @@ function cachedUpstreamStats(upstreamId) {
   return entry.stats;
 }
 
+/* 渠道 24h 健康历史（逐小时成功率/延迟）与 stats 同节奏拉取：独立缓存、
+   同一个单飞 Promise，避免多一套轮询节奏。 */
+const upstreamHealthCache = new Map();
+
+function cachedUpstreamHealth(upstreamId) {
+  const entry = upstreamHealthCache.get(upstreamId);
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > UPSTREAM_STATS_TTL_MS) return null;
+  return entry.health;
+}
+
 /* 单飞（in-flight 去重）：缓存 60 秒后是所有渠道同时过期，而 renderCards 的
    触发点很密（定时刷新、SSE 事件、操作后重载）。过期瞬间几个触发点挤在一起，
    如果各自发请求，网络面板里就是 渠道数 × 触发次数 的一排 stats 并发。共享
@@ -733,9 +744,15 @@ let statsRefreshPromise = null;
 // the rest of the console. Returns whether the cache actually got refreshed.
 async function fetchAllUpstreamStats() {
   try {
-    const payload = await api("/api/admin/upstreams/stats");
+    const [payload, healthPayload] = await Promise.all([
+      api("/api/admin/upstreams/stats"),
+      api("/api/admin/upstreams/health?hours=24").catch(() => null),
+    ]);
     const byId = payload && typeof payload.stats === "object" && payload.stats !== null
       ? payload.stats
+      : {};
+    const healthById = healthPayload && typeof healthPayload.entries === "object"
+      ? healthPayload.entries
       : {};
     const fetchedAt = Date.now();
     /* 响应里没出现的渠道（还没有任何日志）也要写进缓存，否则它们永远是
@@ -751,12 +768,47 @@ async function fetchAllUpstreamStats() {
           avgTokensPer1M: Number(raw?.avgTokensPer1M) || 0,
         },
       });
+      const healthRaw = healthById[String(upstream.id)];
+      upstreamHealthCache.set(upstream.id, {
+        fetchedAt,
+        health: {
+          total: Number(healthRaw?.total) || 0,
+          errors: Number(healthRaw?.errors) || 0,
+          successRate: healthRaw && healthRaw.success_rate != null
+            ? Number(healthRaw.success_rate)
+            : null,
+          avgMs: Number(healthRaw?.avg_ms) || 0,
+          buckets: Array.isArray(healthRaw?.buckets) ? healthRaw.buckets : [],
+        },
+      });
     }
     return true;
   } catch (error) {
     /* 拉不到就先用旧缓存/占位显示，下个刷新周期自然重试。 */
     return false;
   }
+}
+
+/* 24h 健康迷你条形图：每根是一小时，高度按该小时请求量，颜色按错误占比。
+   没有流量的小时不画——留白比一根零高的柱更诚实。 */
+function renderHealthBars(health) {
+  const buckets = Array.isArray(health?.buckets) ? health.buckets : [];
+  if (!buckets.length) {
+    return '<div class="health-bars-empty">24h 无请求</div>';
+  }
+  const maxTotal = Math.max(...buckets.map((bucket) => Number(bucket.total) || 0), 1);
+  const bars = buckets.map((bucket) => {
+    const total = Number(bucket.total) || 0;
+    const errors = Number(bucket.errors) || 0;
+    const height = Math.max(12, Math.round((total / maxTotal) * 100));
+    const errorRatio = total > 0 ? errors / total : 1;
+    const tone = errorRatio === 0 ? "ok" : errorRatio < 0.5 ? "warn" : "bad";
+    const hour = new Date(Number(bucket.bucket_epoch) * 1000);
+    const label = `${String(hour.getHours()).padStart(2, "0")}:00 · ${total} 请求`
+      + (errors > 0 ? ` · 失败 ${errors}` : "");
+    return `<span class="health-bar health-bar--${tone}" style="height:${height}%" title="${escapeHtml(label)}"></span>`;
+  }).join("");
+  return `<div class="health-bars" role="img" aria-label="24 小时逐小时健康，共 ${health.total} 请求，失败 ${health.errors}">${bars}</div>`;
 }
 
 /* 同步渲染：统计只从缓存读。缓存是空的就先出骨架，等后台补齐后单独替换这张卡，
@@ -781,6 +833,20 @@ function createChannelCard(upstream) {
   const sixHourTotal = pending
     ? "—"
     : formatMetric(sparklineData.reduce((sum, n) => sum + n, 0));
+
+  // 24h 健康：在线率 + 平均耗时 + 逐小时条形。stats 未到时同样先出骨架。
+  const health = cachedUpstreamHealth(upstream.id);
+  const healthPending = health === null;
+  const hasTraffic = !healthPending && health.total > 0;
+  const successLabel = healthPending || health.successRate == null
+    ? "—"
+    : `${(health.successRate * 100).toFixed(1)}%`;
+  const successTone = healthPending || health.successRate == null
+    ? ""
+    : health.successRate >= 0.99 ? " is-ok" : health.successRate >= 0.9 ? " is-warn" : " is-bad";
+  const healthLatency = healthPending || !hasTraffic || !health.avgMs
+    ? "—"
+    : formatSeconds(health.avgMs);
 
   card.innerHTML = `
     <div class="channel-card-header">
@@ -821,6 +887,16 @@ function createChannelCard(upstream) {
         <span class="sparkline-value">${sixHourTotal}</span>
       </div>
       ${renderSparkline(sparklineData)}
+    </div>
+    <div class="channel-card-health">
+      <div class="sparkline-header">
+        <span class="sparkline-label">24h 健康</span>
+        <span class="health-summary">
+          <span class="health-stat${successTone}" title="24 小时成功率">在线率 ${successLabel}</span>
+          <span class="health-stat" title="24 小时平均耗时">均延迟 ${healthLatency}</span>
+        </span>
+      </div>
+      ${renderHealthBars(healthPending ? null : health)}
     </div>
     <div class="channel-card-metrics">
       <div class="metric-tile">

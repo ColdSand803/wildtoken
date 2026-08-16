@@ -315,6 +315,20 @@ function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - ((-2 * t + 2) ** 3) / 2;
 }
 
+/// 记录序列的重采样：对每个数值键独立做线性重采样，键合回记录。
+/// 延迟图一次带均值和 P95 两条序列，共享同一套采样点才能同步变形。
+function resampleRecords(records, keys, samples) {
+  const perKey = new Map(keys.map((key) => [
+    key,
+    resampleSeries(records.map((record) => Number(record[key]) || 0), samples),
+  ]));
+  return Array.from({ length: samples }, (_, index) => {
+    const record = {};
+    for (const key of keys) record[key] = perKey.get(key)[index];
+    return record;
+  });
+}
+
 /// 轻度数值平滑：两遍 [1,2,1]/4 对称移动平均，压制逐桶抖动，让曲线
 /// 圆滑但不过度削峰。端点保持原值，边界不被拉平。
 function smoothSeries(values, passes = 2) {
@@ -329,27 +343,38 @@ function smoothSeries(values, passes = 2) {
   return current;
 }
 
-/// svg 内的面积/描边 path 带 spark-morph-area / spark-morph-line 类，
-/// pathsForValues 把一组数值映射成该图表坐标系的 { line, area } 路径。
-/// 卡片每次刷新都整体重建 innerHTML，所以上一序列由调用方按图表记在
-/// 模块级变量里传进来；数据没变（实时刷新）时插值结果相同，直接落位。
-function animateSparkMorph(svg, previousValues, nextValues, pathsForValues) {
+/// svg 内的每条可变形 path 带 spark-morph-<name> 类（area / line / p95），
+/// pathsForRecords 把一组记录映射成 { <name>: pathData }。卡片每次刷新都
+/// 整体重建 innerHTML，所以上一序列由调用方按图表记在模块级变量里传
+/// 进来；数据没变（实时刷新）时插值结果相同，直接落位。
+function animateSparkMorph(svg, previousRecords, nextRecords, keys, pathsForRecords) {
   if (!svg) return;
-  const line = svg.querySelector(".spark-morph-line");
-  const area = svg.querySelector(".spark-morph-area");
-  if (!line || !area) return;
-  const from = resampleSeries(
-    Array.isArray(previousValues) && previousValues.length >= 2 ? previousValues : nextValues,
+  const paths = {};
+  for (const name of ["area", "line", "p95"]) {
+    const element = svg.querySelector(`.spark-morph-${name}`);
+    if (element) paths[name] = element;
+  }
+  if (!Object.keys(paths).length) return;
+  const from = resampleRecords(
+    Array.isArray(previousRecords) && previousRecords.length >= 2 ? previousRecords : nextRecords,
+    keys,
     SPARK_MORPH_SAMPLES,
   );
-  const to = resampleSeries(nextValues, SPARK_MORPH_SAMPLES);
+  const to = resampleRecords(nextRecords, keys, SPARK_MORPH_SAMPLES);
   const apply = (t) => {
-    const mid = from.map((value, index) => value + (to[index] - value) * t);
-    const paths = pathsForValues(mid);
-    line.setAttribute("d", paths.line);
-    area.setAttribute("d", paths.area);
+    const mid = from.map((record, index) => {
+      const blended = {};
+      for (const key of keys) blended[key] = record[key] + (to[index][key] - record[key]) * t;
+      return blended;
+    });
+    const pathData = pathsForRecords(mid);
+    for (const [name, element] of Object.entries(paths)) {
+      if (pathData[name] != null) element.setAttribute("d", pathData[name]);
+    }
   };
-  const unchanged = from.every((value, index) => Math.abs(value - to[index]) < 1e-9);
+  const unchanged = keys.every((key) => from.every(
+    (record, index) => Math.abs(record[key] - to[index][key]) < 1e-9,
+  ));
   if (unchanged || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
     apply(1);
     return;
@@ -366,13 +391,13 @@ function animateSparkMorph(svg, previousValues, nextValues, pathsForValues) {
 }
 
 let dashboardSparkGradientSeq = 0;
-let lastRequestSparkValues = null;
-let lastLatencySparkValues = null;
+let lastRequestSparkRecords = null;
+let lastLatencySparkRecords = null;
 
-/// 请求数卡背景曲线的数值 → 路径映射（viewBox 0 0 100 32）。
+/// 请求数卡背景曲线的记录（{v}）→ 路径映射（viewBox 0 0 100 32）。
 /// 渲染和形态插值动画共用，保证动画帧和落位形态完全一致。
-function kpiBackgroundSparkPaths(rawValues) {
-  const values = smoothSeries(rawValues);
+function kpiBackgroundSparkPaths(records) {
+  const values = smoothSeries(records.map((record) => record.v));
   const max = Math.max(...values);
   const min = Math.min(...values);
   const range = max - min || 1;
@@ -390,7 +415,7 @@ function kpiBackgroundSparkPaths(rawValues) {
 /* 请求数卡的背景趋势：压得很淡的平滑曲线，贴卡片底部，不抢数字。 */
 function buildKpiBackgroundSpark(values) {
   if (!Array.isArray(values) || values.length < 2) return "";
-  const { line, area } = kpiBackgroundSparkPaths(values);
+  const { line, area } = kpiBackgroundSparkPaths(values.map((value) => ({ v: value })));
   const gradientId = `kpi-bg-gradient-${++dashboardSparkGradientSeq}`;
   return `
     <svg class="kpi-bg-spark-svg" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
@@ -407,32 +432,44 @@ function buildKpiBackgroundSpark(values) {
   `;
 }
 
-/// 延迟趋势曲线的数值 → 路径映射。曲线数据带上下各留 pad 防描边被视口
+/// 延迟趋势曲线的记录（{a: 均值, p: P95}）→ 路径映射。两条序列共享同一
+/// 套纵向比例，P95 恒在均值上方。曲线数据带上下各留 pad 防描边被视口
 /// 裁掉，但面积一直填到 viewBox 最底边——图表下方紧贴延迟摘要的分隔线，
 /// 中间不能露出一条底色缝。
-function latencySparkPaths(rawValues, width, height) {
-  const values = smoothSeries(rawValues);
-  const max = Math.max(...values, 1);
-  const min = Math.min(...values, 0);
+function latencySparkPaths(records, width, height) {
+  const avg = smoothSeries(records.map((record) => record.a));
+  const p95 = smoothSeries(records.map((record) => record.p));
+  const max = Math.max(...avg, ...p95, 1);
+  const min = Math.min(...avg, ...p95, 0);
   const span = Math.max(max - min, 1);
   const pad = 2;
-  const coords = values.map((value, index) => ({
-    x: pad + (index / Math.max(values.length - 1, 1)) * (width - pad * 2),
-    y: height - pad - ((value - min) / span) * (height - pad * 2),
-  }));
+  const xOf = (index) => pad + (index / Math.max(records.length - 1, 1)) * (width - pad * 2);
+  const yOf = (value) => height - pad - ((value - min) / span) * (height - pad * 2);
   /* 跟渠道卡片同一个平滑生成器和渐变画法，两处图表手感一致。 */
-  return buildSmoothSparkPaths(coords, {
+  const { line, area } = buildSmoothSparkPaths(avg.map((value, index) => ({
+    x: xOf(index),
+    y: yOf(value),
+  })), {
     baselineY: height,
     minY: pad,
     maxY: height - pad,
   });
+  const { line: p95Line } = buildSmoothSparkPaths(p95.map((value, index) => ({
+    x: xOf(index),
+    y: yOf(value),
+  })), {
+    baselineY: height,
+    minY: pad,
+    maxY: height - pad,
+  });
+  return { line, area, p95: p95Line };
 }
 
-function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
-  if (!values.length) {
+function buildSparklineSvg(records, { width = 240, height = 44 } = {}) {
+  if (!records.length) {
     return '<div class="dashboard-chart-empty">暂无耗时数据</div>';
   }
-  const { line, area } = latencySparkPaths(values, width, height);
+  const { line, area, p95 } = latencySparkPaths(records, width, height);
   const gradientId = `dashboard-spark-gradient-${++dashboardSparkGradientSeq}`;
   return `
     <svg class="ops-chart-svg dashboard-spark" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
@@ -443,6 +480,8 @@ function buildSparklineSvg(values, { width = 240, height = 44 } = {}) {
         </linearGradient>
       </defs>
       <path class="spark-morph-area" d="${area}" fill="url(#${gradientId})" />
+      <path class="spark-morph-p95" d="${p95}" fill="none" stroke="currentColor" stroke-opacity="0.35"
+            stroke-width="1.2" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" />
       <path class="spark-morph-line" d="${line}" fill="none" stroke="currentColor" stroke-width="1.8" vector-effect="non-scaling-stroke" />
     </svg>
   `;
@@ -506,6 +545,7 @@ function renderDashboardRankList(container, rows, emptyText, options = {}) {
   const formatValue = typeof options.formatValue === "function"
     ? options.formatValue
     : (value) => String(Math.round(value));
+  const metaHtml = typeof options.metaHtml === "function" ? options.metaHtml : null;
   const hideNames = Boolean(options.hideNames);
   const max = Math.max(...rows.map((row) => Number(row.count) || 0), 1);
   container.innerHTML = rows.map((row) => {
@@ -527,11 +567,13 @@ function renderDashboardRankList(container, rows, emptyText, options = {}) {
     const idHtml = channelId == null
       ? ""
       : `<span class="dashboard-rank-index" title="渠道 #${channelId}">${escapeHtml(idLabel)}</span>`;
+    const meta = metaHtml ? (metaHtml(row) || "") : "";
     return `
       <div class="dashboard-rank-row" title="${escapeHtml(titleParts.join(" · "))}">
         <div class="dashboard-rank-head">
           ${idHtml}
           <span class="dashboard-rank-name${hideNames ? " is-masked" : ""}">${escapeHtml(displayName)}</span>
+          ${meta}
           <span class="dashboard-rank-count">${escapeHtml(displayCount)}</span>
         </div>
         <div class="dashboard-rank-track" aria-hidden="true">
@@ -709,9 +751,12 @@ function renderDashboard() {
   // 请求数卡的背景曲线在范围切换时逐帧变形到新形态
   if (dashboardKpis && requestSparkValues.length >= 2) {
     const sparkSvg = dashboardKpis.querySelector('[data-card-key="requests"] .kpi-bg-spark-svg');
-    animateSparkMorph(sparkSvg, lastRequestSparkValues, requestSparkValues, kpiBackgroundSparkPaths);
+    const sparkRecords = requestSparkValues.map((value) => ({ v: value }));
+    animateSparkMorph(sparkSvg, lastRequestSparkRecords, sparkRecords, ["v"], kpiBackgroundSparkPaths);
+    lastRequestSparkRecords = sparkRecords;
+  } else {
+    lastRequestSparkRecords = null;
   }
-  lastRequestSparkValues = requestSparkValues;
 
   // Prefer the label the server echoed for the range it actually served, so a
   // stale local state cannot mislabel the numbers on screen.
@@ -878,8 +923,12 @@ function renderDashboard() {
   }
 
   // 延迟趋势：按时间分桶的平均耗时序列，横轴就是真实时间而不是"最近 N 条"。
+  // 每桶带均值和 P95，两条序列共享纵向比例同步变形。
   const latencySeries = Array.isArray(overview?.latency_series) ? overview.latency_series : [];
-  const spark = latencySeries.map((bucket) => Number(bucket.avg_ms) || 0);
+  const sparkRecords = latencySeries.map((bucket) => ({
+    a: Number(bucket.avg_ms) || 0,
+    p: bucket.p95_ms != null ? Number(bucket.p95_ms) : (Number(bucket.avg_ms) || 0),
+  }));
   if (dashboardLatencyMeta) {
     dashboardLatencyMeta.textContent = latencySeries.length
       ? `${overviewRangeLabel} · 每桶 ${formatBucketSpan(overview?.bucket_seconds)}`
@@ -888,27 +937,31 @@ function renderDashboard() {
   if (dashboardLatencyChart) {
     if (latencySeries.length === 0) {
       dashboardLatencyChart.innerHTML = '<div class="dashboard-chart-empty">所选范围内暂无有效耗时</div>';
-      lastLatencySparkValues = null;
+      lastLatencySparkRecords = null;
     } else {
       const latestAvg = Number(latencySeries[latencySeries.length - 1].avg_ms) || 0;
       const minDuration = Number(overview?.min_duration_ms) || 0;
       const maxDuration = Number(overview?.max_duration_ms) || 0;
       dashboardLatencyChart.innerHTML = `
-        ${buildSparklineSvg(spark, { width: 320, height: 100 })}
+        ${buildSparklineSvg(sparkRecords, { width: 320, height: 100 })}
         <dl class="dashboard-latency-summary" aria-label="「${overviewRangeLabel}」${durationCount} 条有效耗时的延迟摘要">
           <div><dt>最近</dt><dd>${escapeHtml(formatSeconds(latestAvg))}</dd></div>
           <div><dt>平均</dt><dd>${escapeHtml(formatSeconds(avgMs))}</dd></div>
           <div><dt>范围</dt><dd>${escapeHtml(formatSeconds(minDuration))}–${escapeHtml(formatSeconds(maxDuration))}</dd></div>
+          <div><dt>P50</dt><dd>${overview?.p50_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p50_duration_ms))) : "—"}</dd></div>
+          <div><dt>P95</dt><dd>${overview?.p95_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p95_duration_ms))) : "—"}</dd></div>
+          <div><dt>P99</dt><dd>${overview?.p99_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p99_duration_ms))) : "—"}</dd></div>
         </dl>
       `;
       // 曲线起伏从上一形态逐帧变形到新形态，而不是整图跳变
       animateSparkMorph(
         dashboardLatencyChart.querySelector(".ops-chart-svg"),
-        lastLatencySparkValues,
-        spark,
-        (values) => latencySparkPaths(values, 320, 100),
+        lastLatencySparkRecords,
+        sparkRecords,
+        ["a", "p"],
+        (records) => latencySparkPaths(records, 320, 100),
       );
-      lastLatencySparkValues = spark;
+      lastLatencySparkRecords = sparkRecords;
     }
   }
 
@@ -936,7 +989,19 @@ function renderDashboard() {
     formatValue: formatCompactNumber,
     hideNames: dashboardChannelNameHidden,
   });
-  renderDashboardRankList(dashboardTopModels, topModelRequests, "暂无模型请求数据");
+  renderDashboardRankList(dashboardTopModels, topModelRequests, "暂无模型请求数据", {
+    // 后端为请求排行附带平均耗时与错误率：哪个模型"又慢又容易挂"一眼可见。
+    metaHtml: (row) => {
+      const parts = [];
+      if (row.avg_duration_ms != null) parts.push(formatSeconds(Number(row.avg_duration_ms)));
+      if (row.error_rate != null) {
+        parts.push(`${((Number(row.error_rate) || 0) * 100).toFixed(1)}% 错误`);
+      }
+      return parts.length
+        ? `<span class="dashboard-rank-meta">${escapeHtml(parts.join(" · "))}</span>`
+        : "";
+    },
+  });
   renderDashboardRankList(dashboardTopModelTokens, topModelTokens, "暂无模型 token 数据", {
     formatValue: formatCompactNumber,
   });
