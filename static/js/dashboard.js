@@ -179,9 +179,13 @@ function renderDashboardKpiCards(container, cards) {
       ? ""
       : `<div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>`;
     const cardKeyAttr = card.cardKey ? ` data-card-key="${escapeHtml(card.cardKey)}"` : "";
+    // 背景曲线（SVG）包在过渡容器里，支持时间范围切换的淡入淡出动画
+    const backgroundBlock = card.backgroundHtml
+      ? `<div class="kpi-bg-spark chart-transition-container">${card.backgroundHtml}</div>`
+      : "";
     return `
     <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}${hintTitle}${cardKeyAttr}>
-      ${card.backgroundHtml || ""}
+      ${backgroundBlock}
       <div class="dashboard-kpi-value">${valueHtml}</div>
       <div class="dashboard-kpi-label">${labelHtml}</div>
       ${hintBlock}
@@ -330,7 +334,8 @@ function transitionChartContent(container, newKey, buildNewContent) {
 
 let dashboardSparkGradientSeq = 0;
 
-/* 请求数卡的背景趋势：压得很淡的平滑曲线，贴卡片底部，不抢数字。 */
+/* 请求数卡的背景趋势：压得很淡的平滑曲线，贴卡片底部，不抢数字。
+   返回纯 SVG，由调用方决定是否包在过渡容器里。 */
 function buildKpiBackgroundSpark(values) {
   if (!Array.isArray(values) || values.length < 2) return "";
   const max = Math.max(...values);
@@ -347,7 +352,7 @@ function buildKpiBackgroundSpark(values) {
   });
   const gradientId = `kpi-bg-gradient-${++dashboardSparkGradientSeq}`;
   return `
-    <svg class="kpi-bg-spark" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
+    <svg class="kpi-bg-spark-svg" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
       <defs>
         <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
           <stop offset="0%" stop-color="currentColor" stop-opacity="0.16" />
@@ -652,6 +657,15 @@ function renderDashboard() {
       tone: "",
     },
   ]);
+
+  // 请求数卡的背景曲线在时间范围切换时需要触发淡入淡出过渡
+  if (dashboardKpis && requestSparkHtml) {
+    const requestsCard = dashboardKpis.querySelector('[data-card-key="requests"]');
+    const bgSparkContainer = requestsCard?.querySelector(".kpi-bg-spark");
+    if (bgSparkContainer) {
+      transitionChartContent(bgSparkContainer, dashboardTimeRange, () => requestSparkHtml);
+    }
+  }
 
   // Prefer the label the server echoed for the range it actually served, so a
   // stale local state cannot mislabel the numbers on screen.

@@ -610,20 +610,18 @@ html[data-theme] .dashboard-date-field input[type="date"],
 
 /* ── 时间范围切换的图表过渡动画 ───────────────────────────────── */
 
-/* 延迟趋势和请求数曲线在时间范围切换时不生硬跳变：旧图向左滑出并淡出、
-   新图从右滑入并淡入，符合"时间轴向前/向后移动"的语义。容器相对定位，
-   新旧内容绝对定位叠加 300ms。 */
-@keyframes chart-transition-out {
+/* 曲线在时间范围切换时平滑过渡：旧曲线淡出、新曲线淡入，叠加 300ms，
+   视觉上看起来像形态溶解变形。这比真实的路径插值简单，且对任意点数
+   的数据系列都适用（今天 48 桶，30 天可能只有 30 桶）。 */
+@keyframes chart-fade-out {
   to {
     opacity: 0;
-    transform: translateX(-24px);
   }
 }
 
-@keyframes chart-transition-in {
+@keyframes chart-fade-in {
   from {
     opacity: 0;
-    transform: translateX(24px);
   }
 }
 
@@ -632,17 +630,18 @@ html[data-theme] .dashboard-date-field input[type="date"],
 }
 
 .chart-transition-old {
-  animation: chart-transition-out 300ms ease-out forwards;
+  animation: chart-fade-out 300ms ease-out forwards;
   pointer-events: none;
   position: absolute;
   inset: 0;
 }
 
 .chart-transition-new {
-  animation: chart-transition-in 300ms ease-out;
+  animation: chart-fade-in 300ms ease-out;
 }
 
-/* 请求数卡的背景趋势曲线：绝对定位铺在卡片下半部，最底层。 */
+/* 请求数卡的背景趋势曲线：绝对定位铺在卡片下半部，最底层。
+   .kpi-bg-spark 是过渡容器，内层 SVG 继承尺寸填满。 */
 .kpi-bg-spark {
   bottom: 0;
   color: var(--accent);
@@ -652,6 +651,12 @@ html[data-theme] .dashboard-date-field input[type="date"],
   position: absolute;
   right: 0;
   z-index: 0;
+}
+
+.kpi-bg-spark-svg {
+  display: block;
+  height: 100%;
+  width: 100%;
 }
 
 /* 曲线是 position:absolute，会盖在静态文本上面——文字层显式抬到曲线之上。 */
