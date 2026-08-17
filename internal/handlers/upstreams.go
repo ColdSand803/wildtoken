@@ -178,6 +178,16 @@ func claudeCLIModelTestHeaders(model string) map[string]string {
 	}
 }
 
+// stripContext1MSuffix removes a trailing [1m] alias from a model id. The
+// beta-header decision in claudeCLIModelTestHeaders still reads the model as
+// typed, so the alias keeps its effect while the id goes upstream clean.
+func stripContext1MSuffix(model string) string {
+	if suffix := strings.ToLower(model[max(0, len(model)-4):]); suffix == "[1m]" {
+		return model[:len(model)-4]
+	}
+	return model
+}
+
 // extractModelIDs reads model ids from the several shapes providers return.
 func extractModelIDs(payload json.RawMessage) []string {
 	var source []json.RawMessage
@@ -936,9 +946,12 @@ func modelTestRequest(requestKind, model, prompt string) (string, json.RawMessag
 			"max_tokens": 1000,
 		}
 	case "messages":
+		// The [1m] suffix is the CLI's alias for the 1M context window, resolved
+		// client-side into the context-1m beta header; providers list only the
+		// plain id, so the suffix must not reach the model field.
 		path = "messages"
 		payload = map[string]any{
-			"model":      model,
+			"model":      stripContext1MSuffix(model),
 			"max_tokens": 1000,
 			"messages":   []map[string]string{{"role": "user", "content": prompt}},
 		}
