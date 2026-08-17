@@ -1191,12 +1191,17 @@
         <div class="modal-actions"><button id="model-test-prompt-cancel" type="button" class="secondary">取消</button><button type="submit">保存 Prompt</button></div>
       </form>
     </dialog>
-    <dialog id="group-dialog" class="upstream-dialog">
+    <dialog
+      id="group-dialog"
+      class="upstream-dialog group-dialog"
+      aria-labelledby="group-dialog-title"
+      aria-describedby="group-dialog-description"
+    >
       <form id="group-form" class="upstream-dialog-panel">
-        <header class="modal-head">
+        <header class="modal-head upstream-modal-head">
           <div>
             <h2 id="group-dialog-title">新增分组</h2>
-            <p class="modal-sub">分组用于隔离令牌可访问的渠道范围。</p>
+            <p id="group-dialog-description" class="modal-sub">分组用于隔离令牌可访问的渠道范围。</p>
           </div>
           <div class="modal-head-actions">
             <button id="group-dialog-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button>
@@ -1218,7 +1223,7 @@
             </div>
           </section>
         </div>
-        <footer class="modal-foot">
+        <footer class="modal-footer">
           <button type="button" id="group-cancel" class="secondary">取消</button>
           <button type="submit" class="primary">保存</button>
         </footer>

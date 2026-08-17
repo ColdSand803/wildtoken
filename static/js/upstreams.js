@@ -480,22 +480,20 @@ function setUpstreamView(view) {
     if (viewGridBtn) viewGridBtn.setAttribute("aria-pressed", "true");
     if (viewListBtn) viewListBtn.setAttribute("aria-pressed", "false");
     renderCards();
+    reanchorUpstreamActionMenu();
   } else {
     if (upstreamTableWrap) upstreamTableWrap.hidden = false;
     if (upstreamCardsContainer) upstreamCardsContainer.hidden = true;
     if (viewGridBtn) viewGridBtn.setAttribute("aria-pressed", "false");
     if (viewListBtn) viewListBtn.setAttribute("aria-pressed", "true");
+    reanchorUpstreamActionMenu();
   }
 }
 
 function renderRows() {
-  const openMenuId = activeActionMenuButton && !upstreamActionMenu.hidden
-    ? Number(activeActionMenuButton.dataset.menuId)
-    : null;
-  if (activeActionMenuButton) {
-    activeActionMenuButton.setAttribute("aria-expanded", "false");
-    activeActionMenuButton = null;
-  }
+  const hadOpenMenu = openActionMenuUpstreamId !== null && !upstreamActionMenu.hidden;
+  // 锚点节点即将被 innerHTML 清掉，先松开引用，但保留 id 这个事实。
+  activeActionMenuButton = null;
 
   rows.innerHTML = "";
   renderUpstreamSummary();
@@ -628,21 +626,35 @@ function renderRows() {
   updateBatchToolbar();
   applyAllColumnVisibility();
 
-  if (openMenuId !== null) {
-    const replacement = rows.querySelector(`button[data-menu-id="${openMenuId}"]`);
-    if (replacement) {
-      activeActionMenuButton = replacement;
-      replacement.setAttribute("aria-expanded", "true");
-      window.requestAnimationFrame(positionUpstreamActionMenu);
-    } else {
-      closeUpstreamActionMenu();
-    }
-  }
-
   // Also update cards if in grid view
   if (currentUpstreamView === "grid") {
     renderCards();
   }
+  /* 必须等两个视图都渲染完再锚定。卡片视图下表格是 display:none，
+     此时锚到表格里的按钮会拿到全 0 的 rect，菜单被夹到 (8, 8)。 */
+  if (hadOpenMenu) {
+    reanchorUpstreamActionMenu();
+  }
+}
+
+/* 按渠道 id 把菜单重新绑到当前视图的触发按钮上。渲染会换掉按钮节点，
+   所以不能靠旧引用；这个渠道被筛掉或删掉了就关菜单。 */
+function reanchorUpstreamActionMenu() {
+  if (openActionMenuUpstreamId === null || upstreamActionMenu.hidden) return;
+  const scope = currentUpstreamView === "grid" ? upstreamCardsContainer : rows;
+  const trigger = scope?.querySelector(
+    `button[data-menu-id="${openActionMenuUpstreamId}"]`,
+  );
+  if (!trigger) {
+    closeUpstreamActionMenu();
+    return;
+  }
+  if (activeActionMenuButton && activeActionMenuButton !== trigger) {
+    activeActionMenuButton.setAttribute("aria-expanded", "false");
+  }
+  activeActionMenuButton = trigger;
+  trigger.setAttribute("aria-expanded", "true");
+  window.requestAnimationFrame(positionUpstreamActionMenu);
 }
 
 function formatMetric(num) {
@@ -1007,7 +1019,7 @@ async function hydrateVisibleCardStats(upstreamList) {
     );
     if (!existing) continue;
     // 菜单开在这张卡上时先不动它，否则菜单会失去锚点。
-    if (existing.contains(activeActionMenuButton)) continue;
+    if (upstream.id === openActionMenuUpstreamId) continue;
     existing.replaceWith(createChannelCard(upstream));
   }
 }
@@ -1061,7 +1073,7 @@ function renderCards() {
     existingCards.delete(upstream.id);
 
     let card;
-    if (existing && existing.contains(activeActionMenuButton)) {
+    if (existing && Number(existing.dataset.cardUpstreamId) === openActionMenuUpstreamId) {
       // 菜单开在这张卡上，保持这个节点，替换会让菜单丢掉锚点。
       card = existing;
     } else {
@@ -1171,6 +1183,7 @@ function openUpstreamActionMenu(button) {
 
   closeUpstreamActionMenu();
   activeActionMenuButton = button;
+  openActionMenuUpstreamId = Number(button.dataset.menuId);
   button.setAttribute("aria-expanded", "true");
   upstreamActionMenu.innerHTML = actionMenuMarkup(Number(button.dataset.menuId));
   upstreamActionMenu.style.visibility = "hidden";
@@ -1188,6 +1201,9 @@ function closeUpstreamActionMenu(restoreFocus = false) {
     button.setAttribute("aria-expanded", "false");
   }
   activeActionMenuButton = null;
+  openActionMenuUpstreamId = null;
+  upstreamActionMenu.style.removeProperty("left");
+  upstreamActionMenu.style.removeProperty("top");
   upstreamActionMenu.style.visibility = "";
   hidePopoverLayer(upstreamActionMenu);
   if (restoreFocus && button?.isConnected) {
@@ -1200,6 +1216,12 @@ function positionUpstreamActionMenu() {
     return;
   }
   const triggerRect = activeActionMenuButton.getBoundingClientRect();
+  /* 锚点脱离文档或落在 display:none 子树里时 rect 全为 0，按它算会把菜单
+     夹到视口角落。宁可关掉，也不要画在错误位置。 */
+  if (!activeActionMenuButton.isConnected || (!triggerRect.width && !triggerRect.height)) {
+    closeUpstreamActionMenu();
+    return;
+  }
   const menuRect = upstreamActionMenu.getBoundingClientRect();
   const viewportGap = 8;
   let left = triggerRect.right - menuRect.width;

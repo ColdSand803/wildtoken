@@ -1494,7 +1494,7 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 		}
 
 		resp := models.ExportUpstreamsResponse{
-			Kind:       "wildtoken-channels",
+			Kind:       "wildtoken.channels",
 			Version:    1,
 			ExportedAt: time.Now().UTC().Format(time.RFC3339),
 			Channels:   channels,

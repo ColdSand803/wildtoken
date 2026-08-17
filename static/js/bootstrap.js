@@ -558,6 +558,7 @@ let tokenSearchTimer = null;
 
 let upstreams = [];
 let activeActionMenuButton = null;
+let openActionMenuUpstreamId = null;
 let lastUpstreamLoadError = "";
 const modelDialogState = {
   upstream: null,
