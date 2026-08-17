@@ -179,10 +179,10 @@ function renderDashboardKpiCards(container, cards) {
       ? ""
       : `<div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>`;
     const cardKeyAttr = card.cardKey ? ` data-card-key="${escapeHtml(card.cardKey)}"` : "";
-    // 背景曲线（SVG）包在绝对定位容器里铺满卡片下半部
-    const backgroundBlock = card.backgroundHtml
-      ? `<div class="kpi-bg-spark"><div class="kpi-spark-hit-layer"></div>${card.backgroundHtml}</div>`
-      : "";
+    /* 背景曲线（SVG + 它的 hover tooltip）已经自带绝对定位容器，直接摊在
+       卡片里：曲线贴卡片下半部，tooltip 作为卡片的直接子节点，才能浮在
+       数字文本之上而不被曲线容器的层叠上下文压住。 */
+    const backgroundBlock = card.backgroundHtml || "";
     return `
     <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}${hintTitle}${cardKeyAttr}>
       ${backgroundBlock}
@@ -394,59 +394,114 @@ let dashboardSparkGradientSeq = 0;
 let lastRequestSparkRecords = null;
 let lastLatencySparkRecords = null;
 
+const KPI_SPARK_VIEW = { width: 100, height: 32 };
+
 /// 请求数卡背景曲线的记录（{v}）→ 路径映射（viewBox 0 0 100 32）。
 /// 渲染和形态插值动画共用，保证动画帧和落位形态完全一致。
 function kpiBackgroundSparkPaths(records) {
+  const { width, height } = KPI_SPARK_VIEW;
   const values = smoothSeries(records.map((record) => record.v));
   const max = Math.max(...values);
   const min = Math.min(...values);
   const range = max - min || 1;
   const coords = values.map((value, index) => ({
-    x: (index / (values.length - 1)) * 100,
-    y: 30 - ((value - min) / range) * 26,
+    x: (index / (values.length - 1)) * width,
+    y: height - 2 - ((value - min) / range) * (height - 6),
   }));
   return buildSmoothSparkPaths(coords, {
-    baselineY: 32,
+    baselineY: height,
     minY: 2,
-    maxY: 30,
+    maxY: height - 2,
   });
 }
 
+/// 鼠标横向位置（0..1）→ 命中的桶。整点位置直接落在那个桶上，桶之间线性
+/// 插值，tooltip 报的数就是曲线在该处的真实高度。纯函数，方便测试。
+function kpiSparkPointAtRatio(values, ratio) {
+  const clamped = Math.max(0, Math.min(1, ratio));
+  const position = clamped * Math.max(values.length - 1, 1);
+  const index = Math.min(values.length - 1, Math.floor(position));
+  const next = Math.min(values.length - 1, index + 1);
+  const progress = next === index ? 0 : position - index;
+  return {
+    index,
+    next,
+    progress,
+    value: values[index] + (values[next] - values[index]) * progress,
+    x: clamped * KPI_SPARK_VIEW.width,
+  };
+}
+
+/* 请求数卡的曲线 hover。命中区域是整张卡片而不只是曲线所在的下半部：
+   曲线是压在卡面上的背景装饰，只有贴着它才出点会让人以为没做交互。纵向
+   位置不参与取值，指到哪一列就报那一列——点的 y 直接从已渲染的 path 上取
+   （getPointAtLength 二分找 x），所以点永远压在肉眼看到的曲线上，形态过渡
+   动画进行到一半时也一样。 */
 function bindKpiRequestSparkInteraction(card, values) {
   const svg = card?.querySelector(".kpi-bg-spark-svg");
-  const hitArea = card?.querySelector(".kpi-spark-hit-area");
-  const hoverLayer = card?.querySelector(".kpi-spark-hit-layer");
+  const line = svg?.querySelector(".spark-morph-line");
   const guide = svg?.querySelector(".kpi-spark-hover-guide");
   const dot = svg?.querySelector(".kpi-spark-hover-dot");
   const tooltip = card?.querySelector(".kpi-spark-tooltip");
-  if (!svg || !hoverLayer || !hitArea || !guide || !dot || !tooltip || !Array.isArray(values) || values.length < 2) return;
+  if (!svg || !line || !guide || !dot || !tooltip || !Array.isArray(values) || values.length < 2) return;
+  const { width, height } = KPI_SPARK_VIEW;
   let frameId = null;
   let pendingEvent = null;
+
+  // path 上横坐标为 x 的点：曲线单调递增于 x，二分即可。
+  const pathPointAtX = (path, x) => {
+    const total = path.getTotalLength();
+    let low = 0;
+    let high = total;
+    for (let iteration = 0; iteration < 14; iteration++) {
+      const mid = (low + high) / 2;
+      if (path.getPointAtLength(mid).x < x) low = mid;
+      else high = mid;
+    }
+    return path.getPointAtLength((low + high) / 2);
+  };
+
+  const render = (event) => {
+    const bounds = svg.getBoundingClientRect();
+    if (!bounds.width || !bounds.height) return;
+    const point = kpiSparkPointAtRatio(
+      values,
+      (event.clientX - bounds.left) / bounds.width,
+    );
+    // preserveAspectRatio="none" 把圆拉成椭圆，横向反向缩放补回来。
+    const dotScaleX = (bounds.height * width) / Math.max(bounds.width * height, 1);
+    const onCurve = pathPointAtX(line, point.x);
+    guide.setAttribute("x1", point.x);
+    guide.setAttribute("x2", point.x);
+    dot.setAttribute("transform", `scale(${dotScaleX} 1)`);
+    dot.setAttribute("cx", point.x / dotScaleX);
+    dot.setAttribute("cy", onCurve.y);
+
+    tooltip.innerHTML = `<strong>请求数</strong><span>${formatCompactNumber(Math.round(point.value))}</span>`;
+    tooltip.hidden = false;
+    // 点在 svg 里，tooltip 挂在卡片上：换算成卡片坐标，再夹进卡片内。
+    const cardBounds = card.getBoundingClientRect();
+    const gap = 8;
+    const dotLeft = bounds.left - cardBounds.left + (point.x / width) * bounds.width;
+    const dotTop = bounds.top - cardBounds.top + (onCurve.y / height) * bounds.height;
+    const preferLeft = dotLeft > cardBounds.width * 0.62;
+    const left = preferLeft ? dotLeft - tooltip.offsetWidth - gap : dotLeft + gap;
+    tooltip.style.left = `${Math.max(
+      gap,
+      Math.min(left, Math.max(gap, cardBounds.width - tooltip.offsetWidth - gap)),
+    )}px`;
+    tooltip.style.top = `${Math.max(
+      gap,
+      Math.min(dotTop - tooltip.offsetHeight - gap, Math.max(gap, cardBounds.height - tooltip.offsetHeight - gap)),
+    )}px`;
+  };
+
   const update = (event) => {
     pendingEvent = event;
     if (frameId != null) return;
     frameId = window.requestAnimationFrame(() => {
       frameId = null;
-      const bounds = svg.getBoundingClientRect();
-      if (!pendingEvent) return;
-      const ratio = Math.max(0, Math.min(1, (pendingEvent.clientX - bounds.left) / bounds.width));
-      const dotScaleX = (bounds.height * 100) / Math.max(bounds.width * 32, 1);
-      const x = ratio * 100;
-      const position = ratio * (values.length - 1);
-      const index = Math.min(values.length - 1, Math.floor(position));
-      const next = Math.min(values.length - 1, index + 1);
-      const progress = next === index ? 0 : position - index;
-      const value = values[index] + (values[next] - values[index]) * progress;
-      const y = 30 - ((value - Math.min(...values)) / (Math.max(...values) - Math.min(...values) || 1)) * 26;
-      guide.setAttribute("x1", x);
-      guide.setAttribute("x2", x);
-      dot.setAttribute("transform", `scale(${dotScaleX} 1)`);
-      dot.setAttribute("cx", x / dotScaleX);
-      dot.setAttribute("cy", y);
-      tooltip.innerHTML = `<strong>请求数</strong><span>${formatCompactNumber(Math.round(value))}</span>`;
-      tooltip.hidden = false;
-      tooltip.style.left = `${Math.min(Math.max(6, x + 8), card.clientWidth - tooltip.offsetWidth - 6)}px`;
-      tooltip.style.top = `${Math.max(6, y - 34)}px`;
+      if (pendingEvent) render(pendingEvent);
     });
   };
   const clear = () => {
@@ -456,34 +511,44 @@ function bindKpiRequestSparkInteraction(card, values) {
     tooltip.hidden = true;
     svg.removeAttribute("data-hovering");
   };
-  hoverLayer.addEventListener("pointerenter", (event) => {
+  // 绑在卡片上：pointermove 从数字、标签这些子节点冒泡上来，整卡都能命中。
+  card.addEventListener("pointerenter", (event) => {
     svg.dataset.hovering = "true";
     update(event);
   });
-  hoverLayer.addEventListener("pointermove", update);
-  hoverLayer.addEventListener("pointerleave", clear);
+  card.addEventListener("pointermove", (event) => {
+    svg.dataset.hovering = "true";
+    update(event);
+  });
+  card.addEventListener("pointerleave", clear);
 }
 
-/* 请求数卡的背景趋势：压得很淡的平滑曲线，贴卡片底部，不抢数字。 */
+/* 请求数卡的背景趋势：压得很淡的平滑曲线，贴卡片底部，不抢数字。
+   曲线容器只负责画，pointer-events 全关；hover 命中的是整张卡片（见
+   bindKpiRequestSparkInteraction）。tooltip 是卡片的直接子节点，不放进
+   曲线容器里——那个容器 z-index 低于文字层，塞进去会被数字压住。 */
 function buildKpiBackgroundSpark(values) {
   if (!Array.isArray(values) || values.length < 2) return "";
   const { line, area } = kpiBackgroundSparkPaths(values.map((value) => ({ v: value })));
   const gradientId = `kpi-bg-gradient-${++dashboardSparkGradientSeq}`;
   return `
-    <svg class="kpi-bg-spark-svg" viewBox="0 0 100 32" preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="currentColor" stop-opacity="0.16" />
-          <stop offset="100%" stop-color="currentColor" stop-opacity="0.02" />
-        </linearGradient>
-      </defs>
-      <path class="spark-morph-area" d="${area}" fill="url(#${gradientId})" />
-      <path class="spark-morph-line" d="${line}" fill="none" stroke="currentColor" stroke-opacity="0.45"
-            stroke-width="1.2" vector-effect="non-scaling-stroke" />
-      <line class="kpi-spark-hover-guide" x1="0" y1="2" x2="0" y2="32" vector-effect="non-scaling-stroke" />
-      <circle class="kpi-spark-hover-dot" r="2.5" cx="0" cy="0" />
-      <rect class="kpi-spark-hit-area" x="0" y="0" width="100" height="32" />
-    </svg>
+    <div class="kpi-bg-spark">
+      <svg class="kpi-bg-spark-svg" viewBox="0 0 ${KPI_SPARK_VIEW.width} ${KPI_SPARK_VIEW.height}"
+           preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+          <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="currentColor" stop-opacity="0.16" />
+            <stop offset="100%" stop-color="currentColor" stop-opacity="0.02" />
+          </linearGradient>
+        </defs>
+        <path class="spark-morph-area" d="${area}" fill="url(#${gradientId})" />
+        <path class="spark-morph-line" d="${line}" fill="none" stroke="currentColor" stroke-opacity="0.45"
+              stroke-width="1.2" vector-effect="non-scaling-stroke" />
+        <line class="kpi-spark-hover-guide" x1="0" y1="0" x2="0" y2="${KPI_SPARK_VIEW.height}"
+              vector-effect="non-scaling-stroke" />
+        <circle class="kpi-spark-hover-dot" r="2.5" cx="0" cy="0" />
+      </svg>
+    </div>
     <div class="kpi-spark-tooltip" role="status" hidden></div>
   `;
 }

@@ -621,22 +621,18 @@ html[data-theme] .dashboard-date-field input[type="date"],
 }
 
 /* 请求数卡的背景趋势曲线：绝对定位铺在卡片下半部，最底层。
-   曲线形态的切换过渡由 JS 逐帧插值 path 完成（见 animateSparkMorph）。 */
+   曲线形态的切换过渡由 JS 逐帧插值 path 完成（见 animateSparkMorph）。
+   命中区域是整张卡片，事件绑在卡片上（见 bindKpiRequestSparkInteraction），
+   所以曲线本身完全不吃 pointer events。 */
 .kpi-bg-spark {
   bottom: 0;
   color: var(--accent);
   height: 58%;
   left: 0;
-  pointer-events: auto;
+  pointer-events: none;
   position: absolute;
   right: 0;
   z-index: 0;
-}
-
-.kpi-spark-hit-layer {
-  inset: 0;
-  position: absolute;
-  z-index: 2;
 }
 
 .kpi-bg-spark-svg {
@@ -645,13 +641,11 @@ html[data-theme] .dashboard-date-field input[type="date"],
   pointer-events: none;
   position: relative;
   width: 100%;
-  z-index: 1;
 }
 
-.kpi-spark-hit-area {
+/* 整卡都能取值，指针形状也覆盖整卡。 */
+.dashboard-kpi:has(> .kpi-bg-spark) {
   cursor: crosshair;
-  fill: transparent;
-  pointer-events: all;
 }
 
 .kpi-spark-hover-guide,

@@ -1164,6 +1164,16 @@ function escapeHtml(value) {
   });
 }
 
+/* 迷你图统一用 preserveAspectRatio="none"：曲线要铺满整宽，横纵缩放比例
+   因此不同（例如 viewBox 100×40 画在 260×48px 上，横向 2.6 倍、纵向 1.2
+   倍）。<circle> 会跟着被横向拉扁成椭圆，补偿办法是给它反向的横向缩放，
+   再把 cx 除以同一个系数抵消位移。系数 = 纵向缩放 / 横向缩放。
+   bounds 是 svg 的 getBoundingClientRect()，view 是 {width, height} 的
+   viewBox 尺寸。 */
+function sparkDotScaleX(bounds, view) {
+  return (bounds.height * view.width) / Math.max(bounds.width * view.height, 1);
+}
+
 /* Catmull-Rom 转三次贝塞尔的平滑折线，渠道卡片的 6h 请求量和看板的延迟趋势
    共用这一个生成器，曲线手感才一致。coords 是已经换算到 SVG 坐标系的
    {x, y} 数组；返回描边路径和向 baselineY 封口的面积路径。控制点的 y 会被

@@ -651,6 +651,8 @@ function formatMetric(num) {
   return num.toString();
 }
 
+const CHANNEL_SPARK_VIEW = { width: 100, height: 40 };
+
 let sparklineGradientSeq = 0;
 
 function renderSparkline(points) {
@@ -714,6 +716,7 @@ function bindChannelSparklineInteraction(container, values) {
   const dot = svg?.querySelector(".channel-spark-hover-dot");
   const tooltip = container?.querySelector(".channel-spark-tooltip");
   if (!svg || !hitArea || !guide || !dot || !tooltip || !Array.isArray(values) || values.length < 2) return;
+  const { width, height } = CHANNEL_SPARK_VIEW;
   let frameId = null;
   let pendingEvent = null;
   const min = Math.min(...values);
@@ -726,22 +729,26 @@ function bindChannelSparklineInteraction(container, values) {
       frameId = null;
       if (!pendingEvent) return;
       const bounds = svg.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
       const ratio = Math.max(0, Math.min(1, (pendingEvent.clientX - bounds.left) / bounds.width));
       const position = ratio * (values.length - 1);
       const index = Math.min(values.length - 1, Math.floor(position));
       const next = Math.min(values.length - 1, index + 1);
       const progress = next === index ? 0 : position - index;
       const value = values[index] + (values[next] - values[index]) * progress;
-      const x = ratio * 100;
-      const y = 40 - ((value - min) / range) * 35;
+      const x = ratio * width;
+      const y = height - ((value - min) / range) * (height - 5);
+      // 卡片宽度随窗口变化，缩放系数每帧重算，点才一直是圆的。
+      const dotScaleX = sparkDotScaleX(bounds, CHANNEL_SPARK_VIEW);
       guide.setAttribute("x1", x);
       guide.setAttribute("x2", x);
-      dot.setAttribute("cx", x);
+      dot.setAttribute("transform", `scale(${dotScaleX} 1)`);
+      dot.setAttribute("cx", x / dotScaleX);
       dot.setAttribute("cy", y);
       tooltip.innerHTML = `<strong>请求量 (6h)</strong><span>${formatMetric(Math.round(value))}</span>`;
       tooltip.hidden = false;
-      tooltip.style.left = `${Math.min(Math.max(6, x * bounds.width / 100 + 8), container.clientWidth - tooltip.offsetWidth - 6)}px`;
-      tooltip.style.top = `${Math.max(6, y * bounds.height / 40 - 32)}px`;
+      tooltip.style.left = `${Math.min(Math.max(6, x * bounds.width / width + 8), container.clientWidth - tooltip.offsetWidth - 6)}px`;
+      tooltip.style.top = `${Math.max(6, y * bounds.height / height - 32)}px`;
     });
   };
   const clear = () => {
@@ -749,7 +756,6 @@ function bindChannelSparklineInteraction(container, values) {
     if (frameId != null) window.cancelAnimationFrame(frameId);
     frameId = null;
     tooltip.hidden = true;
-    svg.removeAttribute("data-hovering");
     svg.removeAttribute("data-hovering");
   };
   hitArea.addEventListener("pointerenter", (event) => {
