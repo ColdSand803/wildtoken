@@ -147,12 +147,20 @@ func codexModelTestHeaders() map[string]string {
 }
 
 // claudeCLIModelTestHeaders reproduces what the Claude Code CLI sends.
-func claudeCLIModelTestHeaders() map[string]string {
+//
+// A model name carrying the [1m] suffix is a relay-side alias for the 1M context
+// window, which providers only honor alongside the matching beta header — the
+// CLI itself sends it via ANTHROPIC_BETAS, so the test does the same.
+func claudeCLIModelTestHeaders(model string) map[string]string {
+	betas := "claude-code-20250219,interleaved-thinking-2025-05-14," +
+		"mid-conversation-system-2026-04-07,effort-2025-11-24"
+	if strings.Contains(strings.ToLower(model), "[1m]") {
+		betas += ",context-1m-2025-08-07"
+	}
 	return map[string]string{
 		"accept":          "application/json",
 		"accept-encoding": "identity",
-		"anthropic-beta": "claude-code-20250219,interleaved-thinking-2025-05-14," +
-			"mid-conversation-system-2026-04-07,effort-2025-11-24",
+		"anthropic-beta":  betas,
 		"anthropic-dangerous-direct-browser-access": "true",
 		"anthropic-version":                         "2023-06-01",
 		"content-type":                              "application/json",
@@ -845,7 +853,7 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 		case "responses":
 			defaultHeaders = codexModelTestHeaders()
 		case "messages":
-			defaultHeaders = claudeCLIModelTestHeaders()
+			defaultHeaders = claudeCLIModelTestHeaders(strings.TrimSpace(input.Model))
 		}
 
 		overrides, err := parseExtraHeaders(row.ExtraHeaders)
