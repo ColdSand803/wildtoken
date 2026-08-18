@@ -81,6 +81,100 @@ func (c *ModelsListCache) Invalidate() {
 	clear(c.byGroup)
 }
 
+// ProbeResult is one channel's outcome from the most recent batch probe.
+//
+// This is deliberately separate from the 24h traffic health the channel cards
+// also show: that one summarises real proxied requests, this one is a single
+// synthetic request an operator asked for just now. Merging them would let a
+// probe rewrite the traffic history, or a quiet channel look unreachable.
+type ProbeResult struct {
+	UpstreamID   int64   `json:"upstream_id"`
+	OK           bool    `json:"ok"`
+	StatusCode   *int32  `json:"status_code"`
+	DurationMs   *int32  `json:"duration_ms"`
+	ErrorSummary *string `json:"error_summary"`
+	CheckedAt    string  `json:"checked_at"`
+}
+
+// ProbeRunState holds the last batch-probe results and serialises the runs.
+//
+// Results live in memory rather than SQLite: they describe reachability at one
+// instant, which is stale by the time a restart is over, and persisting them
+// would invite reading an old row as current status. The trade-off is that a
+// restart clears the badges until the next run, which is noted in the API
+// contract.
+type ProbeRunState struct {
+	mu      sync.RWMutex
+	running bool
+	results map[int64]ProbeResult
+	// startedAt and finishedAt describe the most recent run for the console's
+	// "last checked" line.
+	startedAt  time.Time
+	finishedAt time.Time
+}
+
+func NewProbeRunState() *ProbeRunState {
+	return &ProbeRunState{results: map[int64]ProbeResult{}}
+}
+
+// TryStart claims the right to run a batch probe, returning false when one is
+// already in flight.
+//
+// A batch probe sends one request per channel, so a double-clicked button or two
+// open consoles would multiply that load against every upstream at once. The
+// second caller is refused rather than queued: by the time the first finishes,
+// its results are the answer the second wanted.
+func (p *ProbeRunState) TryStart(now time.Time) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.running {
+		return false
+	}
+	p.running = true
+	p.startedAt = now
+	return true
+}
+
+// Finish records a completed run and publishes its results.
+//
+// Results replace the previous run's entries for the channels probed and leave
+// the rest alone, so probing a subset does not erase badges for the others.
+func (p *ProbeRunState) Finish(results []ProbeResult, now time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, result := range results {
+		p.results[result.UpstreamID] = result
+	}
+	p.running = false
+	p.finishedAt = now
+}
+
+// Abandon releases the run lock without publishing results, for a run that was
+// cancelled before it could finish.
+func (p *ProbeRunState) Abandon() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.running = false
+}
+
+// Snapshot returns the cached results and whether a run is in flight.
+func (p *ProbeRunState) Snapshot() (map[int64]ProbeResult, bool, time.Time) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	copied := make(map[int64]ProbeResult, len(p.results))
+	for id, result := range p.results {
+		copied[id] = result
+	}
+	return copied, p.running, p.finishedAt
+}
+
+// Forget drops a channel's cached result, for when that channel is deleted.
+func (p *ProbeRunState) Forget(upstreamID int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.results, upstreamID)
+}
+
 // State is the shared application state every handler receives.
 type State struct {
 	DB          *sql.DB
@@ -103,7 +197,10 @@ type State struct {
 	UpstreamRateLimiter *ratelimit.Limiter
 	// Quotas holds the usage that a token has committed to but that its stored
 	// total does not show yet, so admission weighs requests still in flight.
-	Quotas    *quota.Tracker
+	Quotas *quota.Tracker
+	// ProbeRuns carries the last batch-probe results and keeps concurrent runs
+	// from multiplying probe load across every channel.
+	ProbeRuns *ProbeRunState
 	StartedAt time.Time
 }
 

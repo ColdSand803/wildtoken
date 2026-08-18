@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/liguangsheng/wildtoken/internal/apperr"
 )
@@ -37,9 +38,30 @@ type UpstreamHealthOut struct {
 // hours, computed straight from request_logs. Computing on read keeps the
 // write path free of bookkeeping and stays cheap because the window is short
 // and grouped in SQL.
-func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours int64) (map[int64]*UpstreamHealthOut, error) {
+//
+// excludeClientTypes drops the console's own probes from the aggregate. They
+// share request_logs with proxied traffic so the log page can filter them, but
+// counting them here would let an operator move the number this card reports
+// just by clicking "test" — and a batch probe across every channel would move it
+// a lot. The caller passes the set because it owns those client_type values.
+func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours int64,
+	excludeClientTypes []string) (map[int64]*UpstreamHealthOut, error) {
 	hours = min(max(hours, 1), 24*7)
 	cutoff := fmt.Sprintf("-%d hours", hours)
+
+	var exclusion strings.Builder
+	args := []any{cutoff}
+	if len(excludeClientTypes) > 0 {
+		exclusion.WriteString(" AND client_type NOT IN (")
+		for index, clientType := range excludeClientTypes {
+			if index > 0 {
+				exclusion.WriteString(", ")
+			}
+			exclusion.WriteString("?")
+			args = append(args, clientType)
+		}
+		exclusion.WriteString(")")
+	}
 
 	rows, err := database.QueryContext(ctx, `
 		SELECT upstream_id,
@@ -49,9 +71,10 @@ func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours int64) (
 			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END),
 			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0)
 		FROM request_logs
-		WHERE upstream_id IS NOT NULL AND created_at >= datetime('now', ?)
+		WHERE upstream_id IS NOT NULL AND created_at >= datetime('now', ?)`+
+		exclusion.String()+`
 		GROUP BY upstream_id, bucket_epoch
-		ORDER BY bucket_epoch ASC`, cutoff)
+		ORDER BY bucket_epoch ASC`, args...)
 	if err != nil {
 		return nil, apperr.Database(err)
 	}

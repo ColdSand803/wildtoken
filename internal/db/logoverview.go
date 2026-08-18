@@ -14,9 +14,18 @@ import (
 // previous client-side math over "the most recent ~200 loaded logs", whose
 // meaning drifted with traffic volume.
 type LogOverviewOut struct {
-	Range         string `json:"range"`
-	RangeLabel    string `json:"range_label"`
-	TotalRequests int64  `json:"total_requests"`
+	Range      string `json:"range"`
+	RangeLabel string `json:"range_label"`
+	// ResolvedStart/ResolvedEnd are the concrete [start, end) instants this
+	// response actually covered, as RFC3339 UTC. A drill-down echoes them back
+	// verbatim as the log endpoint's start/end, which is why they are emitted in
+	// the shape that endpoint accepts rather than the internal storage shape:
+	// the console forwards an opaque pair instead of recomputing a window whose
+	// preset it would have to interpret. Both are null for "全部时间", which
+	// drills down to no time filter at all.
+	ResolvedStart *string `json:"resolved_start"`
+	ResolvedEnd   *string `json:"resolved_end"`
+	TotalRequests int64   `json:"total_requests"`
 	// PreviousTotal 是上一个同长周期的请求总数，给增长率当基数。今天对比
 	// 昨天同时段；固定窗口对比再往前一个窗口；自定义对比等长的前置区间；
 	// "全部"没有上一周期，字段为 null。

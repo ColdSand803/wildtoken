@@ -10,8 +10,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/apperr"
@@ -37,6 +39,15 @@ const (
 	probeModelList   = "model-list"
 	probeBalance     = "balance"
 )
+
+// probeClientTypes is the full set above, for queries that summarise real
+// traffic and must leave console-initiated requests out of it.
+//
+// Adding a probe type means adding it here too. Health aggregates that silently
+// absorb a new probe type read as channel behaviour an operator never caused.
+func probeClientTypes() []string {
+	return []string{probeModelTest, probeChannelTest, probeModelList, probeBalance}
+}
 
 // buildProbeURL mirrors the upstream URL rules used by proxied traffic.
 func buildProbeURL(baseURL, path, query string) string {
@@ -248,6 +259,10 @@ type probeOutcome struct {
 	// written to the log is redacted by the response snapshot.
 	headers map[string]string
 	body    string
+	// durationMs is set even when the probe returns an error, because the
+	// interesting number for an unreachable channel is how long it took to fail
+	// -- a refused connection and a swallowed request look the same otherwise.
+	durationMs *int32
 }
 
 // probeLogPath is the path component of a probe URL, for the log's path column.
@@ -307,11 +322,12 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 	response, err := state.HTTPClient.Do(request)
 	if err != nil {
 		entry := newEntry()
-		entry.DurationMs = durationMs(startedAt)
+		elapsed := durationMs(startedAt)
+		entry.DurationMs = elapsed
 		message := err.Error()
 		entry.Error = &message
 		state.LogWriter.Schedule(entry)
-		return probeOutcome{}, err
+		return probeOutcome{durationMs: elapsed}, err
 	}
 	defer response.Body.Close()
 
@@ -328,11 +344,12 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 	if err != nil {
 		entry := newEntry()
 		entry.StatusCode = &statusCode
-		entry.DurationMs = durationMs(startedAt)
+		elapsed := durationMs(startedAt)
+		entry.DurationMs = elapsed
 		message := err.Error()
 		entry.Error = &message
 		state.LogWriter.Schedule(entry)
-		return probeOutcome{}, err
+		return probeOutcome{status: status, durationMs: elapsed}, err
 	}
 
 	// Only an inference probe can have token usage. Running the extractor over a
@@ -346,7 +363,8 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 
 	entry := newEntry()
 	entry.StatusCode = &statusCode
-	entry.DurationMs = durationMs(startedAt)
+	elapsed := durationMs(startedAt)
+	entry.DurationMs = elapsed
 	entry.PromptTokens = usage.PromptTokens
 	entry.CompletionTokens = usage.CompletionTokens
 	entry.TotalTokens = usage.TotalTokens
@@ -357,7 +375,9 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 	entry.DownstreamResponse = responseSnapshot
 	state.LogWriter.Schedule(entry)
 
-	return probeOutcome{status: status, headers: headers, body: string(body)}, nil
+	return probeOutcome{
+		status: status, headers: headers, body: string(body), durationMs: elapsed,
+	}, nil
 }
 
 func durationMs(startedAt time.Time) *int32 {
@@ -724,6 +744,10 @@ func AdminDeleteUpstream(state *appstate.State) http.HandlerFunc {
 		state.ModelsCache.Invalidate()
 		state.Routing.Invalidate()
 		state.AutoWeight.Reset(id)
+		// Ids are reused by SQLite after a delete, so a stale probe result left
+		// behind would attach this channel's last status to whatever is created
+		// next.
+		state.ProbeRuns.Forget(id)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -796,6 +820,204 @@ func AdminTestUpstream(state *appstate.State) http.HandlerFunc {
 			"status_code":  outcome.status,
 			"content_type": optionalHeader(outcome.headers, "content-type"),
 			"preview":      truncateRunes(outcome.body, 1000),
+		})
+	}
+}
+
+// Batch probe bounds.
+const (
+	// probeAllConcurrency caps how many channels are probed at once. A batch
+	// probe is the one console action whose cost scales with the number of
+	// configured channels, and every one of those requests leaves through the
+	// same shared HTTP client the proxy path uses.
+	probeAllConcurrency = 6
+	// probeAllBudget bounds the whole run regardless of channel count, so a
+	// board full of dead endpoints cannot hold a request open indefinitely.
+	// Individual probes keep their own per-channel timeout inside this.
+	probeAllBudget = 90 * time.Second
+	// probeAllErrorSummaryChars bounds what a failure contributes to the
+	// response. The full body is already in the log row.
+	probeAllErrorSummaryChars = 300
+)
+
+// AdminProbeAllUpstreams probes every channel once and returns a per-channel
+// result.
+//
+// Results are also cached in state.ProbeRuns so the channel cards can show a
+// "last checked" badge without re-probing on every page load. The run is
+// serialised: a second concurrent request is refused rather than queued, because
+// finishing the first produces the answer the second wanted.
+func AdminProbeAllUpstreams(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		includeDisabled := strings.TrimSpace(r.URL.Query().Get("include_disabled")) == "true"
+
+		rows, err := db.ListUpstreamRows(r.Context(), state.DB)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		targets := make([]models.UpstreamRow, 0, len(rows))
+		for _, row := range rows {
+			if includeDisabled || row.Enabled == 1 {
+				targets = append(targets, row)
+			}
+		}
+
+		if !state.ProbeRuns.TryStart(time.Now()) {
+			apperr.WriteError(w, apperr.Conflict("a batch probe is already running"))
+			return
+		}
+
+		// The budget is derived from the request context, so an operator closing
+		// the console still cancels the outbound probes rather than leaving them
+		// to finish against every upstream unattended.
+		ctx, cancel := context.WithTimeout(r.Context(), probeAllBudget)
+		defer cancel()
+
+		results := probeUpstreamsConcurrently(ctx, state, targets)
+
+		// Partial results are published rather than discarded: one dead channel
+		// eating the budget should not throw away what the others reported. The
+		// channels that never got their turn are reported as skipped instead of
+		// being cached as failures they did not earn.
+		state.ProbeRuns.Finish(results, time.Now())
+
+		succeeded := 0
+		for _, result := range results {
+			if result.OK {
+				succeeded++
+			}
+		}
+		apperr.WriteJSON(w, http.StatusOK, map[string]any{
+			"total":     len(targets),
+			"probed":    len(results),
+			"skipped":   len(targets) - len(results),
+			"succeeded": succeeded,
+			"failed":    len(results) - succeeded,
+			"partial":   len(results) < len(targets),
+			"results":   results,
+		})
+	}
+}
+
+// probeUpstreamsConcurrently probes each channel under a bounded worker pool.
+//
+// Every channel gets a result, including the ones whose own configuration is
+// broken: a channel with unparseable extra headers is a failure an operator
+// needs to see, not a row silently missing from the report.
+func probeUpstreamsConcurrently(ctx context.Context, state *appstate.State,
+	targets []models.UpstreamRow) []appstate.ProbeResult {
+	results := make([]appstate.ProbeResult, len(targets))
+	semaphore := make(chan struct{}, probeAllConcurrency)
+	var wait sync.WaitGroup
+
+	for index := range targets {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			select {
+			case semaphore <- struct{}{}:
+				defer func() { <-semaphore }()
+			case <-ctx.Done():
+				results[index] = probeResultForCancelled(targets[index])
+				return
+			}
+			results[index] = probeOneUpstream(ctx, state, targets[index])
+		}(index)
+	}
+	wait.Wait()
+
+	// Channels that never got their turn carry no CheckedAt; dropping them keeps
+	// a partial run from publishing "not checked" as a result.
+	published := make([]appstate.ProbeResult, 0, len(results))
+	for _, result := range results {
+		if result.CheckedAt != "" {
+			published = append(published, result)
+		}
+	}
+	return published
+}
+
+// probeResultForCancelled marks a channel the run never reached.
+func probeResultForCancelled(row models.UpstreamRow) appstate.ProbeResult {
+	return appstate.ProbeResult{UpstreamID: row.ID}
+}
+
+// probeOneUpstream runs the same GET /v1/models check the single-channel test
+// uses, so a batch result and a manual test of one channel cannot disagree.
+func probeOneUpstream(ctx context.Context, state *appstate.State,
+	row models.UpstreamRow) appstate.ProbeResult {
+	result := appstate.ProbeResult{
+		UpstreamID: row.ID,
+		CheckedAt:  time.Now().UTC().Format(models.TimestampFormat),
+	}
+
+	overrides, err := parseExtraHeaders(row.ExtraHeaders)
+	if err == nil {
+		err = validateOverrides(overrides)
+	}
+	if err != nil {
+		summary := truncateRunes(err.Error(), probeAllErrorSummaryChars)
+		result.ErrorSummary = &summary
+		return result
+	}
+
+	targetURL := buildProbeURL(row.BaseURL, "models", "")
+	headers := buildChannelRequestHeaders(nil, row.APIKey, overrides)
+
+	outcome, err := sendAndLogProbe(ctx, state, consoleProbe{
+		clientType:   probeChannelTest,
+		method:       http.MethodGet,
+		url:          targetURL,
+		headers:      headers,
+		upstreamID:   &row.ID,
+		upstreamName: &row.Name,
+	}, probeTimeout(row.TimeoutSeconds))
+
+	result.DurationMs = outcome.durationMs
+	if err != nil {
+		summary := truncateRunes(err.Error(), probeAllErrorSummaryChars)
+		result.ErrorSummary = &summary
+		return result
+	}
+
+	status := int32(outcome.status)
+	result.StatusCode = &status
+	result.OK = outcome.status < 400
+	if !result.OK {
+		summary := truncateRunes(strings.TrimSpace(outcome.body), probeAllErrorSummaryChars)
+		if summary == "" {
+			summary = http.StatusText(outcome.status)
+		}
+		result.ErrorSummary = &summary
+	}
+	return result
+}
+
+// AdminLastProbeResults returns the cached batch-probe results without probing.
+//
+// The channel list calls this on load so a reload shows the last known state
+// instead of either a blank badge or a fresh burst of outbound requests.
+func AdminLastProbeResults(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		results, running, finishedAt := state.ProbeRuns.Snapshot()
+
+		entries := make([]appstate.ProbeResult, 0, len(results))
+		for _, result := range results {
+			entries = append(entries, result)
+		}
+		slices.SortFunc(entries, func(a, b appstate.ProbeResult) int {
+			return int(a.UpstreamID - b.UpstreamID)
+		})
+
+		var checkedAt any
+		if !finishedAt.IsZero() {
+			checkedAt = finishedAt.UTC().Format(models.TimestampFormat)
+		}
+		apperr.WriteJSON(w, http.StatusOK, map[string]any{
+			"running":    running,
+			"checked_at": checkedAt,
+			"results":    entries,
 		})
 	}
 }

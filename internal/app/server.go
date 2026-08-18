@@ -120,6 +120,7 @@ func New(ctx context.Context) (*Server, error) {
 		TokenRateLimiter:    ratelimit.NewLimiter(),
 		UpstreamRateLimiter: ratelimit.NewLimiter(),
 		Quotas:              quotas,
+		ProbeRuns:           appstate.NewProbeRunState(),
 		StartedAt:           time.Now(),
 	}
 	// The client reads the proxy setting through the runtime store on every

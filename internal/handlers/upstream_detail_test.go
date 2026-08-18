@@ -44,6 +44,7 @@ func upstreamTestState(t *testing.T) *appstate.State {
 		ModelsCache: appstate.NewModelsListCache(),
 		Routing:     proxy.NewRoutingCache(),
 		Quotas:      quota.NewTracker(),
+		ProbeRuns:   appstate.NewProbeRunState(),
 		StartedAt:   time.Now(),
 	}
 }

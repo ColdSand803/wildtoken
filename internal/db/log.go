@@ -123,6 +123,43 @@ func (w LogTopWindow) cutoffExpression() string {
 	}
 }
 
+// ResolveWindowRange expresses a preset window as the concrete [start, end)
+// instants it covers, in the models.TimestampFormat UTC shape.
+//
+// The dashboard's presets are relative SQLite expressions evaluated at query
+// time, which is fine for one aggregate but leaves a drill-down with nothing to
+// carry: "最近 24 小时" names no instant. Resolving here rather than in the
+// browser keeps one definition of where a window starts — notably 'today',
+// whose midnight is the server's local one, not the viewer's — so the log page
+// filters over the same rows the dashboard counted.
+//
+// LogTopWindowAll returns no bounds, and LogTopWindowCustom returns none either
+// because its caller already holds the explicit range it parsed.
+func ResolveWindowRange(window LogTopWindow, now time.Time) (start, end time.Time, ok bool) {
+	var from time.Time
+	switch window {
+	case LogTopWindowToday:
+		local := now.Local()
+		from = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
+	case LogTopWindowOneDay:
+		from = now.AddDate(0, 0, -1)
+	case LogTopWindowThreeDays:
+		from = now.AddDate(0, 0, -3)
+	case LogTopWindowSevenDays:
+		from = now.AddDate(0, 0, -7)
+	case LogTopWindowThirtyDays:
+		from = now.AddDate(0, 0, -30)
+	default:
+		return time.Time{}, time.Time{}, false
+	}
+	// End is exclusive and the row being written this instant should be
+	// included, so it rounds up to the next whole second rather than
+	// truncating: created_at has second granularity, and a truncated bound
+	// would drop everything logged during the current second.
+	upper := now.UTC().Truncate(time.Second).Add(time.Second)
+	return from.UTC().Truncate(time.Second), upper, true
+}
+
 func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWindow,
 	startAt, endAt string) ([]any, error) {
 	switch window {
@@ -151,6 +188,21 @@ type LogFilter struct {
 	Search            *string
 	Status            *string
 	ClientType        *string
+	// Start and End bound created_at as [Start, End). Both carry the
+	// models.TimestampFormat UTC shape created_at itself uses, so the
+	// comparison is a plain string compare on a fixed-width zero-padded
+	// layout. Callers normalize whatever the operator typed into that shape
+	// before it reaches here; an RFC3339 literal with its 'T' and zone would
+	// compare wrong rather than fail loudly.
+	Start *string
+	End   *string
+	// Stream selects streaming or non-streaming requests.
+	Stream *bool
+	// MinDurationMs keeps rows that took at least this long. A row with no
+	// recorded duration never matches: an unknown duration cannot be shown to
+	// have crossed the threshold, and counting it would answer "slower than 3s?"
+	// with requests that may have been instant.
+	MinDurationMs *int64
 }
 
 const (
@@ -205,6 +257,14 @@ func StatusMatches(status string, code *int32) bool {
 // filters only applied to the paginated history and live events arrived
 // unfiltered. Search compares the same fields as the SQL LIKE list.
 func (f LogFilter) Matches(entry models.RequestLogOut) bool {
+	// Both sides are the fixed-width UTC models.TimestampFormat, so ordering
+	// by string is ordering by time. [Start, End) matches the SQL exactly.
+	if f.Start != nil && entry.CreatedAt < *f.Start {
+		return false
+	}
+	if f.End != nil && entry.CreatedAt >= *f.End {
+		return false
+	}
 	if f.UpstreamID != nil && (entry.UpstreamID == nil || *entry.UpstreamID != *f.UpstreamID) {
 		return false
 	}
@@ -216,6 +276,13 @@ func (f LogFilter) Matches(entry models.RequestLogOut) bool {
 		return false
 	}
 	if f.Status != nil && !StatusMatches(*f.Status, entry.StatusCode) {
+		return false
+	}
+	if f.Stream != nil && (entry.Stream != 0) != *f.Stream {
+		return false
+	}
+	if f.MinDurationMs != nil &&
+		(entry.DurationMs == nil || int64(*entry.DurationMs) < *f.MinDurationMs) {
 		return false
 	}
 	if f.Search != nil {
@@ -246,6 +313,20 @@ func (f LogFilter) Matches(entry models.RequestLogOut) bool {
 
 // appendFilters adds the WHERE fragments and their bind values.
 func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
+	// The range goes first because it is the only filter here an index can
+	// serve (idx_request_logs_created_at, and the composites leading with
+	// upstream_id/downstream_token_id). Everything below it — client_type,
+	// status_code, the leading-wildcard LIKE — can only be evaluated per row,
+	// so bounding created_at first is what keeps a filtered page from reading
+	// the whole table.
+	if f.Start != nil {
+		query.WriteString(" AND created_at >= ?")
+		args = append(args, *f.Start)
+	}
+	if f.End != nil {
+		query.WriteString(" AND created_at < ?")
+		args = append(args, *f.End)
+	}
 	if f.UpstreamID != nil {
 		query.WriteString(" AND upstream_id = ?")
 		args = append(args, *f.UpstreamID)
@@ -290,6 +371,20 @@ func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
 	if f.ClientType != nil {
 		query.WriteString(" AND client_type = ?")
 		args = append(args, *f.ClientType)
+	}
+	if f.Stream != nil {
+		// The column is an INTEGER flag, so the bool is bound as 0/1 rather
+		// than relying on the driver's mapping matching SQLite's storage.
+		value := 0
+		if *f.Stream {
+			value = 1
+		}
+		query.WriteString(" AND stream = ?")
+		args = append(args, value)
+	}
+	if f.MinDurationMs != nil {
+		query.WriteString(" AND duration_ms IS NOT NULL AND duration_ms >= ?")
+		args = append(args, *f.MinDurationMs)
 	}
 	return args
 }

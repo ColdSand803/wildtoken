@@ -75,6 +75,10 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			upstreams.Post("/fetch-models", handlers.AdminFetchModelsPreview(state))
 			upstreams.Post("/export", handlers.AdminExportUpstreams(state))
 			upstreams.Post("/import", handlers.AdminImportUpstreams(state))
+			// Registered before the /{id} routes so "probe-all" is not captured
+			// as a channel id.
+			upstreams.Post("/probe-all", handlers.AdminProbeAllUpstreams(state))
+			upstreams.Get("/probe-all", handlers.AdminLastProbeResults(state))
 			upstreams.Get("/", handlers.AdminListUpstreams(state))
 			upstreams.Post("/", handlers.AdminCreateUpstream(state))
 			upstreams.Get("/{id}", handlers.AdminGetUpstream(state))
