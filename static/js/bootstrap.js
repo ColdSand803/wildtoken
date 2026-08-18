@@ -1,4 +1,4 @@
-// Shared DOM references, mutable view state, and cross-view utilities.
+﻿// Shared DOM references, mutable view state, and cross-view utilities.
 const ADMIN_TOKEN_KEY = "wildtoken_admin_token";
 const adminTokenDialog = document.querySelector("#admin-token-dialog");
 const adminTokenForm = document.querySelector("#admin-token-form");
@@ -39,6 +39,7 @@ const selectPanel = document.querySelector("#select-panel");
 const upstreamActionMenu = document.querySelector("#upstream-action-menu");
 const rows = document.querySelector("#upstream-rows");
 const upstreamSummary = document.querySelector("#upstream-summary");
+const upstreamProbeSummary = document.querySelector("#upstream-probe-summary");
 const upstreamCardsContainer = document.querySelector("#upstream-cards");
 const viewGridBtn = document.querySelector("#upstream-view-grid");
 const viewListBtn = document.querySelector("#upstream-view-list");
@@ -46,6 +47,7 @@ const upstreamTableWrap = document.querySelector(".view[data-view='upstreams'] .
 const form = document.querySelector("#upstream-form");
 const formTitle = document.querySelector("#form-title");
 const newButton = document.querySelector("#new-upstream");
+const batchProbeBtn = document.querySelector("#batch-probe");
 const resetButton = document.querySelector("#reset-form");
 const fetchModelsButton = document.querySelector("#fetch-models");
 const upstreamDialog = document.querySelector("#upstream-dialog");
@@ -221,25 +223,47 @@ const logUpstreamFilter = document.querySelector("#log-upstream-filter");
 const logSearchInput = document.querySelector("#log-search");
 const logStatusFilter = document.querySelector("#log-status-filter");
 const logClientFilter = document.querySelector("#log-client-filter");
+const logStreamFilter = document.querySelector("#log-stream-filter");
+const logMinDurationInput = document.querySelector("#log-min-duration");
 const logTokenFilterBadge = document.querySelector("#log-token-filter-badge");
 const logTokenFilterName = document.querySelector("#log-token-filter-name");
 const logTokenFilterClear = document.querySelector("#log-token-filter-clear");
+const logRangeFilterBadge = document.querySelector("#log-range-filter-badge");
+const logRangeFilterName = document.querySelector("#log-range-filter-name");
+const logRangeFilterClear = document.querySelector("#log-range-filter-clear");
 let logDownstreamTokenId = null;
 let logDownstreamTokenName = "";
+let logRangeStart = "";
+let logRangeEnd = "";
+let logRangeLabel = "";
 
 function updateLogFilterChips() {
-  if (!logTokenFilterBadge) return;
-  if (logDownstreamTokenId != null) {
-    logTokenFilterBadge.hidden = false;
-    if (logTokenFilterName) {
-      logTokenFilterName.textContent = logDownstreamTokenName
-        ? logDownstreamTokenName + " (#" + logDownstreamTokenId + ")"
-        : "#" + logDownstreamTokenId;
+  if (logTokenFilterBadge) {
+    if (logDownstreamTokenId != null) {
+      logTokenFilterBadge.hidden = false;
+      if (logTokenFilterName) {
+        logTokenFilterName.textContent = logDownstreamTokenName
+          ? logDownstreamTokenName + " (#" + logDownstreamTokenId + ")"
+          : "#" + logDownstreamTokenId;
+      }
+    } else {
+      logTokenFilterBadge.hidden = true;
+      if (logTokenFilterName) {
+        logTokenFilterName.textContent = "";
+      }
     }
-  } else {
-    logTokenFilterBadge.hidden = true;
-    if (logTokenFilterName) {
-      logTokenFilterName.textContent = "";
+  }
+  if (logRangeFilterBadge) {
+    if (logRangeStart && logRangeEnd) {
+      logRangeFilterBadge.hidden = false;
+      if (logRangeFilterName) {
+        logRangeFilterName.textContent = logRangeLabel || `${logRangeStart} 至 ${logRangeEnd}`;
+      }
+    } else {
+      logRangeFilterBadge.hidden = true;
+      if (logRangeFilterName) {
+        logRangeFilterName.textContent = "";
+      }
     }
   }
 }
@@ -256,6 +280,24 @@ function getLogDownstreamTokenId() {
 
 function getLogDownstreamTokenName() {
   return logDownstreamTokenName;
+}
+
+function setLogTimeRange(start = "", end = "", label = "") {
+  logRangeStart = start ? String(start).trim() : "";
+  logRangeEnd = end ? String(end).trim() : "";
+  logRangeLabel = label ? String(label).trim() : "";
+  updateLogFilterChips();
+}
+
+function getLogTimeRange() {
+  return { start: logRangeStart, end: logRangeEnd, label: logRangeLabel };
+}
+
+function clearLogTimeRange() {
+  logRangeStart = "";
+  logRangeEnd = "";
+  logRangeLabel = "";
+  updateLogFilterChips();
 }
 const logSensitiveToggle = document.querySelector("#log-sensitive-toggle");
 const logRefreshButton = document.querySelector("#log-refresh");

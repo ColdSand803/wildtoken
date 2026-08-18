@@ -259,13 +259,16 @@ function clearTokenFilters() {
 }
 
 function clearLogFilters() {
-  if (logSearchInput) logSearchInput.value = "";
-  if (logUpstreamFilter) logUpstreamFilter.value = "";
-  if (logStatusFilter) logStatusFilter.value = "";
-  if (logClientFilter) logClientFilter.value = "";
+  if (typeof logSearchInput !== "undefined" && logSearchInput) logSearchInput.value = "";
+  if (typeof logUpstreamFilter !== "undefined" && logUpstreamFilter) logUpstreamFilter.value = "";
+  if (typeof logStatusFilter !== "undefined" && logStatusFilter) logStatusFilter.value = "";
+  if (typeof logClientFilter !== "undefined" && logClientFilter) logClientFilter.value = "";
+  if (typeof logStreamFilter !== "undefined" && logStreamFilter) logStreamFilter.value = "";
+  if (typeof logMinDurationInput !== "undefined" && logMinDurationInput) logMinDurationInput.value = "";
+  if (typeof clearLogTimeRange === "function") clearLogTimeRange();
   if (typeof setLogDownstreamTokenId === "function") setLogDownstreamTokenId(null);
   if (typeof resetLogPagination === "function") resetLogPagination();
-  loadLogs();
+  if (typeof loadLogs === "function") loadLogs();
   if (typeof restartLogStream === "function") restartLogStream();
 }
 

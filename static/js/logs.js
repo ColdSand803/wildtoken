@@ -579,6 +579,27 @@ function logMatchesStatusFilter(log, status) {
   return true;
 }
 
+function parseUtcDateMs(val) {
+  if (!val || typeof val !== "string") return NaN;
+  const str = val.trim();
+  if (!str) return NaN;
+  if (str.includes("T") || str.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(str)) {
+    return Date.parse(str);
+  }
+  return Date.parse(str.replace(" ", "T") + "Z");
+}
+
+function logMatchesTimeRange(createdAt, startIso, endIso) {
+  if (!createdAt || !startIso || !endIso) return true;
+  const logMs = parseUtcDateMs(createdAt);
+  const startMs = parseUtcDateMs(startIso);
+  const endMs = parseUtcDateMs(endIso);
+  if (!Number.isFinite(logMs) || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return true;
+  }
+  return logMs >= startMs && logMs < endMs;
+}
+
 function logMatchesSearchFilter(log, search) {
   const needle = String(search || "").trim().toLowerCase();
   if (!needle) return true;
@@ -600,7 +621,9 @@ function logMatchesSearchFilter(log, search) {
 }
 
 function logMatchesCurrentFilters(log) {
-  const upstreamId = logUpstreamFilter?.value || "";
+  if (!log || typeof log !== "object") return false;
+
+  const upstreamId = typeof logUpstreamFilter !== "undefined" && logUpstreamFilter ? logUpstreamFilter.value : "";
   if (upstreamId && String(log.upstream_id ?? "") !== upstreamId) {
     return false;
   }
@@ -612,15 +635,37 @@ function logMatchesCurrentFilters(log) {
       return false;
     }
   }
-  const clientType = logClientFilter?.value || "";
+  const clientType = typeof logClientFilter !== "undefined" && logClientFilter ? logClientFilter.value : "";
   if (clientType && String(log.client_type || "unknown") !== clientType) {
     return false;
   }
-  const status = logStatusFilter?.value || "";
+  const status = typeof logStatusFilter !== "undefined" && logStatusFilter ? logStatusFilter.value : "";
   if (!logMatchesStatusFilter(log, status)) {
     return false;
   }
-  return logMatchesSearchFilter(log, logSearchInput?.value || "");
+  const streamVal = typeof logStreamFilter !== "undefined" && logStreamFilter ? logStreamFilter.value : "";
+  if (streamVal === "true" || streamVal === "false") {
+    const isStream = Boolean(log.stream);
+    if (isStream !== (streamVal === "true")) {
+      return false;
+    }
+  }
+  const minDurationVal = typeof logMinDurationInput !== "undefined" && logMinDurationInput ? logMinDurationInput.value.trim() : "";
+  if (minDurationVal !== "") {
+    const minMs = Number(minDurationVal);
+    if (Number.isFinite(minMs) && minMs >= 0) {
+      if (log.duration_ms === null || log.duration_ms === undefined || Number(log.duration_ms) < minMs) {
+        return false;
+      }
+    }
+  }
+  const timeRange = typeof getLogTimeRange === "function" ? getLogTimeRange() : null;
+  if (timeRange && timeRange.start && timeRange.end) {
+    if (!logMatchesTimeRange(log.created_at, timeRange.start, timeRange.end)) {
+      return false;
+    }
+  }
+  return logMatchesSearchFilter(log, typeof logSearchInput !== "undefined" && logSearchInput ? logSearchInput.value : "");
 }
 
 function normalizeLogStreamPayload(data) {
@@ -974,19 +1019,28 @@ async function openLogStream(controller) {
     headers.set("x-admin-token", token);
 
     const streamParams = new URLSearchParams();
-    const upstreamId = logUpstreamFilter?.value || "";
+    const upstreamId = typeof logUpstreamFilter !== "undefined" && logUpstreamFilter ? logUpstreamFilter.value : "";
     const currentTokenId = typeof getLogDownstreamTokenId === "function"
       ? getLogDownstreamTokenId()
       : (typeof logDownstreamTokenId !== "undefined" ? logDownstreamTokenId : null);
-    const search = (logSearchInput?.value || "").trim();
-    const status = logStatusFilter?.value || "";
-    const clientType = logClientFilter?.value || "";
+    const search = typeof logSearchInput !== "undefined" && logSearchInput ? (logSearchInput.value || "").trim() : "";
+    const status = typeof logStatusFilter !== "undefined" && logStatusFilter ? logStatusFilter.value : "";
+    const clientType = typeof logClientFilter !== "undefined" && logClientFilter ? logClientFilter.value : "";
+    const streamVal = typeof logStreamFilter !== "undefined" && logStreamFilter ? logStreamFilter.value : "";
+    const minDurationVal = typeof logMinDurationInput !== "undefined" && logMinDurationInput ? logMinDurationInput.value.trim() : "";
+    const { start: rangeStart, end: rangeEnd } = typeof getLogTimeRange === "function" ? getLogTimeRange() : { start: "", end: "" };
 
     if (upstreamId) streamParams.set("upstream_id", upstreamId);
     if (currentTokenId !== null && currentTokenId !== undefined) streamParams.set("downstream_token_id", String(currentTokenId));
     if (search) streamParams.set("search", search);
     if (status) streamParams.set("status", status);
     if (clientType) streamParams.set("client_type", clientType);
+    if (streamVal === "true" || streamVal === "false") streamParams.set("stream", streamVal);
+    if (minDurationVal !== "" && /^\d+$/.test(minDurationVal)) streamParams.set("min_duration_ms", minDurationVal);
+    if (rangeStart && rangeEnd) {
+      streamParams.set("start", rangeStart);
+      streamParams.set("end", rangeEnd);
+    }
 
     const streamQuery = streamParams.toString();
     const streamPath = streamQuery ? `${LOG_STREAM_PATH}?${streamQuery}` : LOG_STREAM_PATH;
@@ -1459,6 +1513,43 @@ function formatLogDetailMeta(detail) {
     `
     : "";
 
+  let timingLine = "";
+  let timingBarHtml = "";
+
+  const totalMs = detail.duration_ms != null && Number.isFinite(Number(detail.duration_ms))
+    ? Number(detail.duration_ms)
+    : null;
+
+  if (detail.stream) {
+    const hasFirstToken = detail.first_token_ms != null && Number.isFinite(Number(detail.first_token_ms));
+    const firstTokenMs = hasFirstToken ? Number(detail.first_token_ms) : null;
+    const firstTokenLabel = hasFirstToken
+      ? formatFirstTokenTime(firstTokenMs)
+      : `<span class="first-token-time neutral" title="首字耗时不可用">不可用</span>`;
+
+    const transferMs = (totalMs != null && firstTokenMs != null)
+      ? Math.max(0, totalMs - firstTokenMs)
+      : null;
+    const transferLabel = transferMs != null ? formatSeconds(transferMs) : "-";
+
+    timingLine = `<small>首字 ${firstTokenLabel} · 传输 ${escapeHtml(transferLabel)} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+
+    if (firstTokenMs != null && totalMs != null && totalMs > 0) {
+      const ttfbRatio = Math.min(1, Math.max(0, firstTokenMs / totalMs));
+      const transferRatio = Math.max(0, 1 - ttfbRatio);
+      const ttfbPercent = (ttfbRatio * 100).toFixed(1);
+      const transferPercent = (transferRatio * 100).toFixed(1);
+      timingBarHtml = `
+        <div class="log-detail-timing-bar" title="总耗时 ${totalMs}ms (首字 ${firstTokenMs}ms + 传输 ${transferMs}ms)">
+          <span class="timing-seg timing-seg--ttfb" style="width:${ttfbPercent}%" title="首字耗时 (TTFB): ${firstTokenMs}ms"></span>
+          <span class="timing-seg timing-seg--transfer" style="width:${transferPercent}%" title="传输耗时: ${transferMs}ms"></span>
+        </div>
+      `;
+    }
+  } else {
+    timingLine = `<small>总耗时 ${formatTotalDurationTime(detail)}</small>`;
+  }
+
   return `
     <div class="log-detail-meta-card log-detail-route-card">
       <span class="log-detail-meta-label">请求路由</span>
@@ -1471,7 +1562,8 @@ function formatLogDetailMeta(detail) {
     <div class="log-detail-meta-card">
       <span class="log-detail-meta-label">状态与耗时</span>
       <strong><span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span></strong>
-      <small>首字 ${formatFirstTokenTime(detail.first_token_ms)} · 总耗时 ${formatTotalDurationTime(detail)}</small>
+      ${timingLine}
+      ${timingBarHtml}
       ${formatTokensPerSecondLine(detail)}
       ${statusErrorLine}
     </div>
@@ -1646,14 +1738,27 @@ async function loadLogs() {
   }
 
   try {
-    const upstreamId = logUpstreamFilter?.value || "";
-    const search = (logSearchInput?.value || "").trim();
-    const status = logStatusFilter?.value || "";
-    const clientType = logClientFilter?.value || "";
+    const upstreamId = typeof logUpstreamFilter !== "undefined" && logUpstreamFilter ? logUpstreamFilter.value : "";
+    const search = typeof logSearchInput !== "undefined" && logSearchInput ? (logSearchInput.value || "").trim() : "";
+    const status = typeof logStatusFilter !== "undefined" && logStatusFilter ? logStatusFilter.value : "";
+    const clientType = typeof logClientFilter !== "undefined" && logClientFilter ? logClientFilter.value : "";
+    const streamVal = typeof logStreamFilter !== "undefined" && logStreamFilter ? logStreamFilter.value : "";
+    const minDurationVal = typeof logMinDurationInput !== "undefined" && logMinDurationInput ? logMinDurationInput.value.trim() : "";
     const currentTokenId = typeof getLogDownstreamTokenId === "function"
       ? getLogDownstreamTokenId()
       : (typeof logDownstreamTokenId !== "undefined" ? logDownstreamTokenId : null);
-    const filtersActive = Boolean(upstreamId || search || status || clientType || (currentTokenId !== null && currentTokenId !== undefined));
+    const { start, end } = typeof getLogTimeRange === "function" ? getLogTimeRange() : { start: "", end: "" };
+
+    const filtersActive = Boolean(
+      upstreamId ||
+      search ||
+      status ||
+      clientType ||
+      (currentTokenId !== null && currentTokenId !== undefined) ||
+      (start && end) ||
+      (streamVal === "true" || streamVal === "false") ||
+      (minDurationVal !== "" && /^\d+$/.test(minDurationVal))
+    );
     const params = new URLSearchParams({
       limit: String(logPageSize),
     });
@@ -1663,6 +1768,12 @@ async function loadLogs() {
     if (search) params.set("search", search);
     if (status) params.set("status", status);
     if (clientType) params.set("client_type", clientType);
+    if (streamVal === "true" || streamVal === "false") params.set("stream", streamVal);
+    if (minDurationVal !== "" && /^\d+$/.test(minDurationVal)) params.set("min_duration_ms", minDurationVal);
+    if (start && end) {
+      params.set("start", start);
+      params.set("end", end);
+    }
 
     const page = await api(`/api/admin/logs?${params}`);
     if (requestGeneration !== logLoadGeneration) return;

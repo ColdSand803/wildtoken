@@ -525,8 +525,11 @@ if (dashboardView) {
     const target = event.target.closest("[data-drill-status]");
     if (!target) return;
     const status = target.dataset.drillStatus;
+    const start = target.dataset.start || "";
+    const end = target.dataset.end || "";
+    const rangeLabel = target.dataset.rangeLabel || "";
     if (status) {
-      drillDownToLogs({ status });
+      drillDownToLogs({ status, start, end, rangeLabel });
     }
   });
   dashboardView.addEventListener("keydown", (event) => {
@@ -536,8 +539,11 @@ if (dashboardView) {
     if (target.tagName === "BUTTON" && event.key === "Enter") return;
     event.preventDefault();
     const status = target.dataset.drillStatus;
+    const start = target.dataset.start || "";
+    const end = target.dataset.end || "";
+    const rangeLabel = target.dataset.rangeLabel || "";
     if (status) {
-      drillDownToLogs({ status });
+      drillDownToLogs({ status, start, end, rangeLabel });
     }
   });
 }
@@ -545,6 +551,19 @@ if (dashboardView) {
 logTokenFilterClear?.addEventListener("click", () => {
   if (typeof setLogDownstreamTokenId === "function") {
     setLogDownstreamTokenId(null);
+  }
+  if (typeof resetLogPagination === "function") {
+    resetLogPagination();
+  }
+  loadLogs();
+  if (typeof restartLogStream === "function") {
+    restartLogStream();
+  }
+});
+
+logRangeFilterClear?.addEventListener("click", () => {
+  if (typeof clearLogTimeRange === "function") {
+    clearLogTimeRange();
   }
   if (typeof resetLogPagination === "function") {
     resetLogPagination();

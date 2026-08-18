@@ -600,6 +600,7 @@ function renderRows() {
               <span class="status-switch-thumb"></span>
             </span>
           </button>
+          ${renderProbeBadgeMarkup(upstreamProbeResults.get(upstream.id))}
         </div>
         <span
           class="effective-zero-note"
@@ -866,6 +867,197 @@ async function fetchAllUpstreamStats() {
   }
 }
 
+
+/* 渠道主动测活探针缓存与运行状态 */
+const upstreamProbeResults = new Map();
+let latestProbeCheckedAt = null;
+let probeRunning = false;
+let probePollTimer = null;
+
+function renderProbeBadgeMarkup(probeResult) {
+  if (!probeResult) {
+    return "<span class=\"probe-badge probe-badge--untested\" title=\"尚未测活\">未测活</span>";
+  }
+  if (probeResult.skipped) {
+    return "<span class=\"probe-badge probe-badge--skipped\" title=\"已跳过（未在测活范围内或已超时）\">已跳过</span>";
+  }
+  const timeStr = probeResult.checked_at ? (" · " + escapeHtml(probeResult.checked_at)) : "";
+  const ms = probeResult.duration_ms != null ? (probeResult.duration_ms + "ms") : "-";
+
+  if (probeResult.ok || (probeResult.status_code != null && probeResult.status_code < 400)) {
+    const code = probeResult.status_code ?? 200;
+    return "<span class=\"probe-badge probe-badge--ok\" title=\"探针测试正常 (HTTP " + code + " · " + ms + timeStr + ")\">HTTP " + code + " (" + ms + ")</span>";
+  }
+
+  if (probeResult.status_code != null && probeResult.status_code >= 400) {
+    const code = probeResult.status_code;
+    const err = probeResult.error_summary ? (" · " + escapeHtml(probeResult.error_summary)) : "";
+    return "<span class=\"probe-badge probe-badge--failed\" title=\"探针测试失败 (HTTP " + code + " · " + ms + err + timeStr + ")\">HTTP " + code + " (" + ms + ")</span>";
+  }
+
+  const err = probeResult.error_summary ? (" · " + escapeHtml(probeResult.error_summary)) : "";
+  return "<span class=\"probe-badge probe-badge--transport\" title=\"探针连接异常 (" + ms + err + timeStr + ")\">连接异常 (" + ms + ")</span>";
+}
+
+function renderProbeSummary(data) {
+  const summaryEl = typeof upstreamProbeSummary !== "undefined" && upstreamProbeSummary
+    ? upstreamProbeSummary
+    : (typeof document !== "undefined" ? document.querySelector("#upstream-probe-summary") : null);
+  const btn = typeof batchProbeBtn !== "undefined" && batchProbeBtn
+    ? batchProbeBtn
+    : (typeof document !== "undefined" ? document.querySelector("#batch-probe") : null);
+
+  if (btn) {
+    if (probeRunning) {
+      btn.disabled = true;
+      btn.textContent = "测活中...";
+    } else {
+      btn.disabled = false;
+      btn.textContent = "一键测活";
+    }
+  }
+
+  if (!summaryEl) return;
+
+  if (probeRunning) {
+    summaryEl.hidden = false;
+    summaryEl.innerHTML = `
+      <div class="probe-summary-status">
+        <span class="probe-summary-dot is-running" aria-hidden="true"></span>
+        <span>正在批量测活渠道...</span>
+      </div>
+    `;
+    return;
+  }
+
+  if (!data || (!data.results?.length && !data.total && !data.checked_at)) {
+    summaryEl.hidden = true;
+    summaryEl.innerHTML = "";
+    return;
+  }
+
+  const total = Number(data.total ?? data.results?.length ?? 0);
+  const succeeded = Number(data.succeeded ?? data.results?.filter((r) => r.ok || (r.status_code != null && r.status_code < 400)).length ?? 0);
+  const skipped = Number(data.skipped ?? data.results?.filter((r) => r.skipped).length ?? 0);
+  const failed = Number(data.failed ?? (total - succeeded - skipped));
+  const partial = Boolean(data.partial);
+  const checkedAt = data.checked_at ? escapeHtml(data.checked_at) : (latestProbeCheckedAt ? escapeHtml(latestProbeCheckedAt) : "");
+
+  summaryEl.hidden = false;
+  summaryEl.innerHTML = `
+    <div class="probe-summary-status">
+      <span class="probe-summary-dot" aria-hidden="true"></span>
+      <span>最近测活 (${total} 渠道)：</span>
+      <span class="probe-stat-ok">成功 <strong>${succeeded}</strong></span>
+      ${failed > 0 ? `<span class="probe-stat-failed">失败 <strong>${failed}</strong></span>` : ""}
+      ${skipped > 0 ? `<span class="probe-stat-skipped">跳过 <strong>${skipped}</strong></span>` : ""}
+      ${partial ? `<span class="probe-stat-partial muted">[部分超时]</span>` : ""}
+      ${checkedAt ? `<span class="muted font-mono">${checkedAt}</span>` : ""}
+    </div>
+  `;
+}
+
+async function fetchLatestProbeResults() {
+  try {
+    const data = await api("/api/admin/upstreams/probe-all");
+    if (!data) return null;
+
+    if (data.running) {
+      probeRunning = true;
+      renderProbeSummary(data);
+      if (!probePollTimer) {
+        probePollTimer = setTimeout(() => {
+          probePollTimer = null;
+          fetchLatestProbeResults();
+        }, 1000);
+      }
+      return data;
+    }
+
+    if (probePollTimer) {
+      clearTimeout(probePollTimer);
+      probePollTimer = null;
+    }
+    probeRunning = false;
+
+    if (Array.isArray(data.results)) {
+      upstreamProbeResults.clear();
+      for (const res of data.results) {
+        if (res && res.upstream_id != null) {
+          upstreamProbeResults.set(res.upstream_id, res);
+        }
+      }
+      latestProbeCheckedAt = data.checked_at || null;
+      renderProbeSummary(data);
+      if (typeof priorityEditorIsOpen === "function" && !priorityEditorIsOpen()) {
+        renderRows();
+      }
+    } else {
+      renderProbeSummary(null);
+    }
+    return data;
+  } catch (error) {
+    // 忽略后台静默获取失败
+    return null;
+  }
+}
+
+async function runBatchProbe({ includeDisabled = false } = {}) {
+  if (probeRunning) return;
+  probeRunning = true;
+  renderProbeSummary({ running: true });
+
+  const query = includeDisabled ? "?include_disabled=true" : "";
+  try {
+    const data = await api("/api/admin/upstreams/probe-all" + query, { method: "POST" });
+    probeRunning = false;
+    if (probePollTimer) {
+      clearTimeout(probePollTimer);
+      probePollTimer = null;
+    }
+
+    if (data && Array.isArray(data.results)) {
+      upstreamProbeResults.clear();
+      for (const item of data.results) {
+        if (item && item.upstream_id != null) {
+          upstreamProbeResults.set(item.upstream_id, item);
+        }
+      }
+      latestProbeCheckedAt = data.results?.[0]?.checked_at || new Date().toISOString();
+      renderProbeSummary(data);
+      if (typeof priorityEditorIsOpen === "function" && !priorityEditorIsOpen()) {
+        renderRows();
+      }
+      const succeeded = data.succeeded ?? 0;
+      const failed = data.failed ?? 0;
+      const skipped = data.skipped ?? 0;
+      let msg = "批量测活完成：成功 " + succeeded + "，失败 " + failed;
+      if (skipped > 0) msg += "，跳过 " + skipped;
+      if (typeof setStatus === "function") {
+        setStatus(msg, failed > 0 ? "warning" : "success");
+      }
+    }
+    return data;
+  } catch (error) {
+    if (error && error.status === 409) {
+      if (typeof setStatus === "function") {
+        setStatus("已有批量测活任务在运行中，正在同步最新进度...", "info");
+      }
+      return await fetchLatestProbeResults();
+    }
+    probeRunning = false;
+    if (probePollTimer) {
+      clearTimeout(probePollTimer);
+      probePollTimer = null;
+    }
+    renderProbeSummary(null);
+    if (typeof setStatus === "function") {
+      setStatus("批量测活失败：" + error.message, "error");
+    }
+    return null;
+  }
+}
+
 /* 24h 健康迷你条形图：每根是一小时，高度按该小时请求量，颜色按错误占比。
    没有流量的小时不画——留白比一根零高的柱更诚实。 */
 function renderHealthBars(health) {
@@ -933,6 +1125,7 @@ function createChannelCard(upstream) {
       </div>
       <div class="channel-card-header-actions">
         <span class="channel-card-badge">优先级 ${upstream.priority}</span>
+        ${renderProbeBadgeMarkup(upstreamProbeResults.get(upstream.id))}
         <button
           type="button"
           class="status-switch ${upstream.enabled ? "on" : "off"}"
@@ -1260,7 +1453,10 @@ async function loadUpstreams(options = {}) {
       renderUpstreamSummary();
     }
     renderLogFilterOptions();
-  } catch (error) {
+      if (typeof fetchLatestProbeResults === "function") {
+        fetchLatestProbeResults().catch(() => {});
+      }
+    } catch (error) {
     const message = `加载失败：${error.message}`;
     if (message !== lastUpstreamLoadError) {
       setStatus(message, "error");

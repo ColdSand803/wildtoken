@@ -364,6 +364,7 @@
               </div>
             </div>
             <div id="upstream-summary" class="summary-strip" aria-live="polite"></div>
+            <div id="upstream-probe-summary" class="summary-strip upstream-probe-summary" hidden aria-live="polite"></div>
             <div class="view-toolbar upstream-toolbar">
               <label class="filter-field">
                 搜索
@@ -409,6 +410,7 @@
                 </button>
               </div>
               <div class="actions toolbar-actions">
+                <button id="batch-probe" type="button" class="secondary">一键测活</button>
                 <button id="channel-export" type="button" class="secondary">导出</button>
                 <button id="channel-import" type="button" class="secondary">导入</button>
                 <button id="quick-import" type="button" class="secondary">快速导入</button>
@@ -483,6 +485,10 @@
                 <span class="log-token-filter-label">当前令牌: <strong id="log-token-filter-name"></strong></span>
                 <button type="button" id="log-token-filter-clear" class="ghost icon-button" title="清除令牌过滤" aria-label="清除令牌过滤">×</button>
               </span>
+              <span id="log-range-filter-badge" class="log-token-filter-badge log-range-filter-badge" hidden>
+                <span class="log-token-filter-label">时间范围: <strong id="log-range-filter-name"></strong></span>
+                <button type="button" id="log-range-filter-clear" class="ghost icon-button" title="清除时间范围过滤" aria-label="清除时间范围过滤">×</button>
+              </span>
               <label class="log-filter">
                 客户端
                 <select id="log-client-filter">
@@ -498,6 +504,25 @@
                   <option value="model-list">model-list</option>
                   <option value="balance">balance</option>
                 </select>
+              </label>
+              <label class="log-filter">
+                流式
+                <select id="log-stream-filter">
+                  <option value="">全部</option>
+                  <option value="true">仅流式</option>
+                  <option value="false">仅非流式</option>
+                </select>
+              </label>
+              <label class="log-filter log-filter-duration">
+                耗时
+                <input
+                  id="log-min-duration"
+                  type="number"
+                  min="0"
+                  step="100"
+                  placeholder="≥ ms"
+                  title="仅筛选有耗时采样且 duration_ms 大于等于该值的日志"
+                />
               </label>
               <label class="log-filter">
                 状态码

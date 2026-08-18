@@ -34,18 +34,42 @@ function getStatusCodeAttribution(statusCode) {
   }
 }
 
-function drillDownToLogs({ search = "", upstreamId = "", status = "", downstreamTokenId = null, downstreamTokenName = "" } = {}) {
+function drillDownToLogs({
+  search = "",
+  upstreamId = "",
+  status = "",
+  downstreamTokenId = null,
+  downstreamTokenName = "",
+  start = "",
+  end = "",
+  rangeLabel = "",
+} = {}) {
   if (typeof setLogDownstreamTokenId === "function") {
     setLogDownstreamTokenId(downstreamTokenId, downstreamTokenName);
   }
-  if (logSearchInput) logSearchInput.value = search;
-  if (logUpstreamFilter) logUpstreamFilter.value = upstreamId;
-  if (logStatusFilter) logStatusFilter.value = status;
-  if (logClientFilter) logClientFilter.value = "";
+  const overview = typeof dashboardOverview !== "undefined" ? dashboardOverview : null;
+  if (!start && !end && overview?.resolved_start && overview?.resolved_end) {
+    start = overview.resolved_start;
+    end = overview.resolved_end;
+    if (!rangeLabel && typeof getTimeRangeLabel === "function" && typeof dashboardTimeRange !== "undefined") {
+      rangeLabel = getTimeRangeLabel(dashboardTimeRange);
+    }
+  }
+  if (typeof setLogTimeRange === "function") {
+    setLogTimeRange(start, end, rangeLabel);
+  }
+  if (typeof logSearchInput !== "undefined" && logSearchInput) logSearchInput.value = search;
+  if (typeof logUpstreamFilter !== "undefined" && logUpstreamFilter) logUpstreamFilter.value = upstreamId;
+  if (typeof logStatusFilter !== "undefined" && logStatusFilter) logStatusFilter.value = status;
+  if (typeof logClientFilter !== "undefined" && logClientFilter) logClientFilter.value = "";
+  if (typeof logStreamFilter !== "undefined" && logStreamFilter) logStreamFilter.value = "";
+  if (typeof logMinDurationInput !== "undefined" && logMinDurationInput) logMinDurationInput.value = "";
   if (typeof resetLogPagination === "function") {
     resetLogPagination();
   }
-  switchView("logs");
+  if (typeof switchView === "function") {
+    switchView("logs");
+  }
   if (typeof restartLogStream === "function") {
     restartLogStream();
   }
@@ -1217,7 +1241,15 @@ function renderDashboard() {
           const rate = count > 0 ? bucketErrors / count : 0;
           // 错误率 50% 及以上就到满色；下限 0.25 保证个位数错误也看得见。
           const opacity = (0.25 + 0.75 * Math.min(1, rate / 0.5)).toFixed(2);
-          return `<span class="status-error-cell is-clickable" data-drill-status="error" style="opacity:${opacity}" title="${escapeHtml(when)} · 错误 ${bucketErrors}/${count} (${(rate * 100).toFixed(1)}%) · 点击在日志中查看" role="button" tabindex="0"></span>`;
+          const startEpoch = Number(bucket.bucket_epoch) || 0;
+          const bucketSec = Number(bucket.bucket_seconds) || 0;
+          let rangeAttrs = "";
+          if (startEpoch > 0 && bucketSec > 0) {
+            const startIso = new Date(startEpoch * 1000).toISOString();
+            const endIso = new Date((startEpoch + bucketSec) * 1000).toISOString();
+            rangeAttrs = ` data-start="${startIso}" data-end="${endIso}" data-range-label="${escapeHtml(when)}"`;
+          }
+          return `<span class="status-error-cell is-clickable" data-drill-status="error"${rangeAttrs} style="opacity:${opacity}" title="${escapeHtml(when)} · 错误 ${bucketErrors}/${count} (${(rate * 100).toFixed(1)}%) · 点击在日志中查看" role="button" tabindex="0"></span>`;
         }).join("");
         stripHtml = `
           <div class="status-error-strip-wrap">

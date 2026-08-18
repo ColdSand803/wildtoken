@@ -1041,6 +1041,32 @@ if (logClientFilter) {
     if (typeof restartLogStream === "function") restartLogStream();
   });
 }
+if (logStreamFilter) {
+  logStreamFilter.addEventListener("change", () => {
+    resetLogPagination();
+    loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
+  });
+}
+if (logMinDurationInput) {
+  logMinDurationInput.addEventListener("input", debounce(() => {
+    resetLogPagination();
+    loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
+  }, 200));
+  logMinDurationInput.addEventListener("change", () => {
+    resetLogPagination();
+    loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
+  });
+}
+if (batchProbeBtn) {
+  batchProbeBtn.addEventListener("click", () => {
+    if (typeof runBatchProbe === "function") {
+      runBatchProbe();
+    }
+  });
+}
 if (logSensitiveToggle) {
   logSensitiveToggle.addEventListener("click", () => {
     setLogSensitiveHidden(!logSensitiveHidden);
