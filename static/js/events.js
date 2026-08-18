@@ -461,12 +461,99 @@ systemRefreshButton?.addEventListener("click", async () => {
 rotateAdminTokenButton?.addEventListener("click", rotateAdminToken);
 
 // ── Dashboard controls ───────────────────────────────────
+if (dashboardRefreshSelect) {
+  dashboardRefreshSelect.value = String(dashboardRefreshIntervalMs);
+  dashboardRefreshSelect.addEventListener("change", () => {
+    updateDashboardRefreshInterval(Number(dashboardRefreshSelect.value));
+  });
+}
+
 if (dashboardChannelNameToggle) {
   updateDashboardChannelNameToggle();
   dashboardChannelNameToggle.addEventListener("click", () => {
     setDashboardChannelNameHidden(!dashboardChannelNameHidden);
   });
 }
+
+const dashboardRankGrid = document.querySelector(".dashboard-rank-grid");
+if (dashboardRankGrid) {
+  dashboardRankGrid.addEventListener("click", (event) => {
+    const row = event.target.closest(".dashboard-rank-row.is-clickable");
+    if (!row) return;
+    const rankType = row.dataset.rankType;
+    const targetId = row.dataset.targetId;
+    const targetName = row.dataset.targetName;
+    if (rankType === "channel") {
+      drillDownToLogs({ upstreamId: targetId || "", search: targetId ? "" : targetName });
+    } else if (rankType === "token") {
+      const parsedId = targetId !== null && targetId !== undefined && targetId !== "" && Number.isFinite(Number(targetId)) ? Number(targetId) : null;
+      drillDownToLogs({
+        downstreamTokenId: parsedId,
+        downstreamTokenName: targetName || "",
+        search: parsedId !== null ? "" : (targetName || ""),
+      });
+    } else if (rankType === "model") {
+      drillDownToLogs({ search: targetName || "" });
+    }
+  });
+  dashboardRankGrid.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest(".dashboard-rank-row.is-clickable");
+    if (!row) return;
+    event.preventDefault();
+    const rankType = row.dataset.rankType;
+    const targetId = row.dataset.targetId;
+    const targetName = row.dataset.targetName;
+    if (rankType === "channel") {
+      drillDownToLogs({ upstreamId: targetId || "", search: targetId ? "" : targetName });
+    } else if (rankType === "token") {
+      const parsedId = targetId !== null && targetId !== undefined && targetId !== "" && Number.isFinite(Number(targetId)) ? Number(targetId) : null;
+      drillDownToLogs({
+        downstreamTokenId: parsedId,
+        downstreamTokenName: targetName || "",
+        search: parsedId !== null ? "" : (targetName || ""),
+      });
+    } else if (rankType === "model") {
+      drillDownToLogs({ search: targetName || "" });
+    }
+  });
+}
+
+const dashboardView = document.querySelector("#view-dashboard");
+if (dashboardView) {
+  dashboardView.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-drill-status]");
+    if (!target) return;
+    const status = target.dataset.drillStatus;
+    if (status) {
+      drillDownToLogs({ status });
+    }
+  });
+  dashboardView.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const target = event.target.closest("[data-drill-status]");
+    if (!target) return;
+    if (target.tagName === "BUTTON" && event.key === "Enter") return;
+    event.preventDefault();
+    const status = target.dataset.drillStatus;
+    if (status) {
+      drillDownToLogs({ status });
+    }
+  });
+}
+
+logTokenFilterClear?.addEventListener("click", () => {
+  if (typeof setLogDownstreamTokenId === "function") {
+    setLogDownstreamTokenId(null);
+  }
+  if (typeof resetLogPagination === "function") {
+    resetLogPagination();
+  }
+  loadLogs();
+  if (typeof restartLogStream === "function") {
+    restartLogStream();
+  }
+});
 
 // ── Dashboard time range ─────────────────────────────────
 function persistDashboardRange() {

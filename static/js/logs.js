@@ -565,16 +565,17 @@ function normalizeLogListRow(log) {
 
 function logMatchesStatusFilter(log, status) {
   if (!status) return true;
-  const statusCode = Number(log.status_code);
-  if (status === "none") {
-    return log.status_code === null || log.status_code === undefined;
+  const raw = log?.status_code;
+  if (raw === null || raw === undefined || raw === "" || !Number.isFinite(Number(raw))) {
+    return status === "none" || status === "error";
   }
-  if (!Number.isFinite(statusCode)) {
-    return false;
-  }
+  const statusCode = Number(raw);
+  if (status === "none") return false;
   if (status === "2xx") return statusCode >= 200 && statusCode < 300;
   if (status === "4xx") return statusCode >= 400 && statusCode < 500;
   if (status === "5xx") return statusCode >= 500 && statusCode < 600;
+  if (status === "other") return (statusCode >= 100 && statusCode < 200) || (statusCode >= 300 && statusCode < 400);
+  if (status === "error") return statusCode < 200 || statusCode >= 300;
   return true;
 }
 
@@ -599,9 +600,17 @@ function logMatchesSearchFilter(log, search) {
 }
 
 function logMatchesCurrentFilters(log) {
-  const upstreamId = logUpstreamFilter.value;
+  const upstreamId = logUpstreamFilter?.value || "";
   if (upstreamId && String(log.upstream_id ?? "") !== upstreamId) {
     return false;
+  }
+  const currentTokenId = typeof getLogDownstreamTokenId === "function"
+    ? getLogDownstreamTokenId()
+    : (typeof logDownstreamTokenId !== "undefined" ? logDownstreamTokenId : null);
+  if (currentTokenId !== null && currentTokenId !== undefined) {
+    if (log.downstream_token_id === null || log.downstream_token_id === undefined || Number(log.downstream_token_id) !== Number(currentTokenId)) {
+      return false;
+    }
   }
   const clientType = logClientFilter?.value || "";
   if (clientType && String(log.client_type || "unknown") !== clientType) {
@@ -963,7 +972,26 @@ async function openLogStream(controller) {
     if (!token) return;
     const headers = new Headers({ Accept: "text/event-stream" });
     headers.set("x-admin-token", token);
-    const response = await fetch(LOG_STREAM_PATH, {
+
+    const streamParams = new URLSearchParams();
+    const upstreamId = logUpstreamFilter?.value || "";
+    const currentTokenId = typeof getLogDownstreamTokenId === "function"
+      ? getLogDownstreamTokenId()
+      : (typeof logDownstreamTokenId !== "undefined" ? logDownstreamTokenId : null);
+    const search = (logSearchInput?.value || "").trim();
+    const status = logStatusFilter?.value || "";
+    const clientType = logClientFilter?.value || "";
+
+    if (upstreamId) streamParams.set("upstream_id", upstreamId);
+    if (currentTokenId !== null && currentTokenId !== undefined) streamParams.set("downstream_token_id", String(currentTokenId));
+    if (search) streamParams.set("search", search);
+    if (status) streamParams.set("status", status);
+    if (clientType) streamParams.set("client_type", clientType);
+
+    const streamQuery = streamParams.toString();
+    const streamPath = streamQuery ? `${LOG_STREAM_PATH}?${streamQuery}` : LOG_STREAM_PATH;
+
+    const response = await fetch(streamPath, {
       cache: "no-store",
       headers,
       signal: controller.signal,
@@ -1040,6 +1068,15 @@ function stopLogStream() {
   if (controller) controller.abort();
   logStreamReconnectAttempts = 0;
   updateLiveIndicator();
+}
+
+function restartLogStream() {
+  if (logStreamController !== null || logStreamReconnectTimer !== null) {
+    stopLogStream();
+  }
+  if (shouldStreamLogs()) {
+    startLogStream();
+  }
 }
 
 function logRenderOptions() {
@@ -1609,16 +1646,20 @@ async function loadLogs() {
   }
 
   try {
-    const upstreamId = logUpstreamFilter.value;
+    const upstreamId = logUpstreamFilter?.value || "";
     const search = (logSearchInput?.value || "").trim();
     const status = logStatusFilter?.value || "";
     const clientType = logClientFilter?.value || "";
-    const filtersActive = Boolean(upstreamId || search || status || clientType);
+    const currentTokenId = typeof getLogDownstreamTokenId === "function"
+      ? getLogDownstreamTokenId()
+      : (typeof logDownstreamTokenId !== "undefined" ? logDownstreamTokenId : null);
+    const filtersActive = Boolean(upstreamId || search || status || clientType || (currentTokenId !== null && currentTokenId !== undefined));
     const params = new URLSearchParams({
       limit: String(logPageSize),
     });
     appendLogPaginationParams(params);
     if (upstreamId) params.set("upstream_id", upstreamId);
+    if (currentTokenId !== null && currentTokenId !== undefined) params.set("downstream_token_id", String(currentTokenId));
     if (search) params.set("search", search);
     if (status) params.set("status", status);
     if (clientType) params.set("client_type", clientType);

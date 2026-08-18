@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -145,10 +146,102 @@ func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWin
 
 // LogFilter narrows a log listing. A nil field means the filter is not applied.
 type LogFilter struct {
-	UpstreamID *int64
-	Search     *string
-	Status     *string
-	ClientType *string
+	UpstreamID        *int64
+	DownstreamTokenID *int64
+	Search            *string
+	Status            *string
+	ClientType        *string
+}
+
+const (
+	LogStatus2xx   = "2xx"
+	LogStatus4xx   = "4xx"
+	LogStatus5xx   = "5xx"
+	LogStatusOther = "other"
+	LogStatusNone  = "none"
+	LogStatusError = "error"
+)
+
+func ValidLogStatus(status string) bool {
+	switch status {
+	case LogStatus2xx, LogStatus4xx, LogStatus5xx, LogStatusOther, LogStatusNone, LogStatusError:
+		return true
+	default:
+		return false
+	}
+}
+
+// StatusMatches reports whether one status code belongs to a status category.
+//
+// It is the Go twin of the SQL the listing builds, so the live stream and the
+// paginated list cannot disagree about what an error is. A nil code is a row
+// that never got an HTTP status.
+func StatusMatches(status string, code *int32) bool {
+	if code == nil {
+		return status == LogStatusNone || status == LogStatusError
+	}
+	value := *code
+	switch status {
+	case LogStatus2xx:
+		return value >= 200 && value <= 299
+	case LogStatus4xx:
+		return value >= 400 && value <= 499
+	case LogStatus5xx:
+		return value >= 500 && value <= 599
+	case LogStatusOther:
+		return (value >= 100 && value <= 199) || (value >= 300 && value <= 399)
+	case LogStatusNone:
+		return false
+	case LogStatusError:
+		return value < 200 || value >= 300
+	default:
+		return true
+	}
+}
+
+// Matches reports whether a committed log row satisfies the filter.
+//
+// The live stream broadcasts every committed row, so without this the console's
+// filters only applied to the paginated history and live events arrived
+// unfiltered. Search compares the same fields as the SQL LIKE list.
+func (f LogFilter) Matches(entry models.RequestLogOut) bool {
+	if f.UpstreamID != nil && (entry.UpstreamID == nil || *entry.UpstreamID != *f.UpstreamID) {
+		return false
+	}
+	if f.DownstreamTokenID != nil &&
+		(entry.DownstreamTokenID == nil || *entry.DownstreamTokenID != *f.DownstreamTokenID) {
+		return false
+	}
+	if f.ClientType != nil && entry.ClientType != *f.ClientType {
+		return false
+	}
+	if f.Status != nil && !StatusMatches(*f.Status, entry.StatusCode) {
+		return false
+	}
+	if f.Search != nil {
+		needle := strings.ToLower(*f.Search)
+		fields := []*string{entry.Model, entry.RequestModel, entry.UpstreamModel,
+			entry.UpstreamName, entry.DownstreamTokenName, entry.Error}
+		matched := false
+		for _, field := range fields {
+			if field != nil && strings.Contains(strings.ToLower(*field), needle) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			if strings.Contains(strconv.FormatInt(entry.ID, 10), needle) {
+				matched = true
+			} else if entry.StatusCode != nil &&
+				strings.Contains(strconv.FormatInt(int64(*entry.StatusCode), 10), needle) {
+				matched = true
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
 
 // appendFilters adds the WHERE fragments and their bind values.
@@ -156,6 +249,10 @@ func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
 	if f.UpstreamID != nil {
 		query.WriteString(" AND upstream_id = ?")
 		args = append(args, *f.UpstreamID)
+	}
+	if f.DownstreamTokenID != nil {
+		query.WriteString(" AND downstream_token_id = ?")
+		args = append(args, *f.DownstreamTokenID)
 	}
 	if f.Search != nil {
 		// The wildcards are escaped so an operator searching for a literal '%'
@@ -176,14 +273,18 @@ func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
 	}
 	if f.Status != nil {
 		switch *f.Status {
-		case "2xx":
+		case LogStatus2xx:
 			query.WriteString(" AND status_code BETWEEN 200 AND 299")
-		case "4xx":
+		case LogStatus4xx:
 			query.WriteString(" AND status_code BETWEEN 400 AND 499")
-		case "5xx":
+		case LogStatus5xx:
 			query.WriteString(" AND status_code BETWEEN 500 AND 599")
-		case "none":
+		case LogStatusOther:
+			query.WriteString(" AND status_code IS NOT NULL AND ((status_code BETWEEN 100 AND 199) OR (status_code BETWEEN 300 AND 399))")
+		case LogStatusNone:
 			query.WriteString(" AND status_code IS NULL")
+		case LogStatusError:
+			query.WriteString(" AND (status_code IS NULL OR status_code < 200 OR status_code >= 300)")
 		}
 	}
 	if f.ClientType != nil {
@@ -418,6 +519,12 @@ const channelNameExpression = `CASE
               ELSE '#' || upstream_id
            END`
 
+// tokenNameExpression prefers a non-empty downstream_token_name snapshot, else "#<id>".
+const tokenNameExpression = `CASE
+              WHEN downstream_token_name IS NOT NULL AND TRIM(downstream_token_name) <> '' THEN TRIM(downstream_token_name)
+              ELSE '#' || downstream_token_id
+           END`
+
 const modelSourceFilter = "COALESCE(NULLIF(TRIM(upstream_model), ''), NULLIF(TRIM(model), '')) IS NOT NULL"
 
 const tokenMetricFilter = "total_tokens IS NOT NULL AND total_tokens > 0"
@@ -437,9 +544,9 @@ func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 	startAt, endAt string, limit int64) (models.RequestLogTopStatsOut, error) {
 	limit = min(max(limit, 1), 20)
 
-	// Channels aggregate by upstream_id so renamed or same-name channels stay
-	// distinct.
-	specs := [4]topLogCountSpec{
+	// Channels aggregate by upstream_id and Tokens by downstream_token_id so
+	// renamed or same-name items stay distinct.
+	specs := [6]topLogCountSpec{
 		{
 			nameExpression:   actualModelExpression,
 			groupExpression:  actualModelExpression,
@@ -469,9 +576,25 @@ func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 			metricFilter:     tokenMetricFilter,
 			exposeGroupID:    true,
 		},
+		{
+			nameExpression:   tokenNameExpression,
+			groupExpression:  "downstream_token_id",
+			sourceFilter:     "downstream_token_id IS NOT NULL",
+			metricExpression: "1",
+			withLatency:      true,
+			exposeGroupID:    true,
+		},
+		{
+			nameExpression:   tokenNameExpression,
+			groupExpression:  "downstream_token_id",
+			sourceFilter:     "downstream_token_id IS NOT NULL",
+			metricExpression: "COALESCE(total_tokens, 0)",
+			metricFilter:     tokenMetricFilter,
+			exposeGroupID:    true,
+		},
 	}
 
-	var rankings [4][]models.RequestLogTopItemOut
+	var rankings [6][]models.RequestLogTopItemOut
 	for i, spec := range specs {
 		items, err := topLogCounts(ctx, database, window, startAt, endAt, spec, limit)
 		if err != nil {
@@ -486,6 +609,8 @@ func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 		Channels:      rankings[1],
 		ModelTokens:   rankings[2],
 		ChannelTokens: rankings[3],
+		Tokens:        rankings[4],
+		TokenTokens:   rankings[5],
 	}, nil
 }
 

@@ -1012,26 +1012,33 @@ for (const link of navLinks) {
 }
 window.addEventListener("hashchange", () => switchView(currentViewFromHash()));
 
-logUpstreamFilter.addEventListener("change", () => {
-  resetLogPagination();
-  loadLogs();
-});
-if (logSearchInput) {
-  logSearchInput.addEventListener("input", debounce(() => {
+if (logUpstreamFilter) {
+  logUpstreamFilter.addEventListener("change", () => {
     resetLogPagination();
     loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
+  });
+}
+if (logSearchInput) {
+  logSearchInput.addEventListener("input", debounce(() => {
+    if (typeof setLogDownstreamTokenId === "function") setLogDownstreamTokenId(null);
+    resetLogPagination();
+    loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
   }, 150));
 }
 if (logStatusFilter) {
   logStatusFilter.addEventListener("change", () => {
     resetLogPagination();
     loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
   });
 }
 if (logClientFilter) {
   logClientFilter.addEventListener("change", () => {
     resetLogPagination();
     loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
   });
 }
 if (logSensitiveToggle) {

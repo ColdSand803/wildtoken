@@ -260,10 +260,13 @@ function clearTokenFilters() {
 
 function clearLogFilters() {
   if (logSearchInput) logSearchInput.value = "";
+  if (logUpstreamFilter) logUpstreamFilter.value = "";
   if (logStatusFilter) logStatusFilter.value = "";
   if (logClientFilter) logClientFilter.value = "";
-  resetLogPagination();
+  if (typeof setLogDownstreamTokenId === "function") setLogDownstreamTokenId(null);
+  if (typeof resetLogPagination === "function") resetLogPagination();
   loadLogs();
+  if (typeof restartLogStream === "function") restartLogStream();
 }
 
 function currentViewName() {
@@ -460,8 +463,27 @@ function startDashboardRefresh() {
     updateLiveIndicator();
     return;
   }
-  dashboardRefreshTimer = window.setInterval(loadDashboardData, DASHBOARD_REFRESH_MS);
+  const interval = Number(dashboardRefreshIntervalMs);
+  if (!Number.isFinite(interval) || interval <= 0) {
+    updateLiveIndicator();
+    return;
+  }
+  dashboardRefreshTimer = window.setInterval(loadDashboardData, interval);
   updateLiveIndicator();
+}
+
+function updateDashboardRefreshInterval(newInterval) {
+  const val = Number(newInterval);
+  dashboardRefreshIntervalMs = Number.isFinite(val) ? val : DASHBOARD_DEFAULT_REFRESH_MS;
+  try {
+    localStorage.setItem(DASHBOARD_REFRESH_KEY, String(dashboardRefreshIntervalMs));
+  } catch {
+    // storage fallback
+  }
+  stopDashboardRefresh();
+  if (currentViewFromHash() === "dashboard") {
+    startDashboardRefresh();
+  }
 }
 
 function stopDashboardRefresh() {

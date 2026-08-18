@@ -22,23 +22,24 @@ type LogOverviewOut struct {
 	// "全部"没有上一周期，字段为 null。
 	PreviousTotal *int64 `json:"previous_total"`
 	// PreviousStatus 是上一同长周期的分类计数，给状态分布图例的环比用。
-	PreviousStatus *StatusCounts      `json:"previous_status"`
-	ErrorRequests  int64              `json:"error_requests"`
-	Status2xx      int64              `json:"status_2xx"`
-	Status4xx      int64              `json:"status_4xx"`
-	Status5xx      int64              `json:"status_5xx"`
-	StatusOther    int64              `json:"status_other"`
-	DurationCount  int64              `json:"duration_count"`
-	AvgDurationMs  float64            `json:"avg_duration_ms"`
-	MinDurationMs  int64              `json:"min_duration_ms"`
-	MaxDurationMs  int64              `json:"max_duration_ms"`
+	PreviousStatus *StatusCounts `json:"previous_status"`
+	ErrorRequests  int64         `json:"error_requests"`
+	Status2xx      int64         `json:"status_2xx"`
+	Status4xx      int64         `json:"status_4xx"`
+	Status5xx      int64         `json:"status_5xx"`
+	StatusOther    int64         `json:"status_other"`
+	StatusNone     int64         `json:"status_none"`
+	DurationCount  int64         `json:"duration_count"`
+	AvgDurationMs  float64       `json:"avg_duration_ms"`
+	MinDurationMs  int64         `json:"min_duration_ms"`
+	MaxDurationMs  int64         `json:"max_duration_ms"`
 	// P50/P95/P99 是全窗口耗时的最近邻分位数。均值会被一条慢请求拉高，
 	// 分位数区分"普遍变慢"和"偶发超时"。无有效耗时时为 null。
-	P50DurationMs  *float64           `json:"p50_duration_ms"`
-	P95DurationMs  *float64           `json:"p95_duration_ms"`
-	P99DurationMs  *float64           `json:"p99_duration_ms"`
-	BucketSeconds  int64              `json:"bucket_seconds"`
-	LatencySeries  []LatencyBucketOut `json:"latency_series"`
+	P50DurationMs *float64           `json:"p50_duration_ms"`
+	P95DurationMs *float64           `json:"p95_duration_ms"`
+	P99DurationMs *float64           `json:"p99_duration_ms"`
+	BucketSeconds int64              `json:"bucket_seconds"`
+	LatencySeries []LatencyBucketOut `json:"latency_series"`
 	// RequestSeries 按同一套分桶统计全部请求（不过滤耗时），是请求量趋势的
 	// 数据源——LatencySeries 里的 count 只数有耗时的行，当请求量用会偏低。
 	RequestSeries []RequestBucketOut `json:"request_series"`
@@ -72,6 +73,7 @@ type StatusCounts struct {
 	Status4xx   int64 `json:"status_4xx"`
 	Status5xx   int64 `json:"status_5xx"`
 	StatusOther int64 `json:"status_other"`
+	StatusNone  int64 `json:"status_none"`
 }
 
 /*
@@ -161,7 +163,9 @@ func LogOverview(ctx context.Context, database *sql.DB,
 			COALESCE(SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code >= 500 AND status_code <= 599 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code IS NOT NULL AND ((status_code BETWEEN 100 AND 199) OR (status_code BETWEEN 300 AND 399)) THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code IS NULL THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0),
 			COALESCE(MIN(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END), 0),
@@ -171,12 +175,12 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	var durationSum int64
 	row := database.QueryRowContext(ctx, aggregateQuery, predicateArgs...)
 	if err := row.Scan(&out.TotalRequests, &out.ErrorRequests,
-		&out.Status2xx, &out.Status4xx, &out.Status5xx,
+		&out.Status2xx, &out.Status4xx, &out.Status5xx, &out.StatusOther, &out.StatusNone,
 		&out.DurationCount, &durationSum,
 		&out.MinDurationMs, &out.MaxDurationMs); err != nil {
 		return out, err
 	}
-	out.StatusOther = out.TotalRequests - out.Status2xx - out.Status4xx - out.Status5xx
+	out.StatusOther = out.TotalRequests - out.Status2xx - out.Status4xx - out.Status5xx - out.StatusNone
 	if out.DurationCount > 0 {
 		out.AvgDurationMs = float64(durationSum) / float64(out.DurationCount)
 	}
@@ -364,11 +368,13 @@ func previousWindowCounts(ctx context.Context, database *sql.DB,
 			COUNT(*),
 			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0)
+			COALESCE(SUM(CASE WHEN status_code >= 500 AND status_code <= 599 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code IS NOT NULL AND ((status_code BETWEEN 100 AND 199) OR (status_code BETWEEN 300 AND 399)) THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code IS NULL THEN 1 ELSE 0 END), 0)
 		FROM request_logs WHERE `+predicate, args...)
-	if err := row.Scan(&counts.Total, &counts.Status2xx, &counts.Status4xx, &counts.Status5xx); err != nil {
+	if err := row.Scan(&counts.Total, &counts.Status2xx, &counts.Status4xx, &counts.Status5xx, &counts.StatusOther, &counts.StatusNone); err != nil {
 		return counts, false, err
 	}
-	counts.StatusOther = counts.Total - counts.Status2xx - counts.Status4xx - counts.Status5xx
+	counts.StatusOther = counts.Total - counts.Status2xx - counts.Status4xx - counts.Status5xx - counts.StatusNone
 	return counts, true, nil
 }

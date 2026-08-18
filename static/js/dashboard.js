@@ -1,3 +1,56 @@
+function getStatusCodeAttribution(statusCode) {
+  if (statusCode === null || statusCode === undefined) {
+    return "无响应 · 连接中断或请求未完成";
+  }
+  const code = Number(statusCode);
+  switch (code) {
+    case 200:
+      return "200 OK · 请求成功";
+    case 400:
+      return "400 Bad Request · 请求参数错误或上下文超长";
+    case 401:
+      return "401 Unauthorized · 鉴权失败或 API Key 无效";
+    case 403:
+      return "403 Forbidden · 权限不足或上游拒绝访问";
+    case 404:
+      return "404 Not Found · 模型或接口路径不存在";
+    case 429:
+      return "429 Too Many Requests · 触发限流或配额耗尽";
+    case 499:
+      return "499 Client Closed · 客户端主动断开连接";
+    case 500:
+      return "500 Internal Error · 上游服务内部异常";
+    case 502:
+      return "502 Bad Gateway · 网关错误或上游无响应";
+    case 503:
+      return "503 Service Unavailable · 服务过载或维护中";
+    case 504:
+      return "504 Gateway Timeout · 上游响应超时";
+    default:
+      if (code >= 200 && code < 300) return `${code} · 成功响应`;
+      if (code >= 400 && code < 500) return `${code} · 客户端请求错误`;
+      if (code >= 500 && code < 600) return `${code} · 服务端/网关错误`;
+      return `${code}`;
+  }
+}
+
+function drillDownToLogs({ search = "", upstreamId = "", status = "", downstreamTokenId = null, downstreamTokenName = "" } = {}) {
+  if (typeof setLogDownstreamTokenId === "function") {
+    setLogDownstreamTokenId(downstreamTokenId, downstreamTokenName);
+  }
+  if (logSearchInput) logSearchInput.value = search;
+  if (logUpstreamFilter) logUpstreamFilter.value = upstreamId;
+  if (logStatusFilter) logStatusFilter.value = status;
+  if (logClientFilter) logClientFilter.value = "";
+  if (typeof resetLogPagination === "function") {
+    resetLogPagination();
+  }
+  switchView("logs");
+  if (typeof restartLogStream === "function") {
+    restartLogStream();
+  }
+}
+
 // ── Dashboard ────────────────────────────────────────────
 // Range state lives in bootstrap.js with the other shared view state.
 
@@ -108,6 +161,7 @@ function cacheHitRateCard(label, usage, scopeLabel) {
     hint: hasInput
       ? `${scopeLabel} · 命中 ${formatCompactNumber(safeCacheHit)} / 输入 ${formatCompactNumber(inputTokens)}`
       : `${scopeLabel} · 暂无输入 token`,
+    tooltip: "Prompt 缓存命中率 = 缓存命中 Token 数 / (缓存命中 Token 数 + 新输入 Token 数)；反映大模型对前缀提示词的复用效率与成本节省",
     tone: "",
   };
 }
@@ -174,7 +228,8 @@ function renderDashboardKpiCards(container, cards) {
        卡片最底层（低透明度趋势曲线之类）。cardKey 用于识别需要背景曲线过渡的卡。 */
     const valueHtml = card.valueHtml ?? escapeHtml(card.value);
     const labelHtml = card.labelHtml ?? escapeHtml(card.label);
-    const hintTitle = card.hoverHint && card.hint ? ` title="${escapeHtml(card.hint)}"` : "";
+    const finalTitle = card.tooltip || (card.hoverHint && card.hint ? card.hint : "");
+    const hintTitle = finalTitle ? ` title="${escapeHtml(finalTitle)}"` : "";
     const hintBlock = card.hoverHint
       ? ""
       : `<div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>`;
@@ -762,9 +817,21 @@ function setDashboardChannelNameHidden(hidden) {
   const topChannelRequests = Array.isArray(dashboardTopStats.channels) ? dashboardTopStats.channels : [];
   const topChannelTokens = Array.isArray(dashboardTopStats.channel_tokens) ? dashboardTopStats.channel_tokens : [];
   renderDashboardRankList(dashboardTopChannels, topChannelRequests, "暂无渠道请求数据", {
+    rankType: "channel",
     hideNames: dashboardChannelNameHidden,
+    metaHtml: (row) => {
+      const parts = [];
+      if (row.avg_duration_ms != null) parts.push(formatSeconds(Number(row.avg_duration_ms)));
+      if (row.error_rate != null) {
+        parts.push(`${((Number(row.error_rate) || 0) * 100).toFixed(1)}% 错误`);
+      }
+      return parts.length
+        ? `<span class="dashboard-rank-meta">${escapeHtml(parts.join(" · "))}</span>`
+        : "";
+    },
   });
   renderDashboardRankList(dashboardTopChannelTokens, topChannelTokens, "暂无渠道 token 数据", {
+    rankType: "channel",
     formatValue: formatCompactNumber,
     hideNames: dashboardChannelNameHidden,
   });
@@ -781,29 +848,36 @@ function renderDashboardRankList(container, rows, emptyText, options = {}) {
     : (value) => String(Math.round(value));
   const metaHtml = typeof options.metaHtml === "function" ? options.metaHtml : null;
   const hideNames = Boolean(options.hideNames);
+  const rankType = options.rankType || "";
   const max = Math.max(...rows.map((row) => Number(row.count) || 0), 1);
   container.innerHTML = rows.map((row) => {
     const count = Number(row.count) || 0;
     const displayCount = formatValue(count);
     const width = Math.max(4, (count / max) * 100);
-    const channelId = (() => {
+    const targetId = (() => {
       if (row.id == null || row.id === "") return null;
       const n = Number(row.id);
       return Number.isFinite(n) ? n : null;
     })();
-    const idLabel = channelId == null ? "" : `#${channelId}`;
-    const displayName = hideNames ? "******" : String(row.name || "");
+    const idPrefix = rankType === "token" ? "令牌 #" : (rankType === "channel" ? "渠道 #" : "#");
+    const idLabel = targetId == null ? "" : `#${targetId}`;
+    const rawName = String(row.name || "");
+    const displayName = hideNames ? "******" : rawName;
     const titleParts = [
       idLabel || null,
-      hideNames ? null : (row.name || null),
+      hideNames ? null : rawName,
       displayCount,
+      "点击在日志中查看",
     ].filter(Boolean);
-    const idHtml = channelId == null
+    const idHtml = targetId == null
       ? ""
-      : `<span class="dashboard-rank-index" title="渠道 #${channelId}">${escapeHtml(idLabel)}</span>`;
+      : `<span class="dashboard-rank-index" title="${idPrefix}${targetId}">${escapeHtml(idLabel)}</span>`;
     const meta = metaHtml ? (metaHtml(row) || "") : "";
+    const idAttr = targetId == null ? "" : ` data-target-id="${targetId}"`;
+    const nameAttr = ` data-target-name="${escapeHtml(rawName)}"`;
+    const typeAttr = rankType ? ` data-rank-type="${escapeHtml(rankType)}"` : "";
     return `
-      <div class="dashboard-rank-row" title="${escapeHtml(titleParts.join(" · "))}">
+      <div class="dashboard-rank-row is-clickable" title="${escapeHtml(titleParts.join(" · "))}"${typeAttr}${idAttr}${nameAttr} tabindex="0" role="button">
         <div class="dashboard-rank-head">
           ${idHtml}
           <span class="dashboard-rank-name${hideNames ? " is-masked" : ""}">${escapeHtml(displayName)}</span>
@@ -1080,6 +1154,7 @@ function renderDashboard() {
   const c4 = Number(overview?.status_4xx) || 0;
   const c5 = Number(overview?.status_5xx) || 0;
   const cOther = Number(overview?.status_other) || 0;
+  const cNone = Number(overview?.status_none) || 0;
   const requestSeriesForStatus = Array.isArray(overview?.request_series) ? overview.request_series : [];
   if (dashboardStatusMeta) {
     dashboardStatusMeta.textContent = overviewRangeLabel;
@@ -1089,10 +1164,11 @@ function renderDashboard() {
       dashboardStatusChart.innerHTML = '<div class="dashboard-chart-empty">所选范围内暂无请求</div>';
     } else {
       const pct = (count) => (count / total) * 100;
-      const barSeg = (cls, count) => {
+      const barSeg = (cls, count, statusVal, label, desc) => {
         const width = pct(count);
         if (width <= 0) return "";
-        return `<span class="ops-bar-seg ${cls}" style="width:${width.toFixed(2)}%" title="${count}"></span>`;
+        const title = `${label} (${count} 条，${width.toFixed(1)}%) · ${desc} · 点击在日志中查看`;
+        return `<span class="ops-bar-seg ${cls} is-clickable" data-drill-status="${statusVal}" style="width:${width.toFixed(2)}%" title="${escapeHtml(title)}" role="button" tabindex="0"></span>`;
       };
 
       /* 图例的环比徽标。小基数保护：上一周期不足 10 条时百分比全是噪声
@@ -1107,22 +1183,24 @@ function renderDashboard() {
         const magnitude = Math.abs(growth);
         return `<span class="status-delta ${up ? upClass : downClass}" title="较上一同长周期（${previous} 条）">${up ? "↑" : "↓"}<span data-count-key="status-delta-${key}" data-count-to="${magnitude.toFixed(3)}" data-count-format="growth">${formatKpiCount(magnitude, "growth")}</span></span>`;
       };
-      const legendItem = (seg, label, count, countKey, deltaHtml) => `
-        <span class="status-legend-item">
+      const legendItem = (seg, label, count, countKey, statusVal, desc, deltaHtml) => `
+        <span class="status-legend-item is-clickable" data-drill-status="${statusVal}" title="${label} (${count} 条) · ${desc} · 点击在日志中查看" role="button" tabindex="0">
           <span class="status-legend-dot ops-bar-seg ${seg}" aria-hidden="true"></span>
           <span class="status-legend-label">${label}</span>
           <strong class="status-legend-count" data-count-key="status-count-${countKey}" data-count-to="${count}" data-count-format="compact">${formatCompactNumber(count)}</strong>
           ${deltaHtml}
         </span>`;
       const legendHtml = [
-        legendItem("ok", "2xx", c2, "2xx",
+        legendItem("ok", "2xx", c2, "2xx", "2xx", "正常成功响应",
           legendDelta("2xx", c2, prevStatus?.status_2xx, "status-delta--good", "status-delta--calm")),
-        legendItem("warn", "4xx", c4, "4xx",
+        legendItem("warn", "4xx", c4, "4xx", "4xx", "客户端错误 (含 429 限流/配额、401/403 鉴权、400 格式/超长)",
           legendDelta("4xx", c4, prevStatus?.status_4xx, "status-delta--bad", "status-delta--good")),
-        legendItem("danger", "5xx", c5, "5xx",
+        legendItem("danger", "5xx", c5, "5xx", "5xx", "服务端/网关错误 (含 504 超时、502 坏网关、500/503 内部错误)",
           legendDelta("5xx", c5, prevStatus?.status_5xx, "status-delta--bad", "status-delta--good")),
-        legendItem("muted", "其他", cOther, "other",
+        legendItem("info", "其他", cOther, "other", "other", "1xx / 3xx 重定向及其他 HTTP 状态",
           legendDelta("other", cOther, prevStatus?.status_other, "status-delta--bad", "status-delta--good")),
+        legendItem("muted", "无响应", cNone, "none", "none", "无响应 / 连接中断 / 未完成",
+          legendDelta("none", cNone, prevStatus?.status_none, "status-delta--bad", "status-delta--good")),
       ].join("");
 
       /* 错误时间细带：每桶一格，颜色深浅随该桶错误率，回答"错误发生在何时、
@@ -1139,7 +1217,7 @@ function renderDashboard() {
           const rate = count > 0 ? bucketErrors / count : 0;
           // 错误率 50% 及以上就到满色；下限 0.25 保证个位数错误也看得见。
           const opacity = (0.25 + 0.75 * Math.min(1, rate / 0.5)).toFixed(2);
-          return `<span class="status-error-cell" style="opacity:${opacity}" title="${escapeHtml(when)} · 错误 ${bucketErrors}/${count}"></span>`;
+          return `<span class="status-error-cell is-clickable" data-drill-status="error" style="opacity:${opacity}" title="${escapeHtml(when)} · 错误 ${bucketErrors}/${count} (${(rate * 100).toFixed(1)}%) · 点击在日志中查看" role="button" tabindex="0"></span>`;
         }).join("");
         stripHtml = `
           <div class="status-error-strip-wrap">
@@ -1149,8 +1227,12 @@ function renderDashboard() {
       }
 
       dashboardStatusChart.innerHTML = `
-        <div class="ops-bar-track" role="img" aria-label="2xx ${c2} · 4xx ${c4} · 5xx ${c5} · 其他 ${cOther}">
-          ${barSeg("ok", c2)}${barSeg("warn", c4)}${barSeg("danger", c5)}${barSeg("muted", cOther)}
+        <div class="ops-bar-track" role="img" aria-label="2xx ${c2} · 4xx ${c4} · 5xx ${c5} · 其他 ${cOther} · 无响应 ${cNone}">
+          ${barSeg("ok", c2, "2xx", "2xx 成功", "正常成功响应")}
+          ${barSeg("warn", c4, "4xx", "4xx 客户端错误", "含 429 限流/配额、401/403 鉴权、400 格式/超长")}
+          ${barSeg("danger", c5, "5xx", "5xx 服务端错误", "含 504 超时、502 坏网关、500/503 内部错误")}
+          ${barSeg("info", cOther, "other", "其他 HTTP 状态", "1xx / 3xx 重定向及其他 HTTP 状态")}
+          ${barSeg("muted", cNone, "none", "无响应", "无响应 / 连接中断 / 未完成")}
         </div>
         <div class="status-legend">${legendHtml}</div>
         ${stripHtml}
@@ -1187,9 +1269,9 @@ function renderDashboard() {
           <div><dt>最近</dt><dd>${escapeHtml(formatSeconds(latestAvg))}</dd></div>
           <div><dt>平均</dt><dd>${escapeHtml(formatSeconds(avgMs))}</dd></div>
           <div><dt>范围</dt><dd>${escapeHtml(formatSeconds(minDuration))}–${escapeHtml(formatSeconds(maxDuration))}</dd></div>
-          <div><dt>P50</dt><dd>${overview?.p50_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p50_duration_ms))) : "—"}</dd></div>
-          <div><dt>P95</dt><dd>${overview?.p95_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p95_duration_ms))) : "—"}</dd></div>
-          <div><dt>P99</dt><dd>${overview?.p99_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p99_duration_ms))) : "—"}</dd></div>
+          <div><dt title="中位数耗时：50% 的请求快于此时间">P50</dt><dd title="中位数耗时：50% 的请求快于此时间">${overview?.p50_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p50_duration_ms))) : "—"}</dd></div>
+          <div><dt title="95分位耗时：95% 的请求快于此时间，反映绝大多数用户的体验">P95</dt><dd title="95分位耗时：95% 的请求快于此时间，反映绝大多数用户的体验">${overview?.p95_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p95_duration_ms))) : "—"}</dd></div>
+          <div><dt title="99分位耗时：99% 的请求快于此时间，体现极端长尾延迟与服务毛刺">P99</dt><dd title="99分位耗时：99% 的请求快于此时间，体现极端长尾延迟与服务毛刺">${overview?.p99_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p99_duration_ms))) : "—"}</dd></div>
         </dl>
       `;
       // 曲线起伏从上一形态逐帧变形到新形态，而不是整图跳变
@@ -1209,6 +1291,9 @@ function renderDashboard() {
   const topChannelRequests = Array.isArray(dashboardTopStats?.channels) ? dashboardTopStats.channels : [];
   const topModelTokens = Array.isArray(dashboardTopStats?.model_tokens) ? dashboardTopStats.model_tokens : [];
   const topChannelTokens = Array.isArray(dashboardTopStats?.channel_tokens) ? dashboardTopStats.channel_tokens : [];
+  const topTokenRequests = Array.isArray(dashboardTopStats?.tokens) ? dashboardTopStats.tokens : [];
+  const topTokenTokens = Array.isArray(dashboardTopStats?.token_tokens) ? dashboardTopStats.token_tokens : [];
+
   const topWindowLabel = dashboardTopWindowLabel(dashboardTopStats?.window || dashboardTimeRange);
   if (dashboardModelsMeta) {
     dashboardModelsMeta.textContent = `${topWindowLabel} · 请求 Top ${topModelRequests.length || 0}`;
@@ -1222,15 +1307,34 @@ function renderDashboard() {
   if (dashboardChannelTokensMeta) {
     dashboardChannelTokensMeta.textContent = `${topWindowLabel} · Tokens Top ${topChannelTokens.length || 0}`;
   }
+  if (dashboardTokensMeta) {
+    dashboardTokensMeta.textContent = `${topWindowLabel} · 请求 Top ${topTokenRequests.length || 0}`;
+  }
+  if (dashboardTokenTokensMeta) {
+    dashboardTokenTokensMeta.textContent = `${topWindowLabel} · Tokens Top ${topTokenTokens.length || 0}`;
+  }
+
   renderDashboardRankList(dashboardTopChannels, topChannelRequests, "暂无渠道请求数据", {
+    rankType: "channel",
     hideNames: dashboardChannelNameHidden,
+    metaHtml: (row) => {
+      const parts = [];
+      if (row.avg_duration_ms != null) parts.push(formatSeconds(Number(row.avg_duration_ms)));
+      if (row.error_rate != null) {
+        parts.push(`${((Number(row.error_rate) || 0) * 100).toFixed(1)}% 错误`);
+      }
+      return parts.length
+        ? `<span class="dashboard-rank-meta">${escapeHtml(parts.join(" · "))}</span>`
+        : "";
+    },
   });
   renderDashboardRankList(dashboardTopChannelTokens, topChannelTokens, "暂无渠道 token 数据", {
+    rankType: "channel",
     formatValue: formatCompactNumber,
     hideNames: dashboardChannelNameHidden,
   });
   renderDashboardRankList(dashboardTopModels, topModelRequests, "暂无模型请求数据", {
-    // 后端为请求排行附带平均耗时与错误率：哪个模型"又慢又容易挂"一眼可见。
+    rankType: "model",
     metaHtml: (row) => {
       const parts = [];
       if (row.avg_duration_ms != null) parts.push(formatSeconds(Number(row.avg_duration_ms)));
@@ -1243,6 +1347,24 @@ function renderDashboard() {
     },
   });
   renderDashboardRankList(dashboardTopModelTokens, topModelTokens, "暂无模型 token 数据", {
+    rankType: "model",
+    formatValue: formatCompactNumber,
+  });
+  renderDashboardRankList(dashboardTopTokens, topTokenRequests, "暂无令牌请求数据", {
+    rankType: "token",
+    metaHtml: (row) => {
+      const parts = [];
+      if (row.avg_duration_ms != null) parts.push(formatSeconds(Number(row.avg_duration_ms)));
+      if (row.error_rate != null) {
+        parts.push(`${((Number(row.error_rate) || 0) * 100).toFixed(1)}% 错误`);
+      }
+      return parts.length
+        ? `<span class="dashboard-rank-meta">${escapeHtml(parts.join(" · "))}</span>`
+        : "";
+    },
+  });
+  renderDashboardRankList(dashboardTopTokenTokens, topTokenTokens, "暂无令牌 token 数据", {
+    rankType: "token",
     formatValue: formatCompactNumber,
   });
 
@@ -1250,14 +1372,14 @@ function renderDashboard() {
     const errors = items
       .filter((item) => {
         const code = item.status_code;
-        return code === null || code === undefined || Number(code) >= 400;
+        return code === null || code === undefined || !Number.isFinite(Number(code)) || Number(code) < 200 || Number(code) >= 300;
       })
       .slice(0, 8);
     if (errors.length === 0) {
       dashboardErrorRows.innerHTML = `
         <tr>
           <td colspan="5" class="empty">
-            <span class="muted">${items.length ? "近窗内暂无 4xx/5xx/无响应记录" : "暂无近窗日志"}</span>
+            <span class="muted">${items.length ? "近窗内暂无非 2xx/无响应记录" : "暂无近窗日志"}</span>
           </td>
         </tr>
       `;
@@ -1270,8 +1392,10 @@ function renderDashboard() {
         const model = log.model
           ? `<code title="${escapeHtml(log.model)}">${escapeHtml(log.model)}</code>`
           : '<span class="muted">-</span>';
+        const attribution = getStatusCodeAttribution(log.status_code);
+        const errorDesc = log.error ? ` · 详情: ${log.error}` : "";
         return `
-          <tr class="log-row dashboard-error-row" data-log-id="${log.id}" tabindex="0" title="点击查看请求详情">
+          <tr class="log-row dashboard-error-row" data-log-id="${log.id}" tabindex="0" title="${escapeHtml(attribution + errorDesc)} · 点击查看请求详情">
             <td class="time-cell"><span>${escapeHtml(time)}</span><span class="muted">#${log.id}</span></td>
             <td class="channel-cell">${channel}</td>
             <td class="model-cell">${model}</td>
@@ -1284,16 +1408,32 @@ function renderDashboard() {
   }
 }
 
+let dashboardLoadGeneration = 0;
+let dashboardAbortController = null;
+
 async function loadDashboardData() {
-  if (dashboardLoading) return;
+  if (dashboardAbortController) {
+    try {
+      dashboardAbortController.abort();
+    } catch {
+      // ignore
+    }
+  }
+  const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+  dashboardAbortController = controller;
+  const currentGen = ++dashboardLoadGeneration;
+
   dashboardLoading = true;
   try {
+    const fetchOptions = controller ? { signal: controller.signal } : {};
     if (!upstreamsLoadedOnce) {
-      await loadUpstreams();
+      await loadUpstreams(fetchOptions);
+      if (currentGen !== dashboardLoadGeneration) return;
     } else {
       // Refresh the upstream snapshot for enabled and effective-weight counts.
       try {
-        const list = await api("/api/admin/upstreams");
+        const list = await api("/api/admin/upstreams", fetchOptions);
+        if (currentGen !== dashboardLoadGeneration) return;
         upstreams = list;
         for (const upstream of upstreams) {
           upstream.effectiveRecoveryAtMs = upstream.health_recovery_remaining_seconds
@@ -1301,7 +1441,8 @@ async function loadDashboardData() {
             : null;
         }
         upstreamsLoadedOnce = true;
-      } catch {
+      } catch (err) {
+        if (currentGen !== dashboardLoadGeneration || err?.name === "AbortError") return;
         // Keep previous upstreams cache if refresh fails.
       }
     }
@@ -1327,12 +1468,14 @@ async function loadDashboardData() {
     topParams.set("limit", String(DASHBOARD_TOP_LIMIT));
 
     const [page, tokenUsage, runtimeMetrics, topStats, overview] = await Promise.all([
-      api(`/api/admin/logs?${params}`),
-      api(`/api/admin/logs/token-usage?${tokenUsageParams}`),
-      api("/api/admin/system/metrics"),
-      api(`/api/admin/logs/top?${topParams}`),
-      api(`/api/admin/logs/overview?${overviewParams}`),
+      api(`/api/admin/logs?${params}`, fetchOptions),
+      api(`/api/admin/logs/token-usage?${tokenUsageParams}`, fetchOptions),
+      api("/api/admin/system/metrics", fetchOptions),
+      api(`/api/admin/logs/top?${topParams}`, fetchOptions),
+      api(`/api/admin/logs/overview?${overviewParams}`, fetchOptions),
     ]);
+    if (currentGen !== dashboardLoadGeneration) return;
+
     dashboardLogItems = page.items || [];
     dashboardTokenUsage = tokenUsage;
     dashboardRuntimeMetrics = runtimeMetrics || null;
@@ -1341,6 +1484,9 @@ async function loadDashboardData() {
     lastDashboardLoadError = "";
     renderDashboard();
   } catch (error) {
+    if (currentGen !== dashboardLoadGeneration || error?.name === "AbortError") {
+      return;
+    }
     const message = `看板加载失败：${error.message}`;
     if (message !== lastDashboardLoadError) {
       setStatus(message, "error");
@@ -1350,7 +1496,9 @@ async function loadDashboardData() {
       dashboardScope.textContent = message;
     }
   } finally {
-    dashboardLoading = false;
+    if (currentGen === dashboardLoadGeneration) {
+      dashboardLoading = false;
+    }
   }
 }
 

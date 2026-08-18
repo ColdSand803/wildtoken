@@ -221,6 +221,42 @@ const logUpstreamFilter = document.querySelector("#log-upstream-filter");
 const logSearchInput = document.querySelector("#log-search");
 const logStatusFilter = document.querySelector("#log-status-filter");
 const logClientFilter = document.querySelector("#log-client-filter");
+const logTokenFilterBadge = document.querySelector("#log-token-filter-badge");
+const logTokenFilterName = document.querySelector("#log-token-filter-name");
+const logTokenFilterClear = document.querySelector("#log-token-filter-clear");
+let logDownstreamTokenId = null;
+let logDownstreamTokenName = "";
+
+function updateLogFilterChips() {
+  if (!logTokenFilterBadge) return;
+  if (logDownstreamTokenId != null) {
+    logTokenFilterBadge.hidden = false;
+    if (logTokenFilterName) {
+      logTokenFilterName.textContent = logDownstreamTokenName
+        ? logDownstreamTokenName + " (#" + logDownstreamTokenId + ")"
+        : "#" + logDownstreamTokenId;
+    }
+  } else {
+    logTokenFilterBadge.hidden = true;
+    if (logTokenFilterName) {
+      logTokenFilterName.textContent = "";
+    }
+  }
+}
+
+function setLogDownstreamTokenId(id, name = "") {
+  logDownstreamTokenId = id != null && id !== "" && Number.isFinite(Number(id)) ? Number(id) : null;
+  logDownstreamTokenName = name ? String(name) : "";
+  updateLogFilterChips();
+}
+
+function getLogDownstreamTokenId() {
+  return logDownstreamTokenId;
+}
+
+function getLogDownstreamTokenName() {
+  return logDownstreamTokenName;
+}
 const logSensitiveToggle = document.querySelector("#log-sensitive-toggle");
 const logRefreshButton = document.querySelector("#log-refresh");
 const logNewEntriesNotice = document.querySelector("#log-new-entries-notice");
@@ -244,6 +280,22 @@ const LOG_REFRESH_KEY = "wildtoken_log_refresh_seconds";
 const DEFAULT_HOME_KEY = "wildtoken_default_home";
 const DEFAULT_REFRESH_MS = 10000;
 const DASHBOARD_REFRESH_MS = 15000;
+const DASHBOARD_REFRESH_KEY = "wildtoken_dashboard_refresh_interval";
+const DASHBOARD_DEFAULT_REFRESH_MS = 15000;
+let dashboardRefreshIntervalMs = (() => {
+  try {
+    const saved = localStorage.getItem(DASHBOARD_REFRESH_KEY);
+    if (saved !== null) {
+      const parsed = Number(saved);
+      if (Number.isFinite(parsed) && [0, 5000, 15000, 30000].includes(parsed)) {
+        return parsed;
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return DASHBOARD_DEFAULT_REFRESH_MS;
+})();
 const DASHBOARD_LOG_LIMIT = 200;
 const DASHBOARD_TOP_LIMIT = 10;
 // Legacy key, read once so an existing ranking-period preference carries over.
@@ -361,6 +413,11 @@ const dashboardTopChannels = document.querySelector("#dashboard-top-channels");
 const dashboardChannelsMeta = document.querySelector("#dashboard-channels-meta");
 const dashboardTopChannelTokens = document.querySelector("#dashboard-top-channel-tokens");
 const dashboardChannelTokensMeta = document.querySelector("#dashboard-channel-tokens-meta");
+const dashboardTopTokens = document.querySelector("#dashboard-top-tokens");
+const dashboardTokensMeta = document.querySelector("#dashboard-tokens-meta");
+const dashboardTopTokenTokens = document.querySelector("#dashboard-top-token-tokens");
+const dashboardTokenTokensMeta = document.querySelector("#dashboard-token-tokens-meta");
+const dashboardRefreshSelect = document.querySelector("#dashboard-refresh-select");
 const dashboardChannelNameToggle = document.querySelector("#dashboard-channel-name-toggle");
 const dashboardErrorRows = document.querySelector("#dashboard-error-rows");
 const dashboardTokenRangeMeta = document.querySelector("#dashboard-token-range");
@@ -384,6 +441,9 @@ if (dashboardEndDate && dashboardCustomEndDate) {
 }
 if (dashboardCustomRange) {
   dashboardCustomRange.hidden = dashboardTimeRange !== "custom";
+}
+if (dashboardRefreshSelect) {
+  dashboardRefreshSelect.value = String(dashboardRefreshIntervalMs);
 }
 
 let dashboardChannelNameHidden = (() => {

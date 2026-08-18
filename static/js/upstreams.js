@@ -854,6 +854,7 @@ async function fetchAllUpstreamStats() {
             ? Number(healthRaw.success_rate)
             : null,
           avgMs: Number(healthRaw?.avg_ms) || 0,
+          timedCount: Number(healthRaw?.timed_count) || 0,
           buckets: Array.isArray(healthRaw?.buckets) ? healthRaw.buckets : [],
         },
       });
@@ -920,7 +921,7 @@ function createChannelCard(upstream) {
   const successTone = healthPending || health.successRate == null
     ? ""
     : health.successRate >= 0.99 ? " is-ok" : health.successRate >= 0.9 ? " is-warn" : " is-bad";
-  const healthLatency = healthPending || !hasTraffic || !health.avgMs
+  const healthLatency = healthPending || !hasTraffic || (health.timedCount != null ? health.timedCount === 0 : !health.avgMs)
     ? "—"
     : formatSeconds(health.avgMs);
 
@@ -966,10 +967,10 @@ function createChannelCard(upstream) {
     </div>
     <div class="channel-card-health">
       <div class="sparkline-header">
-        <span class="sparkline-label">24h 健康</span>
+        <span class="sparkline-label">24h 流量健康</span>
         <span class="health-summary">
-          <span class="health-stat${successTone}" title="24 小时成功率">在线率 ${successLabel}</span>
-          <span class="health-stat" title="24 小时平均耗时">均延迟 ${healthLatency}</span>
+          <span class="health-stat${successTone}" title="24 小时在线率（正常响应占总请求比例，排除客户端主动中断）">在线率 ${successLabel}</span>
+          <span class="health-stat" title="24 小时平均耗时（仅统计有耗时采样的请求）">均延迟 ${healthLatency}</span>
         </span>
       </div>
       ${renderHealthBars(healthPending ? null : health)}
@@ -1236,7 +1237,7 @@ function positionUpstreamActionMenu() {
   upstreamActionMenu.style.top = `${Math.round(top)}px`;
 }
 
-async function loadUpstreams() {
+async function loadUpstreams(options = {}) {
   const showSkeleton = !upstreamsLoadedOnce;
   if (showSkeleton) {
     upstreamsLoading = true;
@@ -1245,7 +1246,7 @@ async function loadUpstreams() {
     }
   }
   try {
-    upstreams = await api("/api/admin/upstreams");
+    upstreams = await api("/api/admin/upstreams", options);
     for (const upstream of upstreams) {
       upstream.effectiveRecoveryAtMs = upstream.health_recovery_remaining_seconds
         ? Date.now() + upstream.health_recovery_remaining_seconds * 1000

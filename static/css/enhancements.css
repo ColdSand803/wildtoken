@@ -283,3 +283,49 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   font-weight: 400;
   margin-top: 2px;
 }
+.ops-bar-seg.info,
+.ops-bar-seg.other {
+  background: var(--accent);
+}
+
+.ops-bar-seg.none {
+  background: var(--line-strong);
+}
+
+.log-token-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  background: var(--panel-muted);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text);
+  font-size: var(--text-xs);
+  align-self: flex-end;
+  height: 38px;
+  box-sizing: border-box;
+}
+
+.log-token-filter-badge strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.log-token-filter-badge .icon-button {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: var(--radius-xs, 4px);
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.log-token-filter-badge .icon-button:hover,
+.log-token-filter-badge .icon-button:focus-visible {
+  color: var(--danger);
+  background: var(--line);
+}

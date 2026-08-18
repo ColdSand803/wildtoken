@@ -11,9 +11,10 @@ import (
 // UpstreamHealthBucketOut is one hour of a channel's traffic: how many requests
 // were attempted, how many failed, and the average latency of timed rows.
 type UpstreamHealthBucketOut struct {
-	BucketEpoch int64  `json:"bucket_epoch"`
-	Total       int64  `json:"total"`
-	Errors      int64  `json:"errors"`
+	BucketEpoch int64   `json:"bucket_epoch"`
+	Total       int64   `json:"total"`
+	Errors      int64   `json:"errors"`
+	TimedCount  int64   `json:"timed_count"`
 	AvgMs       float64 `json:"avg_ms"`
 }
 
@@ -27,6 +28,7 @@ type UpstreamHealthOut struct {
 	Total       int64                     `json:"total"`
 	Errors      int64                     `json:"errors"`
 	SuccessRate float64                   `json:"success_rate"`
+	TimedCount  int64                     `json:"timed_count"`
 	AvgMs       float64                   `json:"avg_ms"`
 	Buckets     []UpstreamHealthBucketOut `json:"buckets"`
 }
@@ -43,8 +45,9 @@ func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours int64) (
 		SELECT upstream_id,
 			(CAST(strftime('%s', created_at) AS INTEGER) / 3600) * 3600 AS bucket_epoch,
 			COUNT(*),
-			COALESCE(SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300 THEN 1 ELSE 0 END), 0),
-			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END)
+			COALESCE(SUM(CASE WHEN (status_code IS NULL OR status_code < 200 OR status_code >= 300) AND (status_code IS NULL OR status_code <> 499) THEN 1 ELSE 0 END), 0),
+			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END),
+			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0)
 		FROM request_logs
 		WHERE upstream_id IS NOT NULL AND created_at >= datetime('now', ?)
 		GROUP BY upstream_id, bucket_epoch
@@ -56,9 +59,9 @@ func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours int64) (
 
 	out := map[int64]*UpstreamHealthOut{}
 	for rows.Next() {
-		var upstreamID, epoch, total, errors int64
+		var upstreamID, epoch, total, errors, timedCount int64
 		var avgMs sql.NullFloat64
-		if err := rows.Scan(&upstreamID, &epoch, &total, &errors, &avgMs); err != nil {
+		if err := rows.Scan(&upstreamID, &epoch, &total, &errors, &avgMs, &timedCount); err != nil {
 			return nil, apperr.Database(err)
 		}
 		entry, ok := out[upstreamID]
@@ -68,10 +71,12 @@ func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours int64) (
 		}
 		entry.Total += total
 		entry.Errors += errors
+		entry.TimedCount += timedCount
 		entry.Buckets = append(entry.Buckets, UpstreamHealthBucketOut{
 			BucketEpoch: epoch,
 			Total:       total,
 			Errors:      errors,
+			TimedCount:  timedCount,
 			AvgMs:       avgMs.Float64,
 		})
 	}
@@ -83,13 +88,15 @@ func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours int64) (
 		if entry.Total > 0 {
 			entry.SuccessRate = float64(entry.Total-entry.Errors) / float64(entry.Total)
 		}
-		// Buckets only carry averages, so the window average is weighted by
-		// each bucket's request count — close enough for a console summary.
+		// Buckets only carry averages, so the window average is weighted by each
+		// bucket's timed-sample count. Weighting by total requests skewed the
+		// result whenever buckets held different numbers of untimed rows, and
+		// gating on AvgMs > 0 silently dropped legitimate 0ms samples.
 		var weighted, timedRequests float64
 		for _, bucket := range entry.Buckets {
-			if bucket.AvgMs > 0 {
-				weighted += bucket.AvgMs * float64(bucket.Total)
-				timedRequests += float64(bucket.Total)
+			if bucket.TimedCount > 0 {
+				weighted += bucket.AvgMs * float64(bucket.TimedCount)
+				timedRequests += float64(bucket.TimedCount)
 			}
 		}
 		if timedRequests > 0 {

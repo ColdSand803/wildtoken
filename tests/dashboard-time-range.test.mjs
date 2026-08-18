@@ -257,3 +257,66 @@ test("the selected range and its custom dates are persisted", () => {
   assert.match(bootstrap, /DASHBOARD_TOP_WINDOW_KEY/);
   assert.match(events, /localStorage\.setItem\(DASHBOARD_RANGE_KEY/);
 });
+
+test("dashboardLoadGeneration and dashboardAbortController prevent stale overwrites across fast range switches", async () => {
+  const source = read("static/js/dashboard.js");
+  assert.ok(source.includes("dashboardLoadGeneration"), "dashboardLoadGeneration variable exists");
+  assert.ok(source.includes("dashboardAbortController"), "dashboardAbortController variable exists");
+  assert.ok(source.includes("currentGen !== dashboardLoadGeneration"), "checks generation before applying results");
+
+  let inFlightSignals = [];
+
+  const context = vm.createContext({
+    dashboardLoadGeneration: 0,
+    dashboardAbortController: null,
+    dashboardLoading: false,
+    dashboardOverview: null,
+    dashboardLogItems: [],
+    dashboardTokenUsage: null,
+    dashboardRuntimeMetrics: null,
+    dashboardTopStats: null,
+    lastDashboardLoadError: "",
+    upstreamsLoadedOnce: true,
+    upstreams: [],
+    DASHBOARD_LOG_LIMIT: 200,
+    DASHBOARD_TOP_LIMIT: 10,
+    DASHBOARD_DEFAULT_RANGE: "30d",
+    dashboardTimeRange: "30d",
+    renderedRange: "",
+    URLSearchParams,
+    dashboardRangeParams: (range) => new URLSearchParams({ range: range || context.dashboardTimeRange }),
+    setStatus: () => {},
+    dashboardScope: { textContent: "" },
+    api: async (url, options) => {
+      inFlightSignals.push(options?.signal);
+      if (url.includes("/overview")) {
+        const urlObj = new URL("http://localhost" + url);
+        const range = urlObj.searchParams.get("range");
+        if (range === "1d") {
+          // simulate slow response for 1d
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        return { range, status_2xx: 10 };
+      }
+      return {};
+    },
+  });
+
+  vm.runInContext("function renderDashboard() { globalThis.renderedRange = dashboardOverview?.range || ''; }", context);
+
+  const loadDashboardDataSource = extractFunction(source, "loadDashboardData");
+  vm.runInContext(`${loadDashboardDataSource}; this.loadDashboardData = loadDashboardData;`, context);
+
+  // Switch to 1d (slow)
+  context.dashboardTimeRange = "1d";
+  const p1 = context.loadDashboardData();
+
+  // Fast switch to 7d (fast)
+  context.dashboardTimeRange = "7d";
+  const p2 = context.loadDashboardData();
+
+  await Promise.all([p1, p2]);
+
+  // The final rendered range must be 7d, even though 1d finished later or was aborted
+  assert.equal(context.renderedRange, "7d");
+});

@@ -541,12 +541,17 @@ func AdminListLogs(state *appstate.State) http.HandlerFunc {
 		// the whole scan. Nothing an operator types to find a request is longer
 		// than this.
 		filter := db.LogFilter{
-			UpstreamID: optionalQueryInt64(query.Get("upstream_id")),
-			Search:     boundedQueryString(query.Get("search"), maxLogSearchChars),
-			ClientType: boundedQueryString(query.Get("client_type"), maxLogSearchChars),
+			UpstreamID:        optionalQueryInt64(query.Get("upstream_id")),
+			DownstreamTokenID: optionalQueryInt64(query.Get("downstream_token_id")),
+			Search:            boundedQueryString(query.Get("search"), maxLogSearchChars),
+			ClientType:        boundedQueryString(query.Get("client_type"), maxLogSearchChars),
 		}
-		if status := query.Get("status"); status == "2xx" || status == "4xx" ||
-			status == "5xx" || status == "none" {
+		if rawStatus, present := query["status"]; present && len(rawStatus) > 0 {
+			status := strings.TrimSpace(rawStatus[0])
+			if !db.ValidLogStatus(status) {
+				apperr.WriteError(w, apperr.BadRequest("status must be one of: 2xx, 4xx, 5xx, other, none, error"))
+				return
+			}
 			filter.Status = &status
 		}
 
@@ -611,6 +616,24 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		// The live stream takes the same filters as the paginated list, so a
+		// filtered console view does not receive events it would never show.
+		query := r.URL.Query()
+		filter := db.LogFilter{
+			UpstreamID:        optionalQueryInt64(query.Get("upstream_id")),
+			DownstreamTokenID: optionalQueryInt64(query.Get("downstream_token_id")),
+			Search:            boundedQueryString(query.Get("search"), maxLogSearchChars),
+			ClientType:        boundedQueryString(query.Get("client_type"), maxLogSearchChars),
+		}
+		if rawStatus, present := query["status"]; present && len(rawStatus) > 0 {
+			status := strings.TrimSpace(rawStatus[0])
+			if !db.ValidLogStatus(status) {
+				apperr.WriteError(w, apperr.BadRequest("status must be one of: 2xx, 4xx, 5xx, other, none, error"))
+				return
+			}
+			filter.Status = &status
+		}
+
 		events, unsubscribe := state.LogWriter.Subscribe()
 		defer unsubscribe()
 
@@ -636,6 +659,9 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 				}
 				if state.Credentials.Version() != auth.CredentialVersion {
 					return
+				}
+				if !filter.Matches(event.Log) {
+					continue
 				}
 				encoded, err := json.Marshal(event)
 				if err != nil {

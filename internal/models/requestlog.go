@@ -126,6 +126,8 @@ type RequestLogTopStatsOut struct {
 	Channels      []RequestLogTopItemOut `json:"channels"`
 	ModelTokens   []RequestLogTopItemOut `json:"model_tokens"`
 	ChannelTokens []RequestLogTopItemOut `json:"channel_tokens"`
+	Tokens        []RequestLogTopItemOut `json:"tokens"`
+	TokenTokens   []RequestLogTopItemOut `json:"token_tokens"`
 }
 
 type TestRequest struct {
