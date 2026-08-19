@@ -108,6 +108,20 @@ CREATE TABLE IF NOT EXISTS request_logs (
     -- recomputed on read, so editing the retry policy cannot rewrite the history
     -- of why a request stopped after one attempt.
     failure_retryable   INTEGER,
+    -- The cost snapshot. All three are NULL together when no price rule covered
+    -- the model, which means "cost unknown" and is distinct from a rule pricing it
+    -- at zero. They are a snapshot rather than a reference on purpose: the amount
+    -- is fixed at settlement so a later price edit cannot change what an already
+    -- served request cost.
+    --
+    -- cost_micros is an integer count of micro-units of cost_currency. There is no
+    -- floating point anywhere in this path.
+    cost_micros         INTEGER,
+    cost_currency       TEXT,
+    -- The model_prices row this amount came from, so the figure can be explained
+    -- months later. Not a foreign key: deleting a price version must not erase the
+    -- record of what a past request was charged.
+    pricing_rule_id     INTEGER,
     error               TEXT
 );`
 
@@ -151,6 +165,30 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     used_tokens  INTEGER NOT NULL DEFAULT 0,
     -- NULL means no limit.
     limit_tokens INTEGER,
+    -- A JSON array of the model ids and trailing-* prefixes this credential may
+    -- call. '[]' is the one spelling of "no restriction" that writes produce;
+    -- NULL means the same thing and is what rows predating the column carry, so
+    -- reads fold the two together (see models.ParseAllowedModels).
+    --
+    -- Matching is exact and case-insensitive, or an explicit trailing wildcard.
+    -- It is deliberately stricter than the model matching that picks a channel:
+    -- that one also accepts prefixes and suffixes of a channel's model names,
+    -- which would admit models this list does not name.
+    allowed_models TEXT NOT NULL DEFAULT '[]',
+    -- The reset cycle. 'none' is a lifetime total, which is how every token
+    -- behaved before these columns and so is the default.
+    quota_period TEXT NOT NULL DEFAULT 'none'
+        CHECK (quota_period IN ('none', 'daily', 'weekly', 'monthly')),
+    -- The IANA zone the period boundary falls in. UTC rather than the host's
+    -- local zone: a boundary that moves when the service is redeployed to another
+    -- region would reset a quota early or late with nothing to explain it.
+    quota_timezone TEXT NOT NULL DEFAULT 'UTC',
+    -- The cycle used_tokens was accumulated under, derived from quota_period and
+    -- quota_timezone. This is what makes rollover safe without a scheduled job:
+    -- usage is applied by an UPDATE that names the period it was earned in, so a
+    -- log row arriving after the boundary is added to the period it belongs to or
+    -- dropped, never to the new one. Empty string for quota_period = 'none'.
+    quota_period_key TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );`
@@ -200,6 +238,40 @@ const backfillUpstreamGroups = `INSERT INTO upstream_groups (upstream_id, group_
 // A token with no group would reach no channel at all, so the column is
 // backfilled to the default group and kept NOT NULL by the application.
 const backfillTokenGroups = `UPDATE api_tokens SET group_id = 1 WHERE group_id IS NULL`
+
+// Versioned model prices. A row is never edited: changing a price inserts a new
+// version with a later effective_from, and a settled request keeps naming the
+// version it was charged under. That is what stops a price edit from rewriting
+// bills that were already issued.
+//
+// Prices are integers — micro-units of the currency per million tokens — because
+// a binary float cannot hold 0.1 exactly and a bill accumulated in float64 stops
+// equalling the sum of its rows. See internal/models/pricing.go.
+const createModelPrices = `
+CREATE TABLE IF NOT EXISTS model_prices (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    -- Matched exactly and case-insensitively, or by a trailing '*'. Deliberately
+    -- stricter than the model matching that picks a channel: that one also
+    -- accepts prefixes and suffixes, which would price gpt-4o-mini at gpt-4o's
+    -- rate.
+    model_pattern   TEXT NOT NULL,
+    currency        TEXT NOT NULL CHECK (currency IN ('USD', 'CNY')),
+    -- Micro-units per 1,000,000 tokens. Zero is a real price (a free tier or a
+    -- dimension the provider does not bill) and is distinct from having no rule,
+    -- which means the cost is unknown.
+    prompt_micros        INTEGER NOT NULL CHECK (prompt_micros >= 0),
+    completion_micros    INTEGER NOT NULL CHECK (completion_micros >= 0),
+    cache_read_micros    INTEGER NOT NULL CHECK (cache_read_micros >= 0),
+    cache_create_micros  INTEGER NOT NULL CHECK (cache_create_micros >= 0),
+    -- 'YYYY-MM-DD HH:MM:SS' UTC, the same fixed-width shape as created_at, so
+    -- lexical comparison is chronological comparison.
+    effective_from  TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);`
+
+// Selection reads by pattern and effective_from, which is what the index covers.
+const createModelPricesIndex = `CREATE INDEX IF NOT EXISTS idx_model_prices_lookup
+    ON model_prices(model_pattern, effective_from);`
 
 const createRuntimeSettings = `
 CREATE TABLE IF NOT EXISTS runtime_settings (

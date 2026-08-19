@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -74,8 +75,14 @@ func getUpstreamDetail(t *testing.T, state *appstate.State, id int64) models.Ups
 	return detail
 }
 
+// itoa renders an integer for a test URL or JSON body.
+//
+// This was `string([]byte{byte('0' + value)})`, which is correct only for 0-9 and
+// silently emits a garbage byte past that rather than failing — a body built with
+// it parsed as malformed JSON, and the test it broke reported a missing value
+// rather than a bad fixture.
 func itoa(value int64) string {
-	return string([]byte{byte('0' + value)})
+	return strconv.FormatInt(value, 10)
 }
 
 // TestTheDetailResponseCarriesTheChannelsGroups guards the regression that made

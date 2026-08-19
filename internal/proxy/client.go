@@ -218,12 +218,16 @@ type Deps struct {
 type RequestContext struct {
 	DownstreamTokenID   int64
 	DownstreamTokenName string
-	ClientType          string
-	RequestModel        *string
-	ForwardModel        *string
-	Method              string
-	Path                string
-	LogBodyMaxBytes     int
+	// QuotaPeriodStamp is the reset cycle this request was admitted under, carried
+	// onto every log entry so its usage settles against that cycle rather than
+	// whichever one is current when the row commits.
+	QuotaPeriodStamp string
+	ClientType       string
+	RequestModel     *string
+	ForwardModel     *string
+	Method           string
+	Path             string
+	LogBodyMaxBytes  int
 	// RequestUID is shared by every attempt this downstream request makes, so
 	// the rows they each write can be recognised as one request's chain. Empty
 	// leaves the column NULL, which is what a caller that does not track
@@ -552,6 +556,7 @@ func baseLogEntry(requestCtx RequestContext, upstream *models.UpstreamRow,
 		UpstreamRequest:     prepared.UpstreamSnapshot,
 		AttemptIndex:        &attemptIndex,
 		PreUpstreamMs:       preUpstreamMs(requestCtx.ReceivedAt, start),
+		QuotaPeriodStamp:    requestCtx.QuotaPeriodStamp,
 	}
 	if requestCtx.RequestUID != "" {
 		uid := requestCtx.RequestUID

@@ -654,6 +654,31 @@ const tokenExpiresPresets = document.querySelector("#token-expires-presets");
 const tokenExpiresPreview = document.querySelector("#token-expires-preview");
 const tokenEnabledCheckbox = document.querySelector("#token-enabled");
 const tokenIdInput = document.querySelector("#token-id");
+const tokenAllowedModelsInput = document.querySelector("#token-allowed-models");
+const tokenQuotaPeriodSelect = document.querySelector("#token-quota-period");
+const tokenQuotaTimezoneInput = document.querySelector("#token-quota-timezone");
+
+// ── 定价规则 ────────────────────────────────────────────────
+const pricingRuleRows = document.querySelector("#pricing-rule-rows");
+const newPricingRuleBtn = document.querySelector("#new-pricing-rule-button");
+const pricingRuleDialog = document.querySelector("#pricing-rule-dialog");
+const pricingRuleForm = document.querySelector("#pricing-rule-form");
+const pricingRuleFormTitle = document.querySelector("#pricing-rule-form-title");
+const pricingRuleDialogClose = document.querySelector("#pricing-rule-dialog-close");
+const pricingRuleCancel = document.querySelector("#pricing-rule-cancel");
+const pricingRuleIdInput = document.querySelector("#pricing-rule-id");
+const pricingModelPatternInput = document.querySelector("#pricing-model-pattern");
+const pricingCurrencySelect = document.querySelector("#pricing-currency");
+const pricingEffectiveFromInput = document.querySelector("#pricing-effective-from");
+const pricingPromptInput = document.querySelector("#pricing-prompt");
+const pricingCompletionInput = document.querySelector("#pricing-completion");
+const pricingCacheReadInput = document.querySelector("#pricing-cache-read");
+const pricingCacheCreateInput = document.querySelector("#pricing-cache-create");
+const pricingRuleStatus = document.querySelector("#pricing-rule-status");
+
+let pricingRules = [];
+let pricingTableInfo = null;
+let pricingLoading = false;
 
 let tokenRefreshTimer = null;
 let tokens = [];

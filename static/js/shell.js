@@ -790,6 +790,9 @@ async function loadSettingsPage() {
       if (systemInfoGrid) systemInfoGrid.innerHTML = `<p class="settings-loading">运行信息暂不可用。</p>`;
     }
   }
+  if (typeof loadPricingRules === "function") {
+    await loadPricingRules();
+  }
 }
 
 function closeModelTestDialog() {

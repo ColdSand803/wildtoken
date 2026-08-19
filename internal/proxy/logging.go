@@ -67,13 +67,24 @@ type LogEntry struct {
 	// the gateway's policy would have given that failure to another channel. Both
 	// are NULL on a successful attempt. Set them through SetFailure so the pair
 	// cannot disagree.
-	FailureStage      *string
-	FailureRetryable  *bool
-	Error             *string
-	DownstreamRequest json.RawMessage
-	UpstreamRequest           json.RawMessage
-	UpstreamResponse          json.RawMessage
-	DownstreamResponse        json.RawMessage
+	FailureStage     *string
+	FailureRetryable *bool
+	// Cost is the price snapshot taken when this request settled. Nil means no
+	// price rule covered the model, which is "unknown", not "free". It is filled in
+	// by the log writer at enqueue rather than by each call site, so every path
+	// that logs a request prices it the same way.
+	Cost *models.CostSnapshot
+	// QuotaPeriodStamp identifies the reset cycle this request was admitted under,
+	// so its usage is applied to that cycle even when the row commits after the
+	// boundary. It is carried rather than recomputed at write time: recomputing is
+	// exactly how a request from the closing minutes of a period comes to spend the
+	// next one's budget.
+	QuotaPeriodStamp   string
+	Error              *string
+	DownstreamRequest  json.RawMessage
+	UpstreamRequest    json.RawMessage
+	UpstreamResponse   json.RawMessage
+	DownstreamResponse json.RawMessage
 }
 
 // SetFailure records one attempt's failure stage together with the verdict that
@@ -130,6 +141,7 @@ type LogWriter struct {
 	metrics LogMetricsRecorder
 	events  *eventBroker
 	quotas  *quota.Tracker
+	pricing *PricingBook
 	done    chan struct{}
 	// closeMu orders closing the queue against scheduling onto it. Sending on a
 	// closed channel panics and a select's default case does not prevent that,
@@ -144,13 +156,17 @@ type LogWriter struct {
 // NewLogWriter starts the background writer. It stops when Close is called,
 // which is also what drains the queue: ctx bounds each write rather than
 // abandoning the rows still waiting to be made.
+// A nil pricing book prices nothing, which leaves the cost columns NULL — the
+// same value a model with no price rule produces.
 func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecorder,
-	logStats *db.LogStatsCache, queueCapacity int, quotas *quota.Tracker) *LogWriter {
+	logStats *db.LogStatsCache, queueCapacity int, quotas *quota.Tracker,
+	pricing *PricingBook) *LogWriter {
 	writer := &LogWriter{
 		entries: make(chan LogEntry, max(queueCapacity, 1)),
 		metrics: metrics,
 		events:  newEventBroker(),
 		quotas:  quotas,
+		pricing: pricing,
 		done:    make(chan struct{}),
 	}
 	go writer.run(ctx, database, logStats)
@@ -162,6 +178,21 @@ func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecor
 // A dropped log is preferable to blocking a proxied request on the writer.
 func (w *LogWriter) Schedule(entry LogEntry) {
 	w.metrics.RecordLogEnqueue()
+
+	// The cost is settled here rather than at flush, because this is the moment
+	// the request finished and its usage became known. The two differ by however
+	// long the batch queue is, and pricing at write time would let an admin price
+	// edit landing in that window change what an already-served request cost.
+	//
+	// Priced on the request's own model — the id the client asked for. That is what
+	// an operator writes a price sheet against, and it keeps a channel's model
+	// mapping from silently moving a request onto another model's rate.
+	entry.Cost = w.pricing.Settle(entry.RequestModel, models.RequestUsage{
+		PromptTokens:        entry.PromptTokens,
+		CompletionTokens:    entry.CompletionTokens,
+		PromptCachedTokens:  entry.PromptCachedTokens,
+		CacheCreationTokens: entry.CacheCreationTokens,
+	})
 
 	// Held across the send so the queue cannot close underneath it.
 	w.closeMu.RLock()
@@ -180,7 +211,7 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 		// because until then the stored total still understates it. A dropped
 		// entry holds nothing: it will never reach the total either.
 		if tokenID, used, ok := quotaUsage(entry); ok {
-			w.quotas.Meter(tokenID, used)
+			w.quotas.Meter(tokenID, entry.QuotaPeriodStamp, used)
 		}
 	default:
 		w.metrics.RecordLogDequeue(1)
@@ -192,7 +223,8 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 // quotaUsage reports the token and amount a log entry contributes to a quota.
 //
 // It is the single definition of what counts, so the hold taken at enqueue and
-// the increment applied at commit can never disagree.
+// the increment applied at commit can never disagree. The period the amount
+// belongs to travels on the entry as QuotaPeriodStamp.
 func quotaUsage(entry LogEntry) (tokenID int64, used int64, ok bool) {
 	if entry.DownstreamTokenID == nil || entry.TotalTokens == nil || *entry.TotalTokens <= 0 {
 		return 0, 0, false
@@ -293,7 +325,10 @@ func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.Lo
 	defer func() {
 		for _, entry := range entries {
 			if tokenID, used, ok := quotaUsage(entry); ok {
-				w.quotas.Settle(tokenID, used)
+				// Released against the same period the hold was taken in. Using the
+				// current period would leave the closed period's hold outstanding
+				// forever, permanently shrinking the budget it applied to.
+				w.quotas.Settle(tokenID, entry.QuotaPeriodStamp, used)
 			}
 		}
 	}()
@@ -421,9 +456,10 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
          duration_ms, first_token_ms,
          request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
          failure_stage, failure_retryable,
+         cost_micros, cost_currency, pricing_rule_id,
          error, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,
 			entry.RequestModel, entry.UpstreamModel, entry.ReasoningEffort,
@@ -433,6 +469,8 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 			entry.CompletionReasoningTokens, entry.DurationMs, entry.FirstTokenMs,
 			entry.RequestUID, entry.AttemptIndex, entry.PreUpstreamMs,
 			entry.UpstreamHeadersMs, entry.FailureStage, entry.FailureRetryable,
+			costMicrosArg(entry.Cost), costCurrencyArg(entry.Cost),
+			pricingRuleIDArg(entry.Cost),
 			entry.Error, createdAt)
 		if err != nil {
 			return nil, apperr.Database(err)
@@ -463,10 +501,13 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 		// at enqueue cannot drift apart. They were two copies of one condition,
 		// which is only correct for as long as nobody edits one of them.
 		if tokenID, used, ok := quotaUsage(entry); ok {
-			_, err := tx.ExecContext(ctx,
-				"UPDATE api_tokens SET used_tokens = used_tokens + ? WHERE id = ?",
-				used, tokenID)
-			if err != nil {
+			// Applied through the period-aware statement rather than a plain
+			// increment. It performs the rollover as part of recording the first
+			// usage of a new cycle, and drops usage that belongs to a cycle already
+			// closed — which is what keeps a request admitted before a boundary from
+			// spending the budget after it. See db.ApplyTokenUsage.
+			if err := db.ApplyTokenUsage(ctx, tx, tokenID, used,
+				entry.QuotaPeriodStamp); err != nil {
 				return nil, apperr.Database(err)
 			}
 		}
@@ -511,6 +552,9 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 					UpstreamHeadersMs:         entry.UpstreamHeadersMs,
 					FailureStage:              entry.FailureStage,
 					FailureRetryable:          entry.FailureRetryable,
+					CostMicros:                costMicrosArg(entry.Cost),
+					CostCurrency:              costCurrencyArg(entry.Cost),
+					PricingRuleID:             pricingRuleIDArg(entry.Cost),
 					Error:                     entry.Error,
 				},
 			},
@@ -557,6 +601,30 @@ func snapshotsEqual(left, right json.RawMessage) bool {
 		return left == nil && right == nil
 	}
 	return string(left) == string(right)
+}
+
+// The three cost columns are written as a group, all NULL or all present. Split
+// out so no call site can store an amount without the version that produced it,
+// which would leave a figure nobody can explain.
+func costMicrosArg(cost *models.CostSnapshot) *int64 {
+	if cost == nil {
+		return nil
+	}
+	return &cost.TotalMicros
+}
+
+func costCurrencyArg(cost *models.CostSnapshot) *string {
+	if cost == nil {
+		return nil
+	}
+	return &cost.Currency
+}
+
+func pricingRuleIDArg(cost *models.CostSnapshot) *int64 {
+	if cost == nil {
+		return nil
+	}
+	return &cost.PricingRuleID
 }
 
 func boolToInt64(value bool) int64 {

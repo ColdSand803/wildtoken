@@ -149,6 +149,7 @@ test("formatLogDetailMeta renders failure stage and retryable badges in status h
     formatSeconds: (ms) => ms + "ms",
   });
 
+  vm.runInContext(extractFunction(source, "formatLogCostText"), context);
   vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
 
   // 1. Failed retryable log

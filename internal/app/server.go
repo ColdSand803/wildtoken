@@ -102,8 +102,19 @@ func New(ctx context.Context) (*Server, error) {
 
 	jobsCtx, cancelJobs := context.WithCancel(context.Background())
 	quotas := quota.NewTracker()
+	// The price table is loaded once here and refreshed by the admin writes. A
+	// failure to load leaves it empty, which prices nothing and leaves the cost
+	// columns NULL — the service still proxies, it just cannot estimate cost until
+	// the table reads successfully.
+	pricing := proxy.NewPricingBook()
+	if rules, err := db.ListPricingRules(ctx, database); err == nil {
+		pricing.Replace(rules)
+	} else {
+		slog.Warn("could not load the model price table; costs will not be estimated",
+			"error", err)
+	}
 	logWriter := proxy.NewLogWriter(jobsCtx, database, runtimeMetrics, logStats,
-		settings.Logging.LogQueueCapacity, quotas)
+		settings.Logging.LogQueueCapacity, quotas, pricing)
 
 	state := &appstate.State{
 		DB:                  database,
@@ -121,6 +132,7 @@ func New(ctx context.Context) (*Server, error) {
 		TokenRateLimiter:    ratelimit.NewLimiter(),
 		UpstreamRateLimiter: ratelimit.NewLimiter(),
 		Quotas:              quotas,
+		Pricing:             pricing,
 		ProbeRuns:           appstate.NewProbeRunState(),
 		StartedAt:           time.Now(),
 	}

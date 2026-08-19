@@ -82,6 +82,8 @@ func Init(ctx context.Context, db *sql.DB) error {
 		seedDefaultGroup,
 		createUpstreamGroups,
 		createUpstreamGroupsIndex,
+		createModelPrices,
+		createModelPricesIndex,
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -124,6 +126,12 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// guessing one from the status.
 		{"failure_stage", "TEXT"},
 		{"failure_retryable", "INTEGER"},
+		// NULL on rows that predate pricing, and on any row whose model no rule
+		// covered. Both mean "cost unknown"; neither means free. The console must
+		// not render them as 0, or a total will understate what was spent.
+		{"cost_micros", "INTEGER"},
+		{"cost_currency", "TEXT"},
+		{"pricing_rule_id", "INTEGER"},
 	} {
 		if err := ensureColumn(ctx, db, "request_logs", column.name, column.definition); err != nil {
 			return err
@@ -146,6 +154,22 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"used_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"limit_tokens", "INTEGER"},
 		{"rate_limit", "TEXT"},
+		// Defaulted to '[]' so an upgraded database reads as unrestricted, which
+		// is how every existing credential behaved before the column. NOT NULL is
+		// deliberately not asserted here: ALTER TABLE ADD COLUMN with a default
+		// fills existing rows, but a row written by an older binary against a
+		// newer file would still carry NULL, and ParseAllowedModels folds NULL
+		// into unrestricted rather than depending on the constraint.
+		{"allowed_models", "TEXT DEFAULT '[]'"},
+		// Defaulted to the legacy behaviour, so an upgraded database keeps treating
+		// every limit as a lifetime total until an operator chooses a cycle. The
+		// CHECK is omitted on the migrated column because SQLite cannot add a
+		// constrained column to a populated table; the stores validate instead, and
+		// an unrecognised value reads as 'none' rather than as an unpredictable
+		// reset.
+		{"quota_period", "TEXT DEFAULT 'none'"},
+		{"quota_timezone", "TEXT DEFAULT 'UTC'"},
+		{"quota_period_key", "TEXT DEFAULT ''"},
 	} {
 		if err := ensureColumn(ctx, db, "api_tokens", column.name, column.definition); err != nil {
 			return err

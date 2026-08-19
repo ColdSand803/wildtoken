@@ -71,6 +71,15 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 		admin.Get("/system", handlers.AdminSystemInfo(state))
 		admin.Get("/system/metrics", handlers.AdminRuntimeMetrics(state))
 
+		// Prices are versioned, so there is no PUT: a change is a new version with
+		// a later effective_from, which is what keeps an already settled request's
+		// amount explicable.
+		admin.Route("/pricing", func(pricing chi.Router) {
+			pricing.Get("/", handlers.AdminListPricingRules(state))
+			pricing.Post("/", handlers.AdminCreatePricingRule(state))
+			pricing.Delete("/{id}", handlers.AdminDeletePricingRule(state))
+		})
+
 		admin.Route("/upstreams", func(upstreams chi.Router) {
 			upstreams.Post("/fetch-models", handlers.AdminFetchModelsPreview(state))
 			upstreams.Post("/export", handlers.AdminExportUpstreams(state))

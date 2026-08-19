@@ -54,23 +54,42 @@ func (s *SettingsStore) Set(settings models.RuntimeSettings) {
 // Concurrent misses may reload the same value, which is intentional and harmless.
 type ModelsListCache struct {
 	mu      sync.RWMutex
-	byGroup map[int64]json.RawMessage
+	byGroup map[ModelsCacheKey]json.RawMessage
+}
+
+// ModelsCacheKey identifies one cached model list.
+//
+// The group decides which channels are reachable; the policy fingerprint decides
+// which of their models this credential may see. Both belong in the key, and the
+// fingerprint is what carries the policy version the checklist requires: editing
+// a token's whitelist changes its fingerprint, so the next request reads a
+// different entry rather than the list computed under the old policy. No
+// invalidation step is needed on a token write, which matters because token edits
+// do not currently invalidate this cache at all.
+//
+// Tokens sharing a whitelist share an entry, so the key count is bounded by
+// distinct policies rather than by tokens.
+type ModelsCacheKey struct {
+	GroupID int64
+	// PolicyFingerprint is empty for an unrestricted token, which is the common
+	// case and shares one entry per group.
+	PolicyFingerprint string
 }
 
 func NewModelsListCache() *ModelsListCache {
-	return &ModelsListCache{byGroup: map[int64]json.RawMessage{}}
+	return &ModelsListCache{byGroup: map[ModelsCacheKey]json.RawMessage{}}
 }
 
-func (c *ModelsListCache) Get(groupID int64) json.RawMessage {
+func (c *ModelsListCache) Get(key ModelsCacheKey) json.RawMessage {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.byGroup[groupID]
+	return c.byGroup[key]
 }
 
-func (c *ModelsListCache) Set(groupID int64, value json.RawMessage) {
+func (c *ModelsListCache) Set(key ModelsCacheKey, value json.RawMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.byGroup[groupID] = value
+	c.byGroup[key] = value
 }
 
 // Invalidate drops every group's entry, because one channel edit can change
@@ -189,6 +208,10 @@ type State struct {
 	LogStats    *db.LogStatsCache
 	ModelsCache *ModelsListCache
 	Routing     *proxy.RoutingCache
+	// Pricing holds the model price table the settlement path reads. It is
+	// replaced wholesale by the admin write endpoints.
+	Pricing *proxy.PricingBook
+
 	// Latency holds the bounded rolling response times least-latency routing
 	// ranks channels by. It is in memory only: the figures describe the last few
 	// minutes, so persisting them would mean a restart routing on measurements

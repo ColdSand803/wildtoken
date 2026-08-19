@@ -82,6 +82,71 @@ func writeProtocolError(w http.ResponseWriter, status int, path, message, errorT
 	})
 }
 
+// ModelNotAllowedCode identifies a model refused by the token's whitelist at the
+// top level of the refusal, mirroring the other downstream rejections: a caller
+// that does not speak either vendor's error shape can branch on it.
+const ModelNotAllowedCode = "MODEL_NOT_ALLOWED"
+
+// ModelNotAllowedMessage is the operator-facing summary carried alongside the code.
+const ModelNotAllowedMessage = "该 API key 不允许调用此模型"
+
+// modelPermittedByToken judges a request against the token's whitelist.
+//
+// A restricted token is refused when the body named no model at all. That is the
+// strict direction, and it is chosen deliberately: the alternative admits any
+// request whose model the gateway could not read, which turns a malformed or
+// unrecognised body into a way past the whitelist. An unrestricted token is
+// unaffected, so this only ever applies to a credential an operator has narrowed
+// on purpose.
+func modelPermittedByToken(policy models.AllowedModelsPolicy, model *string) bool {
+	if policy.Unrestricted() {
+		return true
+	}
+	if model == nil {
+		return false
+	}
+	return policy.Permits(*model)
+}
+
+// modelNotAllowedDetail explains the refusal, naming the permitted list.
+//
+// The list is disclosed because the caller holds the credential it describes:
+// they can already discover it by trying models, and telling them saves a support
+// round trip. It is not disclosed for a request that named no model, where there
+// is nothing to compare it against and the useful correction is different.
+func modelNotAllowedDetail(model *string, policy models.AllowedModelsPolicy) string {
+	patterns := strings.Join(policy.Patterns(), ", ")
+	if model == nil || strings.TrimSpace(*model) == "" {
+		return "this API key is restricted to specific models, so the request must name one; " +
+			"allowed: " + patterns
+	}
+	return "model " + *model + " is not allowed for this API key; allowed: " + patterns
+}
+
+// writeModelNotAllowedRejection refuses a model the token may not call.
+//
+// 403 rather than 400: the request is well formed and the model may well exist —
+// this credential is not permitted to use it. Both vendor dialects have a
+// permission error shape, and an SDK reading either will not retry it, which is
+// the correct behaviour for a refusal that will not change on its own.
+func writeModelNotAllowedRejection(w http.ResponseWriter, anthropic bool, detail string) {
+	body := map[string]any{
+		"code":    ModelNotAllowedCode,
+		"message": ModelNotAllowedMessage,
+	}
+	if anthropic {
+		body["type"] = "error"
+		body["error"] = map[string]string{"type": "permission_error", "message": detail}
+	} else {
+		body["error"] = map[string]string{
+			"message": detail,
+			"type":    "invalid_request_error",
+			"code":    "model_not_allowed",
+		}
+	}
+	apperr.WriteJSON(w, http.StatusForbidden, body)
+}
+
 // UpstreamRateLimitedCode identifies "every routable channel is rate-limited"
 // at the top level of the refusal, mirroring the API-key rejections in
 // middleware: a caller that does not speak either vendor's error shape can
@@ -216,6 +281,15 @@ func (g *abortLogGuard) setDownstreamToken(tokenID int64, tokenName string) {
 	g.entry.DownstreamTokenName = &tokenName
 }
 
+// setQuotaPeriod records the reset cycle the request was admitted under, so a row
+// this guard writes settles against that cycle rather than the current one.
+func (g *abortLogGuard) setQuotaPeriod(stamp string) {
+	if g.entry == nil {
+		return
+	}
+	g.entry.QuotaPeriodStamp = stamp
+}
+
 func (g *abortLogGuard) setClientType(clientType string) {
 	if g.entry == nil {
 		return
@@ -296,6 +370,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		defer guard.finish()
 		guard.setDownstreamToken(auth.TokenID, auth.TokenName)
 		guard.setClientType(auth.ClientType)
+		guard.setQuotaPeriod(auth.QuotaPeriodStamp)
 
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDownstreamBodyBytes))
 		if err != nil {
@@ -317,6 +392,18 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 
 		model := parseModelFromBody(body)
 		guard.setModel(model)
+
+		// The whitelist is judged on the model the client asked for, before any
+		// channel mapping rewrites it. A channel that maps gpt-4o onto some other
+		// provider's id must not be able to launder a model past this check, and
+		// the operator wrote the list in terms of what their callers send.
+		if !modelPermittedByToken(auth.AllowedModels, model) {
+			detail := modelNotAllowedDetail(model, auth.AllowedModels)
+			guard.logAndDisarm(http.StatusForbidden, detail, proxy.FailureStageGateway)
+			writeModelNotAllowedRejection(w, models.IsAnthropicMessages(path), detail)
+			return
+		}
+
 		selector := upstreamSelector(r)
 
 		runtimeSettings := state.Runtime.Get()
@@ -508,6 +595,7 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			&selected.Upstream, proxy.RequestContext{
 				DownstreamTokenID:   config.auth.TokenID,
 				DownstreamTokenName: config.auth.TokenName,
+				QuotaPeriodStamp:    config.auth.QuotaPeriodStamp,
 				ClientType:          config.auth.ClientType,
 				RequestModel:        config.model,
 				ForwardModel:        selected.ForwardModel,
@@ -799,11 +887,20 @@ func ListModelsHandler(state *appstate.State) http.HandlerFunc {
 				return
 			}
 			writeRawJSON(w, OpenAIModelsListResponse(
-				AggregateModelIDs([]models.UpstreamRow{upstream})))
+				permittedModelIDs(AggregateModelIDs([]models.UpstreamRow{upstream}),
+					auth.AllowedModels)))
 			return
 		}
 
-		if cached := state.ModelsCache.Get(auth.GroupID); cached != nil {
+		// The key carries the token's policy fingerprint, so a restricted token
+		// cannot read an entry computed for an unrestricted one — and editing a
+		// whitelist moves the token to a different key rather than needing this
+		// cache to be invalidated on token writes.
+		cacheKey := appstate.ModelsCacheKey{
+			GroupID:           auth.GroupID,
+			PolicyFingerprint: auth.AllowedModels.Fingerprint(),
+		}
+		if cached := state.ModelsCache.Get(cacheKey); cached != nil {
 			writeRawJSON(w, cached)
 			return
 		}
@@ -813,16 +910,41 @@ func ListModelsHandler(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-		response := OpenAIModelsListResponse(AggregateModelIDs(upstreams))
+		response := OpenAIModelsListResponse(
+			permittedModelIDs(AggregateModelIDs(upstreams), auth.AllowedModels))
 
 		// Another concurrent miss may have already filled the cache.
-		if cached := state.ModelsCache.Get(auth.GroupID); cached != nil {
+		if cached := state.ModelsCache.Get(cacheKey); cached != nil {
 			writeRawJSON(w, cached)
 			return
 		}
-		state.ModelsCache.Set(auth.GroupID, response)
+		state.ModelsCache.Set(cacheKey, response)
 		writeRawJSON(w, response)
 	}
+}
+
+// permittedModelIDs narrows an aggregated model list to what a token may call.
+//
+// The intersection runs over concrete ids only, which is what AggregateModelIDs
+// returns — model_prefixes never expand into ids, so a channel's prefix rule
+// contributes nothing here either way. A whitelist entry naming a model no
+// channel serves simply matches nothing; the list advertises what is both
+// reachable and permitted, which is the same pair the proxy path enforces.
+//
+// The result is never nil, so an empty intersection serializes as an empty list
+// rather than null: a token restricted to models its group cannot reach gets a
+// well-formed empty list, which is the honest answer and keeps SDKs working.
+func permittedModelIDs(ids []string, policy models.AllowedModelsPolicy) []string {
+	if policy.Unrestricted() {
+		return ids
+	}
+	permitted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if policy.Permits(id) {
+			permitted = append(permitted, id)
+		}
+	}
+	return permitted
 }
 
 func writeRawJSON(w http.ResponseWriter, body json.RawMessage) {

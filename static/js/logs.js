@@ -213,6 +213,45 @@ function renderLogReasoningEffort(log) {
   `;
 }
 
+
+/**
+ * 格式化单条请求的预估成本文本。
+ * costMicros 为 null / undefined / 非数字时必须返回 "未定价"，严禁显示 "$0.00"。
+ * 遵循与服务端 models.FormatMicros 一致的整数舍入规则：
+ * 正常保留 2 位小数；当金额小于 0.01 主单位（10,000 micros）且大于 0 时保留 6 位小数，避免微小金额被错误四舍五入为 0。
+ */
+function formatLogCostText(costMicros, costCurrency = "USD") {
+  if (costMicros === null || costMicros === undefined) {
+    return "未定价";
+  }
+  const micros = Number(costMicros);
+  if (!Number.isFinite(micros)) {
+    return "未定价";
+  }
+
+  const curr = String(costCurrency || "USD").toUpperCase();
+  const symbol = curr === "USD" ? "$" : curr === "CNY" ? "¥" : `${curr} `;
+
+  const negative = micros < 0;
+  const absMicros = Math.abs(micros);
+  let whole = Math.floor(absMicros / 1_000_000);
+  const fraction = absMicros % 1_000_000;
+
+  let digits = 2;
+  if (whole === 0 && fraction > 0 && fraction < 10_000) {
+    digits = 6;
+  }
+
+  const scale = Math.pow(10, digits);
+  let scaled = Math.round((fraction * scale) / 1_000_000);
+  if (scaled >= scale) {
+    whole += 1;
+    scaled = 0;
+  }
+
+  return `${negative ? "-" : ""}${symbol}${whole}.${String(scaled).padStart(digits, "0")}`;
+}
+
 function formatTokens(log) {
   const part = (value) => (value === null || value === undefined ? "-" : value);
   const cacheHitRate = formatCacheHitRate(log);
@@ -237,12 +276,20 @@ function formatTokens(log) {
   const rateStyle = rateMatch
     ? ` style="--cache-rate:${Math.min(100, Math.max(0, Number(rateMatch[1])))}"`
     : "";
+
+  let costBadge = "";
+  if (log.cost_micros !== null && log.cost_micros !== undefined && Number.isFinite(Number(log.cost_micros))) {
+    const costText = formatLogCostText(log.cost_micros, log.cost_currency);
+    const ruleInfo = log.pricing_rule_id ? ` (规则版本 #${log.pricing_rule_id})` : "";
+    costBadge = `\n    <div><span class="badge log-token-cost-badge" title="预估费用：${escapeHtml(costText)}${escapeHtml(ruleInfo)}">${escapeHtml(costText)}</span></div>`;
+  }
+
   return `
     <span class="token-triple" aria-label="输入 输出 总计 缓存命中 缓存率 思考 tokens">
       ${metrics.map(([label, value]) => `
         <span${label === "缓存率" ? rateStyle : ""}><b>${escapeHtml(String(part(value)))}</b><small>${escapeHtml(label)}</small></span>
       `).join("")}
-    </span>
+    </span>${costBadge}
   `;
 }
 
@@ -1748,6 +1795,18 @@ function formatLogDetailMeta(detail) {
     ? `<div class="log-detail-status-head"><span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>${stageBadge}${retryableBadge}</div>`
     : `<span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>`;
 
+  const isPriced = detail.cost_micros !== null && detail.cost_micros !== undefined && Number.isFinite(Number(detail.cost_micros));
+  const costText = formatLogCostText(detail.cost_micros, detail.cost_currency);
+  const costRuleText = detail.pricing_rule_id ? `定价规则：版本 #${detail.pricing_rule_id}` : (isPriced ? "已结算" : "未匹配定价规则");
+  const costCard = `
+    <div class="log-detail-meta-card log-detail-cost-card">
+      <span class="log-detail-meta-label">预估费用</span>
+      <strong class="log-detail-cost-amount ${isPriced ? "is-priced" : "is-unpriced"}">${escapeHtml(costText)}</strong>
+      <small class="log-detail-cost-rule">${escapeHtml(costRuleText)}</small>
+      <small class="log-cost-disclaimer">估算金额，不等同于供应商最终账单</small>
+    </div>
+  `;
+
   return `
     <div class="log-detail-meta-card log-detail-route-card">
       <span class="log-detail-meta-label">请求路由</span>
@@ -1771,6 +1830,7 @@ function formatLogDetailMeta(detail) {
       <span class="log-detail-meta-label">Tokens</span>
       ${formatTokenDetailPanel(detail)}
     </div>
+    ${costCard}
     ${errorCard}
   `;
 }

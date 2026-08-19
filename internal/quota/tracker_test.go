@@ -10,11 +10,11 @@ func limitOf(value int64) *int64 { return &value }
 func TestTrackerAdmitsWithinBudget(t *testing.T) {
 	tracker := NewTracker()
 
-	reservation, ok := tracker.Admit(1, 100, limitOf(1000))
+	reservation, ok := tracker.Admit(1, "", 100, limitOf(1000))
 	if !ok {
 		t.Fatal("a token well inside its limit should be admitted")
 	}
-	if held := tracker.Outstanding(1); held != ProvisionalCost {
+	if held := tracker.Outstanding(1, ""); held != ProvisionalCost {
 		t.Fatalf("outstanding = %d, want one provisional charge", held)
 	}
 
@@ -27,7 +27,7 @@ func TestTrackerAdmitsWithinBudget(t *testing.T) {
 func TestTrackerRefusesExhaustedQuota(t *testing.T) {
 	tracker := NewTracker()
 
-	_, ok := tracker.Admit(1, 1000, limitOf(1000))
+	_, ok := tracker.Admit(1, "", 1000, limitOf(1000))
 	if ok {
 		t.Fatal("a token at its limit should be refused")
 	}
@@ -47,7 +47,7 @@ func TestTrackerBoundsBurstAdmission(t *testing.T) {
 	admitted := 0
 	reservations := make([]Reservation, 0, 100)
 	for range 100 {
-		reservation, ok := tracker.Admit(1, 0, limit)
+		reservation, ok := tracker.Admit(1, "", 0, limit)
 		if !ok {
 			continue
 		}
@@ -71,24 +71,24 @@ func TestTrackerHoldsMeteredUsageUntilSettled(t *testing.T) {
 	tracker := NewTracker()
 	limit := limitOf(1000)
 
-	reservation, ok := tracker.Admit(1, 0, limit)
+	reservation, ok := tracker.Admit(1, "", 0, limit)
 	if !ok {
 		t.Fatal("the first request should be admitted")
 	}
-	tracker.Meter(1, 1000)
+	tracker.Meter(1, "", 1000)
 	reservation.Release()
 
 	// The row has not committed, so the stored total still reads zero. Usage
 	// that is already known has to keep the next request out until it lands.
-	if _, ok := tracker.Admit(1, 0, limit); ok {
+	if _, ok := tracker.Admit(1, "", 0, limit); ok {
 		t.Fatal("metered usage was not weighed against the limit")
 	}
 
-	tracker.Settle(1, 1000)
+	tracker.Settle(1, "", 1000)
 	if tracked := tracker.Tracked(); tracked != 0 {
 		t.Fatalf("expected settled usage to be dropped, %d tokens still held", tracked)
 	}
-	if _, ok := tracker.Admit(1, 1000, limitOf(2000)); !ok {
+	if _, ok := tracker.Admit(1, "", 1000, limitOf(2000)); !ok {
 		t.Fatal("expected admission once the stored total carried the usage")
 	}
 }
@@ -97,7 +97,7 @@ func TestTrackerIgnoresUnlimitedTokens(t *testing.T) {
 	tracker := NewTracker()
 
 	for range 100 {
-		reservation, ok := tracker.Admit(1, 1<<40, nil)
+		reservation, ok := tracker.Admit(1, "", 1<<40, nil)
 		if !ok {
 			t.Fatal("a token with no limit must always be admitted")
 		}
@@ -112,13 +112,13 @@ func TestReservationReleaseIsIdempotent(t *testing.T) {
 	tracker := NewTracker()
 	limit := limitOf(10 * ProvisionalCost)
 
-	first, _ := tracker.Admit(1, 0, limit)
-	second, _ := tracker.Admit(1, 0, limit)
+	first, _ := tracker.Admit(1, "", 0, limit)
+	second, _ := tracker.Admit(1, "", 0, limit)
 
 	first.Release()
 	first.Release()
 
-	if outstanding := tracker.Outstanding(1); outstanding != ProvisionalCost {
+	if outstanding := tracker.Outstanding(1, ""); outstanding != ProvisionalCost {
 		t.Fatalf("a repeated release must not free another request's hold, outstanding %d", outstanding)
 	}
 	second.Release()
@@ -137,7 +137,7 @@ func TestTrackerConcurrentAdmission(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 50 {
 		wg.Go(func() {
-			if _, ok := tracker.Admit(7, 0, limit); !ok {
+			if _, ok := tracker.Admit(7, "", 0, limit); !ok {
 				return
 			}
 			mu.Lock()
@@ -161,23 +161,23 @@ func TestRetriesAreCoveredByOneReservation(t *testing.T) {
 	// so the provisional charge only ever stands in for the one in flight;
 	// this asserts the finished ones are held at their real cost rather than
 	// at another provisional charge each.
-	reservation, ok := tracker.Admit(1, 0, limitOf(1<<40))
+	reservation, ok := tracker.Admit(1, "", 0, limitOf(1<<40))
 	if !ok {
 		t.Fatal("a token with room should be admitted")
 	}
-	if held := tracker.Outstanding(1); held != ProvisionalCost {
+	if held := tracker.Outstanding(1, ""); held != ProvisionalCost {
 		t.Fatalf("outstanding = %d, want one provisional charge", held)
 	}
 
-	tracker.Meter(1, 500) // the attempt that failed
-	tracker.Meter(1, 800) // the attempt that succeeded
+	tracker.Meter(1, "", 500) // the attempt that failed
+	tracker.Meter(1, "", 800) // the attempt that succeeded
 	reservation.Release()
 
-	if held := tracker.Outstanding(1); held != 1300 {
+	if held := tracker.Outstanding(1, ""); held != 1300 {
 		t.Errorf("outstanding = %d, want the exact 1300 the two attempts used", held)
 	}
 
-	tracker.Settle(1, 1300)
+	tracker.Settle(1, "", 1300)
 	if tracked := tracker.Tracked(); tracked != 0 {
 		t.Errorf("%d tokens still held after both rows committed", tracked)
 	}

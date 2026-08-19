@@ -202,9 +202,9 @@ test("the token table header and its body cells agree on the column count", () =
   const headerCount = [...table.matchAll(/<th[\s>]/g)].length;
 
   const source = read("static/js/tokens.js");
-  // 名称、描述、令牌预览、分组、限额、有效期、状态、操作
-  assert.equal(headerCount, 8);
-  assert.match(source, /skeletonRowsMarkup\(8, 5\)/);
-  assert.match(source, /emptyStateCell\(8, \{/);
-  assert.match(source, /noMatchStateCell\(8, \{/);
+  // 名称、描述、令牌预览、分组、允许模型、限额、有效期、状态、操作
+  assert.equal(headerCount, 9);
+  assert.match(source, /skeletonRowsMarkup\(9, 5\)/);
+  assert.match(source, /emptyStateCell\(9, \{/);
+  assert.match(source, /noMatchStateCell\(9, \{/);
 });

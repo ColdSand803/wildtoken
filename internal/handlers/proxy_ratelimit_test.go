@@ -30,7 +30,12 @@ func proxyRateLimitState(t *testing.T) *appstate.State {
 	state.UpstreamRateLimiter = ratelimit.NewLimiter()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 64, state.Quotas)
+	// One book shared between the state and the writer, as the server wires it: a
+	// second instance would let an admin write refresh a table the settlement path
+	// never reads.
+	state.Pricing = proxy.NewPricingBook()
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics,
+		db.NewLogStatsCache(), 64, state.Quotas, state.Pricing)
 	t.Cleanup(func() {
 		state.LogWriter.Close()
 		state.TokenRateLimiter.Close()

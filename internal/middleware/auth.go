@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strings"
+	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/apperr"
 	"github.com/liguangsheng/wildtoken/internal/authstate"
@@ -51,6 +52,19 @@ type DownstreamAuth struct {
 	// under. LimitTokens is nil when the token is unlimited.
 	UsedTokens  int64
 	LimitTokens *int64
+	// AllowedModels is the token's model whitelist, already parsed. The zero value
+	// is unrestricted.
+	//
+	// This middleware only loads it. Enforcement belongs to the proxy handler,
+	// which is where the request body is read and the client's requested model is
+	// known — checking here would mean parsing the body twice, and on a route
+	// that carries no model there would be nothing to check against.
+	AllowedModels models.AllowedModelsPolicy
+	// QuotaPeriodStamp identifies the reset cycle this request was admitted under.
+	// It travels with the request so its usage is applied to the period it ran in,
+	// even when the log row commits after the boundary. Empty for a token that
+	// never resets.
+	QuotaPeriodStamp string
 }
 
 // DownstreamAuthFrom returns the downstream authentication attached to an
@@ -226,8 +240,21 @@ func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter,
 
 			   The request that crosses the limit is still allowed to finish: its
 			   cost is only known once the response completes. */
-			reservation, admitted := quotas.Admit(credential.TokenID,
-				credential.UsedTokens, credential.LimitTokens)
+			/* The period this request belongs to is resolved once, here, and
+			   travels with it: admission weighs it against this period's usage,
+			   and settlement applies its usage to this same period. Resolving it
+			   again later would put a request that arrived seconds before a
+			   boundary into the period after it. */
+			periodStamp := models.QuotaPeriodStamp(credential.QuotaPeriod, time.Now(),
+				models.LoadQuotaLocation(credential.QuotaTimezone))
+			usedThisPeriod := credential.UsedTokensInCurrentPeriod(periodStamp)
+
+			/* Outstanding usage is tracked per period as well. A hold taken before
+			   a boundary must not count against the budget after it, or the first
+			   requests of a new cycle would be refused on the strength of the
+			   previous one's traffic. */
+			reservation, admitted := quotas.Admit(credential.TokenID, periodStamp,
+				usedThisPeriod, credential.LimitTokens)
 			defer reservation.Release()
 			if !admitted {
 				// The message reports the stored total, not what admission
@@ -235,8 +262,12 @@ func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter,
 				// requests still running, so reporting it as "used" would name a
 				// quantity that matches no record the operator can look at and
 				// that changes with the concurrency of the moment.
+				// The figure reported is this period's usage, not the row's raw
+				// total: on a token that resets, the raw total may describe a cycle
+				// that has already closed, and naming it would tell the caller they
+				// have spent a budget they no longer owe.
 				writeDownstreamQuotaRejection(w, anthropic,
-					models.QuotaExceededMessage(credential.UsedTokens, *credential.LimitTokens))
+					models.QuotaExceededMessage(usedThisPeriod, *credential.LimitTokens))
 				return
 			}
 
@@ -257,12 +288,16 @@ func RequireDownstream(database *sql.DB, limiter *ratelimit.Limiter,
 			}
 
 			ctx := context.WithValue(r.Context(), downstreamAuthKey, DownstreamAuth{
-				TokenID:     credential.TokenID,
-				TokenName:   credential.TokenName,
-				ClientType:  DetectClientType(r, anthropic),
-				GroupID:     credential.GroupID,
-				UsedTokens:  credential.UsedTokens,
-				LimitTokens: credential.LimitTokens,
+				TokenID:       credential.TokenID,
+				TokenName:     credential.TokenName,
+				ClientType:    DetectClientType(r, anthropic),
+				GroupID:       credential.GroupID,
+				UsedTokens:    usedThisPeriod,
+				LimitTokens:   credential.LimitTokens,
+				AllowedModels: credential.AllowedModels,
+				// The stamp resolved at admission, carried so settlement applies
+				// this request's usage to the cycle it actually ran in.
+				QuotaPeriodStamp: periodStamp,
 			})
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
@@ -415,6 +450,59 @@ type DownstreamCredential struct {
 	LimitTokens *int64
 	// RateLimit is the stored rate expression ("100/m"), nil when unlimited.
 	RateLimit *string
+	// AllowedModels is the parsed model whitelist; the zero value is unrestricted.
+	AllowedModels models.AllowedModelsPolicy
+	// QuotaPeriod, QuotaTimezone and StoredPeriodStamp are the token's reset cycle
+	// as stored. StoredPeriodStamp is the period used_tokens was accumulated under,
+	// which is not necessarily the current one — see UsedTokensInCurrentPeriod.
+	QuotaPeriod       string
+	QuotaTimezone     string
+	StoredPeriodStamp string
+}
+
+// UsedTokensInCurrentPeriod reports the usage that counts against the limit right
+// now.
+//
+// When the stored key names an earlier period, the counter describes a cycle that
+// has closed and the current period's usage is zero — the row has not been cleared
+// yet, because the clearing happens atomically with the first usage of the new
+// period. Reading the stale total as current is what would make a token look
+// exhausted through the whole first request of a fresh cycle.
+//
+// The period type has to match for the comparison to mean anything: key shapes
+// differ per type, so after a period-type change the stored total is treated as
+// current rather than compared across shapes.
+func (c DownstreamCredential) UsedTokensInCurrentPeriod(currentStamp string) int64 {
+	if currentStamp == "" {
+		// The token does not reset, so the stored total is the current one.
+		return c.UsedTokens
+	}
+	if c.StoredPeriodStamp == currentStamp {
+		return c.UsedTokens
+	}
+	// The stamp names a different cycle. When it names a different period *type*,
+	// the stored total is real usage the operator has not been credited for, and
+	// the applying statement carries it forward rather than discarding it — so
+	// admission has to weigh it too, or a token would be admitted past its limit
+	// for one request after every configuration change.
+	if periodTypeOf(c.StoredPeriodStamp) != periodTypeOf(currentStamp) {
+		return c.UsedTokens
+	}
+	// Same type, different period: the counter describes a cycle that has closed.
+	// It has not been cleared yet, because clearing happens atomically with the
+	// first usage of the new period.
+	return 0
+}
+
+// periodTypeOf reads the period type a stamp was written under. It mirrors the
+// prefix comparison in db.ApplyTokenUsage, so admission and settlement agree about
+// which stamps are comparable.
+func periodTypeOf(stamp string) string {
+	prefix, _, found := strings.Cut(stamp, ":")
+	if !found {
+		return ""
+	}
+	return prefix
 }
 
 // LookupEnabledDownstreamToken resolves a token to its row.
@@ -442,15 +530,18 @@ func LookupEnabledDownstreamToken(ctx context.Context, database *sql.DB,
 	// would look like a routing bug rather than a configuration choice.
 	var credential DownstreamCredential
 	var storedGroupID, storedLimit sql.NullInt64
-	var storedRateLimit sql.NullString
+	var storedRateLimit, storedAllowedModels sql.NullString
+	var storedPeriod, storedTimezone, storedPeriodKey sql.NullString
 	err := database.QueryRowContext(ctx,
-		`SELECT id, name, group_id, COALESCE(used_tokens, 0), limit_tokens, rate_limit
+		`SELECT id, name, group_id, COALESCE(used_tokens, 0), limit_tokens, rate_limit,
+		       allowed_models, quota_period, quota_timezone, quota_period_key
 		FROM api_tokens
         WHERE token_hash = ? AND enabled = 1
           AND (expires_at IS NULL OR expires_at > datetime('now'))`,
 		db.TokenDigest(token)).
 		Scan(&credential.TokenID, &credential.TokenName, &storedGroupID,
-			&credential.UsedTokens, &storedLimit, &storedRateLimit)
+			&credential.UsedTokens, &storedLimit, &storedRateLimit,
+			&storedAllowedModels, &storedPeriod, &storedTimezone, &storedPeriodKey)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DownstreamCredential{}, false, nil
 	}
@@ -468,5 +559,30 @@ func LookupEnabledDownstreamToken(ctx context.Context, database *sql.DB,
 	if storedRateLimit.Valid && storedRateLimit.String != "" {
 		credential.RateLimit = &storedRateLimit.String
 	}
+	// A stored value that does not parse leaves the policy unrestricted and the
+	// request is admitted, matching how an unparseable rate limit is treated a few
+	// lines up: the row survived validation at write time, so a failure here means
+	// it was edited out of band, and refusing live traffic over a config error the
+	// caller cannot fix is the worse outcome. The console reports the same row as
+	// an empty list, so the two views agree on what it means.
+	if storedAllowedModels.Valid {
+		if policy, err := models.ParseAllowedModels(&storedAllowedModels.String); err == nil {
+			credential.AllowedModels = policy
+		}
+	}
+
+	// An unrecognised stored period reads as 'none', so a row edited out of band
+	// accumulates as a lifetime total rather than resetting on a boundary nobody
+	// configured. That is the conservative direction: the alternative hands budget
+	// back silently.
+	credential.QuotaPeriod = models.DefaultQuotaPeriod
+	if storedPeriod.Valid && models.ValidQuotaPeriod(storedPeriod.String) {
+		credential.QuotaPeriod = storedPeriod.String
+	}
+	credential.QuotaTimezone = models.DefaultQuotaTimezone
+	if storedTimezone.Valid && storedTimezone.String != "" {
+		credential.QuotaTimezone = storedTimezone.String
+	}
+	credential.StoredPeriodStamp = storedPeriodKey.String
 	return credential, true, nil
 }
