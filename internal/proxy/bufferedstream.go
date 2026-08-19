@@ -63,6 +63,11 @@ func (s *bufferedStream) Close() error {
 		clientGone := int32(499)
 		entry.StatusCode = &clientGone
 		entry.Error = ptrTo("client disconnected before the response was delivered")
+		// This overwrites whatever stage the upstream's own status set, which is
+		// correct: the client leaving is what ended this request, and the status it
+		// now carries is 499. Leaving an upstream_status stage next to a 499 would
+		// blame the channel for an answer it delivered in full.
+		entry.SetFailure(FailureStageClientCancelled, clientGone)
 	}
 	s.deps.LogWriter.Schedule(*entry)
 	return nil

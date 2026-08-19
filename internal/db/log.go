@@ -47,6 +47,7 @@ const logListColumns = `id, created_at, method, path,
                 prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
                 duration_ms, first_token_ms,
                 request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
+                failure_stage, failure_retryable,
                 error`
 
 // LogTopWindow is a ranking window accepted by the top-stats endpoint.
@@ -404,8 +405,9 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
 	var durationMs, firstTokenMs sql.NullInt64
-	var requestUID sql.NullString
+	var requestUID, failureStage sql.NullString
 	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
+	var failureRetryable sql.NullBool
 
 	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Method, &entry.Path,
 		&downstreamTokenID, &downstreamTokenName, &entry.ClientType,
@@ -415,7 +417,8 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 		&promptTokens, &completionTokens, &totalTokens,
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
 		&durationMs, &firstTokenMs, &requestUID, &attemptIndex,
-		&preUpstreamMs, &upstreamHeadersMs, &logError)
+		&preUpstreamMs, &upstreamHeadersMs,
+		&failureStage, &failureRetryable, &logError)
 	if err != nil {
 		return entry, err
 	}
@@ -443,7 +446,20 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	entry.AttemptIndex = nullInt32Ptr(attemptIndex)
 	entry.PreUpstreamMs = nullInt32Ptr(preUpstreamMs)
 	entry.UpstreamHeadersMs = nullInt32Ptr(upstreamHeadersMs)
+	entry.FailureStage = nullStringPtr(failureStage)
+	entry.FailureRetryable = nullBoolPtr(failureRetryable)
 	return entry, nil
+}
+
+// nullBoolPtr keeps a NULL verdict distinct from a stored false. A false says
+// the gateway judged the failure unretryable; a NULL says there was no failure
+// to judge, or the row predates the field.
+func nullBoolPtr(value sql.NullBool) *bool {
+	if !value.Valid {
+		return nil
+	}
+	converted := value.Bool
+	return &converted
 }
 
 // LogQueryTimeout bounds how long one log listing may run.
@@ -512,6 +528,7 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
               l.duration_ms, l.first_token_ms,
               l.request_uid, l.attempt_index,
               l.pre_upstream_ms, l.upstream_headers_ms,
+              l.failure_stage, l.failure_retryable,
               l.error,
               p.request_snapshot,
               p.upstream_request_override,
@@ -532,8 +549,9 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
 	var durationMs, firstTokenMs sql.NullInt64
-	var detailRequestUID sql.NullString
+	var detailRequestUID, detailFailureStage sql.NullString
 	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
+	var detailFailureRetryable sql.NullBool
 	var requestSnapshot, upstreamRequestOverride sql.NullString
 	var responseSnapshot, downstreamResponseOverride sql.NullString
 	var upstreamRequestIsOverride, downstreamResponseIsOverride int32
@@ -547,6 +565,7 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
 		&durationMs, &firstTokenMs,
 		&detailRequestUID, &attemptIndex, &preUpstreamMs, &upstreamHeadersMs,
+		&detailFailureStage, &detailFailureRetryable,
 		&logError,
 		&requestSnapshot, &upstreamRequestOverride, &upstreamRequestIsOverride,
 		&responseSnapshot, &downstreamResponseOverride, &downstreamResponseIsOverride)
@@ -580,6 +599,8 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	detail.AttemptIndex = nullInt32Ptr(attemptIndex)
 	detail.PreUpstreamMs = nullInt32Ptr(preUpstreamMs)
 	detail.UpstreamHeadersMs = nullInt32Ptr(upstreamHeadersMs)
+	detail.FailureStage = nullStringPtr(detailFailureStage)
+	detail.FailureRetryable = nullBoolPtr(detailFailureRetryable)
 
 	// A cleared override flag means the peer snapshot was identical to the
 	// canonical one, so the canonical value is what the console should show.

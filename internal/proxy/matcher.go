@@ -275,6 +275,52 @@ type Selection struct {
 	ForwardModel *string
 }
 
+// SelectionPolicy is how routing should choose within a priority tier.
+//
+// It is separate from AutoWeightPolicy because that one is the health-score
+// adjustment policy — penalties, increments, recovery — and a strategy name has
+// nothing to do with adjusting a score. Folding the two together would have made
+// every reader of AutoWeightPolicy wonder which half applied to them.
+//
+// The zero value is the weighted strategy with no latency data, which is what a
+// caller that has not opted into anything should get.
+type SelectionPolicy struct {
+	// Strategy is one of the models.LoadBalance* values. An unrecognised value
+	// falls back to weighted rather than failing the request: routing is not the
+	// place to discover a settings-validation gap.
+	Strategy string
+	// Latency supplies the rolling measurements least-latency ranks by. A nil
+	// tracker makes every channel unmeasured, which the strategy already handles
+	// as its cold-start case.
+	Latency *LatencyTracker
+}
+
+// leastLatency reports whether this policy ranks by latency.
+func (p SelectionPolicy) leastLatency() bool {
+	return p.Strategy == models.LoadBalanceLeastLatency
+}
+
+// LatencyToleranceRatio is how much slower than the fastest channel a channel
+// may be and still receive traffic.
+//
+// This is the hysteresis the strategy needs. Ranking strictly by median would
+// hand every request to whichever channel is a millisecond ahead this instant,
+// and the winner would change on every sample — so traffic would slosh between
+// channels without either being meaningfully faster, and each swing would take
+// the connection reuse and cache warmth with it.
+//
+// A band means a channel has to be genuinely, visibly slower before it stops
+// getting requests.
+const LatencyToleranceRatio = 0.2
+
+// LatencyToleranceFloorMs is the smallest tolerance band, for channels that are
+// all fast.
+//
+// Without a floor, 20% of 30ms is 6ms — inside the noise of a single network
+// hop, so two equally fast channels would still flap. Anything under this
+// difference is not a difference a caller can perceive.
+const LatencyToleranceFloorMs = 50
+
 // SelectUpstream chooses the upstream that serves a request.
 //
 //  1. Direct selection via `x-wildtoken-upstream` header or `upstream` query
@@ -289,12 +335,16 @@ type Selection struct {
 //  4. Candidates are filtered by model match score, keeping only the highest.
 //  5. Priority groups are visited from highest to lowest. Within the first group
 //     whose total effective weight is positive, one is chosen by weighted random.
+//  6. Within that tier, the load-balancing strategy decides: weighted random by
+//     effective weight, or — under least_latency — weighted random among the
+//     channels inside the latency tolerance band.
 func SelectUpstream(
 	ctx context.Context,
 	database *sql.DB,
 	cache *RoutingCache,
 	autoWeight *AutoWeightManager,
 	policy AutoWeightPolicy,
+	selection SelectionPolicy,
 	upstreamSelector *string,
 	model *string,
 	groupID int64,
@@ -304,7 +354,7 @@ func SelectUpstream(
 	if err != nil {
 		return nil, err
 	}
-	return selectFromSnapshot(snapshot, autoWeight, policy, upstreamSelector, model,
+	return selectFromSnapshot(snapshot, autoWeight, policy, selection, upstreamSelector, model,
 		groupID, exclude), nil
 }
 
@@ -312,6 +362,7 @@ func selectFromSnapshot(
 	snapshot *routingSnapshot,
 	autoWeight *AutoWeightManager,
 	policy AutoWeightPolicy,
+	selection SelectionPolicy,
 	upstreamSelector *string,
 	model *string,
 	groupID int64,
@@ -342,7 +393,7 @@ func selectFromSnapshot(
 		return nil
 	}
 
-	return selectWeightedByPriority(candidates, autoWeight, policy, model)
+	return selectWeightedByPriority(candidates, autoWeight, policy, selection, model)
 }
 
 // selectDirect resolves an explicit selector, which may be an id or a name.
@@ -421,12 +472,17 @@ func filterByBestModelScore(upstreams []*parsedUpstream, model *string) []*parse
 	return candidates
 }
 
-// selectWeightedByPriority walks priority groups high to low, choosing by
-// weighted random within the first group that has any routable weight.
+// selectWeightedByPriority walks priority groups high to low, choosing within
+// the first group that has any routable weight.
+//
+// Priority is decided before the strategy runs, and no strategy crosses a tier:
+// a Priority 1 backup exists to be idle while the primary works, so letting a
+// latency comparison promote it would defeat the point of having tiers at all.
 func selectWeightedByPriority(
 	candidates []*parsedUpstream,
 	autoWeight *AutoWeightManager,
 	policy AutoWeightPolicy,
+	selection SelectionPolicy,
 	model *string,
 ) *Selection {
 	byPriority := map[int32][]*parsedUpstream{}
@@ -443,18 +499,24 @@ func selectWeightedByPriority(
 	for _, priority := range priorities {
 		var selectable []*parsedUpstream
 		var weights []uint64
-		var total uint64
 		for _, candidate := range byPriority[priority] {
 			snapshot := autoWeight.Snapshot(candidate.row.ID, candidate.row.Weight,
 				candidate.row.AutoWeightEnabled == 1, policy)
 			if snapshot.RoutingWeight > 0 {
 				selectable = append(selectable, candidate)
 				weights = append(weights, snapshot.RoutingWeight)
-				total += snapshot.RoutingWeight
 			}
 		}
 		if len(selectable) == 0 {
 			continue
+		}
+		if selection.leastLatency() {
+			selectable, weights = keepFastestCandidates(selectable, weights, selection.Latency)
+		}
+
+		var total uint64
+		for _, weight := range weights {
+			total += weight
 		}
 
 		chosen := selectable[weightedIndex(weights, total)]
@@ -462,6 +524,62 @@ func selectWeightedByPriority(
 	}
 
 	return nil
+}
+
+// keepFastestCandidates narrows one tier to the channels answering fastest,
+// keeping their routing weights alongside them.
+//
+// The rules it encodes, in the order they matter:
+//
+//   - A channel with no usable reading — never measured, all samples aged out,
+//     or fewer than LatencyMinSamples — is kept. It is not assumed fast; it is
+//     unknown, and excluding the unknown is how a newly added channel never
+//     gets the traffic it needs to prove itself. This is also the cold-start
+//     answer: with nothing measured, every channel is kept and the tier behaves
+//     exactly as the weighted strategy.
+//   - Among measured channels, the fastest median sets the band. Anything within
+//     LatencyToleranceRatio of it (or LatencyToleranceFloorMs, whichever is
+//     wider) is kept.
+//   - The survivors are still drawn by weighted random on effective weight, so
+//     an operator's weights and the health score keep their meaning. Least
+//     latency narrows the field; it does not replace what happens inside it.
+func keepFastestCandidates(candidates []*parsedUpstream, weights []uint64,
+	latency *LatencyTracker) ([]*parsedUpstream, []uint64) {
+	readings := make([]LatencyReading, len(candidates))
+	fastest := int32(-1)
+	for i, candidate := range candidates {
+		readings[i] = latency.Read(candidate.row.ID)
+		if readings[i].Usable && (fastest < 0 || readings[i].MedianMs < fastest) {
+			fastest = readings[i].MedianMs
+		}
+	}
+	if fastest < 0 {
+		// Nothing is measured yet, so there is nothing to rank by.
+		return candidates, weights
+	}
+
+	tolerance := int32(float64(fastest) * LatencyToleranceRatio)
+	if tolerance < LatencyToleranceFloorMs {
+		tolerance = LatencyToleranceFloorMs
+	}
+	ceiling := fastest + tolerance
+
+	keptCandidates := make([]*parsedUpstream, 0, len(candidates))
+	keptWeights := make([]uint64, 0, len(candidates))
+	for i, candidate := range candidates {
+		if readings[i].Usable && readings[i].MedianMs > ceiling {
+			continue
+		}
+		keptCandidates = append(keptCandidates, candidate)
+		keptWeights = append(keptWeights, weights[i])
+	}
+	// Unreachable while at least one channel is measured, since that channel is
+	// its own ceiling. Guarded anyway: returning an empty tier here would read as
+	// "no route" and refuse a request the tier could serve.
+	if len(keptCandidates) == 0 {
+		return candidates, weights
+	}
+	return keptCandidates, keptWeights
 }
 
 // weightedIndex picks an index with probability proportional to its weight.

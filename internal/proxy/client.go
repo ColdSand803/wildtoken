@@ -203,10 +203,14 @@ type Response struct {
 
 // Deps are the shared services a proxied request needs.
 type Deps struct {
-	HTTPClient     *http.Client
-	AutoWeight     *AutoWeightManager
-	Metrics        *metrics.Runtime
-	LogWriter      *LogWriter
+	HTTPClient *http.Client
+	AutoWeight *AutoWeightManager
+	Metrics    *metrics.Runtime
+	LogWriter  *LogWriter
+	// Latency collects the rolling measurements least-latency routing ranks by.
+	// It may be nil, which every method on it tolerates: a caller that does not
+	// route — an admin probe, a test harness — has nothing to contribute.
+	Latency        *LatencyTracker
 	DefaultTimeout time.Duration
 }
 
@@ -232,6 +236,15 @@ type RequestContext struct {
 	// NULL: an unset origin cannot be distinguished from one at the epoch, and a
 	// pre-upstream figure of several decades would be read as real.
 	ReceivedAt time.Time
+	// FailoverEligible tells this attempt that another one could follow it, which
+	// is what licenses the first-event gate to hold a 2xx SSE response back until
+	// the stream proves itself.
+	//
+	// The caller decides, because only the caller knows whether the attempt budget
+	// is spent or another channel is routable. With it false the stream is handed
+	// over the moment its headers arrive, exactly as before the gate existed:
+	// there is no point paying for a decision nobody can act on.
+	FailoverEligible bool
 }
 
 // ProxyRequest forwards a request upstream, streaming SSE bodies as they arrive.
@@ -267,6 +280,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.StatusCode = &statusCode
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
+		entry.SetFailure(FailureStageRequestBuild, statusCode)
 		deps.LogWriter.Schedule(entry)
 
 		// Returned unwrapped: buildUpstreamRequest already answers with an
@@ -291,9 +305,11 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		clientGone := !attempt.Expired() && ctx.Err() != nil
 
 		statusCode := int32(502)
+		stage := FailureStageConnect
 		switch {
 		case clientGone:
 			statusCode = 499
+			stage = FailureStageClientCancelled
 		case attempt.Expired():
 			// The attempt's own clock ran out: a gateway timeout.
 			statusCode = 504
@@ -307,6 +323,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.StatusCode = &statusCode
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
+		entry.SetFailure(stage, statusCode)
 		deps.LogWriter.Schedule(entry)
 
 		return nil, apperr.Upstream(message)
@@ -323,8 +340,32 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		statusCode := int32(status)
 		entry.StatusCode = &statusCode
 
+		var lead *sseLead
+		if requestCtx.FailoverEligible {
+			// A 2xx header is the channel accepting the request, not answering it.
+			// Returning here on the strength of that header is what let a channel
+			// that accepts everything and streams nothing swallow requests: the
+			// retry loop saw a 2xx and stopped, and the client waited out the
+			// timeout on a stream that was never going to speak.
+			//
+			// So the response is held until one complete event proves the channel
+			// is answering. Nothing has reached the client yet, which is the only
+			// window in which switching channels is invisible to them.
+			var gateErr error
+			lead, gateErr = awaitFirstSSEEvent(response.Body,
+				func() int32 { return int32(time.Since(start).Milliseconds()) },
+				requestCtx.LogBodyMaxBytes)
+			if gateErr != nil {
+				response.Body.Close()
+				attempt.stop()
+				return nil, logFirstEventFailure(ctx, deps, policy, upstream,
+					autoWeightEnabled, attempt, entry, start, gateErr)
+			}
+		}
+
 		stream := newSSEStream(ctx, response.Body, attempt, start, status, responseHeaders,
-			requestCtx.LogBodyMaxBytes, entry, deps, policy, autoWeightEnabled, upstream.ID)
+			requestCtx.LogBodyMaxBytes, entry, deps, policy, autoWeightEnabled, upstream.ID,
+			lead)
 		return &Response{Status: status, Headers: responseHeaders, Body: stream}, nil
 	}
 
@@ -335,9 +376,11 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		clientGone := !attempt.Expired() && ctx.Err() != nil
 
 		statusCode := int32(502)
+		stage := FailureStageResponseBody
 		switch {
 		case clientGone:
 			statusCode = 499
+			stage = FailureStageClientCancelled
 		case attempt.Expired():
 			statusCode = 504
 		}
@@ -348,6 +391,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		message := err.Error()
 		entry := baseLogEntry(requestCtx, upstream, prepared, start)
 		entry.StatusCode = &statusCode
+		entry.SetFailure(stage, statusCode)
 		// The headers did arrive; it was the body that failed. Recording them
 		// here is what shows a channel that answers promptly and then stalls
 		// mid-body, which is otherwise indistinguishable from one that never
@@ -359,8 +403,14 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		return nil, apperr.Upstream(message)
 	}
 
-	if status >= 200 && status < 300 {
+	succeeded := status >= 200 && status < 300
+	if succeeded {
 		deps.AutoWeight.RecordSuccess(upstream.ID, autoWeightEnabled, policy)
+		// Header arrival is the latency sample for a buffered answer: it is when
+		// the channel started responding, which is independent of how long the
+		// answer itself was. Total duration would rank a channel by the size of
+		// the replies it happened to be asked for.
+		deps.Latency.Record(upstream.ID, headersMs)
 	} else {
 		deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
 	}
@@ -395,6 +445,13 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	entry.CompletionReasoningTokens = usage.CompletionReasoningTokens
 	entry.FirstTokenMs = firstTokenMs
 	entry.DurationMs = elapsedMs(start)
+	if !succeeded {
+		// The channel answered, and what it answered is a refusal. The stage says
+		// the status is the whole story, which is what separates it from a channel
+		// that could not be reached at all — both of which used to read as 502-ish
+		// failures with nothing to tell them apart.
+		entry.SetFailure(FailureStageUpstreamStatus, statusCode)
+	}
 	entry.UpstreamResponse = responseSnapshot
 	entry.DownstreamResponse = responseSnapshot
 
@@ -406,6 +463,44 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		Headers: responseHeaders,
 		Body:    newBufferedStream(ctx, bodyBytes, entry, deps, statusCode),
 	}, nil
+}
+
+// logFirstEventFailure records a 2xx SSE stream that never produced an event and
+// returns the error the caller reports.
+//
+// The status it writes is the one that describes who ended it, not the 2xx the
+// upstream sent: a row saying 200 for a stream that delivered nothing is how the
+// console came to show these as successes. The upstream's own status stays in the
+// response snapshot.
+func logFirstEventFailure(ctx context.Context, deps Deps, policy AutoWeightPolicy,
+	upstream *models.UpstreamRow, autoWeightEnabled bool, attempt *attemptTimeout,
+	entry LogEntry, start time.Time, cause error) error {
+	clientGone := !attempt.Expired() && ctx.Err() != nil
+
+	statusCode := int32(502)
+	stage := FailureStageFirstEvent
+	switch {
+	case clientGone:
+		statusCode = 499
+		stage = FailureStageClientCancelled
+	case attempt.Expired():
+		// The channel accepted the request and then went quiet past its own
+		// timeout, which is a gateway timeout however encouraging its header was.
+		statusCode = 504
+	}
+	if !clientGone {
+		deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
+		deps.Metrics.RecordSSEUpstreamError()
+	}
+
+	message := cause.Error()
+	entry.StatusCode = &statusCode
+	entry.DurationMs = elapsedMs(start)
+	entry.Error = &message
+	entry.SetFailure(stage, statusCode)
+	deps.LogWriter.Schedule(entry)
+
+	return apperr.Upstream(message)
 }
 
 func buildUpstreamRequest(ctx context.Context, method string, prepared *PreparedRequest) (*http.Request, error) {

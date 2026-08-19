@@ -441,10 +441,11 @@ function isFixedWeight(upstream) {
 
 function weightCellMarkup(upstream) {
   const baseWeight = formatEffectiveWeight(upstream.weight);
+  const latencyBadge = typeof formatLatencyRoutingBadge === "function" ? formatLatencyRoutingBadge(upstream.id) : "";
   if (isFixedWeight(upstream)) {
-    return `<strong>${baseWeight}</strong><span>固定权重</span>`;
+    return `<strong>${baseWeight}</strong><span>固定权重</span>${latencyBadge}`;
   }
-  return `<strong>${formatEffectiveWeight(upstream.effective_weight)} / ${baseWeight}</strong><span>有效权重 / 基础权重</span>`;
+  return `<strong>${formatEffectiveWeight(upstream.effective_weight)} / ${baseWeight}</strong><span>有效权重 / 基础权重</span>${latencyBadge}`;
 }
 
 function formatZeroWeightNote(upstream, remainingRecovery) {
@@ -1058,6 +1059,92 @@ async function runBatchProbe({ includeDisabled = false } = {}) {
   }
 }
 
+/* 同层调度延迟决策标签与汇总状态 */
+function formatLatencyRoutingBadge(upstreamId) {
+  if (!latestRoutingData || !latestRoutingData.latency_active) {
+    return "";
+  }
+  const latencyList = Array.isArray(latestRoutingData.latency) ? latestRoutingData.latency : [];
+  const entry = latencyList.find((item) => Number(item?.upstream_id) === Number(upstreamId));
+  const minSamples = latestRoutingData.rules?.min_samples ?? 5;
+
+  if (entry && entry.usable && entry.median_ms !== null && entry.median_ms !== undefined) {
+    const samples = entry.sample_count ?? minSamples;
+    return `<span class="latency-routing-tag latency-routing-tag--usable" title="近 5 分钟延迟中位数 ${entry.median_ms}ms (基于 ${samples} 个样本)">延迟中位数 ${entry.median_ms}ms (${samples})</span>`;
+  }
+
+  if (entry && (entry.median_ms === null || entry.median_ms === undefined) && Number(entry.sample_count) > 0) {
+    return `<span class="latency-routing-tag latency-routing-tag--sampling" title="正在采样（${entry.sample_count}/${minSamples}），当前视为未测量并保留竞争">采样中 (${entry.sample_count}/${minSamples})</span>`;
+  }
+
+  return `<span class="latency-routing-tag latency-routing-tag--unmeasured" title="未测量，与加权随机同等参与竞争">未测量 (参与竞争)</span>`;
+}
+
+function renderUpstreamRoutingSummary(data = latestRoutingData) {
+  const summaryEl = typeof upstreamRoutingSummary !== "undefined" && upstreamRoutingSummary
+    ? upstreamRoutingSummary
+    : (typeof document !== "undefined" ? document.querySelector("#upstream-routing-summary") : null);
+  if (!summaryEl) return;
+
+  if (!data) {
+    summaryEl.hidden = true;
+    summaryEl.innerHTML = "";
+    return;
+  }
+
+  const isLeastLatency = data.strategy === "least_latency";
+  const strategyName = isLeastLatency ? "最低延迟优先" : "加权随机";
+  const active = Boolean(data.latency_active);
+  const activeText = active ? "延迟决策已激活" : "延迟决策未激活";
+  const activeClass = active ? "is-active" : "is-inactive";
+  const rules = data.rules || {};
+  const minSamples = rules.min_samples ?? 5;
+  const staleWindow = rules.stale_window_seconds ?? 300;
+  const toleranceRatio = rules.tolerance_ratio != null ? Math.round(rules.tolerance_ratio * 100) : 20;
+  const toleranceFloor = rules.tolerance_floor_ms ?? 50;
+  const sampleCap = rules.sample_capacity ?? 32;
+
+  summaryEl.hidden = false;
+  summaryEl.innerHTML = `
+    <div class="routing-summary-strip-inner">
+      <div class="routing-summary-header">
+        <div class="routing-summary-title-group">
+          <span class="routing-summary-dot ${activeClass}" aria-hidden="true"></span>
+          <span class="routing-summary-strategy">同层调度：<strong>${escapeHtml(strategyName)}</strong></span>
+          <span class="routing-summary-badge ${activeClass}">${escapeHtml(activeText)}</span>
+        </div>
+        <div class="routing-summary-chips">
+          <span class="routing-chip" title="有效测量所需的最小请求采样数">最小样本: <strong>${minSamples}</strong></span>
+          <span class="routing-chip" title="样本滚动过期时间窗口">过期窗口: <strong>${staleWindow}s</strong></span>
+          <span class="routing-chip" title="最低延迟与次优渠道之间的加权容忍浮动带 (≥${toleranceFloor}ms)">容忍带: <strong>${toleranceRatio}%</strong></span>
+          <span class="routing-chip" title="单渠道内存有界采样容量">样本容量: <strong>${sampleCap}</strong></span>
+        </div>
+      </div>
+      <div class="routing-summary-rules-hint">
+        <span class="routing-hint-item">① 层内无可用样本 → 退化为加权随机</span>
+        <span class="routing-hint-item">② 样本不足 ${minSamples} 个 → 视为未测量并保留竞争</span>
+        <span class="routing-hint-item">③ 样本过期 (> ${staleWindow}s) → 自动清除并标记为未测量</span>
+      </div>
+    </div>
+  `;
+}
+
+async function fetchLatestRoutingData() {
+  try {
+    const data = await api("/api/admin/upstreams/routing");
+    if (!data) return null;
+    latestRoutingData = data;
+    renderUpstreamRoutingSummary(data);
+    if (typeof priorityEditorIsOpen === "function" && !priorityEditorIsOpen()) {
+      renderRows();
+    }
+    return data;
+  } catch (error) {
+    // 忽略后台静默获取失败
+    return null;
+  }
+}
+
 /* 24h 健康迷你条形图：每根是一小时，高度按该小时请求量，颜色按错误占比。
    没有流量的小时不画——留白比一根零高的柱更诚实。 */
 function renderHealthBars(health) {
@@ -1125,6 +1212,7 @@ function createChannelCard(upstream) {
       </div>
       <div class="channel-card-header-actions">
         <span class="channel-card-badge">优先级 ${upstream.priority}</span>
+        ${typeof formatLatencyRoutingBadge === "function" ? formatLatencyRoutingBadge(upstream.id) : ""}
         ${renderProbeBadgeMarkup(upstreamProbeResults.get(upstream.id))}
         <button
           type="button"
@@ -1453,10 +1541,13 @@ async function loadUpstreams(options = {}) {
       renderUpstreamSummary();
     }
     renderLogFilterOptions();
-      if (typeof fetchLatestProbeResults === "function") {
-        fetchLatestProbeResults().catch(() => {});
-      }
-    } catch (error) {
+    if (typeof fetchLatestProbeResults === "function") {
+      fetchLatestProbeResults().catch(() => {});
+    }
+    if (typeof fetchLatestRoutingData === "function") {
+      fetchLatestRoutingData().catch(() => {});
+    }
+  } catch (error) {
     const message = `加载失败：${error.message}`;
     if (message !== lastUpstreamLoadError) {
       setStatus(message, "error");

@@ -98,6 +98,16 @@ CREATE TABLE IF NOT EXISTS request_logs (
     -- upstream's own thinking time; without it a slow first token could not be
     -- attributed to either.
     upstream_headers_ms INTEGER,
+    -- failure_stage names where the attempt broke, because the status alone
+    -- cannot: a 502 is written for a failed dial, a body that died mid-read, and
+    -- a stream that closed before saying anything. NULL means the attempt
+    -- succeeded.
+    failure_stage       TEXT,
+    -- failure_retryable is the verdict the gateway reached at the time: whether
+    -- this failure class is one another channel may be given. Stored rather than
+    -- recomputed on read, so editing the retry policy cannot rewrite the history
+    -- of why a request stopped after one attempt.
+    failure_retryable   INTEGER,
     error               TEXT
 );`
 
@@ -205,6 +215,11 @@ CREATE TABLE IF NOT EXISTS runtime_settings (
     auto_weight_recovery_interval_seconds INTEGER NOT NULL DEFAULT 60 CHECK (auto_weight_recovery_interval_seconds BETWEEN 1 AND 3600),
     proxy_enabled INTEGER NOT NULL DEFAULT 0 CHECK (proxy_enabled IN (0, 1)),
     proxy_url TEXT NOT NULL DEFAULT '',
+    -- The default is weighted because that is what every database written before
+    -- this column behaved as. The CHECK is what keeps routing from having to
+    -- decide what an unknown strategy means on the hot path.
+    load_balance_strategy TEXT NOT NULL DEFAULT 'weighted'
+        CHECK (load_balance_strategy IN ('weighted', 'least_latency')),
     revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`

@@ -365,6 +365,7 @@
             </div>
             <div id="upstream-summary" class="summary-strip" aria-live="polite"></div>
             <div id="upstream-probe-summary" class="summary-strip upstream-probe-summary" hidden aria-live="polite"></div>
+            <div id="upstream-routing-summary" class="summary-strip upstream-routing-summary" hidden aria-live="polite"></div>
             <div class="view-toolbar upstream-toolbar">
               <label class="filter-field">
                 搜索
@@ -723,6 +724,7 @@
                 </div>
                 <form id="routing-settings-form" class="settings-server-form">
                   <div class="settings-fields-grid routing-settings-grid">
+                    <label class="field span-2"><span class="field-label">同层负载均衡策略</span><select id="settings-load-balance-strategy" aria-label="同层负载均衡策略"><option value="weighted">加权随机（默认，按有效权重分流）</option><option value="least_latency">最低延迟优先（滚动中位数，结合容忍带与加权）</option></select><span class="field-hint">在最高可用优先级层内选择渠道的方式；最低延迟策略会自动回退加权并保留未测量渠道。</span></label>
                     <label class="field"><span class="field-label">最大重试次数</span><input id="settings-max-retries" type="number" min="0" max="5" required inputmode="numeric" /><span class="field-hint">额外尝试次数；0 表示不重试。</span></label>
                     <label class="field"><span class="field-label">同渠道重试间隔（毫秒）</span><input id="settings-same-upstream-retry-ms" type="number" min="0" max="60000" required inputmode="numeric" /><span class="field-hint">换到不同渠道时不会等待。</span></label>
                     <label class="field"><span class="field-label">失败降幅</span><input id="settings-failure-penalty" type="number" min="0" max="100" required inputmode="numeric" /><span class="field-hint">每次渠道失败都会降低动态有效权重。</span></label>
@@ -1100,6 +1102,7 @@
           <div class="modal-head-actions"><button type="button" class="secondary ghost icon-maximize" data-dialog-maximize aria-label="最大化" title="最大化" aria-pressed="false"><svg class="dialog-icon dialog-icon--maximize" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="0.5"/></svg><svg class="dialog-icon dialog-icon--restore" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="3" width="7" height="7" rx="0.5"/><rect x="3.5" y="5.5" width="7" height="7" rx="0.5"/></svg></button><button id="log-detail-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭"><svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg></button></div>
         </div>
         <div id="log-detail-meta" class="log-detail-meta" aria-live="polite"></div>
+        <div id="log-detail-retry-chain" class="log-detail-retry-chain" aria-live="polite" hidden></div>
         <div class="log-detail-sections-head">
           <div>
             <h3>请求 / 响应快照</h3>

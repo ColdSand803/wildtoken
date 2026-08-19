@@ -49,7 +49,7 @@ func createGroup(t *testing.T, database *sql.DB, name string) int64 {
 func selectInGroup(t *testing.T, database *sql.DB, groupID int64, model string) *Selection {
 	t.Helper()
 	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
-		NewAutoWeightManager(), testPolicy(), nil, &model, groupID, nil)
+		NewAutoWeightManager(), testPolicy(), SelectionPolicy{}, nil, &model, groupID, nil)
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}
@@ -118,7 +118,7 @@ func TestAnExplicitChannelSelectorCannotEscapeTheGroup(t *testing.T) {
 	// A selector is a routing hint, not a way around isolation.
 	for _, selector := range []string{"team-only", "1"} {
 		selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
-			NewAutoWeightManager(), testPolicy(), &selector, ptr("model"),
+			NewAutoWeightManager(), testPolicy(), SelectionPolicy{}, &selector, ptr("model"),
 			models.DefaultGroupID, nil)
 		if err != nil {
 			t.Fatalf("select: %v", err)
@@ -131,7 +131,7 @@ func TestAnExplicitChannelSelectorCannotEscapeTheGroup(t *testing.T) {
 	// The owning group still routes through the same selector.
 	selector := "team-only"
 	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
-		NewAutoWeightManager(), testPolicy(), &selector, ptr("model"), teamID, nil)
+		NewAutoWeightManager(), testPolicy(), SelectionPolicy{}, &selector, ptr("model"), teamID, nil)
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}

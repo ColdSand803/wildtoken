@@ -633,6 +633,13 @@ func AdminUpdateUpstream(state *appstate.State) http.HandlerFunc {
 		if existing.AutoWeightEnabled != enabledInput || (existing.Enabled == 0 && input.Enabled) {
 			state.AutoWeight.Reset(id)
 		}
+		// A new endpoint or model mapping makes the collected latency describe
+		// something this channel no longer is, and least-latency routing would
+		// keep ranking it on those figures for the rest of the staleness window.
+		if existing.BaseURL != input.BaseURL ||
+			!sameModelMappings(existing.ModelMappings, input.ModelMappings) {
+			state.Latency.Reset(id)
+		}
 		applyRuntimeHealth(state, state.AutoWeightPolicy(), &updated)
 		apperr.WriteJSON(w, http.StatusOK, updated)
 	}
@@ -746,8 +753,10 @@ func AdminDeleteUpstream(state *appstate.State) http.HandlerFunc {
 		state.AutoWeight.Reset(id)
 		// Ids are reused by SQLite after a delete, so a stale probe result left
 		// behind would attach this channel's last status to whatever is created
-		// next.
+		// next. The latency samples are dropped for the same reason: a new
+		// channel would otherwise start out ranked on its predecessor's speed.
 		state.ProbeRuns.Forget(id)
+		state.Latency.Reset(id)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }
@@ -1873,4 +1882,26 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 
 		apperr.WriteJSON(w, http.StatusOK, result)
 	}
+}
+
+// sameModelMappings compares a channel's stored mappings, which are a JSON
+// string, with the map an update submitted.
+//
+// Unparseable stored JSON reports a difference rather than equality: the safe
+// answer is that the mapping may have changed, and the only cost of being wrong
+// is a channel re-collecting its latency samples.
+func sameModelMappings(stored string, incoming map[string]string) bool {
+	var existing map[string]string
+	if err := json.Unmarshal([]byte(stored), &existing); err != nil {
+		return false
+	}
+	if len(existing) != len(incoming) {
+		return false
+	}
+	for key, value := range incoming {
+		if existing[key] != value {
+			return false
+		}
+	}
+	return true
 }

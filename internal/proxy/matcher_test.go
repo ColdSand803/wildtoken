@@ -71,7 +71,7 @@ func selectWithFreshCache(t *testing.T, database *sql.DB, autoWeight *AutoWeight
 	selector, model *string) *Selection {
 	t.Helper()
 	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
-		autoWeight, testPolicy(), selector, model, models.DefaultGroupID, nil)
+		autoWeight, testPolicy(), SelectionPolicy{}, selector, model, models.DefaultGroupID, nil)
 	if err != nil {
 		t.Fatalf("select: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestRoutingCacheReusesSnapshotUntilInvalidated(t *testing.T) {
 	selectVia := func(model string) *Selection {
 		t.Helper()
 		selection, err := SelectUpstream(context.Background(), database, cache,
-			autoWeight, testPolicy(), nil, &model, models.DefaultGroupID, nil)
+			autoWeight, testPolicy(), SelectionPolicy{}, nil, &model, models.DefaultGroupID, nil)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}
@@ -181,7 +181,7 @@ func TestSelectionSkipsExcludedChannels(t *testing.T) {
 	// Excluding the higher-priority channel falls over to the next candidate,
 	// even across a priority boundary.
 	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
-		NewAutoWeightManager(), testPolicy(), nil, ptr("model"), models.DefaultGroupID,
+		NewAutoWeightManager(), testPolicy(), SelectionPolicy{}, nil, ptr("model"), models.DefaultGroupID,
 		map[int64]bool{1: true})
 	if err != nil {
 		t.Fatalf("select: %v", err)
@@ -193,7 +193,7 @@ func TestSelectionSkipsExcludedChannels(t *testing.T) {
 	// A direct selector honors the exclusion too: the caller has already found
 	// this channel's rate limit full, so there is nothing left to pick.
 	selection, err = SelectUpstream(context.Background(), database, NewRoutingCache(),
-		NewAutoWeightManager(), testPolicy(), ptr("first"), ptr("model"),
+		NewAutoWeightManager(), testPolicy(), SelectionPolicy{}, ptr("first"), ptr("model"),
 		models.DefaultGroupID, map[int64]bool{1: true})
 	if err != nil {
 		t.Fatalf("direct select: %v", err)
@@ -215,7 +215,7 @@ func TestAnExcludedExactMatchDoesNotShadowAPrefixMatch(t *testing.T) {
 	// Exclusion is applied before model scoring: with the exact match gone, the
 	// prefix match must become routable rather than reading as "no route".
 	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
-		NewAutoWeightManager(), testPolicy(), nil, ptr("gpt-test"), models.DefaultGroupID,
+		NewAutoWeightManager(), testPolicy(), SelectionPolicy{}, nil, ptr("gpt-test"), models.DefaultGroupID,
 		map[int64]bool{1: true})
 	if err != nil {
 		t.Fatalf("select: %v", err)
@@ -384,7 +384,7 @@ func TestWeightedSelectionHonorsWeightRatios(t *testing.T) {
 	const runs = 4000
 	for range runs {
 		selection, err := SelectUpstream(context.Background(), database, cache,
-			autoWeight, testPolicy(), nil, ptr("model"), models.DefaultGroupID, nil)
+			autoWeight, testPolicy(), SelectionPolicy{}, nil, ptr("model"), models.DefaultGroupID, nil)
 		if err != nil {
 			t.Fatalf("select: %v", err)
 		}

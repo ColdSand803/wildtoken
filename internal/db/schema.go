@@ -118,6 +118,12 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"attempt_index", "INTEGER"},
 		{"pre_upstream_ms", "INTEGER"},
 		{"upstream_headers_ms", "INTEGER"},
+		// A legacy row's NULL here reads as "this attempt did not fail", which is
+		// wrong for the failures among them but is the only value that does not
+		// invent a stage. The console shows the stage as unavailable rather than
+		// guessing one from the status.
+		{"failure_stage", "TEXT"},
+		{"failure_retryable", "INTEGER"},
 	} {
 		if err := ensureColumn(ctx, db, "request_logs", column.name, column.definition); err != nil {
 			return err
@@ -169,6 +175,8 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"auto_weight_recovery_interval_seconds", "INTEGER NOT NULL DEFAULT 60 CHECK (auto_weight_recovery_interval_seconds BETWEEN 1 AND 3600)"},
 		{"proxy_enabled", "INTEGER NOT NULL DEFAULT 0 CHECK (proxy_enabled IN (0, 1))"},
 		{"proxy_url", "TEXT NOT NULL DEFAULT ''"},
+		{"load_balance_strategy", "TEXT NOT NULL DEFAULT 'weighted' " +
+			"CHECK (load_balance_strategy IN ('weighted', 'least_latency'))"},
 	} {
 		if err := ensureColumn(ctx, db, "runtime_settings", column.name, column.definition); err != nil {
 			return err

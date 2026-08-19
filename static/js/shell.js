@@ -642,6 +642,7 @@ function fillServerSettings(settings) {
   settingsBodyKeepCount.value = settings.log_body_keep_count;
   settingsRetentionDays.value = settings.log_retention_days;
   settingsBodyMaxBytes.value = settings.log_body_max_bytes;
+  if (settingsLoadBalanceStrategy) settingsLoadBalanceStrategy.value = settings.load_balance_strategy || "weighted";
   settingsMaxRetries.value = settings.max_retries;
   settingsSameUpstreamRetryMs.value = settings.same_upstream_retry_interval_ms;
   settingsFailurePenalty.value = settings.auto_weight_failure_penalty;
@@ -940,11 +941,12 @@ function runtimeSettingsPayload() {
     auto_weight_recovery_interval_seconds: Number(settingsRecoveryInterval.value),
     proxy_enabled: Boolean(settingsProxyEnabled?.checked),
     proxy_url: (settingsProxyUrl?.value || "").trim(),
+    load_balance_strategy: (settingsLoadBalanceStrategy?.value || loadedServerSettings?.load_balance_strategy || "weighted").trim(),
     revision: loadedServerSettings.revision,
   };
 }
 
-const nonIntegerSettingsKeys = new Set(["revision", "proxy_enabled", "proxy_url"]);
+const nonIntegerSettingsKeys = new Set(["revision", "proxy_enabled", "proxy_url", "load_balance_strategy"]);
 
 function runtimeSettingsAreIntegers(payload) {
   return Object.entries(payload).every(([key, value]) => nonIntegerSettingsKeys.has(key) || Number.isInteger(value));

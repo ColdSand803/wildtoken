@@ -189,6 +189,11 @@ type State struct {
 	LogStats    *db.LogStatsCache
 	ModelsCache *ModelsListCache
 	Routing     *proxy.RoutingCache
+	// Latency holds the bounded rolling response times least-latency routing
+	// ranks channels by. It is in memory only: the figures describe the last few
+	// minutes, so persisting them would mean a restart routing on measurements
+	// taken before it.
+	Latency *proxy.LatencyTracker
 	// TokenRateLimiter and UpstreamRateLimiter enforce the per-token and
 	// per-channel rate expressions. They must stay separate instances: both key
 	// their windows by an int64 id, so sharing one would let a token and a
@@ -211,6 +216,7 @@ func (s *State) ProxyDeps() proxy.Deps {
 		AutoWeight:     s.AutoWeight,
 		Metrics:        s.Metrics,
 		LogWriter:      s.LogWriter,
+		Latency:        s.Latency,
 		DefaultTimeout: time.Duration(s.Settings.Upstream.DefaultTimeoutSeconds * float64(time.Second)),
 	}
 }
@@ -219,6 +225,19 @@ func (s *State) ProxyDeps() proxy.Deps {
 func (s *State) AutoWeightPolicy() proxy.AutoWeightPolicy {
 	settings := s.Runtime.Get()
 	return proxy.NewAutoWeightPolicy(&settings)
+}
+
+// SelectionPolicy reads the current load-balancing strategy and the data it needs.
+//
+// Read per request rather than cached, for the same reason AutoWeightPolicy is:
+// an operator changing the strategy expects the next request to use it, not the
+// next restart.
+func (s *State) SelectionPolicy() proxy.SelectionPolicy {
+	settings := s.Runtime.Get()
+	return proxy.SelectionPolicy{
+		Strategy: settings.LoadBalanceStrategy,
+		Latency:  s.Latency,
+	}
 }
 
 // LoadRuntimeSettings reads the persisted policy, falling back to safe startup

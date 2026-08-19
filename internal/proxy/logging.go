@@ -63,11 +63,35 @@ type LogEntry struct {
 	AttemptIndex      *int32
 	PreUpstreamMs     *int32
 	UpstreamHeadersMs *int32
+	// FailureStage and FailureRetryable record where an attempt broke and whether
+	// the gateway's policy would have given that failure to another channel. Both
+	// are NULL on a successful attempt. Set them through SetFailure so the pair
+	// cannot disagree.
+	FailureStage      *string
+	FailureRetryable  *bool
 	Error             *string
 	DownstreamRequest json.RawMessage
 	UpstreamRequest           json.RawMessage
 	UpstreamResponse          json.RawMessage
 	DownstreamResponse        json.RawMessage
+}
+
+// SetFailure records one attempt's failure stage together with the verdict that
+// follows from it.
+//
+// An empty stage clears both fields, which is what a success stores: a stage of
+// "none" would have to be excluded from every console filter by hand, and the
+// first place that forgot would report successes as failures of an unknown kind.
+func (e *LogEntry) SetFailure(stage FailureStage, statusCode int32) {
+	if stage == "" {
+		e.FailureStage = nil
+		e.FailureRetryable = nil
+		return
+	}
+	name := string(stage)
+	retryable := failureRetryable(stage, statusCode)
+	e.FailureStage = &name
+	e.FailureRetryable = &retryable
 }
 
 // LogStreamEvent reports that a committed request-log row became available to
@@ -396,9 +420,10 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
          prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
          duration_ms, first_token_ms,
          request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
+         failure_stage, failure_retryable,
          error, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?)`,
+            ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,
 			entry.RequestModel, entry.UpstreamModel, entry.ReasoningEffort,
@@ -407,7 +432,8 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 			entry.PromptCachedTokens, entry.CacheCreationTokens,
 			entry.CompletionReasoningTokens, entry.DurationMs, entry.FirstTokenMs,
 			entry.RequestUID, entry.AttemptIndex, entry.PreUpstreamMs,
-			entry.UpstreamHeadersMs, entry.Error, createdAt)
+			entry.UpstreamHeadersMs, entry.FailureStage, entry.FailureRetryable,
+			entry.Error, createdAt)
 		if err != nil {
 			return nil, apperr.Database(err)
 		}
@@ -483,6 +509,8 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 					AttemptIndex:              entry.AttemptIndex,
 					PreUpstreamMs:             entry.PreUpstreamMs,
 					UpstreamHeadersMs:         entry.UpstreamHeadersMs,
+					FailureStage:              entry.FailureStage,
+					FailureRetryable:          entry.FailureRetryable,
 					Error:                     entry.Error,
 				},
 			},

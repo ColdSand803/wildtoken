@@ -1,5 +1,28 @@
 // Request log list, performance formatting, snapshots, and detail dialog.
 const LOG_SENSITIVE_MASK = "******";
+const FAILURE_STAGE_LABELS = {
+  first_event: "首事件前失败",
+  stream: "传输中断",
+  client_cancelled: "客户端取消",
+  connect: "连接建立失败",
+  upstream_status: "上游状态异常",
+  request_build: "请求构建失败",
+  response_body: "响应体读取失败",
+  no_route: "未找到路由",
+  rate_limited: "渠道限流",
+  gateway: "网关错误",
+};
+
+function formatFailureStage(stage) {
+  if (!stage) return "";
+  return FAILURE_STAGE_LABELS[stage] || String(stage);
+}
+
+function formatFailureRetryable(retryable) {
+  if (retryable === null || retryable === undefined) return "";
+  return retryable ? "可重试错误" : "不可重试错误";
+}
+
 const LOG_RATE_ANIMATION_MS = 520;
 const LOG_STREAM_PATH = "/api/admin/logs/stream";
 const LOG_STREAM_RELOAD_DEBOUNCE_MS = 240;
@@ -76,16 +99,24 @@ function formatLogChannelStack(log) {
   const name = (log?.upstream_name || "").trim();
   const nameHidden = logSensitiveHidden && Boolean(name);
   const displayName = nameHidden ? LOG_SENSITIVE_MASK : name;
+  const attemptIndex = Number(log?.attempt_index) || 0;
+  const attemptBadge = attemptIndex > 0
+    ? `<span class="log-row-attempt-badge" title="重试第 ${attemptIndex} 次 (关联请求: ${escapeHtml(log?.request_uid || "-")})">重试 #${attemptIndex}</span>`
+    : "";
+
   if (id === null || id === undefined) {
     if (name) {
       return `
         <div class="channel-stack">
           <strong${nameHidden ? " class=\"log-sensitive-value\"" : ` title="${escapeHtml(name)}"`}>${escapeHtml(nameHidden ? LOG_SENSITIVE_MASK : name)}</strong>
           <span class="muted">无 ID</span>
+          ${attemptBadge}
         </div>
       `;
     }
-    return "<span class=\"muted\">无（未匹配到渠道）</span>";
+    return attemptBadge
+      ? `<div class="channel-stack"><span class="muted">无（未匹配到渠道）</span>${attemptBadge}</div>`
+      : "<span class=\"muted\">无（未匹配到渠道）</span>";
   }
   const title = name ? `#${id} · ${displayName}` : `#${id}`;
   const nameLine = name
@@ -95,6 +126,7 @@ function formatLogChannelStack(log) {
     <div class="channel-stack">
       <strong title="${escapeHtml(title)}">#${id}</strong>
       ${nameLine}
+      ${attemptBadge}
     </div>
   `;
 }
@@ -1256,6 +1288,13 @@ function createLogRow(log, options = {}) {
   const channel = formatLogChannelStack(log);
   const status = formatStatusBadge(log.status_code);
   const throughput = formatThroughput(log);
+  const failureStage = log.failure_stage ? formatFailureStage(log.failure_stage) : "";
+  const failureStageTag = failureStage
+    ? `<span class="log-failure-stage-tag" title="失败阶段：${escapeHtml(failureStage)}">${escapeHtml(failureStage)}</span>`
+    : "";
+  const statusMarkup = failureStageTag
+    ? `<div class="log-status-stack">${status}${failureStageTag}</div>`
+    : status;
   row.innerHTML = `
     <td class="time-cell" data-col="time">
       <span>${escapeHtml(time)}</span>
@@ -1268,7 +1307,7 @@ function createLogRow(log, options = {}) {
     <td class="col-reasoning" data-col="reasoning">
       ${renderLogReasoningEffort(log)}
     </td>
-    <td data-col="status">${status}</td>
+    <td data-col="status">${statusMarkup}</td>
     <td class="duration-cell" data-col="duration">
       <span class="latency-metrics">
         <span class="latency-metric"><small>首字</small>${formatFirstTokenTime(log.first_token_ms)}</span>
@@ -1692,6 +1731,23 @@ function formatLogDetailMeta(detail) {
     attemptBadge = `<small class="log-detail-route-attempt" title="重试第 ${attemptIndex} 次 (关联请求: ${escapeHtml(detail.request_uid || "-")})">重试 #${attemptIndex}</small>`;
   }
 
+  let uidBadge = "";
+  if (detail.request_uid) {
+    const uid = escapeHtml(detail.request_uid);
+    uidBadge = `<small class="log-detail-route-uid" title="请求唯一标识 (UID): ${uid}">UID: ${uid}</small>`;
+  }
+
+  const stageName = detail.failure_stage ? formatFailureStage(detail.failure_stage) : "";
+  const stageBadge = stageName
+    ? `<span class="log-detail-failure-stage-badge" title="失败阶段：${escapeHtml(stageName)}">阶段: ${escapeHtml(stageName)}</span>`
+    : "";
+  const retryableBadge = (detail.failure_retryable !== null && detail.failure_retryable !== undefined)
+    ? `<span class="log-detail-retryable-badge ${detail.failure_retryable ? "is-retryable" : "is-non-retryable"}">${detail.failure_retryable ? "可重试错误" : "不可重试错误"}</span>`
+    : "";
+  const statusHeadMarkup = (stageBadge || retryableBadge)
+    ? `<div class="log-detail-status-head"><span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>${stageBadge}${retryableBadge}</div>`
+    : `<span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>`;
+
   return `
     <div class="log-detail-meta-card log-detail-route-card">
       <span class="log-detail-meta-label">请求路由</span>
@@ -1700,11 +1756,12 @@ function formatLogDetailMeta(detail) {
       <small class="log-detail-route-request" title="${escapeHtml(detail.method)} /${escapeHtml(detail.path)} · ${escapeHtml(streamLabel)}">
         ${escapeHtml(detail.method)} /${escapeHtml(detail.path)} · ${escapeHtml(streamLabel)}
       </small>
+      ${uidBadge}
       ${attemptBadge}
     </div>
     <div class="log-detail-meta-card">
       <span class="log-detail-meta-label">状态与耗时</span>
-      <strong><span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span></strong>
+      <strong>${statusHeadMarkup}</strong>
       ${timingLine}
       ${timingBarHtml}
       ${formatTokensPerSecondLine(detail)}
@@ -1816,10 +1873,117 @@ function renderLogDetailSection(details) {
   pre.textContent = currentLogDetail ? formatHttpSnapshot(currentLogDetail[details.dataset.field]) : "";
 }
 
+
+function renderLogRetryChain(detail) {
+  const container = typeof logDetailRetryChain !== "undefined" && logDetailRetryChain
+    ? logDetailRetryChain
+    : (typeof document !== "undefined" ? document.querySelector("#log-detail-retry-chain") : null);
+  if (!container) return;
+
+  if (!detail || !detail.request_uid) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+
+  const candidateMap = new Map();
+  if (Array.isArray(logPageItems)) {
+    for (const item of logPageItems) {
+      if (item && item.request_uid === detail.request_uid) {
+        candidateMap.set(item.id, item);
+      }
+    }
+  }
+  if (detail && detail.id) {
+    candidateMap.set(detail.id, detail);
+  }
+
+  const attempts = Array.from(candidateMap.values());
+  const maxAttemptIndex = attempts.reduce((max, item) => Math.max(max, Number(item.attempt_index) || 0), 0);
+
+  if (attempts.length <= 1 && maxAttemptIndex === 0) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+
+  attempts.sort((a, b) => {
+    const idxA = Number(a.attempt_index) || 0;
+    const idxB = Number(b.attempt_index) || 0;
+    if (idxA !== idxB) return idxA - idxB;
+    return (Number(a.id) || 0) - (Number(b.id) || 0);
+  });
+
+  container.hidden = false;
+  const uid = escapeHtml(detail.request_uid);
+
+  const stepsHtml = attempts.map((attempt) => {
+    const isCurrent = Number(attempt.id) === Number(detail.id);
+    const idx = Number(attempt.attempt_index) || 0;
+    const stepLabel = idx === 0 ? "首次尝试" : `重试 #${idx}`;
+    const statusText = attempt.status_code === null || attempt.status_code === undefined
+      ? "无响应"
+      : `HTTP ${attempt.status_code}`;
+    const statusTone = attempt.status_code === null || attempt.status_code === undefined
+      ? "neutral"
+      : attempt.status_code >= 400
+        ? "danger"
+        : attempt.status_code >= 200 && attempt.status_code < 300
+          ? "ok"
+          : "neutral";
+    const channelLabel = formatLogChannelLabel(attempt);
+    const dur = attempt.duration_ms != null && Number.isFinite(Number(attempt.duration_ms))
+      ? `${Math.round(Number(attempt.duration_ms))}ms`
+      : "-";
+    const stage = attempt.failure_stage ? (typeof formatFailureStage === "function" ? formatFailureStage(attempt.failure_stage) : String(attempt.failure_stage)) : "";
+    const stageBadge = stage ? `<span class="retry-step-stage" title="失败阶段：${escapeHtml(stage)}">${escapeHtml(stage)}</span>` : "";
+
+    return `
+      <button
+        type="button"
+        class="retry-chain-step ${isCurrent ? "is-current" : ""}"
+        data-retry-log-id="${attempt.id}"
+        ${isCurrent ? 'aria-current="step"' : ""}
+        title="查看尝试 #${idx} (ID #${attempt.id}) 详情"
+      >
+        <span class="retry-step-idx">${escapeHtml(stepLabel)}</span>
+        <span class="retry-step-channel" title="${escapeHtml(channelLabel)}">${escapeHtml(channelLabel)}</span>
+        <span class="retry-step-status ${statusTone}">${escapeHtml(statusText)}</span>
+        <span class="retry-step-duration">${escapeHtml(dur)}</span>
+        ${stageBadge}
+      </button>
+    `;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="retry-chain-header">
+      <span class="retry-chain-title">请求重试链路</span>
+      <span class="retry-chain-meta">共 ${attempts.length} 次尝试 · UID: ${uid}</span>
+    </div>
+    <div class="retry-chain-items">
+      ${stepsHtml}
+    </div>
+  `;
+
+  const buttons = container.querySelectorAll("button[data-retry-log-id]");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetId = Number(btn.dataset.retryLogId);
+      if (targetId && targetId !== Number(detail.id)) {
+        showLogDetail(targetId);
+      }
+    });
+  });
+}
+
 async function showLogDetail(logId) {
   currentLogDetail = null;
   logDetailTitle.textContent = "请求详情";
   logDetailSummary.textContent = "正在加载...";
+  if (logDetailRetryChain) {
+    logDetailRetryChain.hidden = true;
+    logDetailRetryChain.innerHTML = "";
+  }
   if (logDetailMeta) {
     logDetailMeta.innerHTML = `
       <div class="log-detail-meta-card log-detail-loading-card">
@@ -1848,6 +2012,7 @@ async function showLogDetail(logId) {
     if (logDetailMeta) {
       logDetailMeta.innerHTML = formatLogDetailMeta(detail);
     }
+    renderLogRetryChain(detail);
     for (const details of logDetailSections) {
       if (details.open) {
         renderLogDetailSection(details);
@@ -1863,6 +2028,10 @@ async function showLogDetail(logId) {
           <small>请稍后重试或刷新日志列表。</small>
         </div>
       `;
+    }
+    if (logDetailRetryChain) {
+      logDetailRetryChain.hidden = true;
+      logDetailRetryChain.innerHTML = "";
     }
   }
 }

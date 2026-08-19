@@ -247,7 +247,7 @@ func (g *abortLogGuard) setRequestSnapshots(downstream, upstream json.RawMessage
 func (g *abortLogGuard) disarm() { g.entry = nil }
 
 // logAndDisarm records a specific failure instead of the default abort.
-func (g *abortLogGuard) logAndDisarm(statusCode int32, message string) {
+func (g *abortLogGuard) logAndDisarm(statusCode int32, message string, stage proxy.FailureStage) {
 	entry := g.entry
 	g.entry = nil
 	if entry == nil {
@@ -256,6 +256,7 @@ func (g *abortLogGuard) logAndDisarm(statusCode int32, message string) {
 	entry.StatusCode = &statusCode
 	entry.Error = &message
 	entry.DurationMs = g.elapsed()
+	entry.SetFailure(stage, statusCode)
 	g.logWriter.Schedule(*entry)
 }
 
@@ -267,6 +268,9 @@ func (g *abortLogGuard) finish() {
 		return
 	}
 	entry.DurationMs = g.elapsed()
+	// The default entry is a 499: this guard only fires for a request that ended
+	// before anything else could describe it.
+	entry.SetFailure(proxy.FailureStageClientCancelled, 499)
 	g.logWriter.Schedule(*entry)
 }
 
@@ -299,12 +303,14 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			// means the caller went away mid-upload.
 			var maxBytesError *http.MaxBytesError
 			if errors.As(err, &maxBytesError) {
-				guard.logAndDisarm(400, "failed to read downstream request body: "+err.Error())
+				guard.logAndDisarm(400, "failed to read downstream request body: "+err.Error(),
+					proxy.FailureStageGateway)
 				apperr.BadRequest("failed to read body: " + err.Error()).Write(w)
 				return
 			}
 			guard.logAndDisarm(499,
-				"client disconnected while reading downstream request body: "+err.Error())
+				"client disconnected while reading downstream request body: "+err.Error(),
+				proxy.FailureStageClientCancelled)
 			apperr.BadRequest("failed to read body: " + err.Error()).Write(w)
 			return
 		}
@@ -318,12 +324,15 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 
 		// A direct selection is resolved once; the retry loop reuses it rather
 		// than re-running a selector that can only ever pick the same channel.
+		selectionPolicy := state.SelectionPolicy()
+
 		var directSelection *proxy.Selection
 		if selector != nil {
 			directSelection, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
-				state.AutoWeight, policy, selector, model, auth.GroupID, nil)
+				state.AutoWeight, policy, selectionPolicy, selector, model, auth.GroupID, nil)
 			if err != nil {
-				guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
+				guard.logAndDisarm(500, "upstream selection failed: "+err.Error(),
+					proxy.FailureStageGateway)
 				apperr.WriteError(w, err)
 				return
 			}
@@ -339,6 +348,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			selector:        selector,
 			directSelection: directSelection,
 			policy:          policy,
+			selectionPolicy: selectionPolicy,
 			runtimeSettings: runtimeSettings,
 		})
 		if err != nil {
@@ -373,6 +383,7 @@ type proxyAttemptConfig struct {
 	selector        *string
 	directSelection *proxy.Selection
 	policy          proxy.AutoWeightPolicy
+	selectionPolicy proxy.SelectionPolicy
 	runtimeSettings models.RuntimeSettings
 }
 
@@ -393,6 +404,13 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 	// re-selection falls over to the remaining candidates instead of drawing the
 	// same channel again. Nil until the first refusal.
 	var rateLimited map[int64]bool
+	// failedUpstreams collects the channels that already failed this request.
+	// They are preferred against rather than banned: routing tries to find one
+	// that has not failed yet, and only if there is none does it come back to a
+	// channel that has. A hard ban would break the single-channel case the retry
+	// interval exists for, where trying the same channel again after a pause is
+	// the whole point.
+	var failedUpstreams map[int64]bool
 
 	for attempt := 0; ; attempt++ {
 		// Selection repeats until a channel's rate limit admits the request;
@@ -403,11 +421,10 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			selected = config.directSelection
 			if config.selector == nil {
 				var err error
-				selected, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
-					state.AutoWeight, config.policy, nil, config.model, config.auth.GroupID,
-					rateLimited)
+				selected, err = selectWithFailover(r, state, config, rateLimited, failedUpstreams)
 				if err != nil {
-					config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
+					config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error(),
+						proxy.FailureStageGateway)
 					return nil, err
 				}
 			} else if selected != nil && rateLimited[selected.Upstream.ID] {
@@ -433,12 +450,13 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				// Routing had candidates, but every one of them refused: the
 				// request is only deferred, not unroutable, so the answer is a
 				// 429 rather than the no-route 503.
-				config.guard.logAndDisarm(429, "all candidate channels are rate limited")
+				config.guard.logAndDisarm(429, "all candidate channels are rate limited",
+					proxy.FailureStageRateLimited)
 				writeUpstreamRateLimitRejection(w, config.path)
 				return nil, nil
 			}
 			reason := noRouteReason(config.selector, config.model, config.groupName)
-			config.guard.logAndDisarm(503, reason)
+			config.guard.logAndDisarm(503, reason, proxy.FailureStageNoRoute)
 			writeProtocolError(w, http.StatusServiceUnavailable,
 				config.path, reason, "upstream_not_configured")
 			return nil, nil
@@ -454,7 +472,8 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				// Logged here because no attempt was made to log it: this is
 				// the one error path out of this function that ProxyRequest
 				// never saw.
-				config.guard.logAndDisarm(499, "client disconnected during retry backoff")
+				config.guard.logAndDisarm(499, "client disconnected during retry backoff",
+					proxy.FailureStageClientCancelled)
 				return nil, apperr.Upstream("client disconnected during retry backoff")
 			case <-time.After(time.Duration(config.runtimeSettings.SameUpstreamRetryIntervalMs) *
 				time.Millisecond):
@@ -476,11 +495,15 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			// keeps full weight and keeps being chosen to fail again.
 			state.AutoWeight.RecordFailure(selected.Upstream.ID,
 				selected.Upstream.AutoWeightEnabled == 1, config.policy)
-			config.guard.logAndDisarm(502, err.Error())
+			config.guard.logAndDisarm(502, err.Error(), proxy.FailureStageRequestBuild)
 			return nil, err
 		}
 		config.guard.setRequestSnapshots(prepared.DownstreamSnapshot, prepared.UpstreamSnapshot)
 
+		// Whether another attempt could follow is decided before this one runs,
+		// because the streaming path needs to know: holding a 2xx SSE response
+		// back to see whether it produces an event is only worth its latency when
+		// there is somewhere else to go.
 		response, err := proxy.ProxyRequest(r.Context(), state.ProxyDeps(), config.policy,
 			&selected.Upstream, proxy.RequestContext{
 				DownstreamTokenID:   config.auth.TokenID,
@@ -491,20 +514,13 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				Method:              r.Method,
 				Path:                config.path,
 				LogBodyMaxBytes:     logBodyMaxBytes,
-				RequestUID:      config.guard.requestUID,
-				AttemptIndex:    int32(attempt),
-				ReceivedAt:      config.guard.startedAt,
+				RequestUID:          config.guard.requestUID,
+				AttemptIndex:        int32(attempt),
+				ReceivedAt:          config.guard.startedAt,
+				FailoverEligible:    attempt < maxRetries,
 			}, prepared)
 
-		failed := err != nil || response.Status < 200 || response.Status >= 300
-		if !failed || attempt >= maxRetries {
-			return response, err
-		}
-		// A client that has gone is not owed another attempt. Retrying spent
-		// another channel's rate-limit allowance and wrote another log row for
-		// a request nobody was waiting for, so one disconnect could leave a
-		// handful of 499s behind it.
-		if r.Context().Err() != nil {
+		if !shouldFailover(r, response, err) || attempt >= maxRetries {
 			return response, err
 		}
 
@@ -519,8 +535,77 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 
 		upstreamID := selected.Upstream.ID
 		previousUpstreamID = &upstreamID
+		if failedUpstreams == nil {
+			failedUpstreams = map[int64]bool{}
+		}
+		failedUpstreams[upstreamID] = true
 		lastFailure = &attemptResult{response: response, err: err}
 	}
+}
+
+// selectWithFailover routes an attempt, preferring a channel that has not
+// already failed this request.
+//
+// Two passes rather than one exclusion set: the first asks for a channel that is
+// neither rate-limited nor already failed, and only when there is none does the
+// second allow a channel that failed to be tried again. Banning failed channels
+// outright would turn a single-channel deployment's retry into an immediate
+// no-route, and preferring nothing would keep drawing the broken channel while a
+// healthy one sat unused — routing draws by weight, and one failure barely moves
+// a weight.
+func selectWithFailover(r *http.Request, state *appstate.State, config proxyAttemptConfig,
+	rateLimited, failedUpstreams map[int64]bool) (*proxy.Selection, error) {
+	if len(failedUpstreams) > 0 {
+		exclude := make(map[int64]bool, len(rateLimited)+len(failedUpstreams))
+		for id := range rateLimited {
+			exclude[id] = true
+		}
+		for id := range failedUpstreams {
+			exclude[id] = true
+		}
+		selected, err := proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
+			state.AutoWeight, config.policy, config.selectionPolicy, nil, config.model,
+			config.auth.GroupID, exclude)
+		if err != nil || selected != nil {
+			return selected, err
+		}
+	}
+	return proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
+		state.AutoWeight, config.policy, config.selectionPolicy, nil, config.model,
+		config.auth.GroupID, rateLimited)
+}
+
+// shouldFailover decides whether an attempt's outcome earns another channel.
+//
+// The proxy used to retry every non-2xx response. That made one wrong credential
+// fan out across every channel serving the model — each answering 401, each
+// charged for it, the caller waiting through the whole list for the same refusal
+// — and it retried 3xx redirects, which are not failures at all.
+//
+// The order of these checks is the policy:
+//
+//  1. A client that has gone is owed nothing. Retrying spent another channel's
+//     rate-limit allowance and wrote another log row for a request nobody was
+//     waiting for.
+//  2. A transport-level error is the channel's own, and switching is worth it.
+//     ProxyRequest has already decided this is not a client abort; it returns an
+//     error for a failed dial, a body that died, and a stream that never spoke.
+//  3. A response's status decides the rest, by the matrix in
+//     proxy.IsRetryableUpstreamStatus.
+func shouldFailover(r *http.Request, response *proxy.Response, err error) bool {
+	if r.Context().Err() != nil {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	if response == nil {
+		return false
+	}
+	if response.Status >= 200 && response.Status < 300 {
+		return false
+	}
+	return proxy.IsRetryableUpstreamStatus(response.Status)
 }
 
 type attemptResult struct {

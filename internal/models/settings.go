@@ -171,6 +171,37 @@ const (
 	DefaultAutoWeightRecoveryIntervalSeconds int64 = 60
 )
 
+// Load-balancing strategies decide how routing picks within one priority tier.
+//
+// The strategy is global rather than per-channel: it compares channels against
+// each other, so a per-channel setting would have no defined meaning when two
+// candidates disagreed about which comparison to run.
+const (
+	// LoadBalanceWeighted is weighted random by effective weight — configured
+	// weight scaled by the health score. It is the default because it is what
+	// every existing database already behaves as.
+	LoadBalanceWeighted = "weighted"
+	// LoadBalanceLeastLatency prefers the channels answering fastest, still
+	// within the highest available priority tier and still weighted-random among
+	// those that tie. It never picks purely by latency: that would hand every
+	// request to whichever channel is momentarily ahead.
+	LoadBalanceLeastLatency = "least_latency"
+)
+
+// DefaultLoadBalanceStrategy keeps an upgraded database routing exactly as it did.
+const DefaultLoadBalanceStrategy = LoadBalanceWeighted
+
+// ValidLoadBalanceStrategy reports whether a stored or submitted value names a
+// strategy routing knows how to run.
+func ValidLoadBalanceStrategy(value string) bool {
+	switch value {
+	case LoadBalanceWeighted, LoadBalanceLeastLatency:
+		return true
+	default:
+		return false
+	}
+}
+
 // RuntimeSettings is the operator-editable policy stored in SQLite.
 type RuntimeSettings struct {
 	LogBodyKeepCount                  int64  `json:"log_body_keep_count"`
@@ -184,8 +215,11 @@ type RuntimeSettings struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
-	Revision                          int64  `json:"revision"`
-	UpdatedAt                         string `json:"updated_at"`
+	// LoadBalanceStrategy selects how routing picks inside a priority tier. See
+	// the LoadBalance* constants.
+	LoadBalanceStrategy string `json:"load_balance_strategy"`
+	Revision            int64  `json:"revision"`
+	UpdatedAt           string `json:"updated_at"`
 	// DatabaseOverride records that these values came from SQLite rather than
 	// the startup defaults. It is not part of the stored row.
 	DatabaseOverride bool `json:"-"`
@@ -205,6 +239,7 @@ func DefaultRuntimeSettings() RuntimeSettings {
 		AutoWeightRecoveryIntervalSeconds: DefaultAutoWeightRecoveryIntervalSeconds,
 		ProxyEnabled:                      false,
 		ProxyURL:                          "",
+		LoadBalanceStrategy:               DefaultLoadBalanceStrategy,
 		Revision:                          0,
 		UpdatedAt:                         "",
 		DatabaseOverride:                  false,
@@ -233,6 +268,9 @@ func (s *RuntimeSettings) Validate() error {
 	}
 	if err := validateProxyURL(s.ProxyURL, s.ProxyEnabled); err != nil {
 		return err
+	}
+	if !ValidLoadBalanceStrategy(s.LoadBalanceStrategy) {
+		return ErrString("load_balance_strategy must be weighted or least_latency")
 	}
 	return nil
 }
@@ -277,7 +315,25 @@ type RuntimeSettingsIn struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
-	Revision                          int64  `json:"revision"`
+	// LoadBalanceStrategy is optional in the request body: an empty value resolves
+	// to the default rather than failing validation, so a console built before
+	// this field existed can still save the other settings instead of having
+	// every write refused.
+	//
+	// This endpoint replaces the whole settings row, as it already did for every
+	// other field, so a caller that omits the strategy resets it to weighted. A
+	// console editing one field must read the current settings and send them back
+	// in full.
+	LoadBalanceStrategy string `json:"load_balance_strategy"`
+	Revision            int64  `json:"revision"`
+}
+
+// NormalizedLoadBalanceStrategy resolves an absent strategy to the default.
+func (in *RuntimeSettingsIn) NormalizedLoadBalanceStrategy() string {
+	if strings.TrimSpace(in.LoadBalanceStrategy) == "" {
+		return DefaultLoadBalanceStrategy
+	}
+	return strings.TrimSpace(in.LoadBalanceStrategy)
 }
 
 func (in *RuntimeSettingsIn) Validate() error {
@@ -296,6 +352,7 @@ func (in *RuntimeSettingsIn) Validate() error {
 	candidate.AutoWeightRecoveryIntervalSeconds = in.AutoWeightRecoveryIntervalSeconds
 	candidate.ProxyEnabled = in.ProxyEnabled
 	candidate.ProxyURL = in.ProxyURL
+	candidate.LoadBalanceStrategy = in.NormalizedLoadBalanceStrategy()
 	return candidate.Validate()
 }
 
@@ -311,6 +368,7 @@ type RuntimeSettingsOut struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
+	LoadBalanceStrategy               string `json:"load_balance_strategy"`
 	Revision                          int64  `json:"revision"`
 	UpdatedAt                         string `json:"updated_at"`
 	DatabaseOverride                  bool   `json:"database_override"`
@@ -329,6 +387,7 @@ func NewRuntimeSettingsOut(s *RuntimeSettings) RuntimeSettingsOut {
 		AutoWeightRecoveryIntervalSeconds: s.AutoWeightRecoveryIntervalSeconds,
 		ProxyEnabled:                      s.ProxyEnabled,
 		ProxyURL:                          s.ProxyURL,
+		LoadBalanceStrategy:               s.LoadBalanceStrategy,
 		Revision:                          s.Revision,
 		UpdatedAt:                         s.UpdatedAt,
 		DatabaseOverride:                  s.DatabaseOverride,

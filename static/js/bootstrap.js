@@ -40,6 +40,7 @@ const upstreamActionMenu = document.querySelector("#upstream-action-menu");
 const rows = document.querySelector("#upstream-rows");
 const upstreamSummary = document.querySelector("#upstream-summary");
 const upstreamProbeSummary = document.querySelector("#upstream-probe-summary");
+const upstreamRoutingSummary = document.querySelector("#upstream-routing-summary");
 const upstreamCardsContainer = document.querySelector("#upstream-cards");
 const viewGridBtn = document.querySelector("#upstream-view-grid");
 const viewListBtn = document.querySelector("#upstream-view-list");
@@ -312,6 +313,7 @@ const logDetailDialog = document.querySelector("#log-detail-dialog");
 const logDetailTitle = document.querySelector("#log-detail-title");
 const logDetailSummary = document.querySelector("#log-detail-summary");
 const logDetailMeta = document.querySelector("#log-detail-meta");
+const logDetailRetryChain = document.querySelector("#log-detail-retry-chain");
 const logDetailClose = document.querySelector("#log-detail-close");
 const logDetailSections = document.querySelectorAll(".log-detail-section");
 const requestDetailGrid = document.querySelector(".request-detail-grid");
@@ -511,6 +513,7 @@ let pageVisible = typeof document.visibilityState === "string"
   : true;
 const selectedUpstreamIds = new Set();
 let lastSummarySignature = "";
+let latestRoutingData = null;
 
 const upstreamSearchInput = document.querySelector("#upstream-search");
 const liveIndicator = document.querySelector("#live-indicator");
@@ -539,6 +542,7 @@ const settingsBodyKeepCount = document.querySelector("#settings-body-keep-count"
 const settingsRetentionDays = document.querySelector("#settings-retention-days");
 const settingsBodyMaxBytes = document.querySelector("#settings-body-max-bytes");
 const routingSettingsForm = document.querySelector("#routing-settings-form");
+const settingsLoadBalanceStrategy = document.querySelector("#settings-load-balance-strategy");
 const settingsMaxRetries = document.querySelector("#settings-max-retries");
 const settingsSameUpstreamRetryMs = document.querySelector("#settings-same-upstream-retry-ms");
 const settingsFailurePenalty = document.querySelector("#settings-failure-penalty");

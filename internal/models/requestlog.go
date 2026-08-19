@@ -45,8 +45,22 @@ type RequestLogOut struct {
 	PreUpstreamMs *int32 `json:"pre_upstream_ms"`
 	// UpstreamHeadersMs is the attempt-relative moment the upstream response
 	// headers arrived, on the same origin as FirstTokenMs and DurationMs.
-	UpstreamHeadersMs *int32  `json:"upstream_headers_ms"`
-	Error             *string `json:"error"`
+	UpstreamHeadersMs *int32 `json:"upstream_headers_ms"`
+	// FailureStage names where this attempt broke: request_build, connect,
+	// upstream_status, first_event, response_body, stream, client_cancelled,
+	// no_route, rate_limited or gateway. NULL means the attempt succeeded, and
+	// also covers rows written before the field existed.
+	FailureStage *string `json:"failure_stage"`
+	// FailureRetryable is the gateway's verdict at the time: whether this failure
+	// class is one another channel may be given. It is stored rather than derived
+	// so a later policy edit cannot rewrite why a request stopped after one
+	// attempt. NULL alongside a NULL FailureStage.
+	//
+	// It says nothing about whether a retry actually happened: the attempt budget
+	// may have been spent, or no other channel may have been routable. Read it
+	// with AttemptIndex and RequestUID for that.
+	FailureRetryable *bool   `json:"failure_retryable"`
+	Error            *string `json:"error"`
 }
 
 // RequestLogDetailOut flattens RequestLogOut and adds the captured payloads.

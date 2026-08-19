@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/middleware"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/proxy"
 	"github.com/liguangsheng/wildtoken/internal/themes"
 )
 
@@ -891,6 +893,54 @@ func AdminUpstreamHealthHistory(state *appstate.State) http.HandlerFunc {
 		apperr.WriteJSON(w, http.StatusOK, map[string]any{
 			"hours":   hours,
 			"entries": health,
+		})
+	}
+}
+
+// AdminUpstreamsRouting reports the effective load-balance strategy, the rules
+// behind it, and each channel's current routing latency.
+//
+// Separate from AdminListUpstreams because that endpoint answers with a bare JSON
+// array: there is no envelope to add these fields to, and giving it one would
+// break every existing caller. Separate from the dashboard's latency charts
+// because those scan request_logs, while this reads the in-memory samples routing
+// actually decided on.
+func AdminUpstreamsRouting(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		settings := state.Runtime.Get()
+		readings := state.Latency.ReadAll()
+
+		latency := make([]models.UpstreamLatencyOut, 0, len(readings))
+		for upstreamID, reading := range readings {
+			entry := models.UpstreamLatencyOut{
+				UpstreamID:  upstreamID,
+				SampleCount: reading.SampleCount,
+				Usable:      reading.Usable,
+			}
+			// Left null below the minimum: a median of two samples is a number the
+			// console would have to explain away, and routing did not use it.
+			if reading.Usable {
+				median := reading.MedianMs
+				entry.MedianMs = &median
+			}
+			latency = append(latency, entry)
+		}
+		// Ordered so the response is stable between polls; a map's order is not.
+		sort.Slice(latency, func(i, j int) bool {
+			return latency[i].UpstreamID < latency[j].UpstreamID
+		})
+
+		apperr.WriteJSON(w, http.StatusOK, models.UpstreamRoutingOut{
+			Strategy:      settings.LoadBalanceStrategy,
+			LatencyActive: settings.LoadBalanceStrategy == models.LoadBalanceLeastLatency,
+			Rules: models.RoutingRulesOut{
+				MinSamples:         proxy.LatencyMinSamples,
+				StaleWindowSeconds: int64(proxy.LatencyStaleWindow.Seconds()),
+				SampleCapacity:     proxy.LatencySampleCapacity,
+				ToleranceRatio:     proxy.LatencyToleranceRatio,
+				ToleranceFloorMs:   proxy.LatencyToleranceFloorMs,
+			},
+			Latency: latency,
 		})
 	}
 }
