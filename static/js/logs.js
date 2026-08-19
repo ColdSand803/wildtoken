@@ -289,9 +289,30 @@ function firstTokenTone(ms) {
 }
 
 function formatFirstTokenTime(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) {
+    return `<span class="first-token-time neutral" title="首字耗时不可用">不可用</span>`;
+  }
   const label = formatSeconds(ms);
   const tone = firstTokenTone(ms);
   return `<span class="first-token-time ${tone}" title="首字耗时 ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+}
+
+function formatGatewayPrepTime(ms, attemptIndex) {
+  const isRetry = attemptIndex !== null && attemptIndex !== undefined && Number(attemptIndex) > 0;
+  const titlePrefix = isRetry ? "网关准备（含前序重试与退避）" : "网关准备";
+  if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) {
+    return `<span class="first-token-time neutral" title="${escapeHtml(titlePrefix)}耗时不可用">不可用</span>`;
+  }
+  const label = formatSeconds(ms);
+  return `<span class="first-token-time neutral" title="${escapeHtml(titlePrefix)} ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+}
+
+function formatHeadersArrivalTime(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) {
+    return `<span class="first-token-time neutral" title="连接与响应头耗时不可用">不可用</span>`;
+  }
+  const label = formatSeconds(ms);
+  return `<span class="first-token-time neutral" title="连接与响应头 ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
 }
 
 function outputTokensPerSecond(log) {
@@ -1520,34 +1541,155 @@ function formatLogDetailMeta(detail) {
     ? Number(detail.duration_ms)
     : null;
 
+  const hasPreUpstream = detail.pre_upstream_ms != null && Number.isFinite(Number(detail.pre_upstream_ms));
+  const preUpstreamMs = hasPreUpstream ? Math.max(0, Number(detail.pre_upstream_ms)) : null;
+
+  const attemptIndex = detail.attempt_index != null && Number.isFinite(Number(detail.attempt_index))
+    ? Number(detail.attempt_index)
+    : null;
+  const isRetry = attemptIndex !== null && attemptIndex > 0;
+  const gatewayLabelName = isRetry ? "网关准备(含重试)" : "网关准备";
+  const gatewayFullTitle = isRetry ? "网关准备（含前序重试与退避）" : "网关准备";
+
+  const hasHeaders = detail.upstream_headers_ms != null && Number.isFinite(Number(detail.upstream_headers_ms));
+  const upstreamHeadersMs = hasHeaders ? Math.max(0, Number(detail.upstream_headers_ms)) : null;
+
+  const hasSampledOrigins = hasPreUpstream || hasHeaders;
+
   if (detail.stream) {
     const hasFirstToken = detail.first_token_ms != null && Number.isFinite(Number(detail.first_token_ms));
-    const firstTokenMs = hasFirstToken ? Number(detail.first_token_ms) : null;
+    const firstTokenMs = hasFirstToken ? Math.max(0, Number(detail.first_token_ms)) : null;
     const firstTokenLabel = hasFirstToken
       ? formatFirstTokenTime(firstTokenMs)
       : `<span class="first-token-time neutral" title="首字耗时不可用">不可用</span>`;
 
-    const transferMs = (totalMs != null && firstTokenMs != null)
-      ? Math.max(0, totalMs - firstTokenMs)
-      : null;
-    const transferLabel = transferMs != null ? formatSeconds(transferMs) : "-";
+    const hasGeneration = hasFirstToken && hasHeaders && (firstTokenMs >= upstreamHeadersMs);
+    const generationMs = hasGeneration ? Math.max(0, firstTokenMs - upstreamHeadersMs) : null;
+    const generationLabel = hasGeneration
+      ? formatSeconds(generationMs)
+      : `<span class="first-token-time neutral" title="上游生成耗时不可用">不可用</span>`;
 
-    timingLine = `<small>首字 ${firstTokenLabel} · 传输 ${escapeHtml(transferLabel)} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+    const hasTransfer = hasFirstToken && totalMs != null && (totalMs >= firstTokenMs);
+    const transferMs = hasTransfer ? Math.max(0, totalMs - firstTokenMs) : null;
+    const transferLabel = hasTransfer
+      ? formatSeconds(transferMs)
+      : `<span class="first-token-time neutral" title="传输耗时不可用">不可用</span>`;
 
-    if (firstTokenMs != null && totalMs != null && totalMs > 0) {
-      const ttfbRatio = Math.min(1, Math.max(0, firstTokenMs / totalMs));
-      const transferRatio = Math.max(0, 1 - ttfbRatio);
-      const ttfbPercent = (ttfbRatio * 100).toFixed(1);
-      const transferPercent = (transferRatio * 100).toFixed(1);
-      timingBarHtml = `
-        <div class="log-detail-timing-bar" title="总耗时 ${totalMs}ms (首字 ${firstTokenMs}ms + 传输 ${transferMs}ms)">
-          <span class="timing-seg timing-seg--ttfb" style="width:${ttfbPercent}%" title="首字耗时 (TTFB): ${firstTokenMs}ms"></span>
-          <span class="timing-seg timing-seg--transfer" style="width:${transferPercent}%" title="传输耗时: ${transferMs}ms"></span>
-        </div>
-      `;
+    if (hasSampledOrigins) {
+      const gatewayValueMarkup = formatGatewayPrepTime(preUpstreamMs, attemptIndex);
+      const headersValueMarkup = formatHeadersArrivalTime(upstreamHeadersMs);
+      const generationValueMarkup = hasGeneration
+        ? `<span class="first-token-time neutral" title="上游生成 ${escapeHtml(generationLabel)}">${escapeHtml(generationLabel)}</span>`
+        : generationLabel;
+      const transferValueMarkup = hasTransfer
+        ? `<span class="first-token-time neutral" title="传输耗时 ${escapeHtml(transferLabel)}">${escapeHtml(transferLabel)}</span>`
+        : transferLabel;
+
+      timingLine = `<small>${escapeHtml(gatewayLabelName)} ${gatewayValueMarkup} · 连接/Header ${headersValueMarkup} · 上游生成 ${generationValueMarkup} · 传输 ${transferValueMarkup} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+
+      if (hasFirstToken && totalMs != null && totalMs > 0) {
+        const fullTotal = (preUpstreamMs || 0) + totalMs;
+        if (fullTotal > 0) {
+          const prePct = preUpstreamMs ? (preUpstreamMs / fullTotal * 100).toFixed(1) : "0.0";
+          const hdrMs = hasHeaders ? Math.min(upstreamHeadersMs, firstTokenMs) : 0;
+          const hdrPct = hdrMs ? (hdrMs / fullTotal * 100).toFixed(1) : "0.0";
+          const genMs = hasGeneration ? generationMs : (hasFirstToken ? Math.max(0, firstTokenMs - hdrMs) : 0);
+          const genPct = genMs ? (genMs / fullTotal * 100).toFixed(1) : "0.0";
+          const txMs = hasTransfer ? transferMs : 0;
+          const txPct = txMs ? (txMs / fullTotal * 100).toFixed(1) : "0.0";
+
+          const segmentsHtml = [
+            preUpstreamMs && preUpstreamMs > 0
+              ? `<span class="timing-seg timing-seg--gateway" style="width:${prePct}%" title="${escapeHtml(gatewayFullTitle)}: ${preUpstreamMs}ms"></span>`
+              : "",
+            hdrMs > 0
+              ? `<span class="timing-seg timing-seg--headers" style="width:${hdrPct}%" title="连接与响应头: ${hdrMs}ms"></span>`
+              : "",
+            genMs > 0
+              ? `<span class="timing-seg timing-seg--generation" style="width:${genPct}%" title="上游生成: ${genMs}ms (首字 ${firstTokenMs}ms)"></span>`
+              : "",
+            txMs > 0
+              ? `<span class="timing-seg timing-seg--transfer" style="width:${txPct}%" title="传输耗时: ${txMs}ms"></span>`
+              : "",
+          ].filter(Boolean).join("");
+
+          timingBarHtml = `
+            <div class="log-detail-timing-bar" title="总耗时 ${totalMs}ms (网关 ${preUpstreamMs ?? "-"}ms + 连接 ${upstreamHeadersMs ?? "-"}ms + 生成 ${genMs}ms + 传输 ${txMs}ms)">
+              ${segmentsHtml}
+            </div>
+          `;
+        }
+      }
+    } else {
+      // Legacy streaming fallback (when neither pre_upstream_ms nor upstream_headers_ms exists)
+      timingLine = `<small>首字 ${firstTokenLabel} · 传输 ${escapeHtml(hasTransfer ? transferLabel : "-")} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+
+      if (firstTokenMs != null && totalMs != null && totalMs > 0) {
+        const ttfbRatio = Math.min(1, Math.max(0, firstTokenMs / totalMs));
+        const transferRatio = Math.max(0, 1 - ttfbRatio);
+        const ttfbPercent = (ttfbRatio * 100).toFixed(1);
+        const transferPercent = (transferRatio * 100).toFixed(1);
+        timingBarHtml = `
+          <div class="log-detail-timing-bar" title="总耗时 ${totalMs}ms (首字 ${firstTokenMs}ms + 传输 ${transferMs}ms)">
+            <span class="timing-seg timing-seg--ttfb" style="width:${ttfbPercent}%" title="首字耗时 (TTFB): ${firstTokenMs}ms"></span>
+            <span class="timing-seg timing-seg--transfer" style="width:${transferPercent}%" title="传输耗时: ${transferMs}ms"></span>
+          </div>
+        `;
+      }
     }
   } else {
-    timingLine = `<small>总耗时 ${formatTotalDurationTime(detail)}</small>`;
+    // Non-streaming
+    if (hasSampledOrigins) {
+      const gatewayValueMarkup = formatGatewayPrepTime(preUpstreamMs, attemptIndex);
+      const headersValueMarkup = formatHeadersArrivalTime(upstreamHeadersMs);
+      const hasTransfer = hasHeaders && totalMs != null && totalMs >= upstreamHeadersMs;
+      const transferMs = hasTransfer ? Math.max(0, totalMs - upstreamHeadersMs) : null;
+      const transferLabel = hasTransfer ? formatSeconds(transferMs) : null;
+
+      if (hasHeaders && hasTransfer) {
+        timingLine = `<small>${escapeHtml(gatewayLabelName)} ${gatewayValueMarkup} · 连接/Header ${headersValueMarkup} · 响应传输 ${escapeHtml(transferLabel)} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+      } else if (hasHeaders) {
+        timingLine = `<small>${escapeHtml(gatewayLabelName)} ${gatewayValueMarkup} · 连接/Header ${headersValueMarkup} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+      } else {
+        timingLine = `<small>${escapeHtml(gatewayLabelName)} ${gatewayValueMarkup} · 上游耗时 ${formatTotalDurationTime(detail)}</small>`;
+      }
+
+      if (totalMs != null && totalMs > 0) {
+        const fullTotal = (preUpstreamMs || 0) + totalMs;
+        if (fullTotal > 0) {
+          const prePct = preUpstreamMs ? (preUpstreamMs / fullTotal * 100).toFixed(1) : "0.0";
+          const hdrMs = hasHeaders ? Math.min(upstreamHeadersMs, totalMs) : 0;
+          const hdrPct = hdrMs ? (hdrMs / fullTotal * 100).toFixed(1) : "0.0";
+          const txMs = hasTransfer ? transferMs : (hasHeaders ? 0 : totalMs);
+          const txPct = txMs ? (txMs / fullTotal * 100).toFixed(1) : "0.0";
+
+          const segmentsHtml = [
+            preUpstreamMs && preUpstreamMs > 0
+              ? `<span class="timing-seg timing-seg--gateway" style="width:${prePct}%" title="${escapeHtml(gatewayFullTitle)}: ${preUpstreamMs}ms"></span>`
+              : "",
+            hdrMs > 0
+              ? `<span class="timing-seg timing-seg--headers" style="width:${hdrPct}%" title="连接与响应头: ${hdrMs}ms"></span>`
+              : "",
+            txMs > 0
+              ? `<span class="timing-seg timing-seg--transfer" style="width:${txPct}%" title="${hasHeaders ? "响应传输" : "上游耗时"}: ${txMs}ms"></span>`
+              : "",
+          ].filter(Boolean).join("");
+
+          timingBarHtml = `
+            <div class="log-detail-timing-bar" title="总耗时 ${totalMs}ms (网关 ${preUpstreamMs ?? "-"}ms + 连接 ${upstreamHeadersMs ?? "-"}ms + 传输 ${txMs}ms)">
+              ${segmentsHtml}
+            </div>
+          `;
+        }
+      }
+    } else {
+      timingLine = `<small>总耗时 ${formatTotalDurationTime(detail)}</small>`;
+    }
+  }
+
+  let attemptBadge = "";
+  if (attemptIndex !== null && attemptIndex > 0) {
+    attemptBadge = `<small class="log-detail-route-attempt" title="重试第 ${attemptIndex} 次 (关联请求: ${escapeHtml(detail.request_uid || "-")})">重试 #${attemptIndex}</small>`;
   }
 
   return `
@@ -1558,6 +1700,7 @@ function formatLogDetailMeta(detail) {
       <small class="log-detail-route-request" title="${escapeHtml(detail.method)} /${escapeHtml(detail.path)} · ${escapeHtml(streamLabel)}">
         ${escapeHtml(detail.method)} /${escapeHtml(detail.path)} · ${escapeHtml(streamLabel)}
       </small>
+      ${attemptBadge}
     </div>
     <div class="log-detail-meta-card">
       <span class="log-detail-meta-label">状态与耗时</span>

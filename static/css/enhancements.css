@@ -425,6 +425,21 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   gap: 1px;
 }
 
+.timing-seg--gateway {
+  background: #a855f7;
+  height: 100%;
+}
+
+.timing-seg--headers {
+  background: #38bdf8;
+  height: 100%;
+}
+
+.timing-seg--generation {
+  background: var(--accent);
+  height: 100%;
+}
+
 .timing-seg--ttfb {
   background: var(--accent);
   height: 100%;
@@ -433,4 +448,18 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 .timing-seg--transfer {
   background: var(--ok);
   height: 100%;
+}
+
+.log-detail-route-attempt {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  border-radius: var(--radius-xs, 4px);
+  background: rgb(245 158 11 / 15%);
+  color: var(--warning, #f59e0b);
+  border: 1px solid rgb(245 158 11 / 30%);
+  width: fit-content;
 }

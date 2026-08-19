@@ -436,7 +436,51 @@ test("openLogStream constructs query params with new filter options", async () =
   assert.ok(path.includes("end=2026-08-19T00%3A00%3A00Z") || path.includes("end=2026-08-19T00:00:00Z"), "stream includes end");
 });
 
-test("formatLogDetailMeta renders stream TTFB and transfer duration bar and handles missing first_token_ms safely", () => {
+test("enhancements.css defines 4-stage timing waterfall styles and retry attempt badge", () => {
+  const css = read("static/css/enhancements.css");
+  assert.ok(css.includes(".timing-seg--gateway"), "has gateway timing segment CSS");
+  assert.ok(css.includes(".timing-seg--headers"), "has headers timing segment CSS");
+  assert.ok(css.includes(".timing-seg--generation"), "has generation timing segment CSS");
+  assert.ok(css.includes(".timing-seg--ttfb"), "has legacy ttfb timing segment CSS");
+  assert.ok(css.includes(".timing-seg--transfer"), "has transfer timing segment CSS");
+  assert.ok(css.includes(".log-detail-route-attempt"), "has attempt badge CSS");
+});
+
+test("formatGatewayPrepTime and formatHeadersArrivalTime handle timings, attempt states, and missing values safely", () => {
+  const source = read("static/js/logs.js");
+  const context = vm.createContext({
+    escapeHtml,
+    formatSeconds,
+  });
+
+  vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
+  vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
+
+  // Gateway prep attempt 0
+  const gw0 = vm.runInContext("formatGatewayPrepTime(120, 0)", context);
+  assert.ok(gw0.includes("120ms"), "shows ms for gateway prep");
+  assert.ok(gw0.includes("网关准备 120ms"), "title is clean gateway prep");
+
+  // Gateway prep attempt > 0 (retry)
+  const gwRetry = vm.runInContext("formatGatewayPrepTime(350, 1)", context);
+  assert.ok(gwRetry.includes("350ms"), "shows ms for retry gateway prep");
+  assert.ok(gwRetry.includes("网关准备（含前序重试与退避） 350ms"), "title mentions retries and backoff");
+
+  // Gateway prep missing
+  const gwNull = vm.runInContext("formatGatewayPrepTime(null, 0)", context);
+  assert.ok(gwNull.includes("不可用"), "marks missing gateway prep as unavailable");
+
+  // Headers arrival
+  const hdrOk = vm.runInContext("formatHeadersArrivalTime(200)", context);
+  assert.ok(hdrOk.includes("200ms"), "shows ms for headers arrival");
+  assert.ok(hdrOk.includes("连接与响应头 200ms"), "title is connection and headers");
+
+  // Headers arrival missing
+  const hdrNull = vm.runInContext("formatHeadersArrivalTime(null)", context);
+  assert.ok(hdrNull.includes("不可用"), "marks missing headers arrival as unavailable");
+});
+
+test("formatLogDetailMeta renders full 4-stage streaming waterfall with accurate math and styles", () => {
   const source = read("static/js/logs.js");
   const context = vm.createContext({
     escapeHtml,
@@ -447,16 +491,190 @@ test("formatLogDetailMeta renders stream TTFB and transfer duration bar and hand
     formatLogModelText: (detail) => detail.model || "未知模型",
     formatReasoningEffort: () => "",
     extractLogDetailError: (detail) => detail.error || null,
-    formatFirstTokenTime: (ms) => `<span class="first-token-time">${formatSeconds(ms)}</span>`,
     formatTotalDurationTime: (log) => `<span class="duration-time">${formatSeconds(log?.duration_ms)}</span>`,
     formatTokensPerSecondLine: () => "",
     formatTokenDetailPanel: () => "<span>Token Panel</span>",
   });
 
+  vm.runInContext(extractFunction(source, "formatFirstTokenTime"), context);
+  vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
+  vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
   vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
 
-  // 1. Stream log with valid TTFB and duration
+  // 4-stage stream log:
+  // pre_upstream_ms = 50
+  // upstream_headers_ms = 100
+  // first_token_ms = 300
+  // duration_ms = 1000
+  // attempt_index = 0
+  // fullTotal = 1050ms
+  // Gateway = 50ms (4.8%)
+  // Headers = 100ms (9.5%)
+  // Generation = 200ms (19.0%)
+  // Transfer = 700ms (66.7%)
   const streamDetail = {
+    method: "POST",
+    path: "/v1/chat/completions",
+    stream: true,
+    pre_upstream_ms: 50,
+    upstream_headers_ms: 100,
+    first_token_ms: 300,
+    duration_ms: 1000,
+    attempt_index: 0,
+    upstream_name: "Channel 1",
+    model: "claude-3-5-sonnet",
+    status_code: 200,
+  };
+  context.streamDetail = streamDetail;
+  const markup = vm.runInContext("formatLogDetailMeta(streamDetail)", context);
+
+  assert.ok(markup.includes("网关准备"), "has gateway label");
+  assert.ok(markup.includes("连接/Header"), "has headers label");
+  assert.ok(markup.includes("上游生成"), "has generation label");
+  assert.ok(markup.includes("传输"), "has transfer label");
+  assert.ok(markup.includes("总耗时"), "has total duration label");
+
+  assert.ok(markup.includes("log-detail-timing-bar"), "has timing bar");
+  assert.ok(markup.includes("timing-seg--gateway"), "has gateway timing segment");
+  assert.ok(markup.includes("timing-seg--headers"), "has headers timing segment");
+  assert.ok(markup.includes("timing-seg--generation"), "has generation timing segment");
+  assert.ok(markup.includes("timing-seg--transfer"), "has transfer timing segment");
+
+  assert.ok(markup.includes("width:4.8%"), "gateway is 50/1050 = 4.8%");
+  assert.ok(markup.includes("width:9.5%"), "headers is 100/1050 = 9.5%");
+  assert.ok(markup.includes("width:19.0%"), "generation is 200/1050 = 19.0%");
+  assert.ok(markup.includes("width:66.7%"), "transfer is 700/1050 = 66.7%");
+});
+
+test("formatLogDetailMeta handles retry attempt badges and custom gateway preparation copy", () => {
+  const source = read("static/js/logs.js");
+  const context = vm.createContext({
+    escapeHtml,
+    formatSeconds,
+    firstTokenTone,
+    totalDurationRating,
+    formatLogChannelLabel: (detail) => detail.upstream_name || "未知渠道",
+    formatLogModelText: (detail) => detail.model || "未知模型",
+    formatReasoningEffort: () => "",
+    extractLogDetailError: (detail) => detail.error || null,
+    formatTotalDurationTime: (log) => `<span class="duration-time">${formatSeconds(log?.duration_ms)}</span>`,
+    formatTokensPerSecondLine: () => "",
+    formatTokenDetailPanel: () => "<span>Token Panel</span>",
+  });
+
+  vm.runInContext(extractFunction(source, "formatFirstTokenTime"), context);
+  vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
+  vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
+  vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
+
+  const retriedDetail = {
+    method: "POST",
+    path: "/v1/chat/completions",
+    stream: true,
+    pre_upstream_ms: 120,
+    upstream_headers_ms: 80,
+    first_token_ms: 280,
+    duration_ms: 800,
+    attempt_index: 2,
+    request_uid: "req-uid-xyz-789",
+    upstream_name: "Channel 2",
+    model: "claude-3-5-sonnet",
+    status_code: 200,
+  };
+  context.retriedDetail = retriedDetail;
+  const markup = vm.runInContext("formatLogDetailMeta(retriedDetail)", context);
+
+  assert.ok(markup.includes("网关准备(含重试)"), "gateway label indicates retry");
+  assert.ok(markup.includes("重试 #2"), "route card shows attempt index badge");
+  assert.ok(markup.includes("req-uid-xyz-789"), "attempt badge references request UID");
+  assert.ok(markup.includes("log-detail-route-attempt"), "uses attempt badge styling");
+});
+
+test("formatLogDetailMeta renders non-streaming logs with sampled gateway and connection timings", () => {
+  const source = read("static/js/logs.js");
+  const context = vm.createContext({
+    escapeHtml,
+    formatSeconds,
+    firstTokenTone,
+    totalDurationRating,
+    formatLogChannelLabel: (detail) => detail.upstream_name || "未知渠道",
+    formatLogModelText: (detail) => detail.model || "未知模型",
+    formatReasoningEffort: () => "",
+    extractLogDetailError: (detail) => detail.error || null,
+    formatTotalDurationTime: (log) => `<span class="duration-time">${formatSeconds(log?.duration_ms)}</span>`,
+    formatTokensPerSecondLine: () => "",
+    formatTokenDetailPanel: () => "<span>Token Panel</span>",
+  });
+
+  vm.runInContext(extractFunction(source, "formatFirstTokenTime"), context);
+  vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
+  vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
+  vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
+
+  // Non-stream log:
+  // pre_upstream_ms = 40
+  // upstream_headers_ms = 160
+  // duration_ms = 600
+  // attempt_index = 0
+  // fullTotal = 640ms
+  // Gateway = 40ms (6.3%)
+  // Headers = 160ms (25.0%)
+  // Response transfer = 440ms (68.8%)
+  const nonStreamDetail = {
+    method: "POST",
+    path: "/v1/chat/completions",
+    stream: false,
+    pre_upstream_ms: 40,
+    upstream_headers_ms: 160,
+    first_token_ms: null,
+    duration_ms: 600,
+    attempt_index: 0,
+    upstream_name: "Channel 1",
+    model: "gpt-4o",
+    status_code: 200,
+  };
+  context.nonStreamDetail = nonStreamDetail;
+  const markup = vm.runInContext("formatLogDetailMeta(nonStreamDetail)", context);
+
+  assert.ok(markup.includes("网关准备"), "shows gateway prep");
+  assert.ok(markup.includes("连接/Header"), "shows headers");
+  assert.ok(markup.includes("响应传输"), "shows response transfer");
+  assert.ok(markup.includes("总耗时"), "shows total duration");
+  assert.ok(!markup.includes("首字"), "non-stream does not mention first token");
+  assert.ok(!markup.includes("上游生成"), "non-stream does not mention upstream generation");
+
+  assert.ok(markup.includes("log-detail-timing-bar"), "has timing bar");
+  assert.ok(markup.includes("timing-seg--gateway"), "has gateway segment");
+  assert.ok(markup.includes("timing-seg--headers"), "has headers segment");
+  assert.ok(markup.includes("timing-seg--transfer"), "has transfer segment");
+  assert.ok(markup.includes("width:6.3%"), "gateway is 40/640 = 6.3%");
+  assert.ok(markup.includes("width:25.0%"), "headers is 160/640 = 25.0%");
+  assert.ok(markup.includes("width:68.8%"), "transfer is 440/640 = 68.8%");
+});
+
+test("formatLogDetailMeta degrades gracefully to legacy 2-stage or missing samples", () => {
+  const source = read("static/js/logs.js");
+  const context = vm.createContext({
+    escapeHtml,
+    formatSeconds,
+    firstTokenTone,
+    totalDurationRating,
+    formatLogChannelLabel: (detail) => detail.upstream_name || "未知渠道",
+    formatLogModelText: (detail) => detail.model || "未知模型",
+    formatReasoningEffort: () => "",
+    extractLogDetailError: (detail) => detail.error || null,
+    formatTotalDurationTime: (log) => `<span class="duration-time">${formatSeconds(log?.duration_ms)}</span>`,
+    formatTokensPerSecondLine: () => "",
+    formatTokenDetailPanel: () => "<span>Token Panel</span>",
+  });
+
+  vm.runInContext(extractFunction(source, "formatFirstTokenTime"), context);
+  vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
+  vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
+  vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
+
+  // 1. Stream log with legacy format (no pre_upstream_ms or upstream_headers_ms)
+  const legacyStream = {
     method: "POST",
     path: "/v1/chat/completions",
     stream: true,
@@ -466,36 +684,33 @@ test("formatLogDetailMeta renders stream TTFB and transfer duration bar and hand
     model: "claude-3-5-sonnet",
     status_code: 200,
   };
-  context.streamDetail = streamDetail;
-  const markup1 = vm.runInContext("formatLogDetailMeta(streamDetail)", context);
+  context.legacyStream = legacyStream;
+  const markup1 = vm.runInContext("formatLogDetailMeta(legacyStream)", context);
+  assert.ok(markup1.includes("首字"), "legacy stream has first token label");
+  assert.ok(markup1.includes("传输"), "legacy stream has transfer label");
+  assert.ok(markup1.includes("timing-seg--ttfb"), "legacy stream uses TTFB segment");
+  assert.ok(markup1.includes("timing-seg--transfer"), "legacy stream uses transfer segment");
+  assert.ok(markup1.includes("width:20.0%"), "legacy TTFB width 20.0%");
 
-  assert.ok(markup1.includes("首字"), "has first token label");
-  assert.ok(markup1.includes("传输"), "has transfer label");
-  assert.ok(markup1.includes("总耗时"), "has total duration label");
-  assert.ok(markup1.includes("log-detail-timing-bar"), "has timing bar");
-  assert.ok(markup1.includes("timing-seg--ttfb"), "has TTFB timing segment");
-  assert.ok(markup1.includes("timing-seg--transfer"), "has transfer timing segment");
-  assert.ok(markup1.includes("width:20.0%"), "TTFB is 200/1000 = 20.0%");
-  assert.ok(markup1.includes("width:80.0%"), "Transfer is 800/1000 = 80.0%");
-
-  // 2. Stream log with missing first_token_ms
-  const missingFirstTokenDetail = {
+  // 2. Stream log with partial missing samples (pre_upstream present, but headers missing)
+  const partialMissingStream = {
     method: "POST",
     path: "/v1/chat/completions",
     stream: true,
+    pre_upstream_ms: 20,
+    upstream_headers_ms: null,
     first_token_ms: null,
-    duration_ms: 1200,
+    duration_ms: 5000,
     upstream_name: "Channel 1",
     model: "claude-3-5-sonnet",
     status_code: 504,
   };
-  context.missingFirstTokenDetail = missingFirstTokenDetail;
-  const markup2 = vm.runInContext("formatLogDetailMeta(missingFirstTokenDetail)", context);
-  assert.ok(markup2.includes("不可用"), "marks first token as unavailable");
-  assert.ok(!markup2.includes("log-detail-timing-bar"), "does not draw misleading bar when TTFB is missing");
+  context.partialMissingStream = partialMissingStream;
+  const markup2 = vm.runInContext("formatLogDetailMeta(partialMissingStream)", context);
+  assert.ok(markup2.includes("不可用"), "marks missing samples as unavailable");
 
-  // 3. Non-stream log (does not invent queueing or first token)
-  const nonStreamDetail = {
+  // 3. Legacy non-stream log (no timing bar, just total duration)
+  const legacyNonStream = {
     method: "POST",
     path: "/v1/chat/completions",
     stream: false,
@@ -505,11 +720,10 @@ test("formatLogDetailMeta renders stream TTFB and transfer duration bar and hand
     model: "gpt-4o",
     status_code: 200,
   };
-  context.nonStreamDetail = nonStreamDetail;
-  const markup3 = vm.runInContext("formatLogDetailMeta(nonStreamDetail)", context);
-  assert.ok(!markup3.includes("首字"), "non-stream does not show first token label");
-  assert.ok(!markup3.includes("传输"), "non-stream does not show transfer label");
-  assert.ok(markup3.includes("总耗时"), "non-stream shows total duration");
+  context.legacyNonStream = legacyNonStream;
+  const markup3 = vm.runInContext("formatLogDetailMeta(legacyNonStream)", context);
+  assert.ok(!markup3.includes("log-detail-timing-bar"), "legacy non-stream does not show timing bar");
+  assert.ok(markup3.includes("总耗时"), "legacy non-stream shows total duration");
 });
 
 test("clearLogFilters clears all new filters including time range, stream, and min duration", () => {
