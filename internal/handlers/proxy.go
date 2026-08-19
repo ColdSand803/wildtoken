@@ -4,6 +4,8 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -145,23 +147,57 @@ func noRouteReason(selector, model *string, groupName string) string {
 // backstop for a panic or an early return that forgets.
 type abortLogGuard struct {
 	logWriter *proxy.LogWriter
+	// startedAt is when the gateway accepted this request. It is both this
+	// guard's own duration origin and the origin every attempt's pre_upstream_ms
+	// is measured from, so the two figures cannot disagree about when the
+	// request began.
 	startedAt time.Time
-	entry     *proxy.LogEntry
+	// requestUID is minted here because this is the first thing built per
+	// request, so every row the request produces — including the abort fallback —
+	// can carry it.
+	requestUID string
+	entry      *proxy.LogEntry
 }
 
 func newAbortLogGuard(logWriter *proxy.LogWriter, method, path string) *abortLogGuard {
 	status := int32(499)
 	message := "client disconnected before proxy completed"
+	requestUID := newRequestUID()
 	return &abortLogGuard{
-		logWriter: logWriter,
-		startedAt: time.Now(),
+		logWriter:  logWriter,
+		startedAt:  time.Now(),
+		requestUID: requestUID,
 		entry: &proxy.LogEntry{
 			Method:     method,
 			Path:       path,
 			StatusCode: &status,
 			Error:      &message,
+			// The uid is set even on this fallback row, so a request that failed
+			// before reaching an upstream is still identifiable as one request.
+			// AttemptIndex stays nil: no attempt was made, which is not the same
+			// as attempt 0.
+			RequestUID: &requestUID,
 		},
 	}
+}
+
+// requestUIDBytes is 8 random bytes: enough that two concurrent requests
+// colliding is not a practical concern, while keeping the column short since it
+// is written on every log row.
+const requestUIDBytes = 8
+
+// newRequestUID mints the key that ties one request's attempt rows together.
+//
+// A failure to read the system's randomness leaves the uid empty rather than
+// failing the request. The value is only a correlation key for the console: a
+// proxied request must not be refused because grouping its log rows was not
+// possible.
+func newRequestUID() string {
+	buffer := make([]byte, requestUIDBytes)
+	if _, err := rand.Read(buffer); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(buffer)
 }
 
 func (g *abortLogGuard) setModel(model *string) {
@@ -455,6 +491,9 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				Method:              r.Method,
 				Path:                config.path,
 				LogBodyMaxBytes:     logBodyMaxBytes,
+				RequestUID:      config.guard.requestUID,
+				AttemptIndex:    int32(attempt),
+				ReceivedAt:      config.guard.startedAt,
 			}, prepared)
 
 		failed := err != nil || response.Status < 200 || response.Status >= 300

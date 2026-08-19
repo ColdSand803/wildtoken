@@ -46,6 +46,7 @@ const logListColumns = `id, created_at, method, path,
                 prompt_tokens, completion_tokens, total_tokens,
                 prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
                 duration_ms, first_token_ms,
+                request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
                 error`
 
 // LogTopWindow is a ranking window accepted by the top-stats endpoint.
@@ -403,6 +404,8 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
 	var durationMs, firstTokenMs sql.NullInt64
+	var requestUID sql.NullString
+	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
 
 	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Method, &entry.Path,
 		&downstreamTokenID, &downstreamTokenName, &entry.ClientType,
@@ -411,7 +414,8 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 		&entry.Stream, &statusCode,
 		&promptTokens, &completionTokens, &totalTokens,
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
-		&durationMs, &firstTokenMs, &logError)
+		&durationMs, &firstTokenMs, &requestUID, &attemptIndex,
+		&preUpstreamMs, &upstreamHeadersMs, &logError)
 	if err != nil {
 		return entry, err
 	}
@@ -435,6 +439,10 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	entry.CompletionReasoningTokens = nullInt32Ptr(completionReasoningTokens)
 	entry.DurationMs = nullInt32Ptr(durationMs)
 	entry.FirstTokenMs = nullInt32Ptr(firstTokenMs)
+	entry.RequestUID = nullStringPtr(requestUID)
+	entry.AttemptIndex = nullInt32Ptr(attemptIndex)
+	entry.PreUpstreamMs = nullInt32Ptr(preUpstreamMs)
+	entry.UpstreamHeadersMs = nullInt32Ptr(upstreamHeadersMs)
 	return entry, nil
 }
 
@@ -502,6 +510,8 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
               l.prompt_tokens, l.completion_tokens, l.total_tokens,
               l.prompt_cached_tokens, l.cache_creation_tokens, l.completion_reasoning_tokens,
               l.duration_ms, l.first_token_ms,
+              l.request_uid, l.attempt_index,
+              l.pre_upstream_ms, l.upstream_headers_ms,
               l.error,
               p.request_snapshot,
               p.upstream_request_override,
@@ -522,6 +532,8 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
 	var durationMs, firstTokenMs sql.NullInt64
+	var detailRequestUID sql.NullString
+	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
 	var requestSnapshot, upstreamRequestOverride sql.NullString
 	var responseSnapshot, downstreamResponseOverride sql.NullString
 	var upstreamRequestIsOverride, downstreamResponseIsOverride int32
@@ -533,7 +545,9 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 		&detail.Stream, &statusCode,
 		&promptTokens, &completionTokens, &totalTokens,
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
-		&durationMs, &firstTokenMs, &logError,
+		&durationMs, &firstTokenMs,
+		&detailRequestUID, &attemptIndex, &preUpstreamMs, &upstreamHeadersMs,
+		&logError,
 		&requestSnapshot, &upstreamRequestOverride, &upstreamRequestIsOverride,
 		&responseSnapshot, &downstreamResponseOverride, &downstreamResponseIsOverride)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -562,6 +576,10 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	detail.CompletionReasoningTokens = nullInt32Ptr(completionReasoningTokens)
 	detail.DurationMs = nullInt32Ptr(durationMs)
 	detail.FirstTokenMs = nullInt32Ptr(firstTokenMs)
+	detail.RequestUID = nullStringPtr(detailRequestUID)
+	detail.AttemptIndex = nullInt32Ptr(attemptIndex)
+	detail.PreUpstreamMs = nullInt32Ptr(preUpstreamMs)
+	detail.UpstreamHeadersMs = nullInt32Ptr(upstreamHeadersMs)
 
 	// A cleared override flag means the peer snapshot was identical to the
 	// canonical one, so the canonical value is what the console should show.

@@ -45,7 +45,11 @@ func upstreamTestState(t *testing.T) *appstate.State {
 		Routing:     proxy.NewRoutingCache(),
 		Quotas:      quota.NewTracker(),
 		ProbeRuns:   appstate.NewProbeRunState(),
-		StartedAt:   time.Now(),
+		// Wired because the server does (internal/app/server.go): the token-usage
+		// endpoint reads this snapshot before it looks at any request, so a nil
+		// cache here is a panic rather than an empty result.
+		LogStats:  db.NewLogStatsCache(),
+		StartedAt: time.Now(),
 	}
 }
 

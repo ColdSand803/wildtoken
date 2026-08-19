@@ -31,7 +31,22 @@ type RequestLogOut struct {
 	CompletionReasoningTokens *int32  `json:"completion_reasoning_tokens"`
 	DurationMs                *int32  `json:"duration_ms"`
 	FirstTokenMs              *int32  `json:"first_token_ms"`
-	Error                     *string `json:"error"`
+	// RequestUID groups the rows one downstream request's successive upstream
+	// attempts produced. NULL on rows written before it was sampled.
+	RequestUID *string `json:"request_uid"`
+	// AttemptIndex is 0 for a request's first upstream attempt. NULL means the
+	// row never reached an upstream attempt at all — a rejection or an abort in
+	// the handler — which is distinct from 0.
+	AttemptIndex *int32 `json:"attempt_index"`
+	// PreUpstreamMs is the gateway's own latency before this attempt's upstream
+	// call: body read, routing, rate-limit admission, preparation, and on a retry
+	// every earlier attempt plus its backoff. Read it together with
+	// AttemptIndex; it is not queue time.
+	PreUpstreamMs *int32 `json:"pre_upstream_ms"`
+	// UpstreamHeadersMs is the attempt-relative moment the upstream response
+	// headers arrived, on the same origin as FirstTokenMs and DurationMs.
+	UpstreamHeadersMs *int32  `json:"upstream_headers_ms"`
+	Error             *string `json:"error"`
 }
 
 // RequestLogDetailOut flattens RequestLogOut and adds the captured payloads.

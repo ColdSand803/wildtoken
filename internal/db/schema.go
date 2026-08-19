@@ -111,6 +111,13 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"prompt_cached_tokens", "INTEGER"},
 		{"cache_creation_tokens", "INTEGER"},
 		{"completion_reasoning_tokens", "INTEGER"},
+		// Rows written before these columns existed keep them NULL. That is the
+		// only honest value: their timings were never sampled, and the console
+		// reports the stage as unavailable rather than deriving one.
+		{"request_uid", "TEXT"},
+		{"attempt_index", "INTEGER"},
+		{"pre_upstream_ms", "INTEGER"},
+		{"upstream_headers_ms", "INTEGER"},
 	} {
 		if err := ensureColumn(ctx, db, "request_logs", column.name, column.definition); err != nil {
 			return err

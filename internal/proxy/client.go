@@ -220,6 +220,18 @@ type RequestContext struct {
 	Method              string
 	Path                string
 	LogBodyMaxBytes     int
+	// RequestUID is shared by every attempt this downstream request makes, so
+	// the rows they each write can be recognised as one request's chain. Empty
+	// leaves the column NULL, which is what a caller that does not track
+	// attempts should do rather than inventing a value.
+	RequestUID string
+	// AttemptIndex is 0 for the first upstream attempt.
+	AttemptIndex int32
+	// ReceivedAt is when the gateway accepted the downstream request, which is
+	// the origin PreUpstreamMs is measured from. A zero value leaves that column
+	// NULL: an unset origin cannot be distinguished from one at the epoch, and a
+	// pre-upstream figure of several decades would be read as real.
+	ReceivedAt time.Time
 }
 
 // ProxyRequest forwards a request upstream, streaming SSE bodies as they arrive.
@@ -251,7 +263,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		// that did not, so the request left no trace at all.
 		message := err.Error()
 		statusCode := int32(502)
-		entry := baseLogEntry(requestCtx, upstream, prepared)
+		entry := baseLogEntry(requestCtx, upstream, prepared, start)
 		entry.StatusCode = &statusCode
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
@@ -264,6 +276,12 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	}
 
 	response, err := deps.HTTPClient.Do(request)
+
+	// Do returning is the moment the upstream response headers are available, so
+	// this is where that sample point is taken. On the failure path it is left
+	// unset: no headers arrived, and a figure here would say they did.
+	headersMs := elapsedMs(start)
+
 	if err != nil {
 		attempt.stop()
 
@@ -285,7 +303,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		}
 
 		message := err.Error()
-		entry := baseLogEntry(requestCtx, upstream, prepared)
+		entry := baseLogEntry(requestCtx, upstream, prepared, start)
 		entry.StatusCode = &statusCode
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
@@ -299,8 +317,9 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	status := response.StatusCode
 
 	if status >= 200 && status < 300 && IsSSEContentType(contentType) {
-		entry := baseLogEntry(requestCtx, upstream, prepared)
+		entry := baseLogEntry(requestCtx, upstream, prepared, start)
 		entry.Stream = true
+		entry.UpstreamHeadersMs = headersMs
 		statusCode := int32(status)
 		entry.StatusCode = &statusCode
 
@@ -327,8 +346,13 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		}
 
 		message := err.Error()
-		entry := baseLogEntry(requestCtx, upstream, prepared)
+		entry := baseLogEntry(requestCtx, upstream, prepared, start)
 		entry.StatusCode = &statusCode
+		// The headers did arrive; it was the body that failed. Recording them
+		// here is what shows a channel that answers promptly and then stalls
+		// mid-body, which is otherwise indistinguishable from one that never
+		// answered at all.
+		entry.UpstreamHeadersMs = headersMs
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
 		deps.LogWriter.Schedule(entry)
@@ -357,9 +381,10 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		}
 	}
 
-	entry := baseLogEntry(requestCtx, upstream, prepared)
+	entry := baseLogEntry(requestCtx, upstream, prepared, start)
 	statusCode := int32(status)
 	entry.StatusCode = &statusCode
+	entry.UpstreamHeadersMs = headersMs
 	entry.Stream = isStream
 	entry.ResponseReasoningEffort = ExtractResponseReasoningEffort(bodyBytes, contentType)
 	entry.PromptTokens = usage.PromptTokens
@@ -403,15 +428,20 @@ func buildUpstreamRequest(ctx context.Context, method string, prepared *Prepared
 }
 
 // baseLogEntry fills the fields every attempt reports, regardless of outcome.
+//
+// start is this attempt's timing origin, which is also what pre_upstream_ms is
+// measured against: the interval it reports ends here, so it can be filled for
+// every outcome including the ones that never reach the upstream.
 func baseLogEntry(requestCtx RequestContext, upstream *models.UpstreamRow,
-	prepared *PreparedRequest) LogEntry {
+	prepared *PreparedRequest, start time.Time) LogEntry {
 	upstreamID := upstream.ID
 	upstreamName := upstream.Name
 	tokenID := requestCtx.DownstreamTokenID
 	tokenName := requestCtx.DownstreamTokenName
 	clientType := requestCtx.ClientType
+	attemptIndex := requestCtx.AttemptIndex
 
-	return LogEntry{
+	entry := LogEntry{
 		Method:              requestCtx.Method,
 		Path:                requestCtx.Path,
 		DownstreamTokenID:   &tokenID,
@@ -425,7 +455,32 @@ func baseLogEntry(requestCtx RequestContext, upstream *models.UpstreamRow,
 		ReasoningEffort:     prepared.ReasoningEffort,
 		DownstreamRequest:   prepared.DownstreamSnapshot,
 		UpstreamRequest:     prepared.UpstreamSnapshot,
+		AttemptIndex:        &attemptIndex,
+		PreUpstreamMs:       preUpstreamMs(requestCtx.ReceivedAt, start),
 	}
+	if requestCtx.RequestUID != "" {
+		uid := requestCtx.RequestUID
+		entry.RequestUID = &uid
+	}
+	return entry
+}
+
+// preUpstreamMs measures the gateway's own latency ahead of one attempt.
+//
+// A zero receivedAt means the caller does not sample it, which leaves the column
+// NULL. A negative interval is clamped to zero rather than stored: the two
+// instants come from the same clock, so the only way to get one is a caller that
+// passed an origin from after the attempt began, and a negative duration in the
+// waterfall would be read as a bug in the display instead of in the sample.
+func preUpstreamMs(receivedAt, start time.Time) *int32 {
+	if receivedAt.IsZero() {
+		return nil
+	}
+	measured := int32(start.Sub(receivedAt).Milliseconds())
+	if measured < 0 {
+		measured = 0
+	}
+	return &measured
 }
 
 func elapsedMs(start time.Time) *int32 {

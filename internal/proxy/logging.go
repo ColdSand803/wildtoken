@@ -56,8 +56,15 @@ type LogEntry struct {
 	CompletionReasoningTokens *int32
 	FirstTokenMs              *int32
 	DurationMs                *int32
-	Error                     *string
-	DownstreamRequest         json.RawMessage
+	// RequestUID, AttemptIndex, PreUpstreamMs and UpstreamHeadersMs carry the
+	// waterfall's raw sample points. See models.RequestLogOut for each field's
+	// interval; the shapes here are the same.
+	RequestUID        *string
+	AttemptIndex      *int32
+	PreUpstreamMs     *int32
+	UpstreamHeadersMs *int32
+	Error             *string
+	DownstreamRequest json.RawMessage
 	UpstreamRequest           json.RawMessage
 	UpstreamResponse          json.RawMessage
 	DownstreamResponse        json.RawMessage
@@ -387,8 +394,11 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
          reasoning_effort, response_reasoning_effort, stream, status_code,
          prompt_tokens, completion_tokens, total_tokens,
          prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
-         duration_ms, first_token_ms, error, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         duration_ms, first_token_ms,
+         request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
+         error, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,
 			entry.RequestModel, entry.UpstreamModel, entry.ReasoningEffort,
@@ -396,7 +406,8 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 			entry.PromptTokens, entry.CompletionTokens, entry.TotalTokens,
 			entry.PromptCachedTokens, entry.CacheCreationTokens,
 			entry.CompletionReasoningTokens, entry.DurationMs, entry.FirstTokenMs,
-			entry.Error, createdAt)
+			entry.RequestUID, entry.AttemptIndex, entry.PreUpstreamMs,
+			entry.UpstreamHeadersMs, entry.Error, createdAt)
 		if err != nil {
 			return nil, apperr.Database(err)
 		}
@@ -468,6 +479,10 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 					CompletionReasoningTokens: entry.CompletionReasoningTokens,
 					DurationMs:                entry.DurationMs,
 					FirstTokenMs:              entry.FirstTokenMs,
+					RequestUID:                entry.RequestUID,
+					AttemptIndex:              entry.AttemptIndex,
+					PreUpstreamMs:             entry.PreUpstreamMs,
+					UpstreamHeadersMs:         entry.UpstreamHeadersMs,
 					Error:                     entry.Error,
 				},
 			},

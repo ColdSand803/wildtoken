@@ -74,6 +74,30 @@ CREATE TABLE IF NOT EXISTS request_logs (
     completion_reasoning_tokens INTEGER,
     duration_ms         INTEGER,
     first_token_ms      INTEGER,
+    -- request_uid ties together the rows written by one downstream request's
+    -- successive upstream attempts. Every attempt logs its own row, and without
+    -- this they were indistinguishable from unrelated requests that happened to
+    -- land in the same second.
+    request_uid         TEXT,
+    -- attempt_index is 0 for a request's first upstream attempt. It is what
+    -- tells pre_upstream_ms on a retry apart from the same field on a first
+    -- attempt, where the two measure very different intervals.
+    attempt_index       INTEGER,
+    -- pre_upstream_ms spans from the moment the gateway accepted the request to
+    -- the moment this attempt began its upstream call: reading the downstream
+    -- body, routing, rate-limit admission, request preparation, and — from
+    -- attempt 1 onward — every earlier attempt plus its retry backoff.
+    --
+    -- Deliberately not named queue_ms. Nothing here waits in a queue, and a
+    -- field by that name would invite the console to report a stage that does
+    -- not exist.
+    pre_upstream_ms     INTEGER,
+    -- upstream_headers_ms spans from this attempt's start to the arrival of the
+    -- upstream response headers, measured on the same origin as first_token_ms
+    -- and duration_ms. It is what separates connect/TLS/upload latency from the
+    -- upstream's own thinking time; without it a slow first token could not be
+    -- attributed to either.
+    upstream_headers_ms INTEGER,
     error               TEXT
 );`
 
