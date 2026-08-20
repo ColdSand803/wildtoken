@@ -117,6 +117,9 @@ test("Ark primary action rules leave navigation and utility controls to their ow
     ".token-preview-button",
     ".model-selection-remove",
     ".toast-close",
+    /* 重试链路的每一步是个 <button>，但它是一行记录、不是主操作。漏在清单外时
+       整行会拿到主按钮的实心渐变，把里面的状态码徽章和渠道名一起糊掉。 */
+    ".retry-chain-step",
   ];
 
   assert.equal(selectors.length, 2, "Ark must keep paired default and hover primary-action selectors");

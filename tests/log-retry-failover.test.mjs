@@ -250,3 +250,45 @@ test("renderLogRetryChain displays multi-attempt steps and hides on single norma
   assert.equal(container.hidden, false);
   assert.ok(container.innerHTML.includes('data-retry-log-id="11"'));
 });
+
+/* 重试链路的每一步是 <button>，所以 base.css 的 button:hover 会给它设
+   color: var(--accent-on)——那是"实心强调色底"的反色（暗色主题近黑、Anthropic 近白）。
+   这里底色只是 8% 的淡色，所以只要 :hover / .is-current 自己不写 color，
+   悬浮瞬间文字就与背景同色、整行消失。这条 bug 与主题包无关，六个主题全中。 */
+test("retry chain hover and current states pin their own text colour", () => {
+  const css = read("static/css/enhancements.css");
+
+  // 取 selector 后面第一个 { ... } 块，不绕正则转义。
+  const ruleBody = (selector) => {
+    const at = css.indexOf(`${selector} {`);
+    if (at === -1) return undefined;
+    const open = css.indexOf("{", at);
+    const close = css.indexOf("}", open);
+    return close === -1 ? undefined : css.slice(open + 1, close);
+  };
+
+  for (const selector of [".retry-chain-step:hover", ".retry-chain-step.is-current"]) {
+    const block = ruleBody(selector);
+    assert.notEqual(block, undefined, `${selector} 必须存在`);
+    assert.match(
+      block,
+      /color:\s*var\(--text\)/,
+      `${selector} 必须自己钉住 color，否则被 button:hover 的 --accent-on 顶掉`,
+    );
+  }
+
+  /* 状态徽章一律走语义令牌：六个主题包各自在改这些 token，写死等于脱离主题。
+     先剥掉注释再断言——注释里会引用被换掉的旧色值作为说明。 */
+  const badges = css
+    .slice(css.indexOf(".retry-step-status {"), css.indexOf(".retry-step-duration"))
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(!/rgb\(\s*\d+\s+\d+\s+\d+/.test(badges), "徽章不许硬编码色值");
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(badges), "徽章不许硬编码十六进制色");
+
+  // 选中且悬浮时不能丢掉选中的描边。
+  assert.match(
+    css,
+    /\.retry-chain-step\.is-current:hover\s*\{[^}]*box-shadow:\s*0 0 0 1px var\(--accent\)/,
+    "选中态的描边在悬浮时要保住",
+  );
+});

@@ -321,6 +321,15 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   box-sizing: border-box;
 }
 
+/* 上面的 display: inline-flex 是作者样式，会压过 UA 样式表的
+   [hidden] { display: none }，所以 JS 设的 hidden 属性藏不住这两个徽标：没有筛选
+   时它们也常驻（strong 是空的，只剩"当前令牌:"和一个 ×），点 × 状态确实清了、
+   徽标却不消失，看着就是关不掉。同 .upstream-cards-grid[hidden] 的兜底。
+   两个徽标共用这个类，所以一条就够。 */
+.log-token-filter-badge[hidden] {
+  display: none;
+}
+
 .log-token-filter-badge strong {
   color: var(--accent);
   font-weight: 600;
@@ -393,20 +402,41 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   opacity: 0.75;
 }
 
+/* 这块曾挂着 .summary-strip（KPI 数字条），和路由摘要犯的是同一个错。那条公共样式
+   对后代 span/strong 通吃、权重还压过这里：span 被 flex:1 1 120px 拉成等宽格子并加
+   竖分割线（7px 的状态圆点也被撑成 120px 宽的椭圆），strong 被 display:block 顶成
+   独立一行的 16px 粗体（"成功"和"3"于是断成两行）。这里是一行说明，不是指标。 */
 .upstream-probe-summary {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
   margin-top: 8px;
+  padding: 8px 12px;
+}
+
+/* 摘掉 .summary-strip 就同时摘掉了 base.css 里 .summary-strip[hidden] 的兜底，
+   而这块正是靠 hidden 收起的（upstreams.js 测活结束时设 true）。下面 display 是
+   作者样式，会压过 UA 的 [hidden]{display:none}，所以这条必须跟着补。 */
+.upstream-probe-summary[hidden] {
+  display: none;
 }
 
 .probe-summary-status {
-  display: inline-flex;
   align-items: center;
-  gap: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  gap: 4px 10px;
 }
 
 .probe-summary-dot {
   background: var(--ok);
-  border-radius: 50%;
+  border-radius: var(--radius-full);
+  /* aspect-ratio 锁正圆：这个点被拉成椭圆过一次，别再来第二次。 */
+  aspect-ratio: 1;
   display: inline-block;
+  flex: none;
   height: 7px;
   width: 7px;
 }
@@ -415,6 +445,17 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   background: var(--accent);
   box-shadow: 0 0 0 0 rgb(56 189 248 / 45%);
   animation: live-pulse 1.2s ease-in-out infinite;
+}
+
+/* 标签和数字是一个整体，不能在中间断行——"成功"留在上一行、"3"掉到下一行就是
+   截图里那个样子。数字走等宽表格数字，多轮测活之间不会左右跳。 */
+.probe-summary-status > span {
+  white-space: nowrap;
+}
+
+.probe-summary-status strong {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .probe-stat-ok strong {
@@ -450,8 +491,12 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   white-space: nowrap;
 }
 
+/* 这个点只从皮肤 class 取配色。aspect-ratio 锁正圆是明说的保险：皮肤 class 将来
+   若再混进纵向几何，点也不会被拉长。 */
 .log-timing-chip-dot {
-  border-radius: 50%;
+  align-self: center;
+  aspect-ratio: 1;
+  border-radius: var(--radius-full);
   flex: none;
   height: 6px;
   width: 6px;
@@ -473,29 +518,33 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   gap: 1px;
 }
 
+/* 撑满轨道是"瀑布条的段"才需要的几何，所以归到基类。
+   原来这条 height:100% 抄在下面每个皮肤 class 里，而 .log-timing-chip-dot 会复用
+   同一批皮肤 class 去取色（见 logs.js formatLogTimingChips）——同权重下后写的赢，
+   6px 的圆点于是被 height:100% 拉到父级行高，border-radius:50% 再抹成竖椭圆。
+   皮肤 class 只留配色，几何一律不进，与 components.css 顶部的约定一致。 */
+.timing-seg {
+  height: 100%;
+}
+
 .timing-seg--gateway {
   background: #a855f7;
-  height: 100%;
 }
 
 .timing-seg--headers {
   background: #38bdf8;
-  height: 100%;
 }
 
 .timing-seg--generation {
   background: var(--accent);
-  height: 100%;
 }
 
 .timing-seg--ttfb {
   background: var(--accent);
-  height: 100%;
 }
 
 .timing-seg--transfer {
   background: var(--ok);
-  height: 100%;
 }
 
 .log-detail-route-attempt {
@@ -642,15 +691,30 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
+/* color 必须显式写在这两个状态里，不能只靠 .retry-chain-step 的那条。
+   这是个 <button>，base.css 的 button:hover 会设 color: var(--accent-on)，权重
+   (0,1,1) 压过 .retry-chain-step 的 (0,1,0)——而 --accent-on 是给"实心强调色底"
+   准备的反色（暗色主题近黑、Anthropic 近白）。底色在这里只是 8% 的淡色，于是
+   悬浮瞬间文字就跟背景同色、整行看不见。box-shadow 同理：button:hover 会补一层
+   glow-accent，这里要么自己定，要么被它加上。 */
 .retry-chain-step:hover {
+  background: var(--accent-soft);
   border-color: var(--accent);
-  background: rgb(56 189 248 / 8%);
+  box-shadow: none;
+  color: var(--text);
 }
 
 .retry-chain-step.is-current {
+  background: var(--accent-soft);
   border-color: var(--accent);
-  background: rgb(56 189 248 / 12%);
+  box-shadow: 0 0 0 1px var(--accent);
+  color: var(--text);
   font-weight: 600;
+}
+
+/* 选中且悬浮时保住选中的描边，否则 :hover 的 box-shadow: none 会把它抹掉，
+   看起来像是移上去就失去了选中态。 */
+.retry-chain-step.is-current:hover {
   box-shadow: 0 0 0 1px var(--accent);
 }
 
@@ -669,25 +733,32 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 }
 
 .retry-step-status {
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
   padding: 1px 6px;
-  border-radius: var(--radius-xs, 4px);
 }
 
+/* 一律走语义令牌。原来硬编码的 #10b981 / #ef4444 是暗色系值，浅色主题下这些
+   token 被特意加深过（见 base.css 的对比度注释），硬编码正好绕开那次修复；
+   六个主题包各自也在改这些 token，写死等于让这块脱离主题。 */
 .retry-step-status.ok {
-  color: var(--ok, #10b981);
-  background: rgb(16 185 129 / 12%);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-border);
+  color: var(--ok);
 }
 
 .retry-step-status.danger {
-  color: var(--danger, #ef4444);
-  background: rgb(239 68 68 / 12%);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  color: var(--danger);
 }
 
 .retry-step-status.neutral {
+  background: var(--panel-muted);
+  border: 1px solid var(--line);
   color: var(--muted);
-  background: var(--panel);
 }
 
 .retry-step-duration {
@@ -699,48 +770,67 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 }
 
 .retry-step-stage {
-  font-size: 10px;
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  color: var(--danger);
+  font-size: var(--text-xs);
   padding: 1px 5px;
-  border-radius: var(--radius-xs, 4px);
-  background: rgb(239 68 68 / 10%);
-  color: var(--danger, #ef4444);
-  border: 1px solid rgb(239 68 68 / 20%);
 }
 
-/* P1-2: Least-Latency & Upstream Routing Summary */
+/* P1-2: Least-Latency & Upstream Routing Summary
+   这块曾挂着 .summary-strip（KPI 数字条）。那条公共样式会把后代 strong 变成
+   display:block 的 16px 粗体、把后代 span 拉成 flex:1 1 120px 并加竖分割线，
+   权重还压过这里的类，所以句子里的 strong 各自成行、chip 的 padding 失效、
+   连 6px 的状态圆点都被抻开。这里是说明性文字，不是指标，自己管排版。 */
 .upstream-routing-summary {
+  background: var(--panel-subtle);
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--accent-border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
   margin-top: 8px;
+  padding: 10px 14px;
+}
+
+.upstream-routing-summary[hidden] {
+  display: none;
 }
 
 .routing-summary-strip-inner {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
 }
 
 .routing-summary-header {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
+  align-items: baseline;
   gap: 8px;
 }
 
+/* 策略名是这块的锚点，比徽标和参数都重要，所以只有它用正文色。 */
 .routing-summary-strategy {
+  color: var(--muted);
   font-size: var(--text-sm);
+  line-height: 1.4;
 }
 
 .routing-summary-strategy strong {
   color: var(--text);
+  font-size: var(--text-base);
+  font-weight: 650;
 }
 
 /* 一句话说清"层"是什么、以及层内怎么挑。这条比上面所有徽标都重要。 */
 .routing-summary-explain {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  line-height: 1.65;
   margin: 0;
-  max-width: 82ch;
+  max-width: 78ch;
 }
 
 .routing-summary-explain strong {
@@ -750,15 +840,27 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 
 /* 参数与退化规则默认收起：要看的人点开，不看的人不用被四个数字和三条规则挡路。 */
 .routing-summary-details {
-  font-size: 11px;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--text-xs);
+  padding-top: 6px;
 }
 
 .routing-summary-details > summary {
+  align-items: center;
+  border-radius: var(--radius-sm);
   color: var(--muted);
   cursor: pointer;
   display: inline-flex;
   list-style: none;
+  padding: 1px 2px;
+  transition: color 150ms ease;
+  user-select: none;
   width: fit-content;
+}
+
+.routing-summary-details > summary:focus-visible {
+  box-shadow: var(--focus-ring);
+  outline: none;
 }
 
 .routing-summary-details > summary::-webkit-details-marker {
@@ -785,21 +887,23 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 .routing-summary-details-body {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   padding: 8px 0 2px 14px;
 }
 
 .routing-summary-dot {
-  border-radius: 50%;
+  border-radius: var(--radius-full);
   display: inline-block;
   flex: none;
-  height: 6px;
+  height: 5px;
   margin-right: 5px;
-  width: 6px;
+  width: 5px;
 }
 
 .routing-summary-dot.is-active {
   background: var(--ok);
+  /* 激活是常态，光点比纯色块更容易在扫视时被认出来。 */
+  box-shadow: 0 0 0 2px var(--ok-soft);
 }
 
 .routing-summary-dot.is-inactive {
@@ -808,85 +912,107 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 
 .routing-summary-badge {
   align-items: center;
+  border-radius: var(--radius-full);
   display: inline-flex;
-  padding: 1px 7px;
-  font-size: 11px;
-  border-radius: 999px;
+  flex: none;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  padding: 1px 8px;
+  white-space: nowrap;
 }
 
+/* 原来这里硬编码 rgb(16 185 129) / #10b981、#38bdf8 一类的暗色系色值。浅色主题下
+   --ok/--warning/--accent 被特意加深过（见 base.css 的对比度注释，就是为了这些
+   延迟与状态 chip 满足 AA），硬编码正好绕开了那次修复，所以一律改回语义令牌。 */
 .routing-summary-badge.is-active {
-  background: rgb(16 185 129 / 12%);
-  color: var(--ok, #10b981);
-  border: 1px solid rgb(16 185 129 / 28%);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-border);
+  color: var(--ok);
 }
 
 .routing-summary-badge.is-inactive {
   background: var(--panel-muted);
-  color: var(--muted);
   border: 1px solid var(--line);
+  color: var(--muted);
 }
 
 .routing-summary-chips {
-  display: inline-flex;
+  display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
 }
 
 .routing-chip {
-  display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 6px;
-  font-size: 11px;
-  font-family: var(--font-mono, monospace);
   background: var(--panel-muted);
   border: 1px solid var(--line);
-  border-radius: var(--radius-xs, 4px);
+  border-radius: var(--radius-sm);
   color: var(--muted);
+  display: inline-flex;
+  flex: none;
+  font-size: var(--text-xs);
+  gap: 4px;
+  line-height: 1.5;
+  padding: 2px 7px;
+  white-space: nowrap;
 }
 
+/* 只有数值走等宽，标签跟着正文走——整块 mono 会让中文标签的字距散开。 */
 .routing-chip strong {
   color: var(--text);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 
 .routing-summary-rules-hint {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  font-size: 11px;
   color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  font-size: var(--text-xs);
+  gap: 3px;
+  line-height: 1.55;
+}
+
+/* 三条退化规则原来横排 flex-wrap，窄屏下会在任意位置断开，"样本过期 (> 300s)"
+   和它的结果被拆到两行读不成句。每条一行，宽度就不再决定可读性。 */
+.routing-hint-item {
+  display: block;
 }
 
 .latency-routing-tag {
-  display: inline-flex;
   align-items: center;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
   gap: 3px;
-  padding: 1px 5px;
-  font-size: 10px;
-  font-family: var(--font-mono, monospace);
-  border-radius: var(--radius-xs, 4px);
-  line-height: 1.3;
+  line-height: 1.5;
+  padding: 1px 6px;
   white-space: nowrap;
   width: fit-content;
 }
 
 .latency-routing-tag--usable {
-  background: rgb(56 189 248 / 12%);
-  color: var(--accent, #38bdf8);
-  border: 1px solid rgb(56 189 248 / 28%);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  color: var(--accent-strong);
 }
 
 .latency-routing-tag--sampling {
-  background: rgb(245 158 11 / 12%);
-  color: var(--warning, #f59e0b);
-  border: 1px solid rgb(245 158 11 / 28%);
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
+  color: var(--warning);
 }
 
+/* 未测量代表"未知"而不是"慢"（见 matcher.go keepFastestCandidates 的说明：它照样
+   参与竞争）。所以这里只是压低存在感，不用 opacity 淡化到像被禁用了。 */
 .latency-routing-tag--unmeasured {
   background: var(--panel-muted);
+  border: 1px dashed var(--line-strong);
   color: var(--muted);
-  border: 1px solid var(--line);
-  opacity: 0.8;
 }
 
 

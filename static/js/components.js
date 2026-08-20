@@ -32,9 +32,14 @@ function wtSegment(seg) {
   }
   const tip = wtTipAttribute(seg.tip);
   if (tip) attrs.push(tip);
-  /* 原生 title 保留：触屏和禁用 JS 时悬浮卡不会出现，那时它是唯一的说明。
-     两者同时存在不会打架——悬浮卡是即时的，浏览器的 title 要停留一秒才弹。 */
-  if (seg.title) attrs.push(`title="${escapeHtml(seg.title)}"`);
+  /* 有悬浮卡时不出原生 title：两者确实会打架。指针停住不动的时候悬浮卡还在显示，
+     浏览器的 title 一秒后照样弹出来，同一句话叠成两层。
+
+     原先留着 title 的理由是"触屏和禁用 JS 时它是唯一的说明"，但这个理由不成立：
+     触屏不触发 hover，原生 title 在触屏上一样不显示；界面整体由 JS 渲染，没有 JS
+     时这些段根本不存在。段上另有 aria-label，读屏也不靠 title。
+     没有悬浮卡的段仍然保留 title——那时它是唯一的说明，这才是真的兜底。 */
+  if (seg.title && !tip) attrs.push(`title="${escapeHtml(seg.title)}"`);
   if (seg.ariaLabel) attrs.push(`aria-label="${escapeHtml(seg.ariaLabel)}"`);
   if (seg.interactive) {
     attrs.push(`role="${seg.role || "button"}"`, 'tabindex="0"');
@@ -60,11 +65,15 @@ function wtSegmentBar(options) {
   const segments = Array.isArray(config.segments) ? config.segments : [];
   const body = segments.map(wtSegment).filter(Boolean).join("");
   const classes = ["wt-segbar", config.trackClass].filter(Boolean).join(" ");
+  /* 轨道的 title 也得一起让位。原生 title 会由祖先代弹：段上撤掉 title 之后，
+     指针停在段上时浏览器会往上找到轨道的 title 弹出来，双弹层原样复现。
+     所以只要任何一段带悬浮卡，整条轨道就不出 title——轨道另有 aria-label。 */
+  const hasTip = segments.some((seg) => seg && seg.tip && seg.tip.title);
 
   const attrs = [`class="${classes}"`];
   if (config.role !== null) attrs.push(`role="${config.role || "img"}"`);
   if (config.ariaLabel) attrs.push(`aria-label="${escapeHtml(config.ariaLabel)}"`);
-  if (config.title) attrs.push(`title="${escapeHtml(config.title)}"`);
+  if (config.title && !hasTip) attrs.push(`title="${escapeHtml(config.title)}"`);
   return `<div ${attrs.join(" ")}>${body}</div>`;
 }
 

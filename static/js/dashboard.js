@@ -558,21 +558,14 @@ function bindKpiRequestSparkInteraction(card, values) {
 
     tooltip.innerHTML = `<strong>请求数</strong><span>${formatCompactNumber(Math.round(point.value))}</span>`;
     tooltip.hidden = false;
-    // 点在 svg 里，tooltip 挂在卡片上：换算成卡片坐标，再夹进卡片内。
+    /* 点在 svg 里、tooltip 挂在卡片上，所以这里只做 SVG→卡片的坐标换算；翻边与夹紧
+       交给公共的 wtPositionHoverCard（static/js/components.js）。原来这段是那个函数
+       的逐行翻版（同样的 0.62 翻边、同样的双向夹紧），改掉一处手感就会和别处分叉。 */
     const cardBounds = card.getBoundingClientRect();
-    const gap = 8;
-    const dotLeft = bounds.left - cardBounds.left + (point.x / width) * bounds.width;
-    const dotTop = bounds.top - cardBounds.top + (onCurve.y / height) * bounds.height;
-    const preferLeft = dotLeft > cardBounds.width * 0.62;
-    const left = preferLeft ? dotLeft - tooltip.offsetWidth - gap : dotLeft + gap;
-    tooltip.style.left = `${Math.max(
-      gap,
-      Math.min(left, Math.max(gap, cardBounds.width - tooltip.offsetWidth - gap)),
-    )}px`;
-    tooltip.style.top = `${Math.max(
-      gap,
-      Math.min(dotTop - tooltip.offsetHeight - gap, Math.max(gap, cardBounds.height - tooltip.offsetHeight - gap)),
-    )}px`;
+    wtPositionHoverCard(card, tooltip, {
+      x: bounds.left - cardBounds.left + (point.x / width) * bounds.width,
+      y: bounds.top - cardBounds.top + (onCurve.y / height) * bounds.height,
+    });
   };
 
   const update = (event) => {
@@ -1210,15 +1203,30 @@ function renderDashboard() {
         if (Math.abs(growth) < 0.5) return "";
         const up = growth > 0;
         const magnitude = Math.abs(growth);
-        return `<span class="status-delta ${up ? upClass : downClass}" title="较上一同长周期（${previous} 条）">${up ? "↑" : "↓"}<span data-count-key="status-delta-${key}" data-count-to="${magnitude.toFixed(3)}" data-count-format="growth">${formatKpiCount(magnitude, "growth")}</span></span>`;
+        /* 基线文案不再挂在这个 span 的 title 上，改由外层图例项的悬浮卡带出去：
+           父子各挂一个 title 时，指针移到环比徽标上会先弹图例项的、再弹这个，
+           两层叠着出现。返回 baseline 让 legendItem 并进 tip 的 lines。 */
+        return {
+          html: `<span class="status-delta ${up ? upClass : downClass}">${up ? "↑" : "↓"}<span data-count-key="status-delta-${key}" data-count-to="${magnitude.toFixed(3)}" data-count-format="growth">${formatKpiCount(magnitude, "growth")}</span></span>`,
+          baseline: `较上一同长周期（${previous} 条）`,
+        };
       };
-      const legendItem = (seg, label, count, countKey, statusVal, desc, deltaHtml) => `
-        <span class="status-legend-item is-clickable" data-drill-status="${statusVal}" title="${label} (${count} 条) · ${desc} · 点击在日志中查看" role="button" tabindex="0">
+      /* 图例项和条上的段说的是同一件事，交互契约也一样（role=button + tabindex），
+         所以走同一个悬浮卡，而不是留原生 title——同一张图里条上弹自绘卡、紧贴其下的
+         图例弹浏览器默认框，是两种观感。绑定处的 target 一并放开到 .status-legend-item。 */
+      const legendItem = (seg, label, count, countKey, statusVal, desc, delta) => {
+        const tip = wtTipAttribute({
+          title: label,
+          lines: [`${count} 条`, desc, delta?.baseline, "点击在日志中查看"],
+        });
+        return `
+        <span class="status-legend-item is-clickable" data-drill-status="${statusVal}" ${tip} role="button" tabindex="0" aria-label="${escapeHtml(`${label} ${count} 条`)}">
           <span class="status-legend-dot ops-bar-seg ${seg}" aria-hidden="true"></span>
           <span class="status-legend-label">${label}</span>
           <strong class="status-legend-count" data-count-key="status-count-${countKey}" data-count-to="${count}" data-count-format="compact">${formatCompactNumber(count)}</strong>
-          ${deltaHtml}
+          ${delta?.html || ""}
         </span>`;
+      };
       const legendHtml = [
         legendItem("ok", "2xx", c2, "2xx", "2xx", "正常成功响应",
           legendDelta("2xx", c2, prevStatus?.status_2xx, "status-delta--good", "status-delta--calm")),
@@ -1296,8 +1304,11 @@ function renderDashboard() {
         ${stripHtml}
       `;
       /* innerHTML 整体重刷会连悬浮卡一起冲掉，所以每次渲染后重绑；
-         wtBindHoverCard 会先解掉上一次的监听器。 */
-      wtBindHoverCard(dashboardStatusChart);
+         wtBindHoverCard 会先解掉上一次的监听器。
+         target 放开到图例项：默认只认 .wt-segbar-seg，图例就只能退回原生 title。 */
+      wtBindHoverCard(dashboardStatusChart, {
+        target: ".wt-segbar-seg, .status-legend-item",
+      });
     }
     // 图例的数量与环比徽标也走数字滚动（这块不经过 KPI 构建器，手动扫一次）。
     animateKpiNumbers(dashboardStatusChart);

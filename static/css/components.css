@@ -468,6 +468,9 @@ html[data-density="compact"] .wt-seg-btn {
      标题和成本提示本来就配了 ellipsis，但撑爆容器发生在布局阶段、比省略号
      生效更早，所以之前完全没用上。 */
   min-width: 0;
+  /* 整张卡片就是选中的入口，光标要说明这一点。内部那几个真按钮（启停开关、操作
+     菜单、查看详情）各自带 cursor，落在它们上面时不受这条影响。 */
+  cursor: pointer;
 }
 
 .channel-card:hover {
@@ -510,10 +513,33 @@ html[data-density="compact"] .wt-seg-btn {
 }
 
 /* 勾选框跟表格里的那一列是同一套语义，不能被卡片的 flex 压扁。 */
+/* 选中的入口是整张卡片，所以这个勾选框视觉上收起。不用 display:none——那会把它
+   从 Tab 序列和读屏里一起摘掉，键盘用户就再没有选中的办法了。sr-only 只是把它移出
+   视觉流，语义、状态、可聚焦性全部保留。 */
 .channel-card-check {
-  flex-shrink: 0;
-  cursor: pointer;
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
   margin: 0;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* 键盘走到它时必须看得见，否则焦点凭空消失。聚焦即回到正常尺寸，落在卡片左上角。 */
+.channel-card-check:focus-visible {
+  clip-path: none;
+  cursor: pointer;
+  height: auto;
+  left: 12px;
+  outline: 2px solid var(--focus, var(--accent));
+  outline-offset: 2px;
+  position: absolute;
+  top: 12px;
+  width: auto;
+  z-index: 1;
 }
 
 .channel-card-title h3 {

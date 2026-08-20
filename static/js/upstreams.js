@@ -761,8 +761,15 @@ function bindChannelSparklineInteraction(container, values) {
       dot.setAttribute("cy", y);
       tooltip.innerHTML = `<strong>请求量 (6h)</strong><span>${formatMetric(Math.round(value))}</span>`;
       tooltip.hidden = false;
-      tooltip.style.left = `${Math.min(Math.max(6, x * bounds.width / width + 8), container.clientWidth - tooltip.offsetWidth - 6)}px`;
-      tooltip.style.top = `${Math.max(6, y * bounds.height / height - 32)}px`;
+      /* 摆放交给公共的 wtPositionHoverCard（static/js/components.js），这里只把 SVG
+         视图坐标换算成容器内坐标。原来这两行是自己一套，和别处不一致：纵向固定上移
+         32px 而不按卡片实际高度算（内容超两行就压住曲线）、完全没有翻边（窄渠道卡上
+         弹层贴着右缘，而看板同类弹层会翻到左边）、夹紧还用的是 clientWidth 而非
+         getBoundingClientRect().width（缩放下两者不同）。 */
+      wtPositionHoverCard(container, tooltip, {
+        x: (x * bounds.width) / width,
+        y: (y * bounds.height) / height,
+      });
     });
   };
   const clear = () => {
@@ -780,7 +787,6 @@ function bindChannelSparklineInteraction(container, values) {
   hitArea.addEventListener("pointerleave", clear);
 }
 
-/* 统计数据按渠道缓存。渠道列表每 N 秒轮询一次，但统计的变化远没有那么快，
 /* 统计数据按渠道缓存。渠道列表每 N 秒轮询一次，但统计的变化远没有那么快，
    而且每张卡一个请求。没有缓存的话，每轮刷新都要等 N 个请求回来才能重建卡片，
    那段空窗就是肉眼看到的闪烁。 */
@@ -1229,12 +1235,15 @@ function createChannelCard(upstream) {
   card.innerHTML = `
     <div class="channel-card-header">
       <div class="channel-card-title">
+        <!-- 选中改成点卡片本身，所以这个勾选框视觉上收起来了（.channel-card-check
+             是 sr-only，聚焦时才现形）。但它必须留在 DOM 里：data-upstream-check 是
+             表格与卡片共用的那套选择契约，键盘的 Tab+空格和读屏的"复选框/已选中"
+             语义也全靠原生 input，换成 div 就得自己重造一遍且容易做残。 -->
         <input
           type="checkbox"
           class="channel-card-check"
           data-upstream-check="${upstream.id}"
           aria-label="选择渠道 ${escapeHtml(upstream.name)}"
-          title="选中后可批量启停或只导出选中的渠道"
           ${selectedUpstreamIds.has(upstream.id) ? "checked" : ""}
         />
         <span class="status-dot status-dot--${statusClass}"></span>
@@ -2043,7 +2052,21 @@ if (upstreamCardsContainer) {
     const actionButton = event.target.closest("button[data-action]");
     if (actionButton) {
       await handleUpstreamAction(actionButton);
+      return;
     }
+
+    /* 点卡片本身即选中。放在最后：上面每个分支都已 return，所以启停开关、操作菜单、
+       查看详情按下时不会顺带把卡片选上。
+
+       勾选框仍在 DOM 里（只是视觉隐藏），这里驱动它而不是直接改集合——它是
+       两个视图共用的那套 data-upstream-check 契约的一端，也是键盘与读屏的入口。
+       点整卡时它不会自己派发 change，所以手动派发一次，让 change 监听器照旧收口。 */
+    const card = event.target.closest(".channel-card");
+    if (!card) return;
+    const check = card.querySelector("input[data-upstream-check]");
+    if (!check) return;
+    check.checked = !check.checked;
+    check.dispatchEvent(new Event("change", { bubbles: true }));
   });
 
   upstreamCardsContainer.addEventListener("change", (event) => {

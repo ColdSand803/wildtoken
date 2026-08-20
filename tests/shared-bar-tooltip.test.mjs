@@ -117,10 +117,16 @@ test("wtSegment renders data attributes, tips, title fallback and interactive ro
   assert.ok(markup.includes("is-hoverable"));
   assert.ok(markup.includes('role="button"'), "交互段默认 role=button");
   assert.ok(markup.includes('tabindex="0"'), "键盘可达");
-  // 触屏和禁用 JS 时悬浮卡不会出现，原生 title 是唯一说明。
-  assert.ok(markup.includes('title="正常成功响应"'));
+  /* 有悬浮卡就不出原生 title：指针停住时悬浮卡还在，浏览器的 title 一秒后照样弹，
+     同一句话叠成两层。段上另有 aria-label，撤掉 title 不丢可访问信息。 */
+  assert.ok(!markup.includes("title="), "悬浮卡在时不出原生 title，避免双弹层");
   assert.ok(markup.includes('aria-label="2xx 120"'));
   assert.ok(markup.includes("data-wt-tip="), markup);
+
+  // 没有悬浮卡的段仍然保留 title——那时它是唯一的说明。
+  const titleOnly = context.wtSegment({ width: "10", title: "无悬浮卡时的说明" });
+  assert.ok(titleOnly.includes('title="无悬浮卡时的说明"'), "没有 tip 时 title 是唯一说明");
+  assert.ok(!titleOnly.includes("data-wt-tip="));
 
   const role = context.wtSegment({ width: "10", interactive: true, role: "img" });
   assert.ok(role.includes('role="img"'), "role 可以被调用方覆盖");
@@ -166,6 +172,28 @@ test("wtSegmentBar keeps the caller skin class, drops null segments and labels t
   const bare = context.wtSegmentBar({ segments: [] });
   assert.ok(bare.startsWith('<div class="wt-segbar"'), bare);
   assert.ok(bare.endsWith("></div>"));
+});
+
+test("wtSegmentBar drops the track title when any segment owns a hover card", () => {
+  const context = barContext(["wtTipAttribute", "wtSegment", "wtSegmentBar"]);
+
+  /* 原生 title 会由祖先代弹：段上撤掉 title 之后，指针停在段上时浏览器会往上找到
+     轨道的 title 弹出来，双弹层原样复现。所以有悬浮卡时整条轨道都不出 title。 */
+  const withTip = context.wtSegmentBar({
+    trackClass: "log-detail-timing-bar",
+    title: "总耗时 1000ms",
+    ariaLabel: "首字 300ms",
+    segments: [{ width: "100", tip: { title: "首字", lines: ["300ms"] } }],
+  });
+  assert.ok(!withTip.includes("title="), "轨道不能替段弹出原生 title");
+  assert.ok(withTip.includes('aria-label="首字 300ms"'), "轨道仍然有可访问名称");
+
+  // 整条都没有悬浮卡时，轨道的 title 是唯一说明，保留。
+  const withoutTip = context.wtSegmentBar({
+    title: "总耗时 1000ms",
+    segments: [{ width: "100" }],
+  });
+  assert.ok(withoutTip.includes('title="总耗时 1000ms"'), "没有悬浮卡时轨道 title 保留");
 });
 
 test("wtSegmentTip parses data-wt-tip and stays silent on garbage", () => {
@@ -247,8 +275,41 @@ test("dashboard status chart and error strip both go through wtSegmentBar", () =
   assert.ok(source.includes('trackClass: "ops-bar-track"'), "状态分布用公共分段条");
   assert.ok(source.includes('trackClass: "status-error-strip"'), "错误时间分布用公共分段条");
   // innerHTML 整体重刷会连悬浮卡一起冲掉，每次渲染后必须重绑。
-  assert.ok(source.includes("wtBindHoverCard(dashboardStatusChart)"), "重渲染后重绑悬浮卡");
+  assert.ok(source.includes("wtBindHoverCard(dashboardStatusChart"), "重渲染后重绑悬浮卡");
   assert.ok(source.includes("wtPositionHoverCard("), "延迟趋势复用公共定位");
+
+  /* 图例项和条上的段说的是同一件事，得走同一个悬浮卡：默认 target 只认
+     .wt-segbar-seg，图例就只能退回浏览器默认弹层，同一张图两种观感。 */
+  assert.ok(
+    source.includes('target: ".wt-segbar-seg, .status-legend-item"'),
+    "图例项也纳入悬浮卡",
+  );
+  assert.ok(
+    !/class="status-legend-item[^"]*"[^>]*title="/.test(source),
+    "图例项不再挂原生 title",
+  );
+  assert.ok(
+    !/class="status-delta [^"]*"[^>]*title="/.test(source),
+    "环比徽标不再挂原生 title（父子两层 title 会叠着弹）",
+  );
+});
+
+/* 四套弹层原本各写一遍摆放。延迟趋势早就复用了公共定位，另两处是手写的：KPI 卡那段
+   是公共函数的逐行翻版，渠道卡那段还和别处不一致（固定上移 32px、没有翻边、用
+   clientWidth 夹紧）。这里锁住"不许再回到手写"，否则手感会重新分叉。 */
+test("every hover card places itself through the shared positioner", () => {
+  for (const file of ["static/js/dashboard.js", "static/js/upstreams.js"]) {
+    const source = read(file);
+    assert.ok(source.includes("wtPositionHoverCard("), `${file} 复用公共定位`);
+    assert.ok(
+      !source.includes("* 0.62"),
+      `${file} 不再手写 62% 翻边判定`,
+    );
+    assert.ok(
+      !/tooltip\.style\.(left|top)\s*=/.test(source),
+      `${file} 不再自己写 tooltip 的 left/top`,
+    );
+  }
 });
 
 test("log detail timing waterfall uses the shared bar and rebinds its hovercard", () => {

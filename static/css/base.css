@@ -1202,6 +1202,13 @@ html[data-theme="light"] .nav-link:hover {
   padding: 0;
 }
 
+/* display: flex 上面、窄屏下 responsive.css 还改成 grid，两者都是作者样式，会压过
+   UA 样式表的 [hidden] { display: none }。#upstream-probe-summary 靠 hidden 属性
+   收起（upstreams.js 测活结束时设 true），没有这条兜底就永远收不回去。 */
+.summary-strip[hidden] {
+  display: none;
+}
+
 .summary-strip span {
   border-right: 1px solid var(--line);
   flex: 1 1 120px;

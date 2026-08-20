@@ -71,6 +71,22 @@ test("enhancements.css defines probe badges and summary styles", () => {
   assert.ok(css.includes(".probe-badge--skipped {"), "probe badge skipped exists");
   assert.ok(css.includes(".probe-badge--untested {"), "probe badge untested exists");
   assert.ok(css.includes(".probe-summary-dot.is-running"), "probe summary running dot exists");
+
+  /* 这块不能再挂 .summary-strip：那是 KPI 数字条的样式，会把后代 span 拉成等宽格子
+     （7px 的状态圆点被撑成椭圆）、把 strong 顶成独立一行的粗体。 */
+  const markup = read("static/admin.html");
+  const tag = /<div id="upstream-probe-summary"[^>]*>/.exec(markup)?.[0];
+  assert.notEqual(tag, undefined, "probe summary must exist");
+  assert.ok(!/\bsummary-strip\b/.test(tag), "不再借用 KPI 数字条的样式");
+  assert.match(tag, /\bhidden\b/, "默认收起");
+
+  /* 摘掉 .summary-strip 也摘掉了 base.css 里 .summary-strip[hidden] 的兜底，而这块
+     正是靠 hidden 收起的。自己的 display 是作者样式，会压过 UA 的 [hidden]。 */
+  assert.match(
+    css,
+    /\.upstream-probe-summary\[hidden\]\s*\{\s*display:\s*none;/,
+    "hidden 兜底必须跟着搬过来，否则测活摘要收不回去",
+  );
 });
 
 test("renderProbeBadgeMarkup renders all required badge states correctly", () => {

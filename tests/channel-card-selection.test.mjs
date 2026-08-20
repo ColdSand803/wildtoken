@@ -143,6 +143,65 @@ test("card clicks on the checkbox do not fall through to the card action delegat
   );
 });
 
+test("clicking the card body selects it, and the real buttons still win", () => {
+  const source = read("static/js/upstreams.js");
+  const delegation = source.slice(source.indexOf('upstreamCardsContainer.addEventListener("click"'));
+
+  const cardBranch = delegation.indexOf('closest(".channel-card")');
+  assert.notEqual(cardBranch, -1, "点卡片本身即选中");
+
+  /* 卡片分支必须排在最后：它是兜底。排到任何按钮之前，按启停开关或操作菜单时
+     就会顺带把卡片选上。 */
+  for (const earlier of [
+    "button[data-empty-action]",
+    "button[data-menu-id]",
+    "[data-card-detail]",
+    "button[data-action]",
+  ]) {
+    const at = delegation.indexOf(earlier);
+    assert.notEqual(at, -1, `${earlier} 分支仍在`);
+    assert.ok(at < cardBranch, `${earlier} 必须先于卡片兜底分支`);
+  }
+
+  /* 走勾选框而不是直接改集合：它是两视图共用的契约端点，也是键盘/读屏的入口。
+     整卡点击不会让它自己派发 change，所以要手动派发一次。 */
+  assert.ok(
+    /dispatchEvent\(new Event\("change", \{ bubbles: true \}\)\)/.test(delegation),
+    "手动派发 change，让选择逻辑仍旧只有一个收口",
+  );
+});
+
+test("the card checkbox is visually hidden but still reachable by keyboard", () => {
+  const css = read("static/css/components.css");
+  const block = css.slice(
+    css.indexOf(".channel-card-check {"),
+    css.indexOf(".channel-card-title h3"),
+  );
+
+  /* display:none / visibility:hidden 会把它从 Tab 序列和读屏里一起摘掉，
+     键盘用户就再没有选中的办法。只能用 sr-only 那套挪出视觉流。 */
+  assert.ok(!/display:\s*none/.test(block), "不能用 display:none 藏勾选框");
+  assert.ok(!/visibility:\s*hidden/.test(block), "不能用 visibility:hidden 藏勾选框");
+  assert.ok(/clip-path:\s*inset\(50%\)/.test(block), "用 sr-only 的裁剪方式隐藏");
+
+  // 焦点不能凭空消失：走到它时要现形。
+  assert.ok(
+    css.includes(".channel-card-check:focus-visible"),
+    "聚焦时勾选框必须可见",
+  );
+
+  const source = read("static/js/upstreams.js");
+  const card = source.slice(
+    source.indexOf("function createChannelCard("),
+    source.indexOf("async function hydrateVisibleCardStats("),
+  );
+  assert.ok(card.includes('type="checkbox"'), "仍是原生 checkbox，语义与状态免费");
+
+  // 整卡可点就得有 pointer 光标，而且这条要在 .channel-card 自己的块里。
+  const cardBlock = /^\.channel-card \{[^}]*\}/m.exec(css)?.[0] ?? "";
+  assert.ok(/cursor:\s*pointer/.test(cardBlock), "整卡光标说明它可点");
+});
+
 test("both views write selection through the same toggle helper", () => {
   const modelsSource = read("static/js/models.js");
   const upstreamsSource = read("static/js/upstreams.js");

@@ -77,3 +77,21 @@ test("Gojo gives the status switch a keyboard focus indicator", () => {
   const stripped = css.match(/\.status-switch:focus-visible \{[^}]+\}/);
   assert.ok(stripped, "expected an explicit :focus-visible rule on the switch");
 });
+
+/* Gojo paints every button it does not explicitly exclude with the full Limitless
+   gradient. The retry-chain step is a <button> but reads as a row of record, not a
+   primary action — left out of the list, the whole row turns solid cyan and the
+   status badge plus channel name inside it become unreadable. */
+test("Gojo leaves the retry-chain step out of its primary-action treatment", () => {
+  const selectors = [
+    ...css.matchAll(/html\[data-theme="gojo"\] button:not\(:where\(([\s\S]*?)\)\)/g),
+  ].map(([, body]) => body);
+
+  assert.ok(selectors.length >= 5, "Gojo repeats the list per state; all must be covered");
+  for (const [index, body] of selectors.entries()) {
+    assert.ok(
+      body.includes(".retry-chain-step"),
+      `exclusion list #${index + 1} must spare the retry-chain step`,
+    );
+  }
+});

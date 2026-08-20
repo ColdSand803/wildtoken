@@ -1669,10 +1669,15 @@ function formatLogDetailMeta(detail) {
         ? `<span class="first-token-time neutral" title="传输耗时 ${escapeHtml(transferLabel)}">${escapeHtml(transferLabel)}</span>`
         : transferLabel;
 
+      /* 四段把首字拆成了「连接/Header」+「上游生成」，firstTokenMs 退化成两段的
+         分界点，界面上就没有首字了——而它是流式请求最先要看的数。它横跨两段、
+         不对应瀑布里任何单一色块，所以和「总耗时」一样不给色点：没有点正好说明
+         这是累积到某一刻的读数，不是又一个独立分段。 */
       timingLine = formatLogTimingChips([
         { segClass: "timing-seg--gateway", label: gatewayLabelName, valueMarkup: gatewayValueMarkup, title: gatewayFullTitle },
         { segClass: "timing-seg--headers", label: "连接/Header", valueMarkup: headersValueMarkup, title: "连接与响应头" },
         { segClass: "timing-seg--generation", label: "上游生成", valueMarkup: generationValueMarkup, title: "上游收到请求到吐出首字" },
+        { label: "首字", valueMarkup: firstTokenLabel, title: "首字耗时 (TTFB)：连接/Header + 上游生成" },
         { segClass: "timing-seg--transfer", label: "传输", valueMarkup: transferValueMarkup, title: "首字之后的流式传输" },
         { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
       ]);

@@ -547,6 +547,23 @@ test("formatLogDetailMeta renders full 4-stage streaming waterfall with accurate
   assert.ok(markup.includes("传输"), "has transfer label");
   assert.ok(markup.includes("总耗时"), "has total duration label");
 
+  // 四段把首字拆成 连接/Header + 上游生成，界面上曾因此没有首字这一项。
+  // "首字"二字也出现在几条 title 里，所以断言打在 chip 标签的结构上。
+  assert.ok(
+    markup.includes('class="log-timing-chip-label">首字</span>'),
+    "keeps a first-token chip even when the four-segment split hides it",
+  );
+  assert.ok(
+    markup.includes('class="log-timing-chip-label">首字</span><span class="first-token-time'),
+    "first-token chip carries the toned TTFB value, not a bare number",
+  );
+  assert.ok(markup.includes("300ms"), "first-token chip reads first_token_ms verbatim");
+  // 首字横跨两段，不对应瀑布里任何单一色块，所以不配色点。
+  assert.ok(
+    !markup.includes('log-timing-chip-dot timing-seg--ttfb'),
+    "first-token chip carries no swatch under the four-segment split",
+  );
+
   assert.ok(markup.includes("log-detail-timing-bar"), "has timing bar");
   assert.ok(markup.includes("timing-seg--gateway"), "has gateway timing segment");
   assert.ok(markup.includes("timing-seg--headers"), "has headers timing segment");
@@ -776,4 +793,22 @@ test("clearLogFilters clears all new filters including time range, stream, and m
   assert.equal(tokenCleared, true);
   assert.equal(paginationReset, true);
   assert.equal(logsLoaded, true);
+});
+
+test("filter badges toggled hidden from script actually disappear", () => {
+  // `.log-token-filter-badge { display: inline-flex }` is author CSS, so it
+  // outranks the UA stylesheet's [hidden] rule. Without an explicit override the
+  // token and range badges sit on screen from page load with an empty <strong>,
+  // and clearing a filter updates state but leaves the badge visible — the ×
+  // looks broken even though its handler ran.
+  const css = read("static/css/enhancements.css");
+  assert.match(css, /\.log-token-filter-badge\[hidden\]\s*\{\s*display:\s*none;/);
+
+  const markup = read("static/admin.html");
+  for (const id of ["log-token-filter-badge", "log-range-filter-badge"]) {
+    const tag = new RegExp(`<[a-z]+ id="${id}"[^>]*>`).exec(markup)?.[0];
+    assert.notEqual(tag, undefined, `${id} must exist`);
+    assert.match(tag, /class="[^"]*\blog-token-filter-badge\b/, `${id} relies on the shared badge rule`);
+    assert.match(tag, /\bhidden\b/, `${id} starts hidden`);
+  }
 });
