@@ -15,6 +15,107 @@
   width: 1px;
 }
 
+/* ── 公共分段条 ────────────────────────────────────────────
+   几何在这里，配色留在调用方原有的皮肤 class 上（.ops-bar-seg / .timing-seg--*
+   / .status-error-cell），所以主题包对那些 class 的定制照旧生效。
+   见 static/js/components.js 的 wtSegmentBar。 */
+.wt-segbar {
+  display: flex;
+  min-width: 0;
+  position: relative;
+}
+
+.wt-segbar-seg {
+  display: block;
+  height: 100%;
+  min-width: 0;
+}
+
+/* 悬浮时纵向放大 1.25 倍——这是「错误时间分布」原来的手感，现在三处一致。
+   放大的段会越出轨道，所以带可悬浮段的轨道必须让 overflow 可见，
+   否则放大的部分会被裁掉、看着像没反应。 */
+.wt-segbar:has(.wt-segbar-seg.is-hoverable) {
+  overflow: visible;
+}
+
+.wt-segbar-seg.is-hoverable {
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.wt-segbar-seg.is-hoverable:hover,
+.wt-segbar-seg.is-hoverable:focus-visible {
+  filter: brightness(1.25);
+  outline: none;
+  transform: scaleY(1.25);
+}
+
+/* 圆角轨道 + overflow: visible 时首尾两段要自己收边，不然方角会戳出轨道轮廓。 */
+.wt-segbar-seg:first-child {
+  border-end-start-radius: inherit;
+  border-start-start-radius: inherit;
+}
+
+.wt-segbar-seg:last-child {
+  border-end-end-radius: inherit;
+  border-start-end-radius: inherit;
+}
+
+/* ── 公共悬浮卡 ────────────────────────────────────────────
+   延迟趋势的「当前时间桶」弹框就是这一个，现在状态分布、错误时间分布和请求详情
+   的耗时瀑布共用它。定位逻辑见 wtPositionHoverCard。 */
+.wt-hovercard-host {
+  position: relative;
+}
+
+.wt-hovercard,
+.dashboard-chart-tooltip {
+  background: var(--panel-elevated);
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  display: grid;
+  gap: 3px;
+  left: 0;
+  margin: 0;
+  max-width: min(260px, calc(100% - 24px));
+  padding: 7px 9px;
+  /* 悬浮卡不能挡住下面的段——那些段是可点的下钻入口。 */
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  z-index: 3;
+}
+
+.wt-hovercard[hidden],
+.dashboard-chart-tooltip[hidden] {
+  display: none;
+}
+
+.wt-hovercard strong,
+.dashboard-chart-tooltip strong {
+  font-size: var(--text-xs);
+}
+
+.wt-hovercard span,
+.dashboard-chart-tooltip span {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wt-segbar-seg.is-hoverable {
+    transition: none;
+  }
+
+  .wt-segbar-seg.is-hoverable:hover,
+  .wt-segbar-seg.is-hoverable:focus-visible {
+    transform: none;
+  }
+}
+
 .wt-page {
   display: grid;
   gap: var(--space-5);
@@ -385,6 +486,13 @@ html[data-density="compact"] .wt-seg-btn {
   transform: none;
 }
 
+/* 选中的卡片。用描边而不是背景色，卡片内部已经有一堆彩色徽章和图表，
+   再叠一层底色会把它们的对比度压掉。 */
+.channel-card--selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 /* Card header */
 
 .channel-card-header {
@@ -399,6 +507,13 @@ html[data-density="compact"] .wt-seg-btn {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+/* 勾选框跟表格里的那一列是同一套语义，不能被卡片的 flex 压扁。 */
+.channel-card-check {
+  flex-shrink: 0;
+  cursor: pointer;
+  margin: 0;
 }
 
 .channel-card-title h3 {

@@ -19,6 +19,25 @@ func metricsState(t *testing.T, enabled bool, token string) *appstate.State {
 	return &appstate.State{Settings: settings, Prometheus: metrics.NewPrometheus()}
 }
 
+// usageReportingUpstream answers with a body carrying the usage block a provider
+// returns, so the token counters have something real to record.
+func usageReportingUpstream(t *testing.T, promptTokens, completionTokens,
+	cachedTokens int) *httptest.Server {
+	t.Helper()
+	body := `{"id":"x","choices":[{"message":{"content":"hi"}}],"usage":{` +
+		`"prompt_tokens":` + itoa(int64(promptTokens)) +
+		`,"completion_tokens":` + itoa(int64(completionTokens)) +
+		`,"total_tokens":` + itoa(int64(promptTokens+completionTokens)) +
+		`,"prompt_tokens_details":{"cached_tokens":` + itoa(int64(cachedTokens)) + `}}}`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "application/json")
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
 func scrape(state *appstate.State, bearer string) *httptest.ResponseRecorder {
 	request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	if bearer != "" {

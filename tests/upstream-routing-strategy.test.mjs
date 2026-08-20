@@ -70,6 +70,8 @@ test("enhancements.css defines upstream routing summary and latency tags", () =>
   assert.ok(css.includes(".routing-summary-dot"), "routing summary dot exists");
   assert.ok(css.includes(".routing-chip"), "routing chip exists");
   assert.ok(css.includes(".routing-summary-rules-hint"), "routing rules hint exists");
+  assert.ok(css.includes(".routing-summary-explain"), "routing explanation style exists");
+  assert.ok(css.includes(".routing-summary-details"), "collapsed params style exists");
   assert.ok(css.includes(".latency-routing-tag"), "latency routing tag exists");
   assert.ok(css.includes(".latency-routing-tag--usable"), "usable latency tag exists");
   assert.ok(css.includes(".latency-routing-tag--sampling"), "sampling latency tag exists");
@@ -152,11 +154,18 @@ test("renderUpstreamRoutingSummary renders strategy, active state, rule chips, a
   assert.equal(summaryEl.hidden, false);
   assert.ok(summaryEl.innerHTML.includes("最低延迟优先"));
   assert.ok(summaryEl.innerHTML.includes("延迟决策已激活"));
+  // "层"要在界面上被解释出来，而不是让人猜。
+  assert.ok(summaryEl.innerHTML.includes("同优先级渠道之间"), "leads with plain language");
+  assert.ok(summaryEl.innerHTML.includes("请求先按优先级从高到低"), "explains what a tier is");
+  assert.ok(summaryEl.innerHTML.includes("routing-summary-explain"), "has explanation paragraph");
+  // 参数与退化规则收在 <details> 里，默认不展开。
+  assert.ok(summaryEl.innerHTML.includes("<details class=\"routing-summary-details\">"), "params are collapsed");
+  assert.ok(!summaryEl.innerHTML.includes("<details class=\"routing-summary-details\" open>"), "collapsed by default");
   assert.ok(summaryEl.innerHTML.includes("最小样本: <strong>5</strong>"));
   assert.ok(summaryEl.innerHTML.includes("过期窗口: <strong>300s</strong>"));
   assert.ok(summaryEl.innerHTML.includes("容忍带: <strong>20%</strong>"));
   assert.ok(summaryEl.innerHTML.includes("样本容量: <strong>32</strong>"));
-  assert.ok(summaryEl.innerHTML.includes("层内无可用样本 → 退化为加权随机"));
+  assert.ok(summaryEl.innerHTML.includes("同优先级内无可用样本 → 退化为加权随机"));
   assert.ok(summaryEl.innerHTML.includes("样本不足 5 个 → 视为未测量并保留竞争"));
   assert.ok(summaryEl.innerHTML.includes("样本过期 (> 300s) → 自动清除并标记为未测量"));
 
@@ -171,6 +180,10 @@ test("renderUpstreamRoutingSummary renders strategy, active state, rule chips, a
   assert.equal(summaryEl.hidden, false);
   assert.ok(summaryEl.innerHTML.includes("加权随机"));
   assert.ok(summaryEl.innerHTML.includes("延迟决策未激活"));
+  assert.ok(summaryEl.innerHTML.includes("权重越大，被抽中的概率越高"), "explains weighted picking");
+  // 加权随机下这些延迟参数全是死数字，不该出现。
+  assert.ok(!summaryEl.innerHTML.includes("routing-summary-details"), "no latency params under weighted");
+  assert.ok(!summaryEl.innerHTML.includes("最小样本"), "no sample chips under weighted");
 });
 
 test("fetchLatestRoutingData fetches /api/admin/upstreams/routing and updates state", async () => {

@@ -213,45 +213,6 @@ function renderLogReasoningEffort(log) {
   `;
 }
 
-
-/**
- * 格式化单条请求的预估成本文本。
- * costMicros 为 null / undefined / 非数字时必须返回 "未定价"，严禁显示 "$0.00"。
- * 遵循与服务端 models.FormatMicros 一致的整数舍入规则：
- * 正常保留 2 位小数；当金额小于 0.01 主单位（10,000 micros）且大于 0 时保留 6 位小数，避免微小金额被错误四舍五入为 0。
- */
-function formatLogCostText(costMicros, costCurrency = "USD") {
-  if (costMicros === null || costMicros === undefined) {
-    return "未定价";
-  }
-  const micros = Number(costMicros);
-  if (!Number.isFinite(micros)) {
-    return "未定价";
-  }
-
-  const curr = String(costCurrency || "USD").toUpperCase();
-  const symbol = curr === "USD" ? "$" : curr === "CNY" ? "¥" : `${curr} `;
-
-  const negative = micros < 0;
-  const absMicros = Math.abs(micros);
-  let whole = Math.floor(absMicros / 1_000_000);
-  const fraction = absMicros % 1_000_000;
-
-  let digits = 2;
-  if (whole === 0 && fraction > 0 && fraction < 10_000) {
-    digits = 6;
-  }
-
-  const scale = Math.pow(10, digits);
-  let scaled = Math.round((fraction * scale) / 1_000_000);
-  if (scaled >= scale) {
-    whole += 1;
-    scaled = 0;
-  }
-
-  return `${negative ? "-" : ""}${symbol}${whole}.${String(scaled).padStart(digits, "0")}`;
-}
-
 function formatTokens(log) {
   const part = (value) => (value === null || value === undefined ? "-" : value);
   const cacheHitRate = formatCacheHitRate(log);
@@ -277,19 +238,12 @@ function formatTokens(log) {
     ? ` style="--cache-rate:${Math.min(100, Math.max(0, Number(rateMatch[1])))}"`
     : "";
 
-  let costBadge = "";
-  if (log.cost_micros !== null && log.cost_micros !== undefined && Number.isFinite(Number(log.cost_micros))) {
-    const costText = formatLogCostText(log.cost_micros, log.cost_currency);
-    const ruleInfo = log.pricing_rule_id ? ` (规则版本 #${log.pricing_rule_id})` : "";
-    costBadge = `\n    <div><span class="badge log-token-cost-badge" title="预估费用：${escapeHtml(costText)}${escapeHtml(ruleInfo)}">${escapeHtml(costText)}</span></div>`;
-  }
-
   return `
     <span class="token-triple" aria-label="输入 输出 总计 缓存命中 缓存率 思考 tokens">
       ${metrics.map(([label, value]) => `
         <span${label === "缓存率" ? rateStyle : ""}><b>${escapeHtml(String(part(value)))}</b><small>${escapeHtml(label)}</small></span>
       `).join("")}
-    </span>${costBadge}
+    </span>
   `;
 }
 
@@ -392,6 +346,44 @@ function formatHeadersArrivalTime(ms) {
   }
   const label = formatSeconds(ms);
   return `<span class="first-token-time neutral" title="连接与响应头 ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+}
+
+/* 耗时四段：原来是一行 `A 0.0s · B 5.4s · C 2.8s · ...` 的长句，而
+   .log-detail-meta-card small 是 nowrap + ellipsis，三列网格里必然被截成
+   "…总耗…"。改成会换行的小块流，每块自带一个和下面瀑布同色的色点，
+   顺带把图例和数值合成一处。 */
+function formatLogTimingChips(chips) {
+  const body = chips.filter(Boolean).map((chip) => {
+    const swatch = chip.segClass
+      ? `<span class="log-timing-chip-dot ${chip.segClass}" aria-hidden="true"></span>`
+      : "";
+    return `<span class="log-timing-chip"${chip.title ? ` title="${escapeHtml(chip.title)}"` : ""}>
+      ${swatch}<span class="log-timing-chip-label">${escapeHtml(chip.label)}</span>${chip.valueMarkup}
+    </span>`;
+  }).join("");
+  return body ? `<div class="log-timing-chips">${body}</div>` : "";
+}
+
+/* 瀑布条。段的描述由调用方给（每段：宽度百分比字符串、皮肤 class、悬浮卡内容），
+   几何/悬浮/键盘可达一律走 wtSegmentBar（static/js/components.js），
+   和看板的状态分布、错误时间分布是同一套。 */
+function formatLogTimingBar(segments, title) {
+  const usable = segments.filter((seg) => seg && Number(seg.width) > 0);
+  if (!usable.length) return "";
+  return wtSegmentBar({
+    trackClass: "log-detail-timing-bar",
+    title,
+    ariaLabel: title,
+    segments: usable.map((seg) => ({
+      className: `timing-seg ${seg.segClass}`,
+      width: seg.width,
+      interactive: true,
+      tip: { title: seg.label, lines: [seg.value, `占总耗时 ${seg.width}%`] },
+      title: seg.title,
+      ariaLabel: `${seg.label} ${seg.value}`,
+      role: "img",
+    })),
+  });
 }
 
 function outputTokensPerSecond(log) {
@@ -1257,12 +1249,18 @@ function updateLogSensitiveToggle() {
   logSensitiveToggle.classList.toggle("is-active", hidden);
 }
 
+/* 详情卡整块重刷会把悬浮卡一起冲掉，所以写入和重绑必须成对出现——
+   三个调用点（打开、脱敏切换、轮询刷新）都走这里。 */
+function renderLogDetailMeta(detail) {
+  if (!logDetailMeta) return;
+  logDetailMeta.innerHTML = formatLogDetailMeta(detail);
+  wtBindHoverCard(logDetailMeta);
+}
+
 function refreshOpenLogDetail() {
   if (!currentLogDetail || !logDetailDialog?.open) return;
   logDetailSummary.textContent = formatLogDetailSummary(currentLogDetail);
-  if (logDetailMeta) {
-    logDetailMeta.innerHTML = formatLogDetailMeta(currentLogDetail);
-  }
+  renderLogDetailMeta(currentLogDetail);
 }
 
 function setLogSensitiveHidden(hidden) {
@@ -1671,7 +1669,13 @@ function formatLogDetailMeta(detail) {
         ? `<span class="first-token-time neutral" title="传输耗时 ${escapeHtml(transferLabel)}">${escapeHtml(transferLabel)}</span>`
         : transferLabel;
 
-      timingLine = `<small>${escapeHtml(gatewayLabelName)} ${gatewayValueMarkup} · 连接/Header ${headersValueMarkup} · 上游生成 ${generationValueMarkup} · 传输 ${transferValueMarkup} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+      timingLine = formatLogTimingChips([
+        { segClass: "timing-seg--gateway", label: gatewayLabelName, valueMarkup: gatewayValueMarkup, title: gatewayFullTitle },
+        { segClass: "timing-seg--headers", label: "连接/Header", valueMarkup: headersValueMarkup, title: "连接与响应头" },
+        { segClass: "timing-seg--generation", label: "上游生成", valueMarkup: generationValueMarkup, title: "上游收到请求到吐出首字" },
+        { segClass: "timing-seg--transfer", label: "传输", valueMarkup: transferValueMarkup, title: "首字之后的流式传输" },
+        { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+      ]);
 
       if (hasFirstToken && totalMs != null && totalMs > 0) {
         const fullTotal = (preUpstreamMs || 0) + totalMs;
@@ -1684,43 +1688,70 @@ function formatLogDetailMeta(detail) {
           const txMs = hasTransfer ? transferMs : 0;
           const txPct = txMs ? (txMs / fullTotal * 100).toFixed(1) : "0.0";
 
-          const segmentsHtml = [
-            preUpstreamMs && preUpstreamMs > 0
-              ? `<span class="timing-seg timing-seg--gateway" style="width:${prePct}%" title="${escapeHtml(gatewayFullTitle)}: ${preUpstreamMs}ms"></span>`
-              : "",
-            hdrMs > 0
-              ? `<span class="timing-seg timing-seg--headers" style="width:${hdrPct}%" title="连接与响应头: ${hdrMs}ms"></span>`
-              : "",
-            genMs > 0
-              ? `<span class="timing-seg timing-seg--generation" style="width:${genPct}%" title="上游生成: ${genMs}ms (首字 ${firstTokenMs}ms)"></span>`
-              : "",
-            txMs > 0
-              ? `<span class="timing-seg timing-seg--transfer" style="width:${txPct}%" title="传输耗时: ${txMs}ms"></span>`
-              : "",
-          ].filter(Boolean).join("");
-
-          timingBarHtml = `
-            <div class="log-detail-timing-bar" title="总耗时 ${totalMs}ms (网关 ${preUpstreamMs ?? "-"}ms + 连接 ${upstreamHeadersMs ?? "-"}ms + 生成 ${genMs}ms + 传输 ${txMs}ms)">
-              ${segmentsHtml}
-            </div>
-          `;
+          timingBarHtml = formatLogTimingBar([
+            {
+              segClass: "timing-seg--gateway",
+              width: prePct,
+              label: gatewayFullTitle,
+              value: `${preUpstreamMs ?? 0}ms`,
+              title: `${gatewayFullTitle}: ${preUpstreamMs}ms`,
+            },
+            {
+              segClass: "timing-seg--headers",
+              width: hdrPct,
+              label: "连接与响应头",
+              value: `${hdrMs}ms`,
+              title: `连接与响应头: ${hdrMs}ms`,
+            },
+            {
+              segClass: "timing-seg--generation",
+              width: genPct,
+              label: "上游生成",
+              value: `${genMs}ms`,
+              title: `上游生成: ${genMs}ms (首字 ${firstTokenMs}ms)`,
+            },
+            {
+              segClass: "timing-seg--transfer",
+              width: txPct,
+              label: "传输耗时",
+              value: `${txMs}ms`,
+              title: `传输耗时: ${txMs}ms`,
+            },
+          ], `总耗时 ${totalMs}ms (网关 ${preUpstreamMs ?? "-"}ms + 连接 ${upstreamHeadersMs ?? "-"}ms + 生成 ${genMs}ms + 传输 ${txMs}ms)`);
         }
       }
     } else {
       // Legacy streaming fallback (when neither pre_upstream_ms nor upstream_headers_ms exists)
-      timingLine = `<small>首字 ${firstTokenLabel} · 传输 ${escapeHtml(hasTransfer ? transferLabel : "-")} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+      timingLine = formatLogTimingChips([
+        { segClass: "timing-seg--ttfb", label: "首字", valueMarkup: firstTokenLabel, title: "首字耗时 (TTFB)" },
+        {
+          segClass: "timing-seg--transfer",
+          label: "传输",
+          valueMarkup: escapeHtml(hasTransfer ? transferLabel : "-"),
+          title: "首字之后的流式传输",
+        },
+        { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+      ]);
 
       if (firstTokenMs != null && totalMs != null && totalMs > 0) {
         const ttfbRatio = Math.min(1, Math.max(0, firstTokenMs / totalMs));
         const transferRatio = Math.max(0, 1 - ttfbRatio);
-        const ttfbPercent = (ttfbRatio * 100).toFixed(1);
-        const transferPercent = (transferRatio * 100).toFixed(1);
-        timingBarHtml = `
-          <div class="log-detail-timing-bar" title="总耗时 ${totalMs}ms (首字 ${firstTokenMs}ms + 传输 ${transferMs}ms)">
-            <span class="timing-seg timing-seg--ttfb" style="width:${ttfbPercent}%" title="首字耗时 (TTFB): ${firstTokenMs}ms"></span>
-            <span class="timing-seg timing-seg--transfer" style="width:${transferPercent}%" title="传输耗时: ${transferMs}ms"></span>
-          </div>
-        `;
+        timingBarHtml = formatLogTimingBar([
+          {
+            segClass: "timing-seg--ttfb",
+            width: (ttfbRatio * 100).toFixed(1),
+            label: "首字耗时 (TTFB)",
+            value: `${firstTokenMs}ms`,
+            title: `首字耗时 (TTFB): ${firstTokenMs}ms`,
+          },
+          {
+            segClass: "timing-seg--transfer",
+            width: (transferRatio * 100).toFixed(1),
+            label: "传输耗时",
+            value: `${transferMs}ms`,
+            title: `传输耗时: ${transferMs}ms`,
+          },
+        ], `总耗时 ${totalMs}ms (首字 ${firstTokenMs}ms + 传输 ${transferMs}ms)`);
       }
     }
   } else {
@@ -1732,12 +1763,41 @@ function formatLogDetailMeta(detail) {
       const transferMs = hasTransfer ? Math.max(0, totalMs - upstreamHeadersMs) : null;
       const transferLabel = hasTransfer ? formatSeconds(transferMs) : null;
 
+      const gatewayChip = {
+        segClass: "timing-seg--gateway",
+        label: gatewayLabelName,
+        valueMarkup: gatewayValueMarkup,
+        title: gatewayFullTitle,
+      };
+      const headersChip = {
+        segClass: "timing-seg--headers",
+        label: "连接/Header",
+        valueMarkup: headersValueMarkup,
+        title: "连接与响应头",
+      };
       if (hasHeaders && hasTransfer) {
-        timingLine = `<small>${escapeHtml(gatewayLabelName)} ${gatewayValueMarkup} · 连接/Header ${headersValueMarkup} · 响应传输 ${escapeHtml(transferLabel)} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+        timingLine = formatLogTimingChips([
+          gatewayChip,
+          headersChip,
+          {
+            segClass: "timing-seg--transfer",
+            label: "响应传输",
+            valueMarkup: escapeHtml(transferLabel),
+            title: "响应体传输",
+          },
+          { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+        ]);
       } else if (hasHeaders) {
-        timingLine = `<small>${escapeHtml(gatewayLabelName)} ${gatewayValueMarkup} · 连接/Header ${headersValueMarkup} · 总耗时 ${formatTotalDurationTime(detail)}</small>`;
+        timingLine = formatLogTimingChips([
+          gatewayChip,
+          headersChip,
+          { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+        ]);
       } else {
-        timingLine = `<small>${escapeHtml(gatewayLabelName)} ${gatewayValueMarkup} · 上游耗时 ${formatTotalDurationTime(detail)}</small>`;
+        timingLine = formatLogTimingChips([
+          gatewayChip,
+          { label: "上游耗时", valueMarkup: formatTotalDurationTime(detail) },
+        ]);
       }
 
       if (totalMs != null && totalMs > 0) {
@@ -1748,28 +1808,37 @@ function formatLogDetailMeta(detail) {
           const hdrPct = hdrMs ? (hdrMs / fullTotal * 100).toFixed(1) : "0.0";
           const txMs = hasTransfer ? transferMs : (hasHeaders ? 0 : totalMs);
           const txPct = txMs ? (txMs / fullTotal * 100).toFixed(1) : "0.0";
+          const txLabel = hasHeaders ? "响应传输" : "上游耗时";
 
-          const segmentsHtml = [
-            preUpstreamMs && preUpstreamMs > 0
-              ? `<span class="timing-seg timing-seg--gateway" style="width:${prePct}%" title="${escapeHtml(gatewayFullTitle)}: ${preUpstreamMs}ms"></span>`
-              : "",
-            hdrMs > 0
-              ? `<span class="timing-seg timing-seg--headers" style="width:${hdrPct}%" title="连接与响应头: ${hdrMs}ms"></span>`
-              : "",
-            txMs > 0
-              ? `<span class="timing-seg timing-seg--transfer" style="width:${txPct}%" title="${hasHeaders ? "响应传输" : "上游耗时"}: ${txMs}ms"></span>`
-              : "",
-          ].filter(Boolean).join("");
-
-          timingBarHtml = `
-            <div class="log-detail-timing-bar" title="总耗时 ${totalMs}ms (网关 ${preUpstreamMs ?? "-"}ms + 连接 ${upstreamHeadersMs ?? "-"}ms + 传输 ${txMs}ms)">
-              ${segmentsHtml}
-            </div>
-          `;
+          timingBarHtml = formatLogTimingBar([
+            {
+              segClass: "timing-seg--gateway",
+              width: prePct,
+              label: gatewayFullTitle,
+              value: `${preUpstreamMs ?? 0}ms`,
+              title: `${gatewayFullTitle}: ${preUpstreamMs}ms`,
+            },
+            {
+              segClass: "timing-seg--headers",
+              width: hdrPct,
+              label: "连接与响应头",
+              value: `${hdrMs}ms`,
+              title: `连接与响应头: ${hdrMs}ms`,
+            },
+            {
+              segClass: "timing-seg--transfer",
+              width: txPct,
+              label: txLabel,
+              value: `${txMs}ms`,
+              title: `${txLabel}: ${txMs}ms`,
+            },
+          ], `总耗时 ${totalMs}ms (网关 ${preUpstreamMs ?? "-"}ms + 连接 ${upstreamHeadersMs ?? "-"}ms + 传输 ${txMs}ms)`);
         }
       }
     } else {
-      timingLine = `<small>总耗时 ${formatTotalDurationTime(detail)}</small>`;
+      timingLine = formatLogTimingChips([
+        { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+      ]);
     }
   }
 
@@ -1795,18 +1864,6 @@ function formatLogDetailMeta(detail) {
     ? `<div class="log-detail-status-head"><span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>${stageBadge}${retryableBadge}</div>`
     : `<span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>`;
 
-  const isPriced = detail.cost_micros !== null && detail.cost_micros !== undefined && Number.isFinite(Number(detail.cost_micros));
-  const costText = formatLogCostText(detail.cost_micros, detail.cost_currency);
-  const costRuleText = detail.pricing_rule_id ? `定价规则：版本 #${detail.pricing_rule_id}` : (isPriced ? "已结算" : "未匹配定价规则");
-  const costCard = `
-    <div class="log-detail-meta-card log-detail-cost-card">
-      <span class="log-detail-meta-label">预估费用</span>
-      <strong class="log-detail-cost-amount ${isPriced ? "is-priced" : "is-unpriced"}">${escapeHtml(costText)}</strong>
-      <small class="log-detail-cost-rule">${escapeHtml(costRuleText)}</small>
-      <small class="log-cost-disclaimer">估算金额，不等同于供应商最终账单</small>
-    </div>
-  `;
-
   return `
     <div class="log-detail-meta-card log-detail-route-card">
       <span class="log-detail-meta-label">请求路由</span>
@@ -1830,7 +1887,6 @@ function formatLogDetailMeta(detail) {
       <span class="log-detail-meta-label">Tokens</span>
       ${formatTokenDetailPanel(detail)}
     </div>
-    ${costCard}
     ${errorCard}
   `;
 }
@@ -2070,7 +2126,7 @@ async function showLogDetail(logId) {
     logDetailTitle.textContent = "请求详情";
     logDetailSummary.textContent = formatLogDetailSummary(detail);
     if (logDetailMeta) {
-      logDetailMeta.innerHTML = formatLogDetailMeta(detail);
+      renderLogDetailMeta(detail);
     }
     renderLogRetryChain(detail);
     for (const details of logDetailSections) {

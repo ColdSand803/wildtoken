@@ -59,22 +59,8 @@ type RequestLogOut struct {
 	// It says nothing about whether a retry actually happened: the attempt budget
 	// may have been spent, or no other channel may have been routable. Read it
 	// with AttemptIndex and RequestUID for that.
-	FailureRetryable *bool `json:"failure_retryable"`
-	// CostMicros is this request's estimated cost, as an integer count of
-	// micro-units of CostCurrency: 1_000_000 is one major unit. All three cost
-	// fields are NULL together, meaning no price rule covered the model — which is
-	// "unknown", not "free". A rule pricing a model at zero yields 0 here, and the
-	// two must not be rendered the same way or a total will understate spending.
-	//
-	// It is an estimate this service computed from published prices, and is not the
-	// provider's final invoice.
-	CostMicros   *int64  `json:"cost_micros"`
-	CostCurrency *string `json:"cost_currency"`
-	// PricingRuleID names the price version the amount was computed from, so a
-	// figure can still be explained after the price sheet has moved on. The
-	// referenced version may since have been deleted.
-	PricingRuleID *int64  `json:"pricing_rule_id"`
-	Error         *string `json:"error"`
+	FailureRetryable *bool   `json:"failure_retryable"`
+	Error            *string `json:"error"`
 }
 
 // RequestLogDetailOut flattens RequestLogOut and adds the captured payloads.

@@ -55,6 +55,18 @@ function escapeHtml(value) {
   });
 }
 
+/* 耗时瀑布现在由 static/js/components.js 的公共分段条渲染，
+   formatLogDetailMeta 直接依赖这几个全局函数，得一起装进沙箱。 */
+function installTimingHelpers(context, logsSource) {
+  const componentsSource = read("static/js/components.js");
+  for (const name of ["wtTipAttribute", "wtSegment", "wtSegmentBar"]) {
+    vm.runInContext(extractFunction(componentsSource, name), context);
+  }
+  for (const name of ["formatLogTimingChips", "formatLogTimingBar"]) {
+    vm.runInContext(extractFunction(logsSource, name), context);
+  }
+}
+
 function formatSeconds(ms) {
   if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) return "-";
   const n = Number(ms);
@@ -455,7 +467,6 @@ test("formatGatewayPrepTime and formatHeadersArrivalTime handle timings, attempt
 
   vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
   vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
-  vm.runInContext(extractFunction(source, "formatLogCostText"), context);
 
   // Gateway prep attempt 0
   const gw0 = vm.runInContext("formatGatewayPrepTime(120, 0)", context);
@@ -500,7 +511,7 @@ test("formatLogDetailMeta renders full 4-stage streaming waterfall with accurate
   vm.runInContext(extractFunction(source, "formatFirstTokenTime"), context);
   vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
   vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
-  vm.runInContext(extractFunction(source, "formatLogCostText"), context);
+  installTimingHelpers(context, source);
   vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
 
   // 4-stage stream log:
@@ -567,7 +578,7 @@ test("formatLogDetailMeta handles retry attempt badges and custom gateway prepar
   vm.runInContext(extractFunction(source, "formatFirstTokenTime"), context);
   vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
   vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
-  vm.runInContext(extractFunction(source, "formatLogCostText"), context);
+  installTimingHelpers(context, source);
   vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
 
   const retriedDetail = {
@@ -612,7 +623,7 @@ test("formatLogDetailMeta renders non-streaming logs with sampled gateway and co
   vm.runInContext(extractFunction(source, "formatFirstTokenTime"), context);
   vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
   vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
-  vm.runInContext(extractFunction(source, "formatLogCostText"), context);
+  installTimingHelpers(context, source);
   vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
 
   // Non-stream log:
@@ -675,7 +686,7 @@ test("formatLogDetailMeta degrades gracefully to legacy 2-stage or missing sampl
   vm.runInContext(extractFunction(source, "formatFirstTokenTime"), context);
   vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
   vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
-  vm.runInContext(extractFunction(source, "formatLogCostText"), context);
+  installTimingHelpers(context, source);
   vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
 
   // 1. Stream log with legacy format (no pre_upstream_ms or upstream_headers_ms)

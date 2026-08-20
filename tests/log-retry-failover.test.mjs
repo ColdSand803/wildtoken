@@ -149,7 +149,17 @@ test("formatLogDetailMeta renders failure stage and retryable badges in status h
     formatSeconds: (ms) => ms + "ms",
   });
 
-  vm.runInContext(extractFunction(source, "formatLogCostText"), context);
+  vm.runInContext(extractFunction(source, "formatFirstTokenTime"), context);
+  vm.runInContext(extractFunction(source, "formatGatewayPrepTime"), context);
+  vm.runInContext(extractFunction(source, "formatHeadersArrivalTime"), context);
+  /* 耗时瀑布走 static/js/components.js 的公共分段条，沙箱里得先有这几个全局。 */
+  const componentsSource = read("static/js/components.js");
+  for (const name of ["wtTipAttribute", "wtSegment", "wtSegmentBar"]) {
+    vm.runInContext(extractFunction(componentsSource, name), context);
+  }
+  for (const name of ["formatLogTimingChips", "formatLogTimingBar"]) {
+    vm.runInContext(extractFunction(source, name), context);
+  }
   vm.runInContext(extractFunction(source, "formatLogDetailMeta"), context);
 
   // 1. Failed retryable log

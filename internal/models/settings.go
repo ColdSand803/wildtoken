@@ -142,6 +142,26 @@ type RuntimeMetricsOut struct {
 	Cleanup                   RuntimeCleanupMetricsOut `json:"cleanup"`
 }
 
+// MetricsEndpointStatusOut describes the Prometheus scrape endpoint's access
+// policy for the console.
+//
+// The configured token is deliberately absent. The console would have no use for
+// it — a scraper holds it, not a browser — and echoing a credential into a page
+// that is open in a tab all day is how it ends up in a screenshot. Whether one is
+// required is the part an operator needs to see.
+type MetricsEndpointStatusOut struct {
+	Enabled bool `json:"enabled"`
+	// Path is fixed rather than configurable, reported so the console does not
+	// hardcode a second copy of it.
+	Path          string `json:"path"`
+	TokenRequired bool   `json:"token_required"`
+	// ConfiguredByFile records that these values come from the startup
+	// configuration, not the runtime settings table. Always true today; it is what
+	// tells the console to render the card read-only instead of offering a switch
+	// that could not save.
+	ConfiguredByFile bool `json:"configured_by_file"`
+}
+
 type SystemInfoOut struct {
 	Service                       string                    `json:"service"`
 	Version                       string                    `json:"version"`
@@ -157,6 +177,7 @@ type SystemInfoOut struct {
 	RecentOneMinuteLogCount       int64                     `json:"recent_one_minute_log_count"`
 	RuntimeLogSettings            RuntimeLogSettingsSummary `json:"runtime_log_settings"`
 	RuntimeMetrics                RuntimeMetricsOut         `json:"runtime_metrics"`
+	MetricsEndpoint               MetricsEndpointStatusOut  `json:"metrics_endpoint"`
 }
 
 const (

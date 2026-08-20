@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/liguangsheng/wildtoken/internal/appstate"
 	"github.com/liguangsheng/wildtoken/internal/authstate"
+	"github.com/liguangsheng/wildtoken/internal/backup"
 	"github.com/liguangsheng/wildtoken/internal/config"
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/metrics"
@@ -64,6 +66,17 @@ func New(ctx context.Context) (*Server, error) {
 		return nil, fmt.Errorf("load configuration: %w", err)
 	}
 
+	// A staged restore is adopted here, before anything opens the database. This is
+	// the only moment nothing holds the file: once the pool is open, replacing it
+	// would leave the existing connections reading the database that was moved aside.
+	databasePath, err := databaseFilePath(settings.Database)
+	if err != nil {
+		return nil, err
+	}
+	if err := adoptStagedRestore(databasePath); err != nil {
+		return nil, err
+	}
+
 	database, err := openDatabase(ctx, settings.Database)
 	if err != nil {
 		return nil, err
@@ -102,23 +115,12 @@ func New(ctx context.Context) (*Server, error) {
 
 	jobsCtx, cancelJobs := context.WithCancel(context.Background())
 	quotas := quota.NewTracker()
-	// The price table is loaded once here and refreshed by the admin writes. A
-	// failure to load leaves it empty, which prices nothing and leaves the cost
-	// columns NULL — the service still proxies, it just cannot estimate cost until
-	// the table reads successfully.
-	pricing := proxy.NewPricingBook()
-	if rules, err := db.ListPricingRules(ctx, database); err == nil {
-		pricing.Replace(rules)
-	} else {
-		slog.Warn("could not load the model price table; costs will not be estimated",
-			"error", err)
-	}
 	// Series are collected whether or not the endpoint is exposed. Collecting only
 	// when enabled would mean a freshly enabled endpoint reports zero traffic until
 	// new requests arrive, which reads as an outage.
 	scrapeMetrics := metrics.NewPrometheus()
 	logWriter := proxy.NewLogWriter(jobsCtx, database, runtimeMetrics, logStats,
-		settings.Logging.LogQueueCapacity, quotas, pricing, scrapeMetrics)
+		settings.Logging.LogQueueCapacity, quotas, scrapeMetrics)
 
 	state := &appstate.State{
 		DB:                  database,
@@ -136,9 +138,9 @@ func New(ctx context.Context) (*Server, error) {
 		TokenRateLimiter:    ratelimit.NewLimiter(),
 		UpstreamRateLimiter: ratelimit.NewLimiter(),
 		Quotas:              quotas,
-		Pricing:             pricing,
 		Prometheus:          scrapeMetrics,
 		ProbeRuns:           appstate.NewProbeRunState(),
+		DatabasePath:        databasePath,
 		StartedAt:           time.Now(),
 	}
 	// An open scrape endpoint is a real deployment when the listener is already
@@ -239,6 +241,46 @@ func (s *Server) shutdownResources() {
 		return
 	}
 	s.state.DB.Close()
+}
+
+// databaseFilePath is the plain filesystem path of the configured database.
+//
+// Derived from the same DSN conversion the pool uses rather than parsed separately,
+// so the backup path and the service can never disagree about which file is the
+// database.
+func databaseFilePath(settings config.DatabaseSettings) (string, error) {
+	dsn, err := sqliteDSN(settings)
+	if err != nil {
+		return "", err
+	}
+	path, _, _ := strings.Cut(dsn, "?")
+	if path == "" {
+		return "", errors.New("database url has no file path")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve database path: %w", err)
+	}
+	return absolute, nil
+}
+
+// adoptStagedRestore applies a restore staged by a previous run.
+//
+// Failures are fatal rather than logged: a staged restore the operator is waiting for
+// must not be skipped in favour of quietly starting on the database it was meant to
+// replace.
+func adoptStagedRestore(databasePath string) error {
+	paths := backup.PathsFor(databasePath)
+	adopted, marker, err := backup.AdoptPending(paths)
+	if err != nil {
+		return fmt.Errorf("adopt staged database restore: %w", err)
+	}
+	if adopted {
+		slog.Warn("database restored from a staged backup",
+			"staged_at", marker.StagedAt, "source_app_version", marker.SourceAppVersion,
+			"rollback", marker.RollbackPath)
+	}
+	return nil
 }
 
 // openDatabase applies the SQLite pragmas the service depends on.

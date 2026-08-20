@@ -125,6 +125,20 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   display: none;
 }
 
+/* 批量工具栏常驻，所以零选中时要一眼看出"现在没选东西"，
+   而不是让用户以为按钮坏了。 */
+.batch-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.toolbar-batch button[disabled] {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .col-menu-wrap {
   position: relative;
 }
@@ -415,13 +429,47 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   color: var(--muted);
 }
 
+/* 耗时四段的文字块。原来是一整行 <small>，被 .log-detail-meta-card small 的
+   nowrap + ellipsis 截断（那条规则是给渠道名/模型名准备的），这里换成会换行的
+   小块流，每块自带一个和瀑布同色的点，读的时候不用在图例和数值之间来回对。 */
+.log-timing-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 2px;
+  min-width: 0;
+}
+
+.log-timing-chip {
+  align-items: center;
+  color: var(--muted);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.log-timing-chip-dot {
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  width: 6px;
+}
+
+.log-timing-chip-label {
+  color: var(--muted);
+}
+
+/* 瀑布条。悬浮时会纵向放大 1.25 倍（公共组件负责），6px 高的条放大后几乎看不出
+   来，所以抬到 10px；overflow 也不能再裁，否则放大的部分被切掉。
+   圆角靠首尾两段的 border-radius: inherit 收边（见 components.css）。 */
 .log-detail-timing-bar {
   display: flex;
-  height: 6px;
+  height: 10px;
   border-radius: 999px;
   background: var(--panel-muted);
-  overflow: hidden;
-  margin-top: 4px;
+  margin-top: 6px;
   gap: 1px;
 }
 
@@ -675,21 +723,79 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
 }
 
-.routing-summary-title-group {
+.routing-summary-strategy {
+  font-size: var(--text-sm);
+}
+
+.routing-summary-strategy strong {
+  color: var(--text);
+}
+
+/* 一句话说清"层"是什么、以及层内怎么挑。这条比上面所有徽标都重要。 */
+.routing-summary-explain {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 0;
+  max-width: 82ch;
+}
+
+.routing-summary-explain strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* 参数与退化规则默认收起：要看的人点开，不看的人不用被四个数字和三条规则挡路。 */
+.routing-summary-details {
+  font-size: 11px;
+}
+
+.routing-summary-details > summary {
+  color: var(--muted);
+  cursor: pointer;
   display: inline-flex;
-  align-items: center;
+  list-style: none;
+  width: fit-content;
+}
+
+.routing-summary-details > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* 自绘三角，跟着展开状态转向——原生 marker 在 inline-flex 的 summary 上不可靠。 */
+.routing-summary-details > summary::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 4px;
+  transition: transform 150ms ease;
+}
+
+.routing-summary-details[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.routing-summary-details > summary:hover,
+.routing-summary-details > summary:focus-visible {
+  color: var(--text);
+}
+
+.routing-summary-details-body {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
+  padding: 8px 0 2px 14px;
 }
 
 .routing-summary-dot {
   border-radius: 50%;
   display: inline-block;
-  height: 7px;
-  width: 7px;
+  flex: none;
+  height: 6px;
+  margin-right: 5px;
+  width: 6px;
 }
 
 .routing-summary-dot.is-active {
@@ -701,9 +807,11 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 }
 
 .routing-summary-badge {
-  padding: 1px 6px;
+  align-items: center;
+  display: inline-flex;
+  padding: 1px 7px;
   font-size: 11px;
-  border-radius: var(--radius-xs, 4px);
+  border-radius: 999px;
 }
 
 .routing-summary-badge.is-active {
@@ -782,7 +890,7 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 }
 
 
-/* ── P2: Token Whitelist, Pricing Rules, Periodic Quotas, Cost Badges ── */
+/* ── P2: Token Whitelist and Periodic Quotas ── */
 
 /* 1. Token Model Whitelist */
 .token-models-cell {
@@ -832,111 +940,251 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   margin-bottom: 2px;
 }
 
-/* 3. Pricing Table & Settings */
-.pricing-table-wrap {
-  margin-top: 12px;
-  overflow-x: auto;
+/* P3-1: the open-scrape-endpoint warning. Styled as a warning rather than plain
+   note text because it describes a configuration publishing traffic volumes and
+   channel health to anything able to reach the port. */
+.metrics-endpoint-warn {
+  border-left: 3px solid var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  padding: 6px 10px;
+  border-radius: 4px;
 }
 
-.pricing-model-cell {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* P3-2: the configuration migration card. Two panes rather than a single column,
+   because export and import are separate operations and interleaving their fields
+   invites typing the export password into the import box. */
+.config-migrate {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
 }
 
-.pricing-model-code {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.badge-wildcard {
-  font-size: 10px;
-  padding: 1px 5px;
-  background: rgb(245 158 11 / 12%);
-  border: 1px solid rgb(245 158 11 / 28%);
-  color: var(--warning, #f59e0b);
-  border-radius: var(--radius-xs, 4px);
-}
-
-.badge-usd {
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 5px;
-  background: rgb(16 185 129 / 12%);
-  border: 1px solid rgb(16 185 129 / 28%);
-  color: #10b981;
-  border-radius: var(--radius-xs, 4px);
-}
-
-.badge-cny {
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 1px 5px;
-  background: rgb(239 68 68 / 12%);
-  border: 1px solid rgb(239 68 68 / 28%);
-  color: #ef4444;
-  border-radius: var(--radius-xs, 4px);
-}
-
-.pricing-rate-val {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  color: var(--text);
-}
-
-.pricing-effective-time {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-/* 4. Log Cost Badges & Detail Cards */
-.log-token-cost-badge {
-  display: inline-block;
-  margin-top: 3px;
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
-  font-weight: 500;
-  padding: 1px 6px;
-  background: rgb(16 185 129 / 10%);
-  border: 1px solid rgb(16 185 129 / 25%);
-  color: #10b981;
-  border-radius: var(--radius-xs, 4px);
-  white-space: nowrap;
-}
-
-.log-detail-cost-card {
+.config-migrate-pane {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 8px);
+  background: var(--surface-muted, transparent);
 }
 
-.log-detail-cost-amount {
-  font-size: var(--text-lg, 16px);
-  font-family: var(--font-mono, monospace);
-  letter-spacing: -0.02em;
-}
-
-.log-detail-cost-amount.is-priced {
-  color: #10b981;
-}
-
-.log-detail-cost-amount.is-unpriced {
-  color: var(--muted);
+.config-migrate-pane h4 {
+  margin: 0;
   font-size: var(--text-md, 14px);
 }
 
-.log-detail-cost-rule {
-  font-family: var(--font-mono, monospace);
+.config-scope-set {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm, 6px);
+}
+
+.config-scope-set legend {
+  padding: 0 4px;
   font-size: 11px;
   color: var(--muted);
 }
 
-.log-cost-disclaimer {
-  font-size: 11px;
+.config-scope {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+/* Marked, because this is the checkbox that puts credentials in a file. */
+.config-secret-row {
+  border-left: 3px solid var(--warning-border);
+  background: var(--warning-soft);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm, 6px);
+}
+
+.config-secret-row small {
+  display: block;
   color: var(--muted);
+  font-size: 11px;
   margin-top: 2px;
+}
+
+.config-migrate-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.config-migrate-status[data-tone="ok"] { color: var(--ok); }
+.config-migrate-status[data-tone="error"] { color: var(--danger); }
+
+.config-import-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.config-counts {
+  display: flex;
+  gap: 6px;
+}
+
+.config-count {
+  font-size: 11px;
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full, 999px);
+  color: var(--muted);
+}
+
+.config-import-errors {
+  border-left: 3px solid var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger-strong);
+  padding: 8px 10px;
+  border-radius: var(--radius-sm, 6px);
+  font-size: 12px;
+}
+
+.config-import-errors ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
+
+.config-import-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.config-import-table th,
+.config-import-table td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+
+.config-import-table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+/* The refused row is the one the operator has to find, so it is the only one
+   coloured. */
+.config-import-table tr[data-action="fail"] td { color: var(--danger); }
+.config-import-table tr[data-action="create"] td:nth-child(3) { color: var(--ok); }
+.config-import-table tr[data-action="skip"] td:nth-child(3) { color: var(--muted); }
+
+/* ── Disaster recovery ──────────────────────────────────────────────────────
+   Shares the two-pane layout of the configuration card above; what it adds is
+   the pending-restore banner, which has to be visible before anything else on
+   the card because it says the database is already scheduled to be replaced. */
+.restore-pending {
+  margin: 12px 0 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  display: grid;
+  gap: 8px;
+}
+
+.restore-pending[hidden] { display: none; }
+
+.restore-pending p {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.backup-info { margin-bottom: 4px; }
+
+.backup-info-grid {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px 12px;
+}
+
+.backup-info-grid div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--line-soft);
+  padding-bottom: 4px;
+}
+
+.backup-info-grid dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.backup-info-grid dd {
+  margin: 0;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.restore-report { margin-top: 8px; }
+
+.restore-verdict {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line-soft);
+}
+
+.restore-verdict[data-verified="true"] { color: var(--ok); border-color: var(--ok); }
+.restore-verdict[data-verified="false"] { color: var(--danger); border-color: var(--danger); }
+
+.restore-warnings {
+  margin: 8px 0;
+  font-size: 12px;
+  color: var(--warn, var(--danger));
+}
+
+.restore-warnings ul { margin: 0; padding-left: 18px; }
+
+/* The staged notice stays on screen after the status line has moved on: "written
+   but not yet in effect" is the state an operator most needs to keep reading. */
+.restore-staged {
+  margin: 8px 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--danger);
+  background: var(--surface-soft, transparent);
+  font-size: 12px;
+}
+
+.restore-staged p { margin: 4px 0 0; color: var(--muted); }
+.restore-staged code { word-break: break-all; }
+
+.restore-compare {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.restore-compare th,
+.restore-compare td {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+  word-break: break-all;
+}
+
+.restore-compare th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 11px;
 }

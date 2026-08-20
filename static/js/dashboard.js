@@ -725,20 +725,15 @@ function bindLatencySparkInteractions(container, records) {
   let pendingEvent = null;
   let frameId = null;
 
+  /* 摆放交给公共的 wtPositionHoverCard（static/js/components.js），这里只负责
+     把 SVG 视图坐标换算成容器内坐标——翻边与夹紧的手感三处保持一致。 */
   const positionTooltip = (point) => {
     const bounds = container.getBoundingClientRect();
-    const gap = 12;
     const svgBounds = svg.getBoundingClientRect();
-    const x = svgBounds.left - bounds.left + (point.x / width) * svgBounds.width;
-    const y = svgBounds.top - bounds.top + (point.y / height) * svgBounds.height;
-    const preferLeft = x > bounds.width * 0.62;
-    const left = preferLeft ? x - tooltip.offsetWidth - gap : x + gap;
-    const top = Math.min(
-      Math.max(gap, y - tooltip.offsetHeight - gap),
-      Math.max(gap, bounds.height - tooltip.offsetHeight - gap),
-    );
-    tooltip.style.left = `${Math.max(gap, Math.min(left, bounds.width - tooltip.offsetWidth - gap))}px`;
-    tooltip.style.top = `${top}px`;
+    wtPositionHoverCard(container, tooltip, {
+      x: svgBounds.left - bounds.left + (point.x / width) * svgBounds.width,
+      y: svgBounds.top - bounds.top + (point.y / height) * svgBounds.height,
+    });
   };
   const formatPointTime = (record) => {
     const epoch = Number(record.bucket_epoch);
@@ -1188,11 +1183,21 @@ function renderDashboard() {
       dashboardStatusChart.innerHTML = '<div class="dashboard-chart-empty">所选范围内暂无请求</div>';
     } else {
       const pct = (count) => (count / total) * 100;
+      /* 分段条与下面的错误细带都走公共组件（static/js/components.js），所以这里
+         只描述"这一段是什么"，几何、悬浮卡与键盘可达由组件统一负责。 */
       const barSeg = (cls, count, statusVal, label, desc) => {
         const width = pct(count);
-        if (width <= 0) return "";
-        const title = `${label} (${count} 条，${width.toFixed(1)}%) · ${desc} · 点击在日志中查看`;
-        return `<span class="ops-bar-seg ${cls} is-clickable" data-drill-status="${statusVal}" style="width:${width.toFixed(2)}%" title="${escapeHtml(title)}" role="button" tabindex="0"></span>`;
+        if (width <= 0) return null;
+        const share = `${count} 条 · ${width.toFixed(1)}%`;
+        return {
+          className: `ops-bar-seg ${cls} is-clickable`,
+          width: width.toFixed(2),
+          interactive: true,
+          data: { "drill-status": statusVal },
+          tip: { title: label, lines: [share, desc, "点击在日志中查看"] },
+          title: `${label} (${share}) · ${desc} · 点击在日志中查看`,
+          ariaLabel: `${label} ${share}`,
+        };
       };
 
       /* 图例的环比徽标。小基数保护：上一周期不足 10 条时百分比全是噪声
@@ -1236,39 +1241,63 @@ function renderDashboard() {
           const bucketErrors = Number(bucket.errors) || 0;
           const when = logTimeFormatter.format(new Date((Number(bucket.bucket_epoch) || 0) * 1000));
           if (!bucketErrors) {
-            return `<span class="status-error-cell is-clean" title="${escapeHtml(when)} · ${count} 条 · 无错误"></span>`;
+            return {
+              className: "status-error-cell is-clean",
+              tip: { title: when, lines: [`${count} 条 · 无错误`] },
+              title: `${when} · ${count} 条 · 无错误`,
+            };
           }
           const rate = count > 0 ? bucketErrors / count : 0;
           // 错误率 50% 及以上就到满色；下限 0.25 保证个位数错误也看得见。
           const opacity = (0.25 + 0.75 * Math.min(1, rate / 0.5)).toFixed(2);
           const startEpoch = Number(bucket.bucket_epoch) || 0;
           const bucketSec = Number(bucket.bucket_seconds) || 0;
-          let rangeAttrs = "";
+          const data = { "drill-status": "error" };
           if (startEpoch > 0 && bucketSec > 0) {
-            const startIso = new Date(startEpoch * 1000).toISOString();
-            const endIso = new Date((startEpoch + bucketSec) * 1000).toISOString();
-            rangeAttrs = ` data-start="${startIso}" data-end="${endIso}" data-range-label="${escapeHtml(when)}"`;
+            data.start = new Date(startEpoch * 1000).toISOString();
+            data.end = new Date((startEpoch + bucketSec) * 1000).toISOString();
+            data["range-label"] = when;
           }
-          return `<span class="status-error-cell is-clickable" data-drill-status="error"${rangeAttrs} style="opacity:${opacity}" title="${escapeHtml(when)} · 错误 ${bucketErrors}/${count} (${(rate * 100).toFixed(1)}%) · 点击在日志中查看" role="button" tabindex="0"></span>`;
-        }).join("");
+          const share = `错误 ${bucketErrors}/${count} (${(rate * 100).toFixed(1)}%)`;
+          return {
+            className: "status-error-cell is-clickable",
+            opacity,
+            interactive: true,
+            data,
+            tip: { title: when, lines: [share, "点击在日志中查看"] },
+            title: `${when} · ${share} · 点击在日志中查看`,
+            ariaLabel: `${when} ${share}`,
+          };
+        });
         stripHtml = `
           <div class="status-error-strip-wrap">
             <span class="status-error-strip-label">错误时间分布</span>
-            <div class="status-error-strip" role="img" aria-label="按时间桶的错误分布">${cells}</div>
+            ${wtSegmentBar({
+              trackClass: "status-error-strip",
+              ariaLabel: "按时间桶的错误分布",
+              segments: cells,
+            })}
           </div>`;
       }
 
       dashboardStatusChart.innerHTML = `
-        <div class="ops-bar-track" role="img" aria-label="2xx ${c2} · 4xx ${c4} · 5xx ${c5} · 其他 ${cOther} · 无响应 ${cNone}">
-          ${barSeg("ok", c2, "2xx", "2xx 成功", "正常成功响应")}
-          ${barSeg("warn", c4, "4xx", "4xx 客户端错误", "含 429 限流/配额、401/403 鉴权、400 格式/超长")}
-          ${barSeg("danger", c5, "5xx", "5xx 服务端错误", "含 504 超时、502 坏网关、500/503 内部错误")}
-          ${barSeg("info", cOther, "other", "其他 HTTP 状态", "1xx / 3xx 重定向及其他 HTTP 状态")}
-          ${barSeg("muted", cNone, "none", "无响应", "无响应 / 连接中断 / 未完成")}
-        </div>
+        ${wtSegmentBar({
+          trackClass: "ops-bar-track",
+          ariaLabel: `2xx ${c2} · 4xx ${c4} · 5xx ${c5} · 其他 ${cOther} · 无响应 ${cNone}`,
+          segments: [
+            barSeg("ok", c2, "2xx", "2xx 成功", "正常成功响应"),
+            barSeg("warn", c4, "4xx", "4xx 客户端错误", "含 429 限流/配额、401/403 鉴权、400 格式/超长"),
+            barSeg("danger", c5, "5xx", "5xx 服务端错误", "含 504 超时、502 坏网关、500/503 内部错误"),
+            barSeg("info", cOther, "other", "其他 HTTP 状态", "1xx / 3xx 重定向及其他 HTTP 状态"),
+            barSeg("muted", cNone, "none", "无响应", "无响应 / 连接中断 / 未完成"),
+          ],
+        })}
         <div class="status-legend">${legendHtml}</div>
         ${stripHtml}
       `;
+      /* innerHTML 整体重刷会连悬浮卡一起冲掉，所以每次渲染后重绑；
+         wtBindHoverCard 会先解掉上一次的监听器。 */
+      wtBindHoverCard(dashboardStatusChart);
     }
     // 图例的数量与环比徽标也走数字滚动（这块不经过 KPI 构建器，手动扫一次）。
     animateKpiNumbers(dashboardStatusChart);

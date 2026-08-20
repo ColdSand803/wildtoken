@@ -34,8 +34,6 @@ function extractConst(source, name) {
 function createContext() {
   const bootstrap = read("static/js/bootstrap.js");
   const tokens = read("static/js/tokens.js");
-  const pricing = read("static/js/pricing.js");
-  const logs = read("static/js/logs.js");
 
   const context = vm.createContext({
     Intl,
@@ -64,33 +62,6 @@ function createContext() {
   vm.runInContext(extractFunction(tokens, "formatTokenCount"), context);
   vm.runInContext(extractConst(tokens, "QUOTA_PERIOD_LABELS"), context);
   vm.runInContext(extractFunction(tokens, "quotaCellMarkup"), context);
-
-  // Pricing
-  vm.runInContext(extractFunction(pricing, "unitPriceToMicros"), context);
-  vm.runInContext(extractFunction(pricing, "formatPricingRate"), context);
-
-  // Logs
-  vm.runInContext(extractFunction(logs, "formatLogCostText"), context);
-  vm.runInContext(extractFunction(logs, "formatCacheHitRate"), context);
-  vm.runInContext(extractFunction(logs, "formatTokens"), context);
-  vm.runInContext(extractFunction(logs, "formatLogChannelLabel"), context);
-  vm.runInContext(extractFunction(logs, "getLogModelRoute"), context);
-  vm.runInContext(extractFunction(logs, "formatLogModelText"), context);
-  vm.runInContext(extractFunction(logs, "formatReasoningEffort"), context);
-  context.extractLogDetailError = (d) => d.error || "";
-  vm.runInContext(extractFunction(logs, "formatFirstTokenTime"), context);
-  vm.runInContext(extractFunction(logs, "firstTokenTone"), context);
-  vm.runInContext(extractFunction(logs, "formatGatewayPrepTime"), context);
-  vm.runInContext(extractFunction(logs, "formatHeadersArrivalTime"), context);
-  vm.runInContext(extractFunction(logs, "formatSeconds"), context);
-  vm.runInContext(extractFunction(logs, "totalDurationRating"), context);
-  vm.runInContext(extractFunction(logs, "formatTotalDurationTime"), context);
-  vm.runInContext(extractFunction(logs, "formatTokensPerSecondLine"), context);
-  vm.runInContext(extractFunction(logs, "outputTokensPerSecond"), context);
-  vm.runInContext(extractFunction(logs, "formatTokenDetailPanel"), context);
-  vm.runInContext(extractConst(logs, "FAILURE_STAGE_LABELS"), context);
-  vm.runInContext(extractFunction(logs, "formatFailureStage"), context);
-  vm.runInContext(extractFunction(logs, "formatLogDetailMeta"), context);
 
   return context;
 }
@@ -188,101 +159,6 @@ test("quotaCellMarkup displays period badge and next reset info", () => {
   assert.match(markupPeriod, /Asia\/Shanghai/);
 });
 
-test("unitPriceToMicros converts major rate per million tokens to integer micros", () => {
-  const context = createContext();
-
-  assert.equal(vm.runInContext(`unitPriceToMicros("2.50")`, context), 2500000);
-  assert.equal(vm.runInContext(`unitPriceToMicros("10.00")`, context), 10000000);
-  assert.equal(vm.runInContext(`unitPriceToMicros("0.000250")`, context), 250);
-  assert.equal(vm.runInContext(`unitPriceToMicros("0")`, context), 0);
-  assert.equal(vm.runInContext(`unitPriceToMicros("")`, context), 0);
-  assert.equal(vm.runInContext(`unitPriceToMicros(null)`, context), 0);
-});
-
-test("formatPricingRate formats rate with currency symbols and decimals", () => {
-  const context = createContext();
-
-  assert.equal(vm.runInContext(`formatPricingRate(2500000, "USD")`, context), "$2.50 / 1M");
-  assert.equal(vm.runInContext(`formatPricingRate(10000000, "USD")`, context), "$10.00 / 1M");
-  assert.equal(vm.runInContext(`formatPricingRate(250, "USD")`, context), "$0.000250 / 1M");
-  assert.equal(vm.runInContext(`formatPricingRate(2500000, "CNY")`, context), "¥2.50 / 1M");
-  assert.equal(vm.runInContext(`formatPricingRate(null, "USD")`, context), "-");
-});
-
-test("formatLogCostText renders '未定价' for unpriced logs and exact formatted currency for priced logs", () => {
-  const context = createContext();
-
-  // costMicros == null MUST return "未定价", strictly forbidden to show "$0.00"
-  assert.equal(vm.runInContext(`formatLogCostText(null, "USD")`, context), "未定价");
-  assert.equal(vm.runInContext(`formatLogCostText(undefined, "USD")`, context), "未定价");
-  assert.equal(vm.runInContext(`formatLogCostText("invalid", "USD")`, context), "未定价");
-
-  // Zero & standard rates
-  assert.equal(vm.runInContext(`formatLogCostText(0, "USD")`, context), "$0.00");
-  assert.equal(vm.runInContext(`formatLogCostText(2500000, "USD")`, context), "$2.50");
-  assert.equal(vm.runInContext(`formatLogCostText(125000, "USD")`, context), "$0.13");
-
-  // Small fraction of a cent (< 10000 micros) retains 6 decimal digits
-  assert.equal(vm.runInContext(`formatLogCostText(250, "USD")`, context), "$0.000250");
-  assert.equal(vm.runInContext(`formatLogCostText(15, "USD")`, context), "$0.000015");
-
-  // CNY
-  assert.equal(vm.runInContext(`formatLogCostText(2500000, "CNY")`, context), "¥2.50");
-  assert.equal(vm.runInContext(`formatLogCostText(250, "CNY")`, context), "¥0.000250");
-
-  // Negative
-  assert.equal(vm.runInContext(`formatLogCostText(-2500000, "USD")`, context), "-$2.50");
-});
-
-test("formatTokens and formatLogDetailMeta render cost badge and disclaimer card", () => {
-  const context = createContext();
-
-  const logPriced = {
-    prompt_tokens: 1000,
-    completion_tokens: 200,
-    total_tokens: 1200,
-    prompt_cached_tokens: 0,
-    completion_reasoning_tokens: 0,
-    cost_micros: 2500000,
-    cost_currency: "USD",
-    pricing_rule_id: 42,
-  };
-
-  const tokensMarkup = vm.runInContext(`formatTokens(${JSON.stringify(logPriced)})`, context);
-  assert.match(tokensMarkup, /log-token-cost-badge/);
-  assert.match(tokensMarkup, /\$2\.50/);
-  assert.match(tokensMarkup, /规则版本 #42/);
-
-  const detailPriced = {
-    ...logPriced,
-    id: 101,
-    status_code: 200,
-    stream: false,
-    duration_ms: 500,
-    channel_name: "OpenAI-Main",
-    model: "gpt-4o",
-    method: "POST",
-    path: "v1/chat/completions",
-  };
-
-  const metaMarkup = vm.runInContext(`formatLogDetailMeta(${JSON.stringify(detailPriced)})`, context);
-  assert.match(metaMarkup, /log-detail-cost-card/);
-  assert.match(metaMarkup, /预估费用/);
-  assert.match(metaMarkup, /\$2\.50/);
-  assert.match(metaMarkup, /定价规则：版本 #42/);
-  assert.match(metaMarkup, /估算金额，不等同于供应商最终账单/);
-
-  const detailUnpriced = {
-    ...detailPriced,
-    cost_micros: null,
-    cost_currency: null,
-    pricing_rule_id: null,
-  };
-  const unpricedMeta = vm.runInContext(`formatLogDetailMeta(${JSON.stringify(detailUnpriced)})`, context);
-  assert.match(unpricedMeta, /未定价/);
-  assert.doesNotMatch(unpricedMeta, /\$0\.00/);
-});
-
 test("admin.html and enhancements.css contain all required P2 elements and styles", () => {
   const html = read("static/admin.html");
   const css = read("static/css/enhancements.css");
@@ -293,21 +169,22 @@ test("admin.html and enhancements.css contain all required P2 elements and style
   assert.match(html, /id="token-quota-timezone"/);
   assert.match(html, /<th>允许模型<\/th>/);
 
-  // Pricing in settings
-  assert.match(html, /id="pricing-settings-title"/);
-  assert.match(html, /id="pricing-rule-rows"/);
-  assert.match(html, /id="new-pricing-rule-button"/);
-  assert.match(html, /id="pricing-rule-dialog"/);
-  assert.match(html, /id="pricing-model-pattern"/);
-  assert.match(html, /<script src="\/static\/js\/pricing\.js"><\/script>/);
-
   // Enhancements CSS
   assert.match(css, /\.token-models-cell/);
   assert.match(css, /\.token-model-tag/);
   assert.match(css, /\.quota-period-badge/);
-  assert.match(css, /\.pricing-table-wrap/);
-  assert.match(css, /\.pricing-model-code/);
-  assert.match(css, /\.log-token-cost-badge/);
-  assert.match(css, /\.log-detail-cost-card/);
-  assert.match(css, /\.log-cost-disclaimer/);
+});
+
+// The cost estimate was removed rather than finished. Asserted here because the
+// console reads its own markup at runtime: a leftover card or script tag would
+// query elements that no longer exist and a leftover badge would print a price
+// this build no longer computes.
+test("no trace of the retired cost estimate remains in the console", () => {
+  const html = read("static/admin.html");
+  const css = read("static/css/enhancements.css");
+  const logs = read("static/js/logs.js");
+
+  assert.doesNotMatch(html, /pricing/, "admin.html still references the pricing UI");
+  assert.doesNotMatch(css, /pricing|cost-/, "enhancements.css still carries pricing styles");
+  assert.doesNotMatch(logs, /cost_micros|预估费用/, "logs.js still renders a cost");
 });

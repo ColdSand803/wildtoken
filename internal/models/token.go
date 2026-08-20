@@ -290,6 +290,14 @@ func (t *APITokenIn) NormalizedQuotaCycle() (period, timezone string, err error)
 	return normalizeQuotaCycle(t.QuotaPeriod, t.QuotaTimezone)
 }
 
+// NormalizeQuotaCycle is normalizeQuotaCycle for callers outside the console's
+// create and update payloads — the configuration import writes a token row
+// directly, and resolving the cycle a second way there is how the two would come
+// to disagree about what a blank timezone means.
+func NormalizeQuotaCycle(rawPeriod, rawTimezone string) (period, timezone string, err error) {
+	return normalizeQuotaCycle(rawPeriod, rawTimezone)
+}
+
 // normalizeQuotaCycle resolves a submitted cycle, defaulting a blank period to
 // none and a blank timezone to UTC.
 //

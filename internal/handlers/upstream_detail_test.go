@@ -25,7 +25,22 @@ import (
 
 func upstreamTestState(t *testing.T) *appstate.State {
 	t.Helper()
-	database, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	return namedTestState(t, "")
+}
+
+// namedTestState is upstreamTestState with the database name qualified, so one test
+// can hold two independent instances at once.
+//
+// The name is part of the shared-cache URI: two states built from the same name are
+// the same database, which silently turns a migration test into an instance
+// importing its own configuration.
+func namedTestState(t *testing.T, instance string) *appstate.State {
+	t.Helper()
+	name := t.Name()
+	if instance != "" {
+		name += "-" + instance
+	}
+	database, err := sql.Open("sqlite", "file:"+name+"?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -49,8 +64,12 @@ func upstreamTestState(t *testing.T) *appstate.State {
 		// Wired because the server does (internal/app/server.go): the token-usage
 		// endpoint reads this snapshot before it looks at any request, so a nil
 		// cache here is a panic rather than an empty result.
-		LogStats:  db.NewLogStatsCache(),
-		StartedAt: time.Now(),
+		LogStats: db.NewLogStatsCache(),
+		// Wired because the server does: applyRuntimeHealth publishes the scrape
+		// gauge from the channel-list path, so a state without it would only stay
+		// safe on the nil-receiver guard rather than exercising what production runs.
+		Prometheus: metrics.NewPrometheus(),
+		StartedAt:  time.Now(),
 	}
 }
 

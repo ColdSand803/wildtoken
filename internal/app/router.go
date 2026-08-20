@@ -76,13 +76,25 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 		admin.Get("/system", handlers.AdminSystemInfo(state))
 		admin.Get("/system/metrics", handlers.AdminRuntimeMetrics(state))
 
-		// Prices are versioned, so there is no PUT: a change is a new version with
-		// a later effective_from, which is what keeps an already settled request's
-		// amount explicable.
-		admin.Route("/pricing", func(pricing chi.Router) {
-			pricing.Get("/", handlers.AdminListPricingRules(state))
-			pricing.Post("/", handlers.AdminCreatePricingRule(state))
-			pricing.Delete("/{id}", handlers.AdminDeletePricingRule(state))
+		// Portable configuration migration. Deliberately its own route group rather
+		// than hung off /upstreams like the channel-only export: it also carries
+		// groups, token policies and settings, and the checklist asks for it to be
+		// authorized and audited separately from disaster recovery below.
+		admin.Route("/config", func(migration chi.Router) {
+			migration.Post("/export", handlers.AdminExportConfig(state))
+			migration.Post("/import", handlers.AdminImportConfig(state))
+		})
+
+		// Disaster recovery, kept apart from /config above. A configuration import
+		// writes named settings into a running instance; a restore replaces every row
+		// it has, including the request log and the admin credential. Sharing a route
+		// group would mean one audit line and one authorization for two operations
+		// whose consequences are not comparable.
+		admin.Route("/disaster-recovery", func(recovery chi.Router) {
+			recovery.Get("/info", handlers.AdminBackupInfo(state))
+			recovery.Post("/backup", handlers.AdminCreateBackup(state))
+			recovery.Post("/restore", handlers.AdminRestoreBackup(state))
+			recovery.Delete("/restore", handlers.AdminCancelRestore(state))
 		})
 
 		admin.Route("/upstreams", func(upstreams chi.Router) {

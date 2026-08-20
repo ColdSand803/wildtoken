@@ -460,6 +460,35 @@ systemRefreshButton?.addEventListener("click", async () => {
 });
 rotateAdminTokenButton?.addEventListener("click", rotateAdminToken);
 
+// ── Configuration migration ──────────────────────────────
+configExportRun?.addEventListener("click", runConfigExport);
+configImportPreview?.addEventListener("click", () => submitConfigImport({ dryRun: true }));
+configImportApply?.addEventListener("click", () => submitConfigImport({ dryRun: false }));
+// Any change to what would be imported invalidates the plan the operator approved,
+// so the apply is locked again until they preview the new input.
+configImportFile?.addEventListener("change", resetConfigImportState);
+configImportConflict?.addEventListener("change", () => {
+  if (configImportApply) configImportApply.disabled = true;
+  setConfigImportStatus("冲突策略已更改，请重新预览。");
+});
+configImportPassword?.addEventListener("input", () => {
+  if (configImportApply) configImportApply.disabled = true;
+});
+
+// ── Disaster recovery ────────────────────────────────────
+backupRun?.addEventListener("click", runDatabaseBackup);
+restoreVerify?.addEventListener("click", () => submitRestore({ dryRun: true }));
+restoreApply?.addEventListener("click", () => submitRestore({ dryRun: false }));
+restoreCancel?.addEventListener("click", cancelStagedRestore);
+// Anything that changes what would be restored invalidates the verification the
+// apply is gated on, so the file has to be checked again before it can be staged.
+restoreFile?.addEventListener("change", resetRestoreState);
+restorePassword?.addEventListener("input", resetRestoreState);
+restoreAllowSchemaMismatch?.addEventListener("change", resetRestoreState);
+// The confirmation phrase does not change the restore, only whether it may run, so
+// it re-evaluates the locks instead of discarding the verification.
+restoreConfirm?.addEventListener("input", applyDisasterRecoveryLocks);
+
 // ── Dashboard controls ───────────────────────────────────
 if (dashboardRefreshSelect) {
   dashboardRefreshSelect.value = String(dashboardRefreshIntervalMs);
@@ -707,21 +736,15 @@ upstreamTable?.addEventListener("click", (event) => {
 // ── Batch enable/disable ─────────────────────────────────
 if (upstreamSelectAll) {
   upstreamSelectAll.addEventListener("change", () => {
-    const filtered = getFilteredUpstreams();
-    if (upstreamSelectAll.checked) {
-      for (const item of filtered) {
-        selectedUpstreamIds.add(item.id);
-      }
-    } else {
-      for (const item of filtered) {
-        selectedUpstreamIds.delete(item.id);
-      }
-    }
-    // Sync visible checkboxes without full re-render when possible
-    for (const input of rows.querySelectorAll("input[data-upstream-check]")) {
-      const id = Number(input.dataset.upstreamCheck);
-      input.checked = selectedUpstreamIds.has(id);
-    }
+    setUpstreamSelectionForFiltered(upstreamSelectAll.checked);
+  });
+}
+if (upstreamSelectVisibleBtn) {
+  upstreamSelectVisibleBtn.addEventListener("click", () => setUpstreamSelectionForFiltered(true));
+}
+if (upstreamClearSelectionBtn) {
+  upstreamClearSelectionBtn.addEventListener("click", () => {
+    selectedUpstreamIds.clear();
     updateBatchToolbar();
   });
 }

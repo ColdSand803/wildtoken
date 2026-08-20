@@ -330,8 +330,28 @@ func AdminSystemInfo(state *appstate.State) http.HandlerFunc {
 				LogBodyMaxBytes:  settings.LogBodyMaxBytes,
 				Revision:         settings.Revision,
 			},
-			RuntimeMetrics: runtimeMetricsOut(state.Metrics.Snapshot()),
+			RuntimeMetrics:  runtimeMetricsOut(state.Metrics.Snapshot()),
+			MetricsEndpoint: metricsEndpointStatus(state),
 		})
+	}
+}
+
+// metricsEndpointStatus reports the scrape endpoint's access policy.
+//
+// Read from the startup configuration rather than the runtime settings row,
+// because that is where it lives: exposing the endpoint is a deployment decision
+// (it changes what the listener answers), not a policy the console can edit. The
+// console renders this read-only for that reason.
+func metricsEndpointStatus(state *appstate.State) models.MetricsEndpointStatusOut {
+	metricsSettings := state.Settings.Metrics
+	return models.MetricsEndpointStatusOut{
+		Enabled: metricsSettings.Enabled,
+		Path:    "/metrics",
+		// Derived from the configuration rather than reported as the token itself:
+		// what the console needs to show is whether the endpoint is guarded, and an
+		// enabled endpoint with no token is the case worth surfacing.
+		TokenRequired:    strings.TrimSpace(metricsSettings.Token) != "",
+		ConfiguredByFile: true,
 	}
 }
 

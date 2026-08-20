@@ -69,11 +69,6 @@ type LogEntry struct {
 	// cannot disagree.
 	FailureStage     *string
 	FailureRetryable *bool
-	// Cost is the price snapshot taken when this request settled. Nil means no
-	// price rule covered the model, which is "unknown", not "free". It is filled in
-	// by the log writer at enqueue rather than by each call site, so every path
-	// that logs a request prices it the same way.
-	Cost *models.CostSnapshot
 	// QuotaPeriodStamp identifies the reset cycle this request was admitted under,
 	// so its usage is applied to that cycle even when the row commits after the
 	// boundary. It is carried rather than recomputed at write time: recomputing is
@@ -150,7 +145,6 @@ type LogWriter struct {
 	metrics LogMetricsRecorder
 	events  *eventBroker
 	quotas  *quota.Tracker
-	pricing *PricingBook
 	// scrape receives the labelled Prometheus series. Nil is a no-op, which is what
 	// a harness assembled without it gets.
 	scrape ScrapeRecorder
@@ -168,17 +162,14 @@ type LogWriter struct {
 // NewLogWriter starts the background writer. It stops when Close is called,
 // which is also what drains the queue: ctx bounds each write rather than
 // abandoning the rows still waiting to be made.
-// A nil pricing book prices nothing, which leaves the cost columns NULL — the
-// same value a model with no price rule produces.
 func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecorder,
 	logStats *db.LogStatsCache, queueCapacity int, quotas *quota.Tracker,
-	pricing *PricingBook, scrape ScrapeRecorder) *LogWriter {
+	scrape ScrapeRecorder) *LogWriter {
 	writer := &LogWriter{
 		entries: make(chan LogEntry, max(queueCapacity, 1)),
 		metrics: metrics,
 		events:  newEventBroker(),
 		quotas:  quotas,
-		pricing: pricing,
 		scrape:  scrape,
 		done:    make(chan struct{}),
 	}
@@ -191,21 +182,6 @@ func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecor
 // A dropped log is preferable to blocking a proxied request on the writer.
 func (w *LogWriter) Schedule(entry LogEntry) {
 	w.metrics.RecordLogEnqueue()
-
-	// The cost is settled here rather than at flush, because this is the moment
-	// the request finished and its usage became known. The two differ by however
-	// long the batch queue is, and pricing at write time would let an admin price
-	// edit landing in that window change what an already-served request cost.
-	//
-	// Priced on the request's own model — the id the client asked for. That is what
-	// an operator writes a price sheet against, and it keeps a channel's model
-	// mapping from silently moving a request onto another model's rate.
-	entry.Cost = w.pricing.Settle(entry.RequestModel, models.RequestUsage{
-		PromptTokens:        entry.PromptTokens,
-		CompletionTokens:    entry.CompletionTokens,
-		PromptCachedTokens:  entry.PromptCachedTokens,
-		CacheCreationTokens: entry.CacheCreationTokens,
-	})
 
 	// Recorded here rather than at flush, so a scrape counts requests the gateway
 	// actually served even when the queue drops their rows or the database write
@@ -552,10 +528,9 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
          duration_ms, first_token_ms,
          request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
          failure_stage, failure_retryable,
-         cost_micros, cost_currency, pricing_rule_id,
          error, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,
 			entry.RequestModel, entry.UpstreamModel, entry.ReasoningEffort,
@@ -565,8 +540,6 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 			entry.CompletionReasoningTokens, entry.DurationMs, entry.FirstTokenMs,
 			entry.RequestUID, entry.AttemptIndex, entry.PreUpstreamMs,
 			entry.UpstreamHeadersMs, entry.FailureStage, entry.FailureRetryable,
-			costMicrosArg(entry.Cost), costCurrencyArg(entry.Cost),
-			pricingRuleIDArg(entry.Cost),
 			entry.Error, createdAt)
 		if err != nil {
 			return nil, apperr.Database(err)
@@ -648,9 +621,6 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 					UpstreamHeadersMs:         entry.UpstreamHeadersMs,
 					FailureStage:              entry.FailureStage,
 					FailureRetryable:          entry.FailureRetryable,
-					CostMicros:                costMicrosArg(entry.Cost),
-					CostCurrency:              costCurrencyArg(entry.Cost),
-					PricingRuleID:             pricingRuleIDArg(entry.Cost),
 					Error:                     entry.Error,
 				},
 			},
@@ -697,30 +667,6 @@ func snapshotsEqual(left, right json.RawMessage) bool {
 		return left == nil && right == nil
 	}
 	return string(left) == string(right)
-}
-
-// The three cost columns are written as a group, all NULL or all present. Split
-// out so no call site can store an amount without the version that produced it,
-// which would leave a figure nobody can explain.
-func costMicrosArg(cost *models.CostSnapshot) *int64 {
-	if cost == nil {
-		return nil
-	}
-	return &cost.TotalMicros
-}
-
-func costCurrencyArg(cost *models.CostSnapshot) *string {
-	if cost == nil {
-		return nil
-	}
-	return &cost.Currency
-}
-
-func pricingRuleIDArg(cost *models.CostSnapshot) *int64 {
-	if cost == nil {
-		return nil
-	}
-	return &cost.PricingRuleID
 }
 
 func boolToInt64(value bool) int64 {

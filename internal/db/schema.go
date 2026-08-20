@@ -82,8 +82,10 @@ func Init(ctx context.Context, db *sql.DB) error {
 		seedDefaultGroup,
 		createUpstreamGroups,
 		createUpstreamGroupsIndex,
-		createModelPrices,
-		createModelPricesIndex,
+		// Ordered after the creates: the index goes before the table it is on, so a
+		// drop cannot leave an index referring to a table that is gone.
+		dropModelPricesIndex,
+		dropModelPrices,
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -126,9 +128,12 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// guessing one from the status.
 		{"failure_stage", "TEXT"},
 		{"failure_retryable", "INTEGER"},
-		// NULL on rows that predate pricing, and on any row whose model no rule
-		// covered. Both mean "cost unknown"; neither means free. The console must
-		// not render them as 0, or a total will understate what was spent.
+		// Retired columns from the removed cost-estimation feature. Still ensured
+		// rather than dropped: CREATE TABLE declares them for a fresh install, so an
+		// instance upgraded from before they existed has to gain them too, or the two
+		// would have different schemas. That difference is what the backup's schema
+		// fingerprint compares, and it would make a snapshot from one instance look
+		// incompatible with the other over three columns nothing reads.
 		{"cost_micros", "INTEGER"},
 		{"cost_currency", "TEXT"},
 		{"pricing_rule_id", "INTEGER"},

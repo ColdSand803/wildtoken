@@ -108,19 +108,15 @@ CREATE TABLE IF NOT EXISTS request_logs (
     -- recomputed on read, so editing the retry policy cannot rewrite the history
     -- of why a request stopped after one attempt.
     failure_retryable   INTEGER,
-    -- The cost snapshot. All three are NULL together when no price rule covered
-    -- the model, which means "cost unknown" and is distinct from a rule pricing it
-    -- at zero. They are a snapshot rather than a reference on purpose: the amount
-    -- is fixed at settlement so a later price edit cannot change what an already
-    -- served request cost.
+    -- Retired columns from the removed cost-estimation feature. Nothing reads or
+    -- writes them: every new row leaves all three NULL.
     --
-    -- cost_micros is an integer count of micro-units of cost_currency. There is no
-    -- floating point anywhere in this path.
+    -- Kept rather than dropped because rows written while the feature existed hold
+    -- real settled amounts, and removing a column in SQLite means rebuilding the
+    -- whole table — on what is normally the largest table here, to reclaim three
+    -- NULL columns. Left in place so the rebuild is not run for cosmetics.
     cost_micros         INTEGER,
     cost_currency       TEXT,
-    -- The model_prices row this amount came from, so the figure can be explained
-    -- months later. Not a foreign key: deleting a price version must not erase the
-    -- record of what a past request was charged.
     pricing_rule_id     INTEGER,
     error               TEXT
 );`
@@ -239,39 +235,16 @@ const backfillUpstreamGroups = `INSERT INTO upstream_groups (upstream_id, group_
 // backfilled to the default group and kept NOT NULL by the application.
 const backfillTokenGroups = `UPDATE api_tokens SET group_id = 1 WHERE group_id IS NULL`
 
-// Versioned model prices. A row is never edited: changing a price inserts a new
-// version with a later effective_from, and a settled request keeps naming the
-// version it was charged under. That is what stops a price edit from rewriting
-// bills that were already issued.
+// The cost-estimation feature was removed, and this drops the table it owned.
 //
-// Prices are integers — micro-units of the currency per million tokens — because
-// a binary float cannot hold 0.1 exactly and a bill accumulated in float64 stops
-// equalling the sum of its rows. See internal/models/pricing.go.
-const createModelPrices = `
-CREATE TABLE IF NOT EXISTS model_prices (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    -- Matched exactly and case-insensitively, or by a trailing '*'. Deliberately
-    -- stricter than the model matching that picks a channel: that one also
-    -- accepts prefixes and suffixes, which would price gpt-4o-mini at gpt-4o's
-    -- rate.
-    model_pattern   TEXT NOT NULL,
-    currency        TEXT NOT NULL CHECK (currency IN ('USD', 'CNY')),
-    -- Micro-units per 1,000,000 tokens. Zero is a real price (a free tier or a
-    -- dimension the provider does not bill) and is distinct from having no rule,
-    -- which means the cost is unknown.
-    prompt_micros        INTEGER NOT NULL CHECK (prompt_micros >= 0),
-    completion_micros    INTEGER NOT NULL CHECK (completion_micros >= 0),
-    cache_read_micros    INTEGER NOT NULL CHECK (cache_read_micros >= 0),
-    cache_create_micros  INTEGER NOT NULL CHECK (cache_create_micros >= 0),
-    -- 'YYYY-MM-DD HH:MM:SS' UTC, the same fixed-width shape as created_at, so
-    -- lexical comparison is chronological comparison.
-    effective_from  TEXT NOT NULL,
-    created_at      TEXT NOT NULL DEFAULT (datetime('now'))
-);`
+// Unconditional rather than gated on a version marker: DROP TABLE IF EXISTS is
+// already idempotent, and an instance that never had the table is the same case
+// as one that has already dropped it. Unlike the three retired request_logs
+// columns, this is a whole table nothing else references, so removing it costs
+// no rebuild.
+const dropModelPrices = `DROP TABLE IF EXISTS model_prices`
 
-// Selection reads by pattern and effective_from, which is what the index covers.
-const createModelPricesIndex = `CREATE INDEX IF NOT EXISTS idx_model_prices_lookup
-    ON model_prices(model_pattern, effective_from);`
+const dropModelPricesIndex = `DROP INDEX IF EXISTS idx_model_prices_lookup`
 
 const createRuntimeSettings = `
 CREATE TABLE IF NOT EXISTS runtime_settings (

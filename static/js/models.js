@@ -671,14 +671,7 @@ rows.addEventListener("click", async (event) => {
 rows.addEventListener("change", (event) => {
   const check = event.target.closest("input[data-upstream-check]");
   if (!check) return;
-  const id = Number(check.dataset.upstreamCheck);
-  if (!Number.isFinite(id)) return;
-  if (check.checked) {
-    selectedUpstreamIds.add(id);
-  } else {
-    selectedUpstreamIds.delete(id);
-  }
-  updateBatchToolbar();
+  toggleUpstreamSelection(Number(check.dataset.upstreamCheck), check.checked);
 });
 
 rows.addEventListener("keydown", (event) => {

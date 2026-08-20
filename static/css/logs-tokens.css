@@ -137,10 +137,11 @@
   overflow-wrap: anywhere;
 }
 
+/* 中间那列（状态与耗时）装四段耗时，比左右两列需要更多横向空间。 */
 .log-detail-meta {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
 }
 
 .log-detail-meta-card {

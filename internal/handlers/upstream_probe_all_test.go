@@ -23,7 +23,7 @@ func probeAllState(t *testing.T) *appstate.State {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics,
-		db.NewLogStatsCache(), 64, state.Quotas, proxy.NewPricingBook(), nil)
+		db.NewLogStatsCache(), 64, state.Quotas, nil)
 	t.Cleanup(func() {
 		state.LogWriter.Close()
 		cancel()

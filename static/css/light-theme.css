@@ -616,8 +616,15 @@ html[data-theme="light"] textarea {
     width: 100%;
   }
 
+  /* 计数独占一行，剩下的宽度留给四个按钮平分；再挤就换行，
+     而不是把「批量启用」压成两个字。 */
+  .batch-count {
+    flex: 1 0 100%;
+  }
+
   .toolbar-batch button {
-    flex: 1 1 0;
+    flex: 1 1 auto;
+    min-width: 76px;
   }
 
   .live-indicator .live-label {

@@ -1080,6 +1080,9 @@ function formatLatencyRoutingBadge(upstreamId) {
   return `<span class="latency-routing-tag latency-routing-tag--unmeasured" title="未测量，与加权随机同等参与竞争">未测量 (参与竞争)</span>`;
 }
 
+/* 「同层调度」里的"层"指优先级层：请求先按优先级从高到低找到第一个还有可用渠道的
+   层级，同一层内部再用这里显示的策略挑一个。原来的标题只写"同层调度：最低延迟优先"，
+   没有一句话说清"层"是什么、也没说明挑选是怎么发生的，看不懂是应该的。 */
 function renderUpstreamRoutingSummary(data = latestRoutingData) {
   const summaryEl = typeof upstreamRoutingSummary !== "undefined" && upstreamRoutingSummary
     ? upstreamRoutingSummary
@@ -1104,27 +1107,45 @@ function renderUpstreamRoutingSummary(data = latestRoutingData) {
   const toleranceFloor = rules.tolerance_floor_ms ?? 50;
   const sampleCap = rules.sample_capacity ?? 32;
 
+  const howItPicks = isLeastLatency
+    ? `层内再按<strong>最低延迟优先</strong>挑：与最快渠道相差不超过 ${toleranceRatio}%（至少 ${toleranceFloor}ms）的渠道一起按权重抽签，明显更慢的不参与。`
+    : `层内再按<strong>加权随机</strong>挑：权重越大，被抽中的概率越高。`;
+
+  /* 参数与退化规则只有在按延迟决策时才有意义，加权随机下它们全是死数字。
+     即便如此也默认收起——绝大多数时候要看的只有上面那两句话。 */
+  const detailsHtml = isLeastLatency
+    ? `
+      <details class="routing-summary-details">
+        <summary>延迟采样的参数与退化规则</summary>
+        <div class="routing-summary-details-body">
+          <div class="routing-summary-chips">
+            <span class="routing-chip" title="有效测量所需的最小请求采样数">最小样本: <strong>${minSamples}</strong></span>
+            <span class="routing-chip" title="样本滚动过期时间窗口">过期窗口: <strong>${staleWindow}s</strong></span>
+            <span class="routing-chip" title="最低延迟与次优渠道之间的加权容忍浮动带 (≥${toleranceFloor}ms)">容忍带: <strong>${toleranceRatio}%</strong></span>
+            <span class="routing-chip" title="单渠道内存有界采样容量">样本容量: <strong>${sampleCap}</strong></span>
+          </div>
+          <div class="routing-summary-rules-hint">
+            <span class="routing-hint-item">① 同优先级内无可用样本 → 退化为加权随机</span>
+            <span class="routing-hint-item">② 样本不足 ${minSamples} 个 → 视为未测量并保留竞争</span>
+            <span class="routing-hint-item">③ 样本过期 (> ${staleWindow}s) → 自动清除并标记为未测量</span>
+          </div>
+        </div>
+      </details>`
+    : "";
+
   summaryEl.hidden = false;
   summaryEl.innerHTML = `
     <div class="routing-summary-strip-inner">
       <div class="routing-summary-header">
-        <div class="routing-summary-title-group">
-          <span class="routing-summary-dot ${activeClass}" aria-hidden="true"></span>
-          <span class="routing-summary-strategy">同层调度：<strong>${escapeHtml(strategyName)}</strong></span>
-          <span class="routing-summary-badge ${activeClass}">${escapeHtml(activeText)}</span>
-        </div>
-        <div class="routing-summary-chips">
-          <span class="routing-chip" title="有效测量所需的最小请求采样数">最小样本: <strong>${minSamples}</strong></span>
-          <span class="routing-chip" title="样本滚动过期时间窗口">过期窗口: <strong>${staleWindow}s</strong></span>
-          <span class="routing-chip" title="最低延迟与次优渠道之间的加权容忍浮动带 (≥${toleranceFloor}ms)">容忍带: <strong>${toleranceRatio}%</strong></span>
-          <span class="routing-chip" title="单渠道内存有界采样容量">样本容量: <strong>${sampleCap}</strong></span>
-        </div>
+        <span class="routing-summary-strategy">同优先级渠道之间：<strong>${escapeHtml(strategyName)}</strong></span>
+        <span class="routing-summary-badge ${activeClass}">
+          <span class="routing-summary-dot ${activeClass}" aria-hidden="true"></span>${escapeHtml(activeText)}
+        </span>
       </div>
-      <div class="routing-summary-rules-hint">
-        <span class="routing-hint-item">① 层内无可用样本 → 退化为加权随机</span>
-        <span class="routing-hint-item">② 样本不足 ${minSamples} 个 → 视为未测量并保留竞争</span>
-        <span class="routing-hint-item">③ 样本过期 (> ${staleWindow}s) → 自动清除并标记为未测量</span>
-      </div>
+      <p class="routing-summary-explain">
+        请求先按优先级从高到低，找到第一个还有可用渠道的层级；${howItPicks}
+      </p>
+      ${detailsHtml}
     </div>
   `;
 }
@@ -1173,6 +1194,7 @@ function createChannelCard(upstream) {
   const card = document.createElement("div");
   card.className = "channel-card";
   if (!upstream.enabled) card.classList.add("channel-card--disabled");
+  if (selectedUpstreamIds.has(upstream.id)) card.classList.add("channel-card--selected");
   card.dataset.cardUpstreamId = String(upstream.id);
 
   const statusClass = upstream.enabled ? "live" : "offline";
@@ -1207,6 +1229,14 @@ function createChannelCard(upstream) {
   card.innerHTML = `
     <div class="channel-card-header">
       <div class="channel-card-title">
+        <input
+          type="checkbox"
+          class="channel-card-check"
+          data-upstream-check="${upstream.id}"
+          aria-label="选择渠道 ${escapeHtml(upstream.name)}"
+          title="选中后可批量启停或只导出选中的渠道"
+          ${selectedUpstreamIds.has(upstream.id) ? "checked" : ""}
+        />
         <span class="status-dot status-dot--${statusClass}"></span>
         <h3 title="${escapeHtml(upstream.name)}">${escapeHtml(upstream.name)}</h3>
       </div>
@@ -1381,15 +1411,69 @@ function renderCards() {
   void hydrateVisibleCardStats(filtered);
 }
 
+/* 勾选状态只存在 selectedUpstreamIds 里，列表和卡片两个视图都用同一个
+   data-upstream-check 属性，所以这一个入口能同时服务两边。 */
+function toggleUpstreamSelection(id, checked) {
+  if (!Number.isFinite(id)) return;
+  if (checked) {
+    selectedUpstreamIds.add(id);
+  } else {
+    selectedUpstreamIds.delete(id);
+  }
+  updateBatchToolbar();
+}
+
+/* 全选/清空当前筛选结果。thead 里的全选框在卡片视图下是看不见的，
+   所以工具栏上的按钮和它共用这个函数。 */
+function setUpstreamSelectionForFiltered(selected) {
+  for (const item of getFilteredUpstreams()) {
+    if (selected) {
+      selectedUpstreamIds.add(item.id);
+    } else {
+      selectedUpstreamIds.delete(item.id);
+    }
+  }
+  updateBatchToolbar();
+}
+
+/* 不整表重渲染，只把两个视图里已经在 DOM 上的勾选框拨到正确状态。 */
+function syncUpstreamCheckboxes() {
+  const scopes = [rows, upstreamCardsContainer];
+  for (const scope of scopes) {
+    if (!scope) continue;
+    for (const input of scope.querySelectorAll("input[data-upstream-check]")) {
+      const id = Number(input.dataset.upstreamCheck);
+      input.checked = selectedUpstreamIds.has(id);
+      const card = input.closest(".channel-card");
+      if (card) card.classList.toggle("channel-card--selected", input.checked);
+    }
+  }
+}
+
 function updateBatchToolbar() {
   const count = selectedUpstreamIds.size;
+  syncUpstreamCheckboxes();
+
+  const filteredIds = getFilteredUpstreams().map((item) => item.id);
+  const selectedVisible = filteredIds.filter((id) => selectedUpstreamIds.has(id));
+
+  /* 工具栏常驻显示：卡片视图下没有表头全选框，隐藏工具栏就等于把"怎么选"
+     这件事藏起来了。零选中时按钮置灰，用文案说明当前状态。 */
   if (batchActionsEl) {
-    batchActionsEl.hidden = count === 0;
+    batchActionsEl.hidden = false;
   }
+  if (upstreamSelectionCountEl) {
+    upstreamSelectionCountEl.textContent = count === 0 ? "未选择渠道" : `已选 ${count} 个`;
+  }
+  if (batchEnableBtn) batchEnableBtn.disabled = count === 0;
+  if (batchDisableBtn) batchDisableBtn.disabled = count === 0;
+  if (upstreamClearSelectionBtn) upstreamClearSelectionBtn.disabled = count === 0;
+  if (upstreamSelectVisibleBtn) {
+    upstreamSelectVisibleBtn.disabled = filteredIds.length === 0
+      || selectedVisible.length === filteredIds.length;
+  }
+
   if (upstreamSelectAll) {
-    const filtered = getFilteredUpstreams();
-    const filteredIds = filtered.map((item) => item.id);
-    const selectedVisible = filteredIds.filter((id) => selectedUpstreamIds.has(id));
     upstreamSelectAll.checked = filteredIds.length > 0 && selectedVisible.length === filteredIds.length;
     upstreamSelectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < filteredIds.length;
   }
@@ -1662,7 +1746,7 @@ function renderChannelExportScope() {
   if (!channelExportScopeEl) return;
   const scope = channelExportScope();
   const detail = scope.all
-    ? `将导出全部 ${scope.count} 个渠道。勾选表格行可只导出选中的渠道。`
+    ? `将导出全部 ${scope.count} 个渠道。勾选渠道（列表或卡片模式均可）可只导出选中的渠道。`
     : `将导出已勾选的 ${scope.count} 个渠道。`;
   channelExportScopeEl.textContent = detail;
 }
@@ -1929,6 +2013,9 @@ if (viewListBtn) {
    行为完全一致。 */
 if (upstreamCardsContainer) {
   upstreamCardsContainer.addEventListener("click", async (event) => {
+    /* 勾选框自己会派发 change，点击代理别插手，否则会连带触发卡片上的其它动作。 */
+    if (event.target.closest("input[data-upstream-check]")) return;
+
     const emptyAction = event.target.closest("button[data-empty-action]");
     if (emptyAction) {
       if (emptyAction.dataset.emptyAction === "new-upstream") {
@@ -1957,6 +2044,12 @@ if (upstreamCardsContainer) {
     if (actionButton) {
       await handleUpstreamAction(actionButton);
     }
+  });
+
+  upstreamCardsContainer.addEventListener("change", (event) => {
+    const check = event.target.closest("input[data-upstream-check]");
+    if (!check) return;
+    toggleUpstreamSelection(Number(check.dataset.upstreamCheck), check.checked);
   });
 }
 

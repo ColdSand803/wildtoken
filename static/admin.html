@@ -385,9 +385,12 @@
                   <option value="effective-zero">有效权重为 0</option>
                 </select>
               </label>
-              <div class="toolbar-batch" id="upstream-batch-actions" hidden>
-                <button type="button" id="batch-enable" class="secondary">批量启用</button>
-                <button type="button" id="batch-disable" class="secondary">批量停用</button>
+              <div class="toolbar-batch" id="upstream-batch-actions">
+                <span class="batch-count" id="upstream-selection-count" aria-live="polite">未选择渠道</span>
+                <button type="button" id="upstream-select-visible" class="secondary ghost">全选</button>
+                <button type="button" id="upstream-clear-selection" class="secondary ghost" disabled>清空</button>
+                <button type="button" id="batch-enable" class="secondary" disabled>批量启用</button>
+                <button type="button" id="batch-disable" class="secondary" disabled>批量停用</button>
               </div>
               <div class="col-menu-wrap">
                 <button type="button" id="upstream-col-menu-btn" class="secondary ghost col-menu-btn" aria-haspopup="true" aria-expanded="false">列</button>
@@ -756,33 +759,6 @@
                 </form>
               </section>
 
-              <section class="settings-card" aria-labelledby="pricing-settings-title">
-                <div class="settings-card-head">
-                  <div>
-                    <h3 id="pricing-settings-title">模型定价规则</h3>
-                    <p>按每百万 Token 设置各模型的输入、输出及缓存单价；结算按请求发生时的价格版本快照固定，修改价格不影响历史账单。</p>
-                  </div>
-                  <button id="new-pricing-rule-button" type="button" class="secondary">新增定价规则</button>
-                </div>
-                <div class="table-wrap pricing-table-wrap">
-                  <table class="admin-table pricing-table">
-                    <thead>
-                      <tr>
-                        <th>模型模式</th>
-                        <th>币种</th>
-                        <th>输入单价</th>
-                        <th>补全单价</th>
-                        <th>缓存读取</th>
-                        <th>缓存创建</th>
-                        <th>生效时间</th>
-                        <th class="col-actions">操作</th>
-                      </tr>
-                    </thead>
-                    <tbody id="pricing-rule-rows"></tbody>
-                  </table>
-                </div>
-              </section>
-
               <section class="settings-card" aria-labelledby="model-test-prompts-title">
                 <div class="settings-card-head"><div><h3 id="model-test-prompts-title">模型测试 Prompt</h3><p>测试窗口选择的 Prompt 模板；编辑后下次测试立即生效。</p></div><button id="new-model-test-prompt" type="button" class="secondary">新增 Prompt</button></div>
                 <div id="model-test-prompt-list" class="model-test-template-list" aria-live="polite"><p class="settings-loading">进入设置页后加载 Prompt。</p></div>
@@ -791,6 +767,78 @@
               <section class="settings-card settings-readonly" aria-labelledby="gateway-default-title">
                 <div class="settings-card-head"><div><h3 id="gateway-default-title">网关默认值</h3><p>启动时读取的默认上游超时。</p></div><span class="settings-readonly-tag">只读</span></div>
                 <div class="settings-note"><strong>默认上游超时：<span id="settings-default-timeout">由启动配置决定</span></strong><p>现有渠道均有明确的超时值；请前往「渠道」按渠道管理。本页不提供动态全局超时设置。</p></div>
+              </section>
+
+              <section class="settings-card settings-readonly" aria-labelledby="metrics-endpoint-title">
+                <div class="settings-card-head"><div><h3 id="metrics-endpoint-title">Prometheus 监控端点</h3><p>供 Prometheus / Grafana 抓取的标准指标端点，由启动配置控制，控制台不提供开关。</p></div><span class="settings-readonly-tag">只读</span></div>
+                <div id="metrics-endpoint-status" class="settings-note" aria-live="polite"><strong>进入设置页后加载端点状态。</strong></div>
+              </section>
+
+              <section class="settings-card settings-security" aria-labelledby="config-migrate-title">
+                <div class="settings-card-head"><div><h3 id="config-migrate-title">配置迁移</h3><p>把分组、渠道、令牌策略与系统设置导出成可移植归档，再导入到另一个实例。归档按名称匹配，不依赖本实例的数字 ID。</p></div><span class="settings-security-mark">敏感操作</span></div>
+
+                <div class="config-migrate">
+                  <div class="config-migrate-pane">
+                    <h4>导出</h4>
+                    <fieldset class="config-scope-set">
+                      <legend>导出范围</legend>
+                      <label class="config-scope"><input type="checkbox" data-export-scope="groups" checked /> <span>分组</span></label>
+                      <label class="config-scope"><input type="checkbox" data-export-scope="channels" checked /> <span>渠道</span></label>
+                      <label class="config-scope"><input type="checkbox" data-export-scope="tokens" checked /> <span>令牌策略</span></label>
+                      <label class="config-scope"><input type="checkbox" data-export-scope="settings" checked /> <span>系统设置</span></label>
+                    </fieldset>
+                    <label class="settings-toggle-row config-secret-row">
+                      <input id="config-export-secrets" type="checkbox" />
+                      <span><strong>包含密钥与令牌明文</strong><small>渠道 API Key 与令牌明文会写入归档，必须设置密码。不含密钥时目标实例会保留自己的 Key，并为新令牌生成新凭证。</small></span>
+                    </label>
+                    <label class="field"><span class="field-label">归档密码</span><input id="config-export-password" type="password" autocomplete="new-password" spellcheck="false" placeholder="至少 8 位；留空则不加密" /><span class="field-hint">用于 AES-256-GCM 加密，密码不会被保存或上报；忘记密码则归档无法恢复。</span></label>
+                    <div class="config-migrate-actions"><button id="config-export-run" type="button" class="secondary">导出归档</button></div>
+                    <p id="config-export-status" class="settings-note config-migrate-status" aria-live="polite"></p>
+                  </div>
+
+                  <div class="config-migrate-pane">
+                    <h4>导入</h4>
+                    <label class="field"><span class="field-label">归档文件</span><input id="config-import-file" type="file" accept=".json,application/json" /><span class="field-hint">选择由本功能导出的 JSON 归档。</span></label>
+                    <label class="field"><span class="field-label">归档密码</span><input id="config-import-password" type="password" autocomplete="off" spellcheck="false" placeholder="加密归档必填" /><span class="field-hint">密码错误或归档被篡改都会在写入前失败。</span></label>
+                    <label class="field"><span class="field-label">同名冲突处理</span><select id="config-import-conflict" aria-label="同名冲突处理"><option value="skip">跳过（默认，保留目标实例现有配置）</option><option value="overwrite">覆盖（用归档内容替换同名配置）</option><option value="fail">中止（存在同名配置时整体不导入）</option></select><span class="field-hint">任何一条被拒绝都会整体回滚，不会写入一半。</span></label>
+                    <div class="config-migrate-actions"><button id="config-import-preview" type="button" class="secondary">预览（不写入）</button><button id="config-import-apply" type="button" class="danger" disabled>确认导入</button></div>
+                    <p id="config-import-status" class="settings-note config-migrate-status" aria-live="polite"></p>
+                    <div id="config-import-report" class="config-import-report" aria-live="polite"></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="settings-card settings-security" aria-labelledby="disaster-recovery-title">
+                <div class="settings-card-head"><div><h3 id="disaster-recovery-title">备份与恢复</h3><p>对数据库整体做一致性快照并下载。恢复会用备份替换本实例的全部数据，包括请求日志、用量计数与管理员令牌。</p></div><span class="settings-security-mark">高危操作</span></div>
+
+                <div id="restore-pending" class="restore-pending" hidden>
+                  <div id="restore-pending-detail" aria-live="polite"></div>
+                  <div class="config-migrate-actions"><button id="restore-cancel" type="button" class="secondary">取消暂存的恢复</button></div>
+                </div>
+
+                <div class="config-migrate">
+                  <div class="config-migrate-pane">
+                    <h4>备份</h4>
+                    <div id="backup-current-info" class="backup-info" aria-live="polite"><p class="settings-loading">进入设置页后加载数据库信息。</p></div>
+                    <label class="field"><span class="field-label">备份密码</span><input id="backup-password" type="password" autocomplete="new-password" spellcheck="false" placeholder="至少 8 位；留空则不加密" /><span class="field-hint">备份含渠道 API Key 与管理员凭据，建议加密。密码不会被保存或上报；忘记密码则备份无法恢复。</span></label>
+                    <div class="config-migrate-actions"><button id="backup-run" type="button" class="secondary">生成并下载备份</button></div>
+                    <p id="backup-status" class="settings-note config-migrate-status" aria-live="polite"></p>
+                  </div>
+
+                  <div class="config-migrate-pane">
+                    <h4>恢复</h4>
+                    <label class="field"><span class="field-label">备份文件</span><input id="restore-file" type="file" accept=".wtbak" /><span class="field-hint">选择本功能生成的 .wtbak 文件；配置归档请用上方的“配置迁移”卡片导入。</span></label>
+                    <label class="field"><span class="field-label">备份密码</span><input id="restore-password" type="password" autocomplete="off" spellcheck="false" placeholder="加密备份必填" /><span class="field-hint">密码错误或文件损坏都会在写入前失败，当前数据库不受影响。</span></label>
+                    <label class="settings-toggle-row config-secret-row">
+                      <input id="restore-allow-schema-mismatch" type="checkbox" />
+                      <span><strong>允许结构不一致的备份</strong><small>备份与本实例的表结构不同时默认拒绝。勾选后继续恢复，缺失的表与列会在下次启动时补齐。</small></span>
+                    </label>
+                    <label class="field"><span class="field-label">覆盖确认</span><input id="restore-confirm" type="text" autocomplete="off" spellcheck="false" placeholder="输入 restore 以确认覆盖" /><span class="field-hint">恢复会覆盖当前数据库的全部数据；恢复完成后管理员令牌也会变成备份中的那一个。</span></label>
+                    <div class="config-migrate-actions"><button id="restore-verify" type="button" class="secondary">校验（不写入）</button><button id="restore-apply" type="button" class="danger" disabled>确认恢复</button></div>
+                    <p id="restore-status" class="settings-note config-migrate-status" aria-live="polite"></p>
+                    <div id="restore-report" class="restore-report" aria-live="polite"></div>
+                  </div>
+                </div>
               </section>
 
               <section class="settings-card settings-security" aria-labelledby="security-title">
@@ -1409,68 +1457,6 @@
         </div>
       </form>
     </dialog>
-    <dialog id="pricing-rule-dialog" class="upstream-dialog">
-      <form id="pricing-rule-form" class="upstream-dialog-panel">
-        <div class="modal-head upstream-modal-head">
-          <div>
-            <h2 id="pricing-rule-form-title">新增定价规则</h2>
-            <p>添加模型单价版本。价格按每百万 Token (1M tokens) 设定。</p>
-          </div>
-          <div class="modal-head-actions">
-            <button type="button" class="secondary ghost icon-maximize" data-dialog-maximize aria-label="最大化" title="最大化" aria-pressed="false">
-              <svg class="dialog-icon dialog-icon--maximize" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="3.25" y="3.25" width="9.5" height="9.5" rx="0.5"/></svg>
-              <svg class="dialog-icon dialog-icon--restore" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="5.5" y="3" width="7" height="7" rx="0.5"/><rect x="3.5" y="5.5" width="7" height="7" rx="0.5"/></svg>
-            </button>
-            <button id="pricing-rule-dialog-close" type="button" class="secondary ghost icon-close" aria-label="关闭" title="关闭">
-              <svg class="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M4 4l8 8M12 4L4 12"/></svg>
-            </button>
-          </div>
-        </div>
-        <input id="pricing-rule-id" type="hidden" />
-        <div class="upstream-dialog-body">
-          <div class="form-grid">
-            <label class="field span-2">
-              <span class="field-label">模型匹配模式</span>
-              <input id="pricing-model-pattern" required maxlength="200" placeholder="例如：gpt-4o、claude-3-5-*、deepseek-*" />
-              <span class="field-hint">支持精确模型名或以 * 结尾的前缀通配。</span>
-            </label>
-            <label class="field">
-              <span class="field-label">结算币种</span>
-              <select id="pricing-currency">
-                <option value="USD">USD ($)</option>
-                <option value="CNY">CNY (¥)</option>
-              </select>
-            </label>
-            <label class="field">
-              <span class="field-label">生效时间（可选）</span>
-              <input id="pricing-effective-from" autocomplete="off" placeholder="留空则立即生效 (YYYY-MM-DD HH:MM:SS)" />
-              <span class="field-hint">指定未来时刻生效；留空为立即生效。</span>
-            </label>
-            <label class="field">
-              <span class="field-label">输入单价 / 1M Tokens</span>
-              <input id="pricing-prompt" type="number" step="0.000001" min="0" required placeholder="例如：2.50" />
-            </label>
-            <label class="field">
-              <span class="field-label">补全单价 / 1M Tokens</span>
-              <input id="pricing-completion" type="number" step="0.000001" min="0" required placeholder="例如：10.00" />
-            </label>
-            <label class="field">
-              <span class="field-label">缓存读取单价 / 1M Tokens</span>
-              <input id="pricing-cache-read" type="number" step="0.000001" min="0" value="0" placeholder="例如：1.25" />
-            </label>
-            <label class="field">
-              <span class="field-label">缓存创建单价 / 1M Tokens</span>
-              <input id="pricing-cache-create" type="number" step="0.000001" min="0" value="0" placeholder="例如：3.75" />
-            </label>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <p id="pricing-rule-status" class="settings-inline-status" role="status"></p>
-          <button id="pricing-rule-cancel" type="button" class="secondary">取消</button>
-          <button type="submit">添加规则</button>
-        </div>
-      </form>
-    </dialog>
     <dialog id="confirm-dialog" class="confirm-dialog">
       <div class="confirm-panel">
         <div class="modal-head">
@@ -1537,13 +1523,13 @@
       popover="manual"
     ></div>
     <script src="/static/js/bootstrap.js"></script>
+    <script src="/static/js/components.js"></script>
     <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/shell.js"></script>
     <script src="/static/js/upstreams.js"></script>
     <script src="/static/js/logs.js"></script>
     <script src="/static/js/models.js"></script>
     <script src="/static/js/tokens.js"></script>
-    <script src="/static/js/pricing.js"></script>
     <script src="/static/js/groups.js"></script>
     <script src="/static/js/events.js"></script>
   </body>

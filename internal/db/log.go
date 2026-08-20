@@ -48,7 +48,6 @@ const logListColumns = `id, created_at, method, path,
                 duration_ms, first_token_ms,
                 request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
                 failure_stage, failure_retryable,
-                cost_micros, cost_currency, pricing_rule_id,
                 error`
 
 // LogTopWindow is a ranking window accepted by the top-stats endpoint.
@@ -409,8 +408,6 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	var requestUID, failureStage sql.NullString
 	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
 	var failureRetryable sql.NullBool
-	var costMicros, pricingRuleID sql.NullInt64
-	var costCurrency sql.NullString
 
 	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Method, &entry.Path,
 		&downstreamTokenID, &downstreamTokenName, &entry.ClientType,
@@ -421,8 +418,7 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
 		&durationMs, &firstTokenMs, &requestUID, &attemptIndex,
 		&preUpstreamMs, &upstreamHeadersMs,
-		&failureStage, &failureRetryable,
-		&costMicros, &costCurrency, &pricingRuleID, &logError)
+		&failureStage, &failureRetryable, &logError)
 	if err != nil {
 		return entry, err
 	}
@@ -452,11 +448,6 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	entry.UpstreamHeadersMs = nullInt32Ptr(upstreamHeadersMs)
 	entry.FailureStage = nullStringPtr(failureStage)
 	entry.FailureRetryable = nullBoolPtr(failureRetryable)
-	// nullInt64Ptr rather than nullInt32Ptr: a cost in micro-units passes int32 at
-	// about $2,147, which is a plausible monthly total and would silently wrap.
-	entry.CostMicros = nullInt64Ptr(costMicros)
-	entry.CostCurrency = nullStringPtr(costCurrency)
-	entry.PricingRuleID = nullInt64Ptr(pricingRuleID)
 	return entry, nil
 }
 
@@ -538,7 +529,6 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
               l.request_uid, l.attempt_index,
               l.pre_upstream_ms, l.upstream_headers_ms,
               l.failure_stage, l.failure_retryable,
-              l.cost_micros, l.cost_currency, l.pricing_rule_id,
               l.error,
               p.request_snapshot,
               p.upstream_request_override,
@@ -562,8 +552,6 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	var detailRequestUID, detailFailureStage sql.NullString
 	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
 	var detailFailureRetryable sql.NullBool
-	var detailCostMicros, detailPricingRuleID sql.NullInt64
-	var detailCostCurrency sql.NullString
 	var requestSnapshot, upstreamRequestOverride sql.NullString
 	var responseSnapshot, downstreamResponseOverride sql.NullString
 	var upstreamRequestIsOverride, downstreamResponseIsOverride int32
@@ -577,9 +565,7 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
 		&durationMs, &firstTokenMs,
 		&detailRequestUID, &attemptIndex, &preUpstreamMs, &upstreamHeadersMs,
-		&detailFailureStage, &detailFailureRetryable,
-		&detailCostMicros, &detailCostCurrency, &detailPricingRuleID,
-		&logError,
+		&detailFailureStage, &detailFailureRetryable, &logError,
 		&requestSnapshot, &upstreamRequestOverride, &upstreamRequestIsOverride,
 		&responseSnapshot, &downstreamResponseOverride, &downstreamResponseIsOverride)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -614,9 +600,6 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	detail.UpstreamHeadersMs = nullInt32Ptr(upstreamHeadersMs)
 	detail.FailureStage = nullStringPtr(detailFailureStage)
 	detail.FailureRetryable = nullBoolPtr(detailFailureRetryable)
-	detail.CostMicros = nullInt64Ptr(detailCostMicros)
-	detail.CostCurrency = nullStringPtr(detailCostCurrency)
-	detail.PricingRuleID = nullInt64Ptr(detailPricingRuleID)
 
 	// A cleared override flag means the peer snapshot was identical to the
 	// canonical one, so the canonical value is what the console should show.

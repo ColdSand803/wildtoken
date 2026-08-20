@@ -208,9 +208,6 @@ type State struct {
 	LogStats    *db.LogStatsCache
 	ModelsCache *ModelsListCache
 	Routing     *proxy.RoutingCache
-	// Pricing holds the model price table the settlement path reads. It is
-	// replaced wholesale by the admin write endpoints.
-	Pricing *proxy.PricingBook
 
 	// Prometheus holds the labelled series the scrape endpoint renders. Separate
 	// from Metrics, whose counters serve the console's JSON endpoint: the JSON
@@ -235,6 +232,16 @@ type State struct {
 	// ProbeRuns carries the last batch-probe results and keeps concurrent runs
 	// from multiplying probe load across every channel.
 	ProbeRuns *ProbeRunState
+
+	// DatabasePath is the resolved filesystem path of the SQLite database.
+	//
+	// Held here rather than re-derived from the configured URL by whoever needs it:
+	// the disaster-recovery endpoints write files beside this one, and a second
+	// parser that disagreed with the pool's about which file is the database would
+	// stage a restore onto the wrong path. Empty in tests that do not use it, and
+	// the endpoints refuse rather than guess when it is.
+	DatabasePath string
+
 	StartedAt time.Time
 }
 
