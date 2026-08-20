@@ -230,7 +230,7 @@ func TestLogWriterBatchesQueuedEntriesAndUpdatesMetrics(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := NewLogWriter(ctx, database, runtimeMetrics, logStats, 16, quota.NewTracker(), NewPricingBook())
+	writer := NewLogWriter(ctx, database, runtimeMetrics, logStats, 16, quota.NewTracker(), NewPricingBook(), nil)
 	events, unsubscribe := writer.Subscribe()
 	defer unsubscribe()
 
@@ -310,7 +310,7 @@ func TestLogWriterDropsEntriesRatherThanBlockingWhenTheQueueIsFull(t *testing.T)
 	// A zero capacity is raised to one, so exactly one entry can be queued while
 	// the writer is busy.
 	ctx, cancel := context.WithCancel(context.Background())
-	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 1, quota.NewTracker(), NewPricingBook())
+	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 1, quota.NewTracker(), NewPricingBook(), nil)
 
 	// Stop the writer before scheduling, so nothing drains the queue.
 	cancel()
@@ -453,7 +453,7 @@ func TestSchedulingAfterCloseDropsTheEntryRatherThanPanicking(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 8, quota.NewTracker(), NewPricingBook())
+	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 8, quota.NewTracker(), NewPricingBook(), nil)
 	writer.Close()
 
 	// A stream still running when the server stopped waiting for it schedules
@@ -471,7 +471,7 @@ func TestSchedulingConcurrentlyWithCloseNeverPanics(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := NewLogWriter(ctx, database, metrics.New(), db.NewLogStatsCache(), 8, quota.NewTracker(), NewPricingBook())
+	writer := NewLogWriter(ctx, database, metrics.New(), db.NewLogStatsCache(), 8, quota.NewTracker(), NewPricingBook(), nil)
 
 	// Close races the schedulers rather than following them, which is the order
 	// a shutdown that timed out on its in-flight requests produces.

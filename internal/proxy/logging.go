@@ -129,6 +129,15 @@ type LogMetricsRecorder interface {
 	FinishCleanup(success bool, duration time.Duration)
 }
 
+// ScrapeRecorder is the labelled-series sink the Prometheus endpoint renders.
+//
+// An interface here rather than a concrete type so this package does not depend on
+// internal/metrics, matching how LogMetricsRecorder is already handled.
+type ScrapeRecorder interface {
+	RecordRequest(upstreamID int64, statusClass, protocol string, durationSeconds float64)
+	RecordTokens(prompt, completion, cacheRead, cacheCreate, reasoning int64)
+}
+
 type persistedLogRecord struct {
 	stats db.PersistedLogStats
 	event LogStreamEvent
@@ -142,7 +151,10 @@ type LogWriter struct {
 	events  *eventBroker
 	quotas  *quota.Tracker
 	pricing *PricingBook
-	done    chan struct{}
+	// scrape receives the labelled Prometheus series. Nil is a no-op, which is what
+	// a harness assembled without it gets.
+	scrape ScrapeRecorder
+	done   chan struct{}
 	// closeMu orders closing the queue against scheduling onto it. Sending on a
 	// closed channel panics and a select's default case does not prevent that,
 	// so the two are made exclusive rather than left to race: a stream still
@@ -160,13 +172,14 @@ type LogWriter struct {
 // same value a model with no price rule produces.
 func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecorder,
 	logStats *db.LogStatsCache, queueCapacity int, quotas *quota.Tracker,
-	pricing *PricingBook) *LogWriter {
+	pricing *PricingBook, scrape ScrapeRecorder) *LogWriter {
 	writer := &LogWriter{
 		entries: make(chan LogEntry, max(queueCapacity, 1)),
 		metrics: metrics,
 		events:  newEventBroker(),
 		quotas:  quotas,
 		pricing: pricing,
+		scrape:  scrape,
 		done:    make(chan struct{}),
 	}
 	go writer.run(ctx, database, logStats)
@@ -194,6 +207,12 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 		CacheCreationTokens: entry.CacheCreationTokens,
 	})
 
+	// Recorded here rather than at flush, so a scrape counts requests the gateway
+	// actually served even when the queue drops their rows or the database write
+	// fails. Tying the counters to a successful insert would make an alert on
+	// traffic volume go quiet exactly when logging is in trouble.
+	w.recordScrapeSeries(entry)
+
 	// Held across the send so the queue cannot close underneath it.
 	w.closeMu.RLock()
 	defer w.closeMu.RUnlock()
@@ -218,6 +237,83 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 		w.metrics.RecordLogDrop()
 		slog.Warn("request log queue full; dropping request log")
 	}
+}
+
+// recordScrapeSeries folds one attempt into the Prometheus counters.
+//
+// The labels are drawn only from bounded values: the channel id, the status class,
+// and the protocol implied by the path. The model string is deliberately not a
+// label — it arrives from the client, so labelling by it would let any caller mint
+// unbounded time series by varying one JSON field.
+func (w *LogWriter) recordScrapeSeries(entry LogEntry) {
+	if w.scrape == nil {
+		return
+	}
+
+	upstreamID := int64(0)
+	if entry.UpstreamID != nil {
+		upstreamID = *entry.UpstreamID
+	}
+	protocol := metricsProtocolOpenAI
+	if models.IsAnthropicMessages(entry.Path) {
+		protocol = metricsProtocolAnthropic
+	}
+
+	// Negative means "no measured duration", which the histogram skips: a request
+	// whose timing is unknown is not a fast one, and folding it in as zero would
+	// pull every latency quantile down.
+	durationSeconds := -1.0
+	if entry.DurationMs != nil && *entry.DurationMs >= 0 {
+		durationSeconds = float64(*entry.DurationMs) / 1000
+	}
+
+	w.scrape.RecordRequest(upstreamID, statusClassOf(entry.StatusCode), protocol,
+		durationSeconds)
+	w.scrape.RecordTokens(
+		int32PtrToInt64Value(entry.PromptTokens),
+		int32PtrToInt64Value(entry.CompletionTokens),
+		int32PtrToInt64Value(entry.PromptCachedTokens),
+		int32PtrToInt64Value(entry.CacheCreationTokens),
+		int32PtrToInt64Value(entry.CompletionReasoningTokens),
+	)
+}
+
+// The label values, duplicated as constants rather than imported from
+// internal/metrics: this package does not depend on that one (see ScrapeRecorder),
+// and a test asserts the two sets agree so the duplication cannot drift.
+const (
+	metricsProtocolOpenAI    = "openai"
+	metricsProtocolAnthropic = "anthropic"
+	metricsStatus2xx         = "2xx"
+	metricsStatus4xx         = "4xx"
+	metricsStatus5xx         = "5xx"
+	metricsStatusOther       = "other"
+	metricsStatusNone        = "none"
+)
+
+// statusClassOf buckets a status code. A nil code is "none" — the attempt never got
+// a status, which is distinct from succeeding.
+func statusClassOf(status *int32) string {
+	if status == nil {
+		return metricsStatusNone
+	}
+	switch code := *status; {
+	case code >= 200 && code <= 299:
+		return metricsStatus2xx
+	case code >= 400 && code <= 499:
+		return metricsStatus4xx
+	case code >= 500 && code <= 599:
+		return metricsStatus5xx
+	default:
+		return metricsStatusOther
+	}
+}
+
+func int32PtrToInt64Value(value *int32) int64 {
+	if value == nil || *value < 0 {
+		return 0
+	}
+	return int64(*value)
 }
 
 // quotaUsage reports the token and amount a log entry contributes to a quota.

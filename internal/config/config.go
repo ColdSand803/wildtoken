@@ -21,6 +21,7 @@ type Settings struct {
 	Upstream UpstreamSettings `toml:"upstream"`
 	Admin    AdminSettings    `toml:"admin"`
 	Themes   ThemeSettings    `toml:"themes"`
+	Metrics  MetricsSettings  `toml:"metrics"`
 }
 
 type ServerSettings struct {
@@ -58,6 +59,30 @@ type ThemeSettings struct {
 	Dir string `toml:"dir"`
 }
 
+// MetricsSettings controls the Prometheus scrape endpoint.
+//
+// Disabled by default, which is the only safe default for an endpoint describing
+// traffic volumes and channel health: enabling it silently on upgrade would
+// publish that to anything able to reach the port.
+type MetricsSettings struct {
+	Enabled bool `toml:"enabled"`
+	// Token guards the endpoint with `Authorization: Bearer <token>`.
+	//
+	// Deliberately separate from the admin credential rather than reusing it.
+	// Prometheus keeps its scrape config in plain text and hands the value to a
+	// long-lived process, so sharing the console's credential would put that
+	// credential there too. Blank means no token, which is only appropriate when
+	// the listener is already unreachable from outside — the server warns at
+	// startup so that is never an accident.
+	Token string `toml:"token"`
+}
+
+// EnabledWithoutToken reports the configuration that exposes metrics to any
+// caller able to reach the port.
+func (m MetricsSettings) EnabledWithoutToken() bool {
+	return m.Enabled && strings.TrimSpace(m.Token) == ""
+}
+
 // Default returns the settings used when no file or environment overrides apply.
 func Default() Settings {
 	return Settings{
@@ -74,6 +99,9 @@ func Default() Settings {
 		Upstream: UpstreamSettings{DefaultTimeoutSeconds: 300.0},
 		Admin:    AdminSettings{Token: "change-me"},
 		Themes:   ThemeSettings{Dir: "themes"},
+		// Off unless the operator asks for it. An upgrade must not begin publishing
+		// traffic volumes and channel health to whatever can reach the port.
+		Metrics: MetricsSettings{Enabled: false},
 	}
 }
 
@@ -175,6 +203,15 @@ func applyEnvOverrides(settings *Settings) error {
 		{"APP__ADMIN__TOKEN", func(s *Settings, v string) error { s.Admin.Token = v; return nil }},
 		{"APP__ADMIN__CLIENT_IP_HEADER", func(s *Settings, v string) error { s.Admin.ClientIPHeader = v; return nil }},
 		{"APP__THEMES__DIR", func(s *Settings, v string) error { s.Themes.Dir = v; return nil }},
+		{"APP__METRICS__ENABLED", func(s *Settings, v string) error {
+			parsed, err := strconv.ParseBool(v)
+			if err != nil {
+				return err
+			}
+			s.Metrics.Enabled = parsed
+			return nil
+		}},
+		{"APP__METRICS__TOKEN", func(s *Settings, v string) error { s.Metrics.Token = v; return nil }},
 	}
 
 	for _, override := range overrides {

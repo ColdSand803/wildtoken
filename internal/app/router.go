@@ -31,6 +31,11 @@ func NewRouter(state *appstate.State) http.Handler {
 	router.Get("/admin", serveAdminHTML)
 	router.Get("/api/themes", handlers.ListPublicThemePacks(state))
 
+	// Outside the admin group: Prometheus authenticates with its own bearer token,
+	// not the console's x-admin-token. Disabled by default, and 404 when disabled so
+	// the endpoint's existence is not confirmed to a scanner.
+	router.Get("/metrics", handlers.PrometheusMetrics(state))
+
 	router.Mount("/static", noStore(http.StripPrefix("/static",
 		noDirectoryListing(http.FileServer(http.Dir("static"))))))
 	router.Mount("/theme-packs", noStore(http.StripPrefix("/theme-packs",

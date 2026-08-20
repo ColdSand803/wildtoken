@@ -212,6 +212,12 @@ type State struct {
 	// replaced wholesale by the admin write endpoints.
 	Pricing *proxy.PricingBook
 
+	// Prometheus holds the labelled series the scrape endpoint renders. Separate
+	// from Metrics, whose counters serve the console's JSON endpoint: the JSON
+	// shape may change with the console, while a metric name and its labels are a
+	// contract an operator's dashboards and alert rules are written against.
+	Prometheus *metrics.Prometheus
+
 	// Latency holds the bounded rolling response times least-latency routing
 	// ranks channels by. It is in memory only: the figures describe the last few
 	// minutes, so persisting them would mean a restart routing on measurements

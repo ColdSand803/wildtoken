@@ -69,6 +69,17 @@ func applyRuntimeHealth(state *appstate.State, policy proxy.AutoWeightPolicy, it
 	item.RuntimeHealthScore = health.Score
 	item.EffectiveWeight = health.EffectiveWeight
 	item.HealthRecoveryRemainingSeconds = health.RecoveryRemainingSeconds
+
+	// The scrape gauge is published from here, where the score has just been
+	// computed for the console. The alternative — sampling at scrape time — would
+	// put a channel list query and a health snapshot on an endpoint meant to be
+	// polled every fifteen seconds.
+	//
+	// The consequence is that a channel's gauge appears once something has read the
+	// channel list, which the console does on load and the health poller does
+	// periodically. A gateway serving traffic with nobody watching the console will
+	// report request counters before it reports health.
+	state.Prometheus.SetHealth(item.ID, float64(health.Score))
 }
 
 // parseExtraHeaders decodes a channel's stored header override map.
@@ -757,6 +768,10 @@ func AdminDeleteUpstream(state *appstate.State) http.HandlerFunc {
 		// channel would otherwise start out ranked on its predecessor's speed.
 		state.ProbeRuns.Forget(id)
 		state.Latency.Reset(id)
+		// The scrape series go for the same reason: a new channel inheriting its
+		// predecessor's counters would look like a jump in traffic to anything
+		// computing a rate over them.
+		state.Prometheus.ForgetUpstream(id)
 		w.WriteHeader(http.StatusNoContent)
 	}
 }

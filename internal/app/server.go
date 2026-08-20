@@ -113,8 +113,12 @@ func New(ctx context.Context) (*Server, error) {
 		slog.Warn("could not load the model price table; costs will not be estimated",
 			"error", err)
 	}
+	// Series are collected whether or not the endpoint is exposed. Collecting only
+	// when enabled would mean a freshly enabled endpoint reports zero traffic until
+	// new requests arrive, which reads as an outage.
+	scrapeMetrics := metrics.NewPrometheus()
 	logWriter := proxy.NewLogWriter(jobsCtx, database, runtimeMetrics, logStats,
-		settings.Logging.LogQueueCapacity, quotas, pricing)
+		settings.Logging.LogQueueCapacity, quotas, pricing, scrapeMetrics)
 
 	state := &appstate.State{
 		DB:                  database,
@@ -133,9 +137,19 @@ func New(ctx context.Context) (*Server, error) {
 		UpstreamRateLimiter: ratelimit.NewLimiter(),
 		Quotas:              quotas,
 		Pricing:             pricing,
+		Prometheus:          scrapeMetrics,
 		ProbeRuns:           appstate.NewProbeRunState(),
 		StartedAt:           time.Now(),
 	}
+	// An open scrape endpoint is a real deployment when the listener is already
+	// unreachable from outside, so it is allowed — but never silently. The endpoint
+	// reports traffic volumes and channel health, which is not something to publish
+	// by accident.
+	if settings.Metrics.EnabledWithoutToken() {
+		slog.Warn("the Prometheus /metrics endpoint is enabled without a token; " +
+			"anything that can reach this port can read traffic volumes and channel health")
+	}
+
 	// The client reads the proxy setting through the runtime store on every
 	// request, so a console edit applies to new connections without a restart.
 	state.HTTPClient = newHTTPClient(settings.Upstream.DefaultTimeoutSeconds, state.Runtime.Get)
