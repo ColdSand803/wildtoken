@@ -812,3 +812,70 @@ test("filter badges toggled hidden from script actually disappear", () => {
     assert.match(tag, /\bhidden\b/, `${id} starts hidden`);
   }
 });
+
+/* 刷新以前是 .log-toolbar 的直接子节点，自己挂 auto margin。这条工具栏有六个筛选器，
+   实测到 1600px 视口都占满第一行，于是刷新必然换行——而 auto margin 在换行之后依然
+   生效，它就孤零零地右对齐在一条空行上。列 / 敏感开关 / 刷新本来是同一类"动作"，
+   收进同一个容器，并且这条工具栏不要那个 auto margin。 */
+test("日志工具栏的列/敏感开关/刷新收在同一组，不会单独占一行", () => {
+  const markup = read("static/admin.html");
+  const toolbarStart = markup.indexOf(`<div class="log-toolbar">`);
+  assert.notEqual(toolbarStart, -1, "日志工具栏应在标记里");
+  const toolbarEnd = markup.indexOf(`<div class="table-wrap">`, toolbarStart);
+  const toolbar = markup.slice(toolbarStart, toolbarEnd);
+
+  /* 组的边界按缩进找而不是按最近的 </div>：组里嵌着 .col-menu-wrap，非贪婪匹配会停在
+     那一层的收尾上，只看到「列」。 */
+  const groupStart = toolbar.indexOf(`<div class="actions toolbar-actions">`);
+  assert.notEqual(groupStart, -1, "三个动作应收在 .toolbar-actions 里");
+  const indent = /\n(\s*)<div class="actions toolbar-actions">/.exec(toolbar)?.[1] ?? "";
+  const groupEnd = toolbar.indexOf(`\n${indent}</div>`, groupStart);
+  assert.notEqual(groupEnd, -1, "动作组应正常收尾");
+  const group = toolbar.slice(groupStart, groupEnd);
+
+  for (const id of ["log-col-menu-btn", "log-sensitive-toggle", "log-refresh"]) {
+    assert.ok(group.includes(`id="${id}"`), `${id} 应在动作组里，而不是散在工具栏上`);
+  }
+  // 三个都在组里，工具栏上就不该再有第二份——尤其是刷新，它原来单独挂着 auto margin。
+  for (const id of ["log-col-menu-btn", "log-sensitive-toggle", "log-refresh"]) {
+    assert.equal(
+      toolbar.split(`id="${id}"`).length - 1,
+      1,
+      `${id} 只应出现一次，也就是只在动作组里`,
+    );
+  }
+
+  const base = read("static/css/base.css");
+  const logRule = /^\.log-toolbar > \.toolbar-actions\s*\{([^}]*)\}/m.exec(base);
+  assert.ok(logRule, "日志工具栏的动作组应显式反选 auto margin");
+  assert.match(logRule[1], /margin-inline-start:\s*0;/, "换行之后 auto 只剩孤岛效果");
+
+  /* 六个筛选器在 --content-max（1440px）下占 1214px，行内只剩 144px，装不下 170px 的
+     动作组——差的就是渠道筛选器上限那 40px。收到 260px 之后默认状态是一行。 */
+  const chan = /^\.log-filter-channel select\s*\{([^}]*)\}/m.exec(base);
+  assert.ok(chan, "渠道筛选器应有宽度规则");
+  const cap = /width:\s*clamp\([^,]+,[^,]+,\s*(\d+)px\)/.exec(chan[1]);
+  assert.ok(cap, "渠道筛选器宽度应是 clamp，上限可读：" + chan[1]);
+  assert.ok(
+    Number(cap[1]) <= 260,
+    `渠道筛选器上限 ${cap[1]}px 会把动作组挤到第二行，1440px 下只剩 144px`,
+  );
+
+  // 渠道/令牌工具栏的动作组确实和左边共享一行，那边保留右对齐。
+  const viewRule = /^\.view-toolbar > \.toolbar-actions\s*\{([^}]*)\}/m.exec(base);
+  assert.ok(viewRule, ".view-toolbar 的动作组规则应还在");
+  assert.match(viewRule[1], /margin-inline-start:\s*auto;/, "别把两条工具栏一起改掉");
+
+  /* 敏感开关搬进动作组之后，凡是按直接子节点找它的规则都够不着了。注释里提到这个
+     选择器不算（有一条注释正是在说"不能这么写"），扫之前先把注释去掉。 */
+  for (const [file, css] of [
+    ["base.css", base],
+    ["responsive.css", read("static/css/responsive.css")],
+  ]) {
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    assert.ok(
+      !/\.log-toolbar\s*>\s*\.log-sensitive-toggle/.test(rules),
+      `${file} 里还留着 .log-toolbar > .log-sensitive-toggle，选择器已经够不着它`,
+    );
+  }
+});

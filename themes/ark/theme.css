@@ -700,7 +700,7 @@ html[data-theme="ark"] .dashboard-card:hover {
   border-top-color: var(--ark-signal);
 }
 
-html[data-theme="ark"] .summary-strip span,
+html[data-theme="ark"] .summary-strip-cells > span,
 html[data-theme="ark"] .system-info-grid,
 html[data-theme="ark"] .system-info-item {
   border-color: var(--ark-rule);

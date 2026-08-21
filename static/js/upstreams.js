@@ -467,6 +467,19 @@ try {
   // Ignore storage errors
 }
 
+/* 工具栏里有两组控件只对一个视图有意义：
+   —「列」配的是表格列的显隐，卡片视图下没有对应物；
+   — 计数/全选/清空是卡片视图选渠道的唯一入口，列表视图的表头第一列就是全选框，
+     留着就是同一件事的第二套按钮。
+   批量启用/停用作用于选中集合本身，与"怎么选"无关，两个视图都留着。 */
+function applyUpstreamViewChrome(view) {
+  const isGrid = view === "grid";
+  // 菜单是 wrap 的绝对定位子节点，连同 wrap 一起消失的话 aria-expanded 会留在 true。
+  if (isGrid) closeColMenus();
+  if (upstreamColMenuWrap) upstreamColMenuWrap.hidden = isGrid;
+  if (upstreamSelectControls) upstreamSelectControls.hidden = !isGrid;
+}
+
 function setUpstreamView(view) {
   currentUpstreamView = view;
   try {
@@ -474,6 +487,8 @@ function setUpstreamView(view) {
   } catch (e) {
     // Ignore storage errors
   }
+
+  applyUpstreamViewChrome(view);
 
   if (view === "grid") {
     if (upstreamTableWrap) upstreamTableWrap.hidden = true;
@@ -713,7 +728,7 @@ function renderSparkline(points) {
         </linearGradient>
       </defs>
       <path d="${area}" fill="url(#${gradientId})" />
-      <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.5"
+      <path class="sparkline-line" d="${line}" fill="none" stroke="currentColor" stroke-width="1.5"
             vector-effect="non-scaling-stroke"/>
       <line class="channel-spark-hover-guide" x1="0" y1="0" x2="0" y2="40" vector-effect="non-scaling-stroke" />
       <circle class="channel-spark-hover-dot" r="2.5" cx="0" cy="0" />
@@ -725,17 +740,15 @@ function renderSparkline(points) {
 
 function bindChannelSparklineInteraction(container, values) {
   const svg = container?.querySelector(".sparkline-svg");
+  const linePath = svg?.querySelector(".sparkline-line");
   const hitArea = svg?.querySelector(".channel-spark-hit-area");
   const guide = svg?.querySelector(".channel-spark-hover-guide");
   const dot = svg?.querySelector(".channel-spark-hover-dot");
   const tooltip = container?.querySelector(".channel-spark-tooltip");
-  if (!svg || !hitArea || !guide || !dot || !tooltip || !Array.isArray(values) || values.length < 2) return;
+  if (!svg || !linePath || !hitArea || !guide || !dot || !tooltip || !Array.isArray(values) || values.length < 2) return;
   const { width, height } = CHANNEL_SPARK_VIEW;
   let frameId = null;
   let pendingEvent = null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
   const update = (event) => {
     pendingEvent = event;
     if (frameId != null) return;
@@ -751,7 +764,10 @@ function bindChannelSparklineInteraction(container, values) {
       const progress = next === index ? 0 : position - index;
       const value = values[index] + (values[next] - values[index]) * progress;
       const x = ratio * width;
-      const y = height - ((value - min) / range) * (height - 5);
+      /* 点的 y 从画出来的曲线上取，不按数值另算一遍：曲线是 Catmull-Rom 平滑过的，
+         采样点之间不走直线，自己按 (value-min)/range 算出来的 y 在拐点附近就掉到
+         曲线外面去了（截图里那个悬空的点）。 */
+      const { y } = sparkPathPointAtX(linePath, x);
       // 卡片宽度随窗口变化，缩放系数每帧重算，点才一直是圆的。
       const dotScaleX = sparkDotScaleX(bounds, CHANNEL_SPARK_VIEW);
       guide.setAttribute("x1", x);
@@ -928,17 +944,19 @@ function renderProbeSummary(data) {
 
   if (probeRunning) {
     summaryEl.hidden = false;
+    /* 跑着的时候标签换成"测活中"、圆点开始呼吸，数字位先占一个破折号。这一格和
+       左边四格共用同一套标签/数字排版，整条的高度不该因为测活跑起来跳一下。 */
+    summaryEl.setAttribute?.("title", "正在批量测活渠道...");
     summaryEl.innerHTML = `
-      <div class="probe-summary-status">
-        <span class="probe-summary-dot is-running" aria-hidden="true"></span>
-        <span>正在批量测活渠道...</span>
-      </div>
+      <span class="summary-strip-label"><span class="probe-summary-dot is-running" aria-hidden="true"></span>测活中</span>
+      <strong class="summary-strip-value is-pending">—</strong>
     `;
     return;
   }
 
   if (!data || (!data.results?.length && !data.total && !data.checked_at)) {
     summaryEl.hidden = true;
+    summaryEl.removeAttribute?.("title");
     summaryEl.innerHTML = "";
     return;
   }
@@ -948,19 +966,31 @@ function renderProbeSummary(data) {
   const skipped = Number(data.skipped ?? data.results?.filter((r) => r.skipped).length ?? 0);
   const failed = Number(data.failed ?? (total - succeeded - skipped));
   const partial = Boolean(data.partial);
-  const checkedAt = data.checked_at ? escapeHtml(data.checked_at) : (latestProbeCheckedAt ? escapeHtml(latestProbeCheckedAt) : "");
+  const checkedAt = data.checked_at || latestProbeCheckedAt || "";
+
+  /* 格面只留"成功 / 总数"这一个比值，失败/跳过/超时和时间戳退到 title——和看板
+     "启用渠道"那张卡一样（dashboard.js 的 hoverHint：说明挪进 title，卡面留给
+     数字）。摊开写要多占一行，而另外四格没有这一行，数字底下就空出同样高的一块
+     白，五格的高度也就再不一致。 */
+  const details = [];
+  if (failed > 0) details.push(`失败 ${failed}`);
+  if (skipped > 0) details.push(`跳过 ${skipped}`);
+  if (partial) details.push("部分渠道测活超时，这一轮的数字不完整");
+  if (checkedAt) details.push(`测于 ${checkedAt}`);
+  // 第一行说清分子分母，细节另起一行，免得挤成一条读不断句的长句。
+  const title = [`最近测活：成功 ${succeeded} / 共 ${total} 个渠道`, details.join(" · ")]
+    .filter(Boolean)
+    .join("\n");
+
+  /* 说明退到 title 之后，"这一轮好不好"得有个不占高度的落点：圆点。失败优先，
+     其次是超时导致的不完整，都没有才是绿的。 */
+  const dotTone = failed > 0 ? " is-failed" : (partial ? " is-partial" : "");
 
   summaryEl.hidden = false;
+  summaryEl.setAttribute?.("title", title);
   summaryEl.innerHTML = `
-    <div class="probe-summary-status">
-      <span class="probe-summary-dot" aria-hidden="true"></span>
-      <span>最近测活 (${total} 渠道)：</span>
-      <span class="probe-stat-ok">成功 <strong>${succeeded}</strong></span>
-      ${failed > 0 ? `<span class="probe-stat-failed">失败 <strong>${failed}</strong></span>` : ""}
-      ${skipped > 0 ? `<span class="probe-stat-skipped">跳过 <strong>${skipped}</strong></span>` : ""}
-      ${partial ? `<span class="probe-stat-partial muted">[部分超时]</span>` : ""}
-      ${checkedAt ? `<span class="muted font-mono">${checkedAt}</span>` : ""}
-    </div>
+    <span class="summary-strip-label"><span class="probe-summary-dot${dotTone}" aria-hidden="true"></span>最近测活</span>
+    <strong class="summary-strip-value">${succeeded}<span class="summary-strip-denominator">/${total}</span></strong>
   `;
 }
 
@@ -1088,16 +1118,25 @@ function formatLatencyRoutingBadge(upstreamId) {
 
 /* 「同层调度」里的"层"指优先级层：请求先按优先级从高到低找到第一个还有可用渠道的
    层级，同一层内部再用这里显示的策略挑一个。原来的标题只写"同层调度：最低延迟优先"，
-   没有一句话说清"层"是什么、也没说明挑选是怎么发生的，看不懂是应该的。 */
+   没有一句话说清"层"是什么、也没说明挑选是怎么发生的，看不懂是应该的。
+
+   这块现在就写在渠道面板标题下的说明位，不再是列表上方一条独立的带框条——原来
+   标题行和说明段分两行、外面还套一层框，为一句话吃掉一整条的高度。合成一句、
+   徽标跟在句尾之后，占的正好是那句静态文案原本就占的位置。 */
 function renderUpstreamRoutingSummary(data = latestRoutingData) {
   const summaryEl = typeof upstreamRoutingSummary !== "undefined" && upstreamRoutingSummary
     ? upstreamRoutingSummary
     : (typeof document !== "undefined" ? document.querySelector("#upstream-routing-summary") : null);
   if (!summaryEl) return;
 
+  /* 拿不到 /routing 时退回静态文案。这里已经是面板的说明位，整块藏起来会让标题
+     底下空一截，和别的面板对不齐。 */
   if (!data) {
-    summaryEl.hidden = true;
-    summaryEl.innerHTML = "";
+    summaryEl.innerHTML = `
+      <div class="routing-summary-strip-inner">
+        <div class="routing-summary-explain">按模型匹配、硬优先级和有效权重路由上游请求。</div>
+      </div>
+    `;
     return;
   }
 
@@ -1114,11 +1153,11 @@ function renderUpstreamRoutingSummary(data = latestRoutingData) {
   const sampleCap = rules.sample_capacity ?? 32;
 
   const howItPicks = isLeastLatency
-    ? `层内再按<strong>最低延迟优先</strong>挑：与最快渠道相差不超过 ${toleranceRatio}%（至少 ${toleranceFloor}ms）的渠道一起按权重抽签，明显更慢的不参与。`
-    : `层内再按<strong>加权随机</strong>挑：权重越大，被抽中的概率越高。`;
+    ? `按<strong>${escapeHtml(strategyName)}</strong>挑：与最快渠道相差不超过 ${toleranceRatio}%（至少 ${toleranceFloor}ms）的渠道一起按权重抽签，明显更慢的不参与。`
+    : `按<strong>${escapeHtml(strategyName)}</strong>挑：权重越大，被抽中的概率越高。`;
 
   /* 参数与退化规则只有在按延迟决策时才有意义，加权随机下它们全是死数字。
-     即便如此也默认收起——绝大多数时候要看的只有上面那两句话。 */
+     即便如此也默认收起——绝大多数时候要看的只有上面那一句话。 */
   const detailsHtml = isLeastLatency
     ? `
       <details class="routing-summary-details">
@@ -1139,18 +1178,9 @@ function renderUpstreamRoutingSummary(data = latestRoutingData) {
       </details>`
     : "";
 
-  summaryEl.hidden = false;
   summaryEl.innerHTML = `
     <div class="routing-summary-strip-inner">
-      <div class="routing-summary-header">
-        <span class="routing-summary-strategy">同优先级渠道之间：<strong>${escapeHtml(strategyName)}</strong></span>
-        <span class="routing-summary-badge ${activeClass}">
-          <span class="routing-summary-dot ${activeClass}" aria-hidden="true"></span>${escapeHtml(activeText)}
-        </span>
-      </div>
-      <p class="routing-summary-explain">
-        请求先按优先级从高到低，找到第一个还有可用渠道的层级；${howItPicks}
-      </p>
+      <div class="routing-summary-explain">请求先按优先级从高到低，找到第一个还有可用渠道的层级；同优先级渠道之间${howItPicks}<span class="routing-summary-badge ${activeClass}"><span class="routing-summary-dot ${activeClass}" aria-hidden="true"></span>${escapeHtml(activeText)}</span></div>
       ${detailsHtml}
     </div>
   `;
@@ -1641,6 +1671,13 @@ async function loadUpstreams(options = {}) {
       fetchLatestRoutingData().catch(() => {});
     }
   } catch (error) {
+    // 看板加载会把自己的 AbortController signal 透传进来（dashboard.js），下一轮
+    // 加载启动时上一轮就被取消。取消不是故障，浏览器给的 message 还是它自己的
+    // 默认文案（Chromium 是 signal is aborted without reason），照原样弹出去只会
+    // 让人以为渠道拉取失败了。
+    if (error?.name === "AbortError") {
+      return;
+    }
     const message = `加载失败：${error.message}`;
     if (message !== lastUpstreamLoadError) {
       setStatus(message, "error");
@@ -2076,9 +2113,8 @@ if (upstreamCardsContainer) {
   });
 }
 
-// Initialize view on page load
-if (currentUpstreamView === "grid") {
-  setUpstreamView("grid");
-}
+/* 列表是默认视图，原来这里只在恢复出 grid 时才调一次 setUpstreamView，列表分支
+   一次都不跑。现在切视图要顺带收起「列」和那三个选择控件，两个分支都得走一遍。 */
+setUpstreamView(currentUpstreamView);
 
 

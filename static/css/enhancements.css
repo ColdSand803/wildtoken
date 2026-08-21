@@ -36,12 +36,14 @@ html[data-density="compact"] .model-chip {
   font-size: 10px;
 }
 
-html[data-density="compact"] .summary-strip span {
-  padding: 7px 10px;
+/* 紧凑密度：格子内边距和数字字号一起收，测活那格跟着走同一套，五格才对得齐。 */
+html[data-density="compact"] .summary-strip-cells > span,
+html[data-density="compact"] .upstream-probe-summary {
+  padding: 6px 10px 7px;
 }
 
-html[data-density="compact"] .summary-strip strong {
-  font-size: var(--text-md);
+html[data-density="compact"] .summary-strip-value {
+  font-size: var(--text-2xl);
 }
 
 html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toast-close):not(.icon-close):not(.icon-maximize):not(.icon-refresh):not(.action-menu-trigger):not(.priority-value):not(.token-preview-button):not(.url-action):not(.model-selection-remove) {
@@ -132,6 +134,19 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* 计数 + 全选 + 清空是一组，只在卡片视图出现（列表视图的表头自带全选框），
+   所以三个一起收在这一层里，切视图时只动一个 hidden。 */
+.batch-select-group {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+/* display 是作者样式，压过 UA 的 [hidden]{display:none}，得自己补一条。 */
+.batch-select-group[hidden] {
+  display: none;
 }
 
 .toolbar-batch button[disabled] {
@@ -228,9 +243,11 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   margin-top: 2px;
 }
 
+/* 状态分布的轨道。这里不设 gap：段间留缝时轨道底色会从缝里透出来，深色皮肤上就是
+   一道黑线，看着像数据里多了一个极窄的分段，实际什么也不表示。无缝是公共分段条
+   （.wt-segbar）的默认，这条只管皮肤——高度、圆角、底色。 */
 .ops-bar-track {
   display: flex;
-  gap: 2px;
   height: 12px;
   overflow: hidden;
   border-radius: 999px;
@@ -290,13 +307,6 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   box-shadow: none;
 }
 
-.summary-hint {
-  color: var(--muted);
-  display: block;
-  font-size: 11px;
-  font-weight: 400;
-  margin-top: 2px;
-}
 .ops-bar-seg.info,
 .ops-bar-seg.other {
   background: var(--accent);
@@ -405,29 +415,34 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 /* 这块曾挂着 .summary-strip（KPI 数字条），和路由摘要犯的是同一个错。那条公共样式
    对后代 span/strong 通吃、权重还压过这里：span 被 flex:1 1 120px 拉成等宽格子并加
    竖分割线（7px 的状态圆点也被撑成 120px 宽的椭圆），strong 被 display:block 顶成
-   独立一行的 16px 粗体（"成功"和"3"于是断成两行）。这里是一行说明，不是指标。 */
+   独立一行的粗体（"成功"和"3"于是断成两行）。
+
+   现在它是数字条最右边的一格（"有效权重为 0"右侧），确实坐在 .summary-strip 里了，
+   靠 base.css 那条盒样式收窄成 .summary-strip-cells > span 兜住——数字格在自己的
+   容器里，这一格是条的直接子节点，选择器够不着；格子里的排版则改由
+   .summary-strip-label / .summary-strip-value 两个显式类负责，这一格主动挂上它们，
+   五格因此长得一模一样。外框、背景、圆角和外边距由 .summary-strip 统一给，自己
+   只留格子内边距和一条分割线——画在左边而不是让左邻格画右边，收起时才不会剩一条
+   悬空的竖线。说明行比四个数字格长，基准宽度也放大些。 */
 .upstream-probe-summary {
-  background: var(--panel-subtle);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  margin-bottom: 12px;
-  margin-top: 8px;
-  padding: 8px 12px;
+  border-left: 1px solid var(--line);
+  flex: 1.6 1 240px;
+  min-width: 0;
+  padding: 9px 14px 10px;
 }
 
-/* 摘掉 .summary-strip 就同时摘掉了 base.css 里 .summary-strip[hidden] 的兜底，
-   而这块正是靠 hidden 收起的（upstreams.js 测活结束时设 true）。下面 display 是
-   作者样式，会压过 UA 的 [hidden]{display:none}，所以这条必须跟着补。 */
+/* 分子（成功数）代表什么在视觉上说不全，渲染时补了一句 title。 */
+.upstream-probe-summary[title] {
+  cursor: help;
+}
+
+/* 这块自己没有 .summary-strip 类（它只是坐在条里的一格），所以 base.css 里
+   .summary-strip[hidden] 那条兜底够不着它，而它正是靠 hidden 收起的（upstreams.js
+   测活结束时设 true）。眼下这里没有任何作者样式设 display，光靠 UA 的
+   [hidden]{display:none} 也能收起来；但作者样式无视优先级压过 UA 样式，往上面加一行
+   display 就会静默失效，所以这条显式写着。 */
 .upstream-probe-summary[hidden] {
   display: none;
-}
-
-.probe-summary-status {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  font-size: var(--text-sm);
-  gap: 4px 10px;
 }
 
 .probe-summary-dot {
@@ -438,6 +453,9 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   display: inline-block;
   flex: none;
   height: 7px;
+  /* 原来靠 flex 行的 gap 拉开距离，现在它只是标签行里的一个 inline-block。 */
+  margin-right: 5px;
+  vertical-align: middle;
   width: 7px;
 }
 
@@ -447,27 +465,16 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   animation: live-pulse 1.2s ease-in-out infinite;
 }
 
-/* 标签和数字是一个整体，不能在中间断行——"成功"留在上一行、"3"掉到下一行就是
-   截图里那个样子。数字走等宽表格数字，多轮测活之间不会左右跳。 */
-.probe-summary-status > span {
-  white-space: nowrap;
+/* 失败数、跳过数、超时和时间戳都退到 title 里了（见 upstreams.js
+   renderProbeSummary），格面只剩比值，所以这一轮好不好改由圆点的颜色带：失败优先，
+   其次是超时导致的数字不完整。这比多一行说明省一行高度——四个数字格没有那一行，
+   多出来的高度会变成它们数字底下的一块白。 */
+.probe-summary-dot.is-failed {
+  background: var(--danger);
 }
 
-.probe-summary-status strong {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-}
-
-.probe-stat-ok strong {
-  color: var(--ok);
-}
-
-.probe-stat-failed strong {
-  color: var(--danger);
-}
-
-.probe-stat-skipped strong {
-  color: var(--muted);
+.probe-summary-dot.is-partial {
+  background: var(--warning);
 }
 
 /* 耗时四段的文字块。原来是一整行 <small>，被 .log-detail-meta-card small 的
@@ -595,11 +602,16 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   white-space: nowrap;
 }
 
+/* 状态徽标那一行。以前只在"带阶段徽标"时出现，现在恒定是这一层，替掉了原来的
+   <strong>——那层挂着 .log-detail-meta-card strong 的 overflow:hidden + ellipsis，
+   截断规则是给渠道名那种纯文本写的，套在带边框的徽标上只会把边框切掉。
+   这里不设 overflow：徽标该换行就换行，不该被裁。 */
 .log-detail-status-head {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: 6px;
+  min-width: 0;
 }
 
 .log-detail-failure-stage-badge {
@@ -782,19 +794,12 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
    这块曾挂着 .summary-strip（KPI 数字条）。那条公共样式会把后代 strong 变成
    display:block 的 16px 粗体、把后代 span 拉成 flex:1 1 120px 并加竖分割线，
    权重还压过这里的类，所以句子里的 strong 各自成行、chip 的 padding 失效、
-   连 6px 的状态圆点都被抻开。这里是说明性文字，不是指标，自己管排版。 */
-.upstream-routing-summary {
-  background: var(--panel-subtle);
-  border: 1px solid var(--line);
-  border-left: 2px solid var(--accent-border);
-  border-radius: var(--radius);
-  margin-bottom: 12px;
-  margin-top: 8px;
-  padding: 10px 14px;
-}
+   连 6px 的状态圆点都被抻开。这里是说明性文字，不是指标，自己管排版。
 
-.upstream-routing-summary[hidden] {
-  display: none;
+   它现在就是渠道面板标题下那句说明本身，不再是列表上方一条独立的带框条——
+   同一句话换个位置就省掉一整条的高度，所以背景、边框和外边距全部去掉。 */
+.upstream-routing-summary {
+  margin-top: 2px;
 }
 
 .routing-summary-strip-inner {
@@ -804,27 +809,12 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   width: 100%;
 }
 
-.routing-summary-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-}
+/* 一句话说清"层"是什么、层内怎么挑，以及延迟决策此刻激没激活。这块原来拆成
+   标题行 + 说明段两行，合成一句之后短了一半，塞进面板抬头也不显挤。
 
-/* 策略名是这块的锚点，比徽标和参数都重要，所以只有它用正文色。 */
-.routing-summary-strategy {
-  color: var(--muted);
-  font-size: var(--text-sm);
-  line-height: 1.4;
-}
-
-.routing-summary-strategy strong {
-  color: var(--text);
-  font-size: var(--text-base);
-  font-weight: 650;
-}
-
-/* 一句话说清"层"是什么、以及层内怎么挑。这条比上面所有徽标都重要。 */
+   注意这里是 div 不是 p：dark-theme.css 有一条
+   `html[data-theme="dark"] .view > .panel > .panel-head p { color: var(--muted) }`，
+   权重高过下面任何一条类选择器，句尾那个绿色徽标会被一起刷成灰的。 */
 .routing-summary-explain {
   color: var(--text-secondary);
   font-size: var(--text-sm);
@@ -917,6 +907,8 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   flex: none;
   font-size: var(--text-xs);
   line-height: 1.5;
+  /* 跟在句子末尾，和句号之间要有一口气的距离。 */
+  margin-inline-start: 6px;
   padding: 1px 8px;
   white-space: nowrap;
 }

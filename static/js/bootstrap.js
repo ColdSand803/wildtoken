@@ -525,8 +525,10 @@ const upstreamSelectAll = document.querySelector("#upstream-select-all");
 const upstreamSelectionCountEl = document.querySelector("#upstream-selection-count");
 const upstreamSelectVisibleBtn = document.querySelector("#upstream-select-visible");
 const upstreamClearSelectionBtn = document.querySelector("#upstream-clear-selection");
+const upstreamSelectControls = document.querySelector("#upstream-select-controls");
 const upstreamColMenuBtn = document.querySelector("#upstream-col-menu-btn");
 const upstreamColMenu = document.querySelector("#upstream-col-menu");
+const upstreamColMenuWrap = document.querySelector("#upstream-col-menu-wrap");
 const logColMenuBtn = document.querySelector("#log-col-menu-btn");
 const logColMenu = document.querySelector("#log-col-menu");
 const upstreamTable = document.querySelector("#upstream-table");
@@ -1318,6 +1320,22 @@ function sparkDotScaleX(bounds, view) {
   return (bounds.height * view.width) / Math.max(bounds.width * view.height, 1);
 }
 
+/* 迷你图上横坐标为 x 的那一点，直接从已经画出来的 path 上取。曲线是
+   buildSmoothSparkPaths 平滑过的，相邻两个采样点之间并不走直线，按原始数值线性
+   插值另算一遍 y，在拐点附近能差出好几像素——hover 的圆点就飘在曲线外面。x 单调
+   递增（采样点等距，转成贝塞尔后横向控制点也等距），所以二分是可靠的。 */
+function sparkPathPointAtX(path, x) {
+  const total = path.getTotalLength();
+  let low = 0;
+  let high = total;
+  for (let iteration = 0; iteration < 14; iteration += 1) {
+    const mid = (low + high) / 2;
+    if (path.getPointAtLength(mid).x < x) low = mid;
+    else high = mid;
+  }
+  return path.getPointAtLength((low + high) / 2);
+}
+
 /* Catmull-Rom 转三次贝塞尔的平滑折线，渠道卡片的 6h 请求量和看板的延迟趋势
    共用这一个生成器，曲线手感才一致。coords 是已经换算到 SVG 坐标系的
    {x, y} 数组；返回描边路径和向 baselineY 封口的面积路径。控制点的 y 会被
@@ -1492,15 +1510,22 @@ function renderUpstreamSummaryCore() {
   }
   lastSummarySignature = signature;
 
-  const effectiveWeightHint = zeroEffectiveWeight > 0
-    ? `<span class="summary-hint">有效权重为 0 的动态渠道会按恢复周期重新加入</span>`
+  /* 那句"会按恢复周期重新加入"退到 title：它是一句固定说明，不是数据，摊在格面上
+     要占两行，把整条撑高一截，而另外几格的数字底下就空着同样高的一块白。走 title
+     和看板 KPI 卡的 hoverHint 是同一套做法（见 dashboard.js renderKpiCards：
+     "说明文字挪进 title，鼠标滑过才显示，卡面留给数字"）。没有零权重渠道时不挂，
+     免得留一个空 tooltip。 */
+  const zeroWeightTitle = zeroEffectiveWeight > 0
+    ? ' title="有效权重为 0 的动态渠道会按恢复周期重新加入"'
     : "";
 
+  /* 标签在上、数字在下：先读到这一格是什么，再落到数值上。标签必须是独立元素——
+     原来它是 strong 后面的一个裸文本节点，压不了字号也降不了灰。 */
   upstreamSummary.innerHTML = `
-    <span><strong>${total}</strong>渠道总数</span>
-    <span><strong>${enabled}</strong>启用</span>
-    <span><strong>${disabled}</strong>停用</span>
-    <span class="${zeroEffectiveWeight ? "summary-warn" : ""}"><strong>${zeroEffectiveWeight}</strong>有效权重为 0${effectiveWeightHint}</span>
+    <span><span class="summary-strip-label">渠道总数</span><strong class="summary-strip-value">${total}</strong></span>
+    <span><span class="summary-strip-label">启用</span><strong class="summary-strip-value">${enabled}</strong></span>
+    <span><span class="summary-strip-label">停用</span><strong class="summary-strip-value">${disabled}</strong></span>
+    <span class="${zeroEffectiveWeight ? "summary-warn" : ""}"${zeroWeightTitle}><span class="summary-strip-label">有效权重为 0</span><strong class="summary-strip-value">${zeroEffectiveWeight}</strong></span>
   `;
 }
 

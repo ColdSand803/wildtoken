@@ -42,9 +42,29 @@ function extractFunction(source, name) {
 }
 
 const adminHtml = read("static/admin.html");
+const bootstrapJs = read("static/js/bootstrap.js");
 const dashboardJs = read("static/js/dashboard.js");
 const dashboardCss = read("static/css/dashboard.css");
 const shellJs = read("static/js/shell.js");
+
+/* KPI 卡工厂现在都经过 kpiCountHtml 拼滚动数字，它又依赖格式化函数和
+   bootstrap.js 里的 escapeHtml。把这条依赖链一次性搬进 vm，省得每个用例
+   各自拼一遍——漏一个就是 ReferenceError 而不是断言失败，很难读。 */
+function kpiCardContext(factoryNames) {
+  const sources = [
+    extractFunction(bootstrapJs, "escapeHtml"),
+    extractFunction(dashboardJs, "formatCompactNumber"),
+    extractFunction(dashboardJs, "formatCacheHitPercent"),
+    extractFunction(dashboardJs, "formatDashboardCacheHitRate"),
+    extractFunction(dashboardJs, "formatKpiCount"),
+    extractFunction(dashboardJs, "kpiCountHtml"),
+    ...factoryNames.map((name) => extractFunction(dashboardJs, name)),
+  ];
+  const exports = factoryNames.map((name) => `this.${name} = ${name};`).join("\n");
+  const context = vm.createContext({});
+  vm.runInContext(`${sources.join("\n")}\n${exports}\nthis.kpiCountHtml = kpiCountHtml;`, context);
+  return context;
+}
 
 test("admin.html contains refresh selector and top tokens ranking cards", () => {
   assert.ok(adminHtml.includes('id="dashboard-refresh-select"'), "refresh select exists in HTML");
@@ -77,17 +97,7 @@ test("getStatusCodeAttribution provides human-readable explanations", () => {
 });
 
 test("cacheHitRateCard calculates hit rate and carries detailed tooltip explanation", () => {
-  const formatHitRateSource = extractFunction(dashboardJs, "formatDashboardCacheHitRate");
-  const formatCompactSource = extractFunction(dashboardJs, "formatCompactNumber");
-  const cardSource = extractFunction(dashboardJs, "cacheHitRateCard");
-
-  const context = vm.createContext({});
-  vm.runInContext(`
-    ${formatHitRateSource}
-    ${formatCompactSource}
-    ${cardSource}
-    this.cacheHitRateCard = cacheHitRateCard;
-  `, context);
+  const context = kpiCardContext(["cacheHitRateCard"]);
 
   const card = context.cacheHitRateCard("缓存率", {
     prompt_cached_tokens: 300,

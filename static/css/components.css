@@ -19,8 +19,14 @@
    几何在这里，配色留在调用方原有的皮肤 class 上（.ops-bar-seg / .timing-seg--*
    / .status-error-cell），所以主题包对那些 class 的定制照旧生效。
    见 static/js/components.js 的 wtSegmentBar。 */
+/* 默认无缝：段与段直接相接。分段条读的是"各段占多大比例"，段间留缝的话轨道底色
+   会从缝里透出来，在深色皮肤上就是一道黑线——那道线看着像数据的一部分（像多了一个
+   极窄的分段），实际什么也不表示。
+   需要"格子感"的调用方自己加 gap（错误时间分布就是这种：每格是一个时间桶，桶与桶
+   本来就该分开数），见 .status-error-strip。 */
 .wt-segbar {
   display: flex;
+  gap: 0;
   min-width: 0;
   position: relative;
 }

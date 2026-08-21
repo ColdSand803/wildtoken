@@ -254,6 +254,31 @@ test("components.css supplies the shared geometry, hover motion and hovercard sk
   assert.ok(css.includes("prefers-reduced-motion"), "尊重减少动效偏好");
 });
 
+/* 段间留缝时轨道底色会从缝里透出来，深色皮肤上就是一道黑线，看着像数据里多了一个
+   极窄的分段，实际什么也不表示。无缝是公共分段条的默认，需要格子感的调用方自己加。 */
+test("公共分段条默认无缝，状态分布不留黑线", () => {
+  const components = read("static/css/components.css");
+  const enhancements = read("static/css/enhancements.css");
+
+  const shared = /^\.wt-segbar\s*\{([^}]*)\}/m.exec(components);
+  assert.ok(shared, ".wt-segbar 应有几何规则");
+  assert.match(shared[1], /gap:\s*0;/, "公共分段条默认不留缝");
+
+  // 状态分布的皮肤只管高度/圆角/底色，不该自己再加 gap 把缝加回来。
+  const track = /^\.ops-bar-track\s*\{([^}]*)\}/m.exec(enhancements);
+  assert.ok(track, ".ops-bar-track 应有皮肤规则");
+  assert.ok(!/gap:/.test(track[1]), "状态分布不该再留缝：" + track[1]);
+});
+
+/* 错误时间分布是另一回事：每格是一个时间桶，桶与桶本来就该分开数（数得出"连着
+   几个桶在报错"），缝在这里是有意义的。这条用例是防止"顺手把 gap 全清了"。 */
+test("错误时间分布保留格子感，缝不能被一起清掉", () => {
+  const css = read("static/css/dashboard.css");
+  const strip = /^\.status-error-strip\s*\{([^}]*)\}/m.exec(css);
+  assert.ok(strip, ".status-error-strip 应有规则");
+  assert.match(strip[1], /gap:\s*2px;/, "时间桶之间要留缝");
+});
+
 test("dashboard.css leaves hover motion to the shared component", () => {
   const css = read("static/css/dashboard.css");
   // dashboard.css 排在 components.css 之后，同优先级的 hover 规则会盖掉
@@ -338,4 +363,51 @@ test("timing chips wrap outside the ellipsis rule so 网关准备 that line neve
   // chip 流不在那条规则下；中间那列还要更宽一点才装得下四段。
   const logsCss = read("static/css/logs-tokens.css");
   assert.ok(logsCss.includes("minmax(0, 1.4fr)"), "状态与耗时那一列更宽");
+});
+
+/* HTTP 200 这类状态徽标以前套在 <strong> 里，吃到 .log-detail-meta-card strong 的
+   overflow:hidden + ellipsis——那套截断是给渠道名那种纯文本写的。徽标自己 22px 顶开
+   13px×1.25 的行盒，上下余量正好 0，换个字体栈或缩放比、圆整方向一反就把边框切掉，
+   于是"有时候"上下像被裁。这条用例钉住"徽标不在截断规则下"。 */
+test("状态徽标不套在会截断的 strong 里，上下不会被裁", () => {
+  const source = read("static/js/logs.js");
+  const head = /const statusHeadMarkup = [\s\S]*?;\s*?[\r\n]/.exec(source);
+  assert.ok(head, "状态徽标那一行应由 statusHeadMarkup 统一产出");
+  assert.ok(!/<strong/.test(head[0]), "徽标不能再套 strong：" + head[0]);
+  assert.match(head[0], /class="log-detail-status-head"/, "外层恒定是这一层");
+
+  // 调用点也不能再补一层 strong 包回去。
+  assert.ok(source.includes("${statusHeadMarkup}"), "状态与耗时卡里应插入 statusHeadMarkup");
+  assert.ok(
+    !/<strong[^>]*>\s*\$\{statusHeadMarkup\}/.test(source),
+    "插入点外面不能再包 strong，那层带着截断规则",
+  );
+
+  const css = read("static/css/enhancements.css");
+  const block = /^\.log-detail-status-head\s*\{([^}]*)\}/m.exec(css);
+  assert.ok(block, ".log-detail-status-head 应有规则");
+  assert.ok(!/overflow:/.test(block[1]), "这一层不设 overflow，徽标该换行就换行：" + block[1]);
+  assert.match(block[1], /flex-wrap:\s*wrap;/, "徽标多了要能换行，而不是挤在一行里被裁");
+});
+
+/* 快捷时间切换之后"请求统计卡片上边被裁"的根因不是徽标，是主数字自己：overflow:hidden
+   是为横向省略号服务的，但它同时也纵向裁，line-height 收得比字形盒矮时裁掉的就是数字
+   的上沿。1.15 在 clamp 到 ~35px 的字号下算出 40.8px 行盒，等宽字形盒 42px，上边切掉
+   1px。各主题 --font-mono 不同（Fira Code / JetBrains Mono / IBM Plex Mono），字形盒
+   高度本来就有差，所以这里要留真余量而不是刚好压线。 */
+test("看板 KPI 数字的行盒高于字形盒，不会自裁上下沿", () => {
+  const css = read("static/css/dashboard.css");
+  const block = /^\.kpi-value,\s*\.dashboard-kpi-value\s*\{([^}]*)\}/m.exec(css);
+  assert.ok(block, ".kpi-value / .dashboard-kpi-value 应有共同规则");
+
+  const lh = /line-height:\s*([\d.]+);/.exec(block[1]);
+  assert.ok(lh, "应显式写 line-height，别落回继承值：" + block[1]);
+  assert.ok(
+    Number(lh[1]) >= 1.25,
+    `line-height 至少 1.25 才够容下等宽字形盒（1.2 em 上下）：当前 ${lh[1]}`,
+  );
+
+  // 横向省略号还得留着——纵向的余量是靠 line-height 让出来的，不是靠去掉裁剪。
+  assert.match(block[1], /overflow:\s*hidden;/, "数字太长仍要用省略号收住");
+  assert.match(block[1], /text-overflow:\s*ellipsis;/, "省略号规则不能一起删掉");
 });

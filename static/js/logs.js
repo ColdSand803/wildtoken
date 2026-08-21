@@ -1865,9 +1865,19 @@ function formatLogDetailMeta(detail) {
   const retryableBadge = (detail.failure_retryable !== null && detail.failure_retryable !== undefined)
     ? `<span class="log-detail-retryable-badge ${detail.failure_retryable ? "is-retryable" : "is-non-retryable"}">${detail.failure_retryable ? "可重试错误" : "不可重试错误"}</span>`
     : "";
-  const statusHeadMarkup = (stageBadge || retryableBadge)
-    ? `<div class="log-detail-status-head"><span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>${stageBadge}${retryableBadge}</div>`
-    : `<span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>`;
+  /* 状态徽标不再套在 <strong> 里。那层 strong 挂着 .log-detail-meta-card strong
+     的 overflow:hidden + nowrap + ellipsis——那套是给渠道名/模型名这类纯文本准备的
+     截断规则，而这里放的是个带边框、min-height:22px 的 inline-flex 徽标：strong 的
+     行盒（13px × 1.25 = 16.25px）本来矮于徽标，靠徽标自己把行盒顶到 22px，于是
+     上下余量正好是 0，边框就压在裁切线上。字体栈换一档（各主题的 --font-mono 不同）
+     或缩放比一变，圆整方向一反就把边框切掉——这就是"有时候上下像被裁了"。
+
+     顺带修掉一个结构问题：带阶段徽标时这里原来是 <div> 套在 <strong> 里，块级元素
+     塞进行内元素是非法嵌套，浏览器会把 strong 拆开，行盒更没法算准。
+     现在统一是一个不参与截断的 div，样式由 .log-detail-status-head 负责。 */
+  const statusHeadMarkup = `<div class="log-detail-status-head">`
+    + `<span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>`
+    + `${stageBadge}${retryableBadge}</div>`;
 
   return `
     <div class="log-detail-meta-card log-detail-route-card">
@@ -1882,7 +1892,7 @@ function formatLogDetailMeta(detail) {
     </div>
     <div class="log-detail-meta-card">
       <span class="log-detail-meta-label">状态与耗时</span>
-      <strong>${statusHeadMarkup}</strong>
+      ${statusHeadMarkup}
       ${timingLine}
       ${timingBarHtml}
       ${formatTokensPerSecondLine(detail)}

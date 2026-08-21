@@ -1003,7 +1003,14 @@ renderFormModelSelection();
 for (const link of navLinks) {
   link.addEventListener("click", () => switchView(link.dataset.view));
 }
-window.addEventListener("hashchange", () => switchView(currentViewFromHash()));
+// 只响应真正的视图变化。switchView 补写 hash 触发的那次 hashchange 指向的还是
+// 同一个视图，重复加载没有意义，还会让本轮请求被下一轮 abort。导航链接和命令面板
+// 直接调 switchView，点当前页刷新的行为不受影响。
+window.addEventListener("hashchange", () => {
+  const next = currentViewFromHash();
+  if (next === activeViewName) return;
+  switchView(next);
+});
 
 if (logUpstreamFilter) {
   logUpstreamFilter.addEventListener("change", () => {

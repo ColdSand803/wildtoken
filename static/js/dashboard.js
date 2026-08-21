@@ -89,13 +89,63 @@ function formatCompactNumber(value) {
   return String(Math.round(value));
 }
 
+/* k/M 是按一千进位的，中文习惯按一万进位，两套刻度对不上——"202.2M"要在脑子里
+   先还原成 202200000 再切成"2.02亿"才读得出量级，这一步换算就是这张卡要替人做的。
+
+   一万以下不换算：formatCompactNumber 在这一档给的已经是精确整数，再写一遍"≈"
+   反而像是另一个数。返回空串表示"这一档不需要"，调用方据此决定还挂不挂那个节点。 */
+/* 从小到大排，cap 是这一档能写到的上限：到了就该进上一档，8290万 不写成 0.83亿。 */
+const CN_UNITS = [
+  { divisor: 10_000, cap: 10_000, suffix: "万" },
+  { divisor: 100_000_000, cap: Infinity, suffix: "亿" },
+];
+
+/* 小数位数跟着量级走，图的是和主数字相当的有效位数（都是三四位）：固定两位的话
+   12.3M 会换出"1234.57万"，六位有效数字摆在一个三位有效数字的主数字旁边，看着像是
+   更准，其实只是更长。 */
+function cnUnitDecimals(scaled) {
+  const abs = Math.abs(scaled);
+  if (abs < 10) return 2;
+  if (abs < 100) return 1;
+  return 0;
+}
+
+function formatChineseUnit(value) {
+  if (!Number.isFinite(value)) return "";
+  const abs = Math.abs(value);
+  // 一万以下这一档卡面就是精确整数，不换算。这条是硬门槛，写在挑单位之前。
+  if (abs < 10_000) return "";
+  for (let i = 0; i < CN_UNITS.length; i += 1) {
+    const { divisor, cap, suffix } = CN_UNITS[i];
+    const scaled = value / divisor;
+    const rounded = Number(scaled.toFixed(cnUnitDecimals(scaled)));
+    /* 挑最小的装得下的单位，判据是四舍五入之后的尾数而不是原值：99999999 按原值
+       落在"万"档，尾数一 round 就是 10000万——那是个进位没进上去的写法，该读作
+       1亿。反过来 82900000 的尾数是 8290，"万"装得下，不该被推去写 0.83亿。 */
+    if (Math.abs(rounded) < cap || i === CN_UNITS.length - 1) {
+      // 末尾的零去掉（1000.0万 → 1000万）。
+      return `${rounded}${suffix}`;
+    }
+  }
+  return "";
+}
+
 function tokenUsageCard(label, usage, scopeLabel) {
   const totalTokens = Number(usage?.total_tokens);
   const requestCount = Number(usage?.request_count);
   const safeTotal = Number.isFinite(totalTokens) && totalTokens > 0 ? totalTokens : 0;
   const safeCount = Number.isFinite(requestCount) && requestCount > 0 ? requestCount : 0;
+  const text = formatCompactNumber(safeTotal);
+  /* 换算跟着主数字一起滚，不是渲染时算一次就钉住：主数字滚到一半时如果换算还停在
+     上一轮的量级，两个数会有半秒对不上。同一个 target 喂两个节点，滚动同源。 */
+  const approxKey = `token-usage-cn:${label}`;
+  const approx = formatChineseUnit(safeTotal)
+    ? kpiCountHtml(approxKey, safeTotal, "cnunit", "", "kpi-approx")
+    : "";
   return {
-    value: formatCompactNumber(safeTotal),
+    value: text,
+    // 多窗口模式下五张同类卡同时在场，key 必须带 label 才不互相串号。
+    valueHtml: `${kpiCountHtml(`token-usage:${label}`, safeTotal, "compact")}${approx}`,
     label,
     hint: safeCount
       ? `${scopeLabel} · ${formatCompactNumber(safeCount)} 条有 token 记录`
@@ -156,15 +206,9 @@ function dashboardRangeParams(range = dashboardTimeRange) {
   return params;
 }
 
-function formatDashboardCacheHitRate(cacheHitTokens, inputTokens) {
-  if (
-    !Number.isFinite(cacheHitTokens)
-    || !Number.isFinite(inputTokens)
-    || inputTokens <= 0
-  ) {
-    return "—";
-  }
-  const percent = (cacheHitTokens / inputTokens) * 100;
+/* 命中率的分档写法。滚动动画逐帧套用同一个函数（formatKpiCount 的 cacheRate
+   分支），两处必须共用一份实现，否则中间帧会跳出静态文本从不会出现的写法。 */
+function formatCacheHitPercent(percent) {
   if (percent === 0) {
     return "0%";
   }
@@ -174,13 +218,28 @@ function formatDashboardCacheHitRate(cacheHitTokens, inputTokens) {
   return `${Math.round(percent)}%`;
 }
 
+function formatDashboardCacheHitRate(cacheHitTokens, inputTokens) {
+  if (
+    !Number.isFinite(cacheHitTokens)
+    || !Number.isFinite(inputTokens)
+    || inputTokens <= 0
+  ) {
+    return "—";
+  }
+  return formatCacheHitPercent((cacheHitTokens / inputTokens) * 100);
+}
+
 function cacheHitRateCard(label, usage, scopeLabel) {
   const cacheHitTokens = Number(usage?.prompt_cached_tokens);
   const inputTokens = Number(usage?.prompt_tokens);
   const hasInput = Number.isFinite(inputTokens) && inputTokens > 0;
   const safeCacheHit = Number.isFinite(cacheHitTokens) && cacheHitTokens > 0 ? cacheHitTokens : 0;
+  const text = formatDashboardCacheHitRate(cacheHitTokens, inputTokens);
+  // 从静态文本反推有没有数值，两者的判空条件就不可能分家。
+  const percent = text === "—" ? null : (cacheHitTokens / inputTokens) * 100;
   return {
-    value: formatDashboardCacheHitRate(cacheHitTokens, inputTokens),
+    value: text,
+    valueHtml: kpiCountHtml(`cache-rate:${label}`, percent, "cacheRate"),
     label,
     hint: hasInput
       ? `${scopeLabel} · 命中 ${formatCompactNumber(safeCacheHit)} / 输入 ${formatCompactNumber(inputTokens)}`
@@ -193,8 +252,10 @@ function cacheHitRateCard(label, usage, scopeLabel) {
 function requestCountCard(label, usage, scopeLabel) {
   const requestCount = Number(usage?.all_request_count);
   const safeCount = Number.isFinite(requestCount) && requestCount > 0 ? requestCount : 0;
+  const text = formatCompactNumber(safeCount);
   return {
-    value: formatCompactNumber(safeCount),
+    value: text,
+    valueHtml: kpiCountHtml(`request-count:${label}`, safeCount, "compact"),
     label,
     hint: `${scopeLabel} · 全部日志`,
     tone: "",
@@ -299,15 +360,47 @@ function formatKpiCount(value, format) {
   if (format === "percent1") {
     return `${value.toFixed(1)}%`;
   }
+  if (format === "cacheRate") {
+    return formatCacheHitPercent(value);
+  }
   if (format === "growth") {
     return Math.abs(value) >= 100
       ? `${Math.round(value)}%`
       : `${value.toFixed(1)}%`;
   }
+  if (format === "seconds1") {
+    return `${value.toFixed(1)}s`;
+  }
   if (format === "compact") {
     return formatCompactNumber(Math.round(value));
   }
+  /* k/M 旁边那句中文量级换算。"≈"在这里生成而不是写死在模板里：滚动动画逐帧套用
+     这个函数、整节点重写 textContent，约等号若留在模板上第一帧就被抹掉。 */
+  if (format === "cnunit") {
+    const text = formatChineseUnit(Math.round(value));
+    return text ? `≈${text}` : "";
+  }
   return String(Math.round(value));
+}
+
+/* 把一个数字包成可滚动的 KPI 节点。value 不是有限数（这一轮无数据）时只留 key
+   不留 data-count-to，animateKpiNumbers 会据此清掉记忆，下次有数据时不会从陈旧
+   值滚起，卡面显示 placeholder。
+
+   卡面文本由取整后的目标值反算，不由调用方传入：滚动的最后一帧写的是
+   formatKpiCount(target)，两者同源才不可能差一档——9.9996% 按原值是 10.0%，按
+   三位小数取整后的 10 是 10%，滚完就会跳一下。 */
+function kpiCountHtml(key, value, format, placeholder = "—", extraClass = "") {
+  const keyAttr = ` data-count-key="${escapeHtml(key)}"`;
+  // 附属数字（换算之类）要压小降灰，但同样得滚，所以类名可加不可换。
+  const cls = `kpi-number${extraClass ? ` ${escapeHtml(extraClass)}` : ""}`;
+  if (!Number.isFinite(value)) {
+    return `<span class="${cls}"${keyAttr}>${escapeHtml(placeholder)}</span>`;
+  }
+  // 属性里只留三位小数：高于任何一种格式实际显示的精度，又不至于写出长浮点。
+  const target = Number(value.toFixed(3));
+  const text = escapeHtml(formatKpiCount(target, format));
+  return `<span class="${cls}"${keyAttr} data-count-to="${target}" data-count-format="${format}">${text}</span>`;
 }
 
 function dropKpiNumberKey(key) {
@@ -527,19 +620,6 @@ function bindKpiRequestSparkInteraction(card, values) {
   let frameId = null;
   let pendingEvent = null;
 
-  // path 上横坐标为 x 的点：曲线单调递增于 x，二分即可。
-  const pathPointAtX = (path, x) => {
-    const total = path.getTotalLength();
-    let low = 0;
-    let high = total;
-    for (let iteration = 0; iteration < 14; iteration++) {
-      const mid = (low + high) / 2;
-      if (path.getPointAtLength(mid).x < x) low = mid;
-      else high = mid;
-    }
-    return path.getPointAtLength((low + high) / 2);
-  };
-
   const render = (event) => {
     const bounds = svg.getBoundingClientRect();
     if (!bounds.width || !bounds.height) return;
@@ -549,7 +629,7 @@ function bindKpiRequestSparkInteraction(card, values) {
     );
     // preserveAspectRatio="none" 把圆拉成椭圆，横向反向缩放补回来。
     const dotScaleX = (bounds.height * width) / Math.max(bounds.width * height, 1);
-    const onCurve = pathPointAtX(line, point.x);
+    const onCurve = sparkPathPointAtX(line, point.x);
     guide.setAttribute("x1", point.x);
     guide.setAttribute("x2", point.x);
     dot.setAttribute("transform", `scale(${dotScaleX} 1)`);
@@ -699,17 +779,6 @@ function bindLatencySparkInteractions(container, records) {
   const p95Path = svg.querySelector(".spark-morph-p95");
   const avgDot = svg.querySelector(".spark-hover-dot--avg");
   const p95Dot = svg.querySelector(".spark-hover-dot--p95");
-  const pathPointAtX = (path, x) => {
-    const length = path.getTotalLength();
-    let low = 0;
-    let high = length;
-    for (let iteration = 0; iteration < 14; iteration++) {
-      const mid = (low + high) / 2;
-      if (path.getPointAtLength(mid).x < x) low = mid;
-      else high = mid;
-    }
-    return path.getPointAtLength((low + high) / 2);
-  };
   const svgBounds = svg.getBoundingClientRect();
   const dotScaleX = (svgBounds.height * width) / Math.max(svgBounds.width * height, 1);
   avgDot.setAttribute("transform", `scale(${dotScaleX} 1)`);
@@ -743,8 +812,8 @@ function bindLatencySparkInteractions(container, records) {
     const progress = index === nextIndex ? 0 : position - index;
     const x = points.avg[index].x + (points.avg[nextIndex].x - points.avg[index].x) * progress;
     const svgY = Math.max(0, Math.min(height, (event.clientY - bounds.top) / bounds.height * height));
-    const avg = pathPointAtX(avgPath, x);
-    const p95 = pathPointAtX(p95Path, x);
+    const avg = sparkPathPointAtX(avgPath, x);
+    const p95 = sparkPathPointAtX(p95Path, x);
     activeSeries = Math.abs(svgY - p95.y) < Math.abs(svgY - avg.y) ? "p95" : "avg";
     svg.dataset.activeSeries = activeSeries;
     guide.setAttribute("x1", x);
@@ -959,9 +1028,10 @@ function renderDashboard() {
   const errorRateLabel = total > 0
     ? `${((errorTotal / total) * 100).toFixed(1).replace(/\.0$/, "")}%`
     : "—";
-  const avgDurationLabel = durationCount > 0
-    ? `${(avgMs / 1000).toFixed(1)}s`
-    : "—";
+  const avgDurationSeconds = durationCount > 0 ? avgMs / 1000 : null;
+  const avgDurationLabel = avgDurationSeconds === null
+    ? "—"
+    : `${avgDurationSeconds.toFixed(1)}s`;
 
   if (dashboardScope) {
     dashboardScope.textContent = total > 0
@@ -1032,7 +1102,7 @@ function renderDashboard() {
   renderDashboardKpiCards(dashboardKpis, [
     {
       value: formatCompactNumber(total),
-      valueHtml: `<span class="kpi-number" data-count-key="dashboard-requests" data-count-to="${total}" data-count-format="compact">${escapeHtml(formatCompactNumber(total))}</span>${requestTrendHtml}`,
+      valueHtml: `${kpiCountHtml("dashboard-requests", total, "compact")}${requestTrendHtml}`,
       backgroundHtml: requestSparkHtml,
       label: "请求数",
       hint: total ? `${overviewRangeLabel} · 共 ${total} 条` : `${overviewRangeLabel} · 暂无请求`,
@@ -1043,8 +1113,8 @@ function renderDashboard() {
     {
       value: errorRateLabel,
       valueHtml: errorRatePct === null
-        ? `<span class="kpi-number" data-count-key="dashboard-error-rate">—</span>`
-        : `<span class="kpi-number" data-count-key="dashboard-error-rate" data-count-to="${errorRatePct.toFixed(3)}" data-count-format="percent">${escapeHtml(errorRateLabel)}</span>${errorDeltaHtml}`,
+        ? kpiCountHtml("dashboard-error-rate", null, "percent")
+        : `${kpiCountHtml("dashboard-error-rate", errorRatePct, "percent")}${errorDeltaHtml}`,
       label: "错误率",
       labelHtml: '<span class="kpi-pulse-dot" aria-hidden="true"></span>错误率',
       hint: total ? `${errorTotal} / ${total} 条失败` : "暂无日志",
@@ -1053,6 +1123,7 @@ function renderDashboard() {
     },
     {
       value: avgDurationLabel,
+      valueHtml: kpiCountHtml("dashboard-avg-duration", avgDurationSeconds, "seconds1"),
       label: "平均耗时",
       hint: durationCount ? `有效 ${durationCount} 条` : "暂无耗时",
       hoverHint: true,
@@ -1060,7 +1131,9 @@ function renderDashboard() {
     },
     {
       value: `${enabledCount}/${totalChannels}`,
-      valueHtml: `${enabledCount}<span class="kpi-denominator">/${totalChannels}</span>`,
+      /* 只滚分子。分母是渠道总数，只在人为增删渠道时变，跟着滚一遍反而像在
+         抖动。 */
+      valueHtml: `${kpiCountHtml("dashboard-enabled-channels", enabledCount, "plain")}<span class="kpi-denominator">/${totalChannels}</span>`,
       label: "启用渠道",
       hint: totalChannels ? `停用 ${disabledCount}` : "暂无渠道",
       hoverHint: true,
@@ -1138,18 +1211,21 @@ function renderDashboard() {
   renderDashboardKpiCards(dashboardRuntimeKpis, [
     {
       value: formatCompactNumber(activeSse),
+      valueHtml: kpiCountHtml("runtime-active-sse", activeSse, "compact"),
       label: "活跃流",
       hint: "当前 SSE 连接",
       tone: activeSse > 0 ? "tone-ok" : "",
     },
     {
       value: formatCompactNumber(recentDisconnects),
+      valueHtml: kpiCountHtml("runtime-sse-disconnects", recentDisconnects, "compact"),
       label: "10m 断连",
       hint: `累计 ${formatCompactNumber(Number(metrics.sse_client_disconnects_total || 0))}`,
       tone: recentDisconnects > 0 ? "tone-warn" : "",
     },
     {
       value: formatCompactNumber(logQueueDepth),
+      valueHtml: kpiCountHtml("runtime-log-queue", logQueueDepth, "compact"),
       label: "日志队列",
       hint: `失败 ${formatCompactNumber(logWriteFailures)} · 丢弃 ${formatCompactNumber(logDropped)} · 慢 DB ${formatCompactNumber(slowDbOperations)}`,
       tone: logWriteFailures > 0 || logDropped > 0 || slowDbOperations > 0 ? "tone-danger" : "",
@@ -1334,16 +1410,24 @@ function renderDashboard() {
       const latestAvg = Number(latencySeries[latencySeries.length - 1].avg_ms) || 0;
       const minDuration = Number(overview?.min_duration_ms) || 0;
       const maxDuration = Number(overview?.max_duration_ms) || 0;
+      /* 摘要里六个数字也走 KPI 滚动。服务端给的是毫秒、卡面显示秒，seconds1
+         的输出与 formatSeconds 一致（一位小数 + s）。分位数可能缺，传 null 让
+         kpiCountHtml 只留 key 不留目标值，显示 — 并清掉上一轮的记忆。 */
+      const latencyNumber = (key, ms) => kpiCountHtml(
+        `latency-${key}`,
+        ms == null ? null : Number(ms) / 1000,
+        "seconds1",
+      );
       dashboardLatencyChart.innerHTML = `
         ${buildSparklineSvg(sparkRecords, { width: 320, height: 100 })}
         <div class="dashboard-chart-tooltip" role="status" hidden></div>
         <dl class="dashboard-latency-summary" aria-label="「${overviewRangeLabel}」${durationCount} 条有效耗时的延迟摘要">
-          <div><dt>最近</dt><dd>${escapeHtml(formatSeconds(latestAvg))}</dd></div>
-          <div><dt>平均</dt><dd>${escapeHtml(formatSeconds(avgMs))}</dd></div>
-          <div><dt>范围</dt><dd>${escapeHtml(formatSeconds(minDuration))}–${escapeHtml(formatSeconds(maxDuration))}</dd></div>
-          <div><dt title="中位数耗时：50% 的请求快于此时间">P50</dt><dd title="中位数耗时：50% 的请求快于此时间">${overview?.p50_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p50_duration_ms))) : "—"}</dd></div>
-          <div><dt title="95分位耗时：95% 的请求快于此时间，反映绝大多数用户的体验">P95</dt><dd title="95分位耗时：95% 的请求快于此时间，反映绝大多数用户的体验">${overview?.p95_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p95_duration_ms))) : "—"}</dd></div>
-          <div><dt title="99分位耗时：99% 的请求快于此时间，体现极端长尾延迟与服务毛刺">P99</dt><dd title="99分位耗时：99% 的请求快于此时间，体现极端长尾延迟与服务毛刺">${overview?.p99_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p99_duration_ms))) : "—"}</dd></div>
+          <div><dt>最近</dt><dd>${latencyNumber("latest", latestAvg)}</dd></div>
+          <div><dt>平均</dt><dd>${latencyNumber("avg", avgMs)}</dd></div>
+          <div><dt>范围</dt><dd>${latencyNumber("min", minDuration)}–${latencyNumber("max", maxDuration)}</dd></div>
+          <div><dt title="中位数耗时：50% 的请求快于此时间">P50</dt><dd title="中位数耗时：50% 的请求快于此时间">${latencyNumber("p50", overview?.p50_duration_ms)}</dd></div>
+          <div><dt title="95分位耗时：95% 的请求快于此时间，反映绝大多数用户的体验">P95</dt><dd title="95分位耗时：95% 的请求快于此时间，反映绝大多数用户的体验">${latencyNumber("p95", overview?.p95_duration_ms)}</dd></div>
+          <div><dt title="99分位耗时：99% 的请求快于此时间，体现极端长尾延迟与服务毛刺">P99</dt><dd title="99分位耗时：99% 的请求快于此时间，体现极端长尾延迟与服务毛刺">${latencyNumber("p99", overview?.p99_duration_ms)}</dd></div>
         </dl>
       `;
       // 曲线起伏从上一形态逐帧变形到新形态，而不是整图跳变
@@ -1357,6 +1441,10 @@ function renderDashboard() {
       bindLatencySparkInteractions(dashboardLatencyChart, sparkRecords);
       lastLatencySparkRecords = sparkRecords;
     }
+    /* 延迟摘要同样不经过 KPI 构建器，手动扫一次。空数据那条分支也要扫：
+       容器里一个 count key 都没有，引擎正好把上一轮的记忆清干净，等数据
+       回来时不会从旧值滚起。 */
+    animateKpiNumbers(dashboardLatencyChart);
   }
 
   const topModelRequests = Array.isArray(dashboardTopStats?.models) ? dashboardTopStats.models : [];

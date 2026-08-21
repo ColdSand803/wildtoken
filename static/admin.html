@@ -360,12 +360,23 @@
               <div>
                 <span class="eyebrow">UPSTREAM ROUTING</span>
                 <h2>渠道</h2>
-                <p>按模型匹配、硬优先级和有效权重路由上游请求。</p>
+                <!-- 路由摘要就写在标题下这句说明的位置：它原来是列表上方一条独立的
+                     带框条，占掉的高度和它承载的一句话不成比例。没拿到 /routing
+                     之前先显示这句静态文案，渲染器再用真实策略替换掉。 -->
+                <div id="upstream-routing-summary" class="upstream-routing-summary" aria-live="polite">
+                  <div class="routing-summary-strip-inner">
+                    <div class="routing-summary-explain">按模型匹配、硬优先级和有效权重路由上游请求。</div>
+                  </div>
+                </div>
               </div>
             </div>
-            <div id="upstream-summary" class="summary-strip" aria-live="polite"></div>
-            <div id="upstream-probe-summary" class="upstream-probe-summary" hidden aria-live="polite"></div>
-            <div id="upstream-routing-summary" class="upstream-routing-summary" hidden aria-live="polite"></div>
+            <!-- 最近测活是数字条最右边的一格。两块由不同的渲染器各写各的 innerHTML，
+                 所以各占一个容器，靠 .summary-strip-cells 的 display: contents 让四个
+                 数字格和它成为同一条上的兄弟。 -->
+            <div class="summary-strip" aria-live="polite">
+              <div id="upstream-summary" class="summary-strip-cells"></div>
+              <div id="upstream-probe-summary" class="upstream-probe-summary" hidden></div>
+            </div>
             <div class="view-toolbar upstream-toolbar">
               <label class="filter-field">
                 搜索
@@ -386,15 +397,16 @@
                 </select>
               </label>
               <div class="toolbar-batch" id="upstream-batch-actions">
-                <span class="batch-count" id="upstream-selection-count" aria-live="polite">未选择渠道</span>
-                <button type="button" id="upstream-select-visible" class="secondary ghost">全选</button>
-                <button type="button" id="upstream-clear-selection" class="secondary ghost" disabled>清空</button>
+                <!-- 计数、全选、清空只在卡片视图出现：列表视图的表头第一列就是全选框，
+                     这三个在那边是同一件事的第二套入口。批量启用/停用作用于选中集合本身，
+                     和"怎么选"无关，两个视图都留着。 -->
+                <span class="batch-select-group" id="upstream-select-controls" hidden>
+                  <span class="batch-count" id="upstream-selection-count" aria-live="polite">未选择渠道</span>
+                  <button type="button" id="upstream-select-visible" class="secondary ghost">全选</button>
+                  <button type="button" id="upstream-clear-selection" class="secondary ghost" disabled>清空</button>
+                </span>
                 <button type="button" id="batch-enable" class="secondary" disabled>批量启用</button>
                 <button type="button" id="batch-disable" class="secondary" disabled>批量停用</button>
-              </div>
-              <div class="col-menu-wrap">
-                <button type="button" id="upstream-col-menu-btn" class="secondary ghost col-menu-btn" aria-haspopup="true" aria-expanded="false">列</button>
-                <div id="upstream-col-menu" class="col-menu" hidden role="menu" aria-label="渠道列显示"></div>
               </div>
               <div class="view-toggle-wrap">
                 <button type="button" id="upstream-view-list" class="secondary ghost view-toggle-btn" aria-pressed="true" aria-label="列表视图" title="列表视图">
@@ -412,6 +424,13 @@
                     <rect x="14" y="14" width="7" height="7" rx="1"/>
                   </svg>
                 </button>
+              </div>
+              <!-- 「列」配的是表格列的显隐，卡片视图下没有对应物，跟着视图一起收起。
+                   摆在视图切换右边：它是"当前视图的配置"，读法上跟在视图后面，
+                   而且切到卡片视图时消失的那一格就落在行尾，不会在筛选器中间留个洞。 -->
+              <div class="col-menu-wrap" id="upstream-col-menu-wrap">
+                <button type="button" id="upstream-col-menu-btn" class="secondary ghost col-menu-btn" aria-haspopup="true" aria-expanded="false">列</button>
+                <div id="upstream-col-menu" class="col-menu" hidden role="menu" aria-label="渠道列显示"></div>
               </div>
               <div class="actions toolbar-actions">
                 <button id="batch-probe" type="button" class="secondary">一键测活</button>
@@ -540,25 +559,28 @@
                   <option value="none">无响应</option>
                 </select>
               </label>
-              <div class="col-menu-wrap">
-                <button type="button" id="log-col-menu-btn" class="secondary ghost col-menu-btn" aria-haspopup="true" aria-expanded="false">列</button>
-                <div id="log-col-menu" class="col-menu" hidden role="menu" aria-label="日志列显示"></div>
-              </div>
-              <button
-                id="log-sensitive-toggle"
-                type="button"
-                class="secondary ghost log-sensitive-toggle is-active"
-                aria-pressed="true"
-                aria-label="敏感信息已屏蔽，点击显示令牌与渠道名"
-                title="敏感信息已屏蔽，点击显示令牌与渠道名"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path class="log-sensitive-eye" d="M2.5 12s3.4-5.5 9.5-5.5S21.5 12 21.5 12 18.1 17.5 12 17.5 2.5 12 2.5 12Z"></path>
-                  <circle class="log-sensitive-eye" cx="12" cy="12" r="2.5"></circle>
-                  <path class="log-sensitive-slash" d="m4 4 16 16"></path>
-                </svg>
-              </button>
+              <!-- 列 / 敏感开关 / 刷新是一组"动作"，和左边那排筛选器不同类。三个收在
+                   同一个容器里，靠 auto margin 一起被推到行尾：以前刷新单独挂 auto
+                   margin，一换行就只有它自己占一整行，右对齐地空在那儿。 -->
               <div class="actions toolbar-actions">
+                <div class="col-menu-wrap">
+                  <button type="button" id="log-col-menu-btn" class="secondary ghost col-menu-btn" aria-haspopup="true" aria-expanded="false">列</button>
+                  <div id="log-col-menu" class="col-menu" hidden role="menu" aria-label="日志列显示"></div>
+                </div>
+                <button
+                  id="log-sensitive-toggle"
+                  type="button"
+                  class="secondary ghost log-sensitive-toggle is-active"
+                  aria-pressed="true"
+                  aria-label="敏感信息已屏蔽，点击显示令牌与渠道名"
+                  title="敏感信息已屏蔽，点击显示令牌与渠道名"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path class="log-sensitive-eye" d="M2.5 12s3.4-5.5 9.5-5.5S21.5 12 21.5 12 18.1 17.5 12 17.5 2.5 12 2.5 12Z"></path>
+                    <circle class="log-sensitive-eye" cx="12" cy="12" r="2.5"></circle>
+                    <path class="log-sensitive-slash" d="m4 4 16 16"></path>
+                  </svg>
+                </button>
                 <button id="log-refresh" type="button" class="secondary">刷新</button>
               </div>
             </div>

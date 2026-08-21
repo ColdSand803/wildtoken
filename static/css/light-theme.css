@@ -334,7 +334,7 @@ html[data-theme="light"] .summary-strip {
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 82%);
 }
 
-html[data-theme="light"] .summary-strip span {
+html[data-theme="light"] .summary-strip-cells > span {
   border-right-color: #dfe8f0;
 }
 

@@ -337,7 +337,14 @@ function currentViewFromHash() {
   return validView(name) ? name : getDefaultHome();
 }
 
+// 当前已切到的视图。switchView 自己会补写 location.hash，那次改写又会派发
+// hashchange，处理器如果无条件再切一次，同一个视图就被加载两遍——后一次的
+// loadDashboardData 会 abort 前一次，首次打开不带 hash 的地址必然撞上。
+// hashchange 靠这个值区分"用户真的换页了"和"我们刚补的 hash"。
+let activeViewName = null;
+
 function switchView(name) {
+  activeViewName = name;
   for (const view of views) {
     view.hidden = view.dataset.view !== name;
   }

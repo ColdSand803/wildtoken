@@ -148,7 +148,20 @@ test("renderProbeBadgeMarkup renders all required badge states correctly", () =>
 
 test("renderProbeSummary renders running state and stats accurately", () => {
   const source = read("static/js/upstreams.js");
-  const summaryEl = { hidden: true, innerHTML: "" };
+  const css = read("static/css/enhancements.css");
+  /* 分子代表什么在视觉上说不全，渲染时补一句 title；桩件把它记下来，顺带证明
+     没数据时那句会被摘掉，不会留着上一轮的比值。 */
+  const summaryEl = {
+    hidden: true,
+    innerHTML: "",
+    title: null,
+    setAttribute(name, value) {
+      if (name === "title") this.title = value;
+    },
+    removeAttribute(name) {
+      if (name === "title") this.title = null;
+    },
+  };
   const batchProbeBtn = { disabled: false, textContent: "一键测活" };
 
   const context = vm.createContext({
@@ -165,7 +178,11 @@ test("renderProbeSummary renders running state and stats accurately", () => {
   vm.runInContext("renderProbeSummary({ running: true })", context);
   assert.equal(summaryEl.hidden, false);
   assert.ok(summaryEl.innerHTML.includes("probe-summary-dot is-running"));
-  assert.ok(summaryEl.innerHTML.includes("正在批量测活渠道"));
+  assert.ok(summaryEl.innerHTML.includes("测活中"), "标签换成进行时");
+  // 这句也在 title 里，格面留给标签和数字这两行。
+  assert.equal(summaryEl.title, "正在批量测活渠道...");
+  // 数字位先占个破折号，测活跑起来时整条的高度不该跳一下。
+  assert.ok(summaryEl.innerHTML.includes('class="summary-strip-value is-pending">—<'));
   assert.equal(batchProbeBtn.disabled, true);
   assert.equal(batchProbeBtn.textContent, "测活中...");
 
@@ -182,18 +199,69 @@ test("renderProbeSummary renders running state and stats accurately", () => {
   context.probeData = data;
   vm.runInContext("renderProbeSummary(probeData)", context);
   assert.equal(summaryEl.hidden, false);
-  assert.ok(summaryEl.innerHTML.includes("最近测活 (5 渠道)"));
-  assert.ok(summaryEl.innerHTML.includes("成功 <strong>3</strong>"));
-  assert.ok(summaryEl.innerHTML.includes("失败 <strong>1</strong>"));
-  assert.ok(summaryEl.innerHTML.includes("跳过 <strong>1</strong>"));
-  assert.ok(summaryEl.innerHTML.includes("[部分超时]"));
-  assert.ok(summaryEl.innerHTML.includes("2026-08-18 10:15:00"));
+
+  /* 和左边四个数字格同一套排版：标签在上（11px 降灰）、数字在下（26px），
+     数字本身是"成功/总数"的比值，读法跟看板那张"启用渠道"卡一致。 */
+  assert.ok(summaryEl.innerHTML.includes('<span class="summary-strip-label">'), "标签用公共类");
+  assert.ok(summaryEl.innerHTML.includes("最近测活"));
+  assert.ok(
+    summaryEl.innerHTML.includes('<strong class="summary-strip-value">3<span class="summary-strip-denominator">/5</span></strong>'),
+    "成功数是分子，渠道总数是分母且压小降灰",
+  );
+  assert.ok(
+    summaryEl.innerHTML.indexOf("summary-strip-label") < summaryEl.innerHTML.indexOf("summary-strip-value"),
+    "标签排在数字上方",
+  );
+
+  /* 格面只有标签和数字这两行，失败/跳过/超时和时间戳全在 title 里：多一行说明就
+     多一行高度，而另外四格没有那一行，多出来的高度会变成它们数字底下的一块白。 */
+  assert.ok(!summaryEl.innerHTML.includes("summary-hint"), "格面不留说明行");
+  assert.ok(!/失败|跳过|超时|2026-08-18/.test(summaryEl.innerHTML), "细节不摊在格面上");
+  assert.match(summaryEl.title, /^最近测活：成功 3 \/ 共 5 个渠道$/m, "第一行说清分子分母");
+  assert.match(summaryEl.title, /失败 1/);
+  assert.match(summaryEl.title, /跳过 1/);
+  assert.match(summaryEl.title, /部分渠道测活超时/);
+  assert.match(summaryEl.title, /测于 2026-08-18 10:15:00/);
+
+  /* 说明退到 title 之后，这一轮好不好改由圆点带色：有失败就是 danger 色，
+     只是超时不完整走 warning，都没有才留默认的绿。 */
+  assert.ok(summaryEl.innerHTML.includes("probe-summary-dot is-failed"), "有失败时圆点转警示色");
+  assert.match(css, /\.probe-summary-dot\.is-failed\s*\{[^}]*background:\s*var\(--danger\);/);
+  assert.match(css, /\.probe-summary-dot\.is-partial\s*\{[^}]*background:\s*var\(--warning\);/);
   assert.equal(batchProbeBtn.disabled, false);
   assert.equal(batchProbeBtn.textContent, "一键测活");
 
   // 3. Null / empty state hides summary
   vm.runInContext("renderProbeSummary(null)", context);
   assert.equal(summaryEl.hidden, true);
+  assert.equal(summaryEl.title, null, "收起时把 title 一起摘掉，别留着上一轮的比值");
+});
+
+test("测活那格挂的是数字条的公共排版类，不是自己另起一套", () => {
+  const css = read("static/css/enhancements.css");
+  const baseCss = read("static/css/base.css");
+
+  /* 标签、数字、分母三个类由 base.css 统一定义，测活那格和四个数字格都挂它们，
+     五格才长得一模一样——这也是这几条排版规则不再写成 .summary-strip 后代选择器
+     的原因：显式类压根漏不出去。 */
+  assert.match(baseCss, /\.summary-strip-label\s*\{[^}]*font-size:\s*var\(--text-xs\);/);
+  assert.match(baseCss, /\.summary-strip-value\s*\{[^}]*font-size:\s*var\(--text-3xl\);/);
+  assert.match(baseCss, /\.summary-strip-denominator\s*\{[^}]*color:\s*var\(--muted\);/);
+
+  // 状态圆点原来靠 flex 行的 gap 拉开，现在它只是标签行里的一个 inline-block。
+  const dot = /\.probe-summary-dot\s*\{([^}]*)\}/.exec(css);
+  assert.ok(dot, "状态圆点有样式");
+  assert.match(dot[1], /margin-right:/);
+  assert.match(dot[1], /vertical-align:/);
+  assert.match(dot[1], /aspect-ratio:\s*1;/, "别再被拉成椭圆");
+
+  /* 格面不再有说明行，对应的一整套样式不该留着——留着就是在邀请下一个人把细节
+     再摊回格面上，而那正是数字底下那块白的来源。 */
+  assert.ok(!css.includes(".summary-hint"), "说明行样式已清掉");
+  assert.ok(!css.includes(".probe-stat-"), "说明行里那几个小类跟着一起清掉");
+
+  // 那个横排 flex 行已经没有了，对应的样式不该留着。
+  assert.ok(!css.includes(".probe-summary-status"), "横排布局的残留样式已清掉");
 });
 
 test("fetchLatestProbeResults uses GET only and populates probe results map", async () => {

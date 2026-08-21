@@ -417,6 +417,14 @@ html[data-theme] .dashboard-date-field input[type="date"],
   box-shadow: 0 0 12px var(--danger-soft);
 }
 
+/* overflow:hidden + ellipsis 是横向的活：数字太长时用省略号收住，别把卡片撑破。
+   但它同时也在纵向裁——而 line-height 收得比字形盒还矮的话，裁掉的就是数字自己的
+   上下沿。1.15 在这个字号（clamp 到 ~35px）下算出约 40.8px 的行盒，等宽字的字形盒
+   是 42px，于是上边被切掉 1px：数字顶部平掉一条，看着就像卡片上边被裁了。
+
+   各主题的 --font-mono 不是同一套字体（base 是 Fira Code，gojo/endfield 是
+   JetBrains Mono…），字形盒高度本来就有差，所以这里要留出真的余量而不是刚好压线。
+   1.3 在 35px 下是 46px，比 42px 的字形盒宽出 4px。 */
 .kpi-value,
 .dashboard-kpi-value {
   color: var(--text);
@@ -425,7 +433,7 @@ html[data-theme] .dashboard-date-field input[type="date"],
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   letter-spacing: -0.03em;
-  line-height: 1.15;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -481,6 +489,19 @@ html[data-theme] .dashboard-date-field input[type="date"],
 /* 说明文字在 title 里，给个可悬浮的暗示。 */
 .kpi-flip .dashboard-kpi[title] {
   cursor: help;
+}
+
+/* Tokens 卡主数字后面那句中文量级换算（≈2.02亿）。压小降灰的读法和分母同一套：
+   主数字仍是 k/M，这一串只是替人把刻度换到万/亿上，不该跟主数字抢视线。
+   font-size 用 em，跟着 .dashboard-kpi-value 的 clamp 一起缩放。 */
+.kpi-approx {
+  color: var(--muted);
+  font-size: 0.52em;
+  font-weight: 600;
+  letter-spacing: 0;
+  margin-left: 5px;
+  /* 换算是次要信息，卡片挤窄时先让它断，主数字不动。 */
+  white-space: nowrap;
 }
 
 /* 启用渠道的分母：压小、降灰，突出启用数。 */
@@ -671,6 +692,9 @@ html[data-theme] .dashboard-date-field input[type="date"],
   letter-spacing: 0.03em;
 }
 
+/* 错误时间分布保留格子感：这里每一格是一个时间桶，桶与桶本来就该分开数，缝是有
+   意义的（数得出"连着几个桶在报错"）。这是对公共分段条 gap:0 默认的显式反选——
+   状态分布那条是比例条，段间的缝什么也不表示，所以那边不留。 */
 .status-error-strip {
   display: flex;
   gap: 2px;
