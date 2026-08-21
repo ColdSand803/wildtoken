@@ -145,6 +145,16 @@ func ListEnabledUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamRow
 		"SELECT "+upstreamColumns+" FROM upstreams WHERE enabled = 1 ORDER BY priority DESC, id ASC")
 }
 
+// ListUpstreamRows returns every channel as a raw row, enabled or not.
+//
+// Unlike ListUpstreams this keeps the stored API key, which an admin-side probe
+// needs in order to authenticate; unlike ListEnabledUpstreams it includes
+// disabled channels, so an operator can test one before turning it on.
+func ListUpstreamRows(ctx context.Context, db *sql.DB) ([]models.UpstreamRow, error) {
+	return queryUpstreamRows(ctx, db,
+		"SELECT "+upstreamColumns+" FROM upstreams ORDER BY priority DESC, id ASC")
+}
+
 // GetUpstream returns ok=false when no row carries the id.
 func GetUpstream(ctx context.Context, db Queryer, id int64) (models.UpstreamRow, bool, error) {
 	row := db.QueryRowContext(ctx, "SELECT "+upstreamColumns+" FROM upstreams WHERE id = ?", id)

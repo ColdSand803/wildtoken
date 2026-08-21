@@ -206,6 +206,41 @@
   padding: 6px 10px;
 }
 
+.dashboard-refresh-control {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.dashboard-time-filter select.dashboard-refresh-select,
+.dashboard-refresh-select {
+  background: var(--panel-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--muted-strong, var(--text-secondary));
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 500;
+  height: 36px;
+  line-height: 1;
+  max-height: 36px;
+  min-height: 36px;
+  min-width: 96px;
+  padding: 0 10px;
+  transition: border-color var(--transition), color var(--transition), background-color var(--transition);
+}
+
+.dashboard-time-filter select.dashboard-refresh-select:hover,
+.dashboard-time-filter select.dashboard-refresh-select:focus-visible,
+.dashboard-refresh-select:hover,
+.dashboard-refresh-select:focus-visible {
+  border-color: var(--line-strong, var(--accent));
+  color: var(--text);
+  outline: none;
+}
+
+
 .dashboard-custom-range-inner {
   align-items: center;
   display: inline-flex;
@@ -382,6 +417,14 @@ html[data-theme] .dashboard-date-field input[type="date"],
   box-shadow: 0 0 12px var(--danger-soft);
 }
 
+/* overflow:hidden + ellipsis 是横向的活：数字太长时用省略号收住，别把卡片撑破。
+   但它同时也在纵向裁——而 line-height 收得比字形盒还矮的话，裁掉的就是数字自己的
+   上下沿。1.15 在这个字号（clamp 到 ~35px）下算出约 40.8px 的行盒，等宽字的字形盒
+   是 42px，于是上边被切掉 1px：数字顶部平掉一条，看着就像卡片上边被裁了。
+
+   各主题的 --font-mono 不是同一套字体（base 是 Fira Code，gojo/endfield 是
+   JetBrains Mono…），字形盒高度本来就有差，所以这里要留出真的余量而不是刚好压线。
+   1.3 在 35px 下是 46px，比 42px 的字形盒宽出 4px。 */
 .kpi-value,
 .dashboard-kpi-value {
   color: var(--text);
@@ -390,7 +433,7 @@ html[data-theme] .dashboard-date-field input[type="date"],
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   letter-spacing: -0.03em;
-  line-height: 1.15;
+  line-height: 1.3;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -446,6 +489,19 @@ html[data-theme] .dashboard-date-field input[type="date"],
 /* 说明文字在 title 里，给个可悬浮的暗示。 */
 .kpi-flip .dashboard-kpi[title] {
   cursor: help;
+}
+
+/* Tokens 卡主数字后面那句中文量级换算（≈2.02亿）。压小降灰的读法和分母同一套：
+   主数字仍是 k/M，这一串只是替人把刻度换到万/亿上，不该跟主数字抢视线。
+   font-size 用 em，跟着 .dashboard-kpi-value 的 clamp 一起缩放。 */
+.kpi-approx {
+  color: var(--muted);
+  font-size: 0.52em;
+  font-weight: 600;
+  letter-spacing: 0;
+  margin-left: 5px;
+  /* 换算是次要信息，卡片挤窄时先让它断，主数字不动。 */
+  white-space: nowrap;
 }
 
 /* 启用渠道的分母：压小、降灰，突出启用数。 */
@@ -547,6 +603,40 @@ html[data-theme] .dashboard-date-field input[type="date"],
   min-width: 0;
 }
 
+/* 悬浮/聚焦的观感统一由 components.css 的 .wt-segbar-seg.is-hoverable 提供，
+   这里只留下钻语义（指针形状）。两边都写 hover 的话，本文件加载在后面、
+   同优先级会盖掉公共组件的 transform，看着就像没动效。 */
+.ops-bar-seg.is-clickable {
+  cursor: pointer;
+}
+
+.status-legend-item.is-clickable {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  transition: background-color var(--transition), border-color var(--transition);
+}
+
+.status-legend-item.is-clickable:hover {
+  background-color: var(--panel-elevated);
+  border-color: var(--line-soft);
+}
+
+.status-legend-item.is-clickable:focus-visible {
+  background-color: var(--panel-elevated);
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
+/* 同上：动效在公共组件里，这里只留指针形状。 */
+.status-error-cell.is-clickable {
+  cursor: pointer;
+}
+
+
 /* 复用 ops-bar-seg 的四色，几何在这里压回小圆点（enhancements.css 在本文件
    之后加载，同名属性要靠更高优先级取胜）。 */
 .status-legend .status-legend-dot {
@@ -602,6 +692,9 @@ html[data-theme] .dashboard-date-field input[type="date"],
   letter-spacing: 0.03em;
 }
 
+/* 错误时间分布保留格子感：这里每一格是一个时间桶，桶与桶本来就该分开数，缝是有
+   意义的（数得出"连着几个桶在报错"）。这是对公共分段条 gap:0 默认的显式反选——
+   状态分布那条是比例条，段间的缝什么也不表示，所以那边不留。 */
 .status-error-strip {
   display: flex;
   gap: 2px;
@@ -933,37 +1026,8 @@ html[data-theme] .dashboard-date-field input[type="date"],
   opacity: 0.18;
 }
 
-.dashboard-chart-tooltip {
-  background: var(--panel-elevated);
-  border: 1px solid var(--line-strong, var(--line));
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-sm);
-  color: var(--text);
-  display: grid;
-  gap: 3px;
-  left: 0;
-  margin: 0;
-  max-width: min(260px, calc(100% - 24px));
-  padding: 7px 9px;
-  pointer-events: none;
-  position: absolute;
-  top: 0;
-  z-index: 2;
-}
-
-.dashboard-chart-tooltip[hidden] {
-  display: none;
-}
-
-.dashboard-chart-tooltip strong {
-  font-size: var(--text-xs);
-}
-
-.dashboard-chart-tooltip span {
-  color: var(--muted);
-  font-size: var(--text-xs);
-  line-height: 1.4;
-}
+/* .dashboard-chart-tooltip 的样式已并入 static/css/components.css 的 .wt-hovercard：
+   延迟趋势的这个弹框现在是全站共用的那一个，只留一份定义。 */
 
 /* 延迟图的曲线要贴着摘要的分隔线：去掉 .dashboard-chart 默认的 10px 纵向
    间距（只影响这一个图表，状态分布图保持原样）。 */
@@ -1028,6 +1092,33 @@ html[data-theme] .dashboard-date-field input[type="date"],
   gap: 5px;
   min-width: 0;
 }
+
+.dashboard-rank-row.is-clickable {
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  padding: 4px 6px;
+  margin: 0 -6px;
+  transition: background-color var(--transition), border-color var(--transition), transform var(--transition);
+}
+
+.dashboard-rank-row.is-clickable:hover {
+  background-color: var(--panel-elevated);
+  border-color: var(--line-soft);
+}
+
+.dashboard-rank-row.is-clickable:active {
+  background-color: var(--panel-muted);
+  transform: scale(0.995);
+}
+
+.dashboard-rank-row.is-clickable:focus-visible {
+  background-color: var(--panel-elevated);
+  border-color: var(--accent);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 1px;
+}
+
 
 .dashboard-rank-head,
 .dashboard-rank-main {
@@ -1148,6 +1239,21 @@ html[data-density="compact"] .dashboard-grid {
   gap: 8px;
   padding-top: 0;
 }
+
+html[data-density="compact"] .dashboard-time-filter select.dashboard-refresh-select,
+html[data-density="compact"] .dashboard-refresh-select {
+  height: 30px;
+  max-height: 30px;
+  min-height: 30px;
+}
+
+
+@media (min-width: 1400px) {
+  .dashboard-rank-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 
 @media (max-width: 1100px) {
   .dashboard-kpis,
@@ -1441,5 +1547,14 @@ html[data-theme] button.wt-seg-btn.is-active:focus-visible {
   .dashboard-kpi:hover {
     transform: none;
   }
+
+  .dashboard-rank-row.is-clickable,
+  .ops-bar-seg.is-clickable,
+  .status-legend-item.is-clickable,
+  .status-error-cell.is-clickable {
+    transform: none;
+    transition: none;
+  }
+
 }
 

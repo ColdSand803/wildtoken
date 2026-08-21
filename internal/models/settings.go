@@ -142,6 +142,26 @@ type RuntimeMetricsOut struct {
 	Cleanup                   RuntimeCleanupMetricsOut `json:"cleanup"`
 }
 
+// MetricsEndpointStatusOut describes the Prometheus scrape endpoint's access
+// policy for the console.
+//
+// The configured token is deliberately absent. The console would have no use for
+// it — a scraper holds it, not a browser — and echoing a credential into a page
+// that is open in a tab all day is how it ends up in a screenshot. Whether one is
+// required is the part an operator needs to see.
+type MetricsEndpointStatusOut struct {
+	Enabled bool `json:"enabled"`
+	// Path is fixed rather than configurable, reported so the console does not
+	// hardcode a second copy of it.
+	Path          string `json:"path"`
+	TokenRequired bool   `json:"token_required"`
+	// ConfiguredByFile records that these values come from the startup
+	// configuration, not the runtime settings table. Always true today; it is what
+	// tells the console to render the card read-only instead of offering a switch
+	// that could not save.
+	ConfiguredByFile bool `json:"configured_by_file"`
+}
+
 type SystemInfoOut struct {
 	Service                       string                    `json:"service"`
 	Version                       string                    `json:"version"`
@@ -157,6 +177,7 @@ type SystemInfoOut struct {
 	RecentOneMinuteLogCount       int64                     `json:"recent_one_minute_log_count"`
 	RuntimeLogSettings            RuntimeLogSettingsSummary `json:"runtime_log_settings"`
 	RuntimeMetrics                RuntimeMetricsOut         `json:"runtime_metrics"`
+	MetricsEndpoint               MetricsEndpointStatusOut  `json:"metrics_endpoint"`
 }
 
 const (
@@ -171,6 +192,37 @@ const (
 	DefaultAutoWeightRecoveryIntervalSeconds int64 = 60
 )
 
+// Load-balancing strategies decide how routing picks within one priority tier.
+//
+// The strategy is global rather than per-channel: it compares channels against
+// each other, so a per-channel setting would have no defined meaning when two
+// candidates disagreed about which comparison to run.
+const (
+	// LoadBalanceWeighted is weighted random by effective weight — configured
+	// weight scaled by the health score. It is the default because it is what
+	// every existing database already behaves as.
+	LoadBalanceWeighted = "weighted"
+	// LoadBalanceLeastLatency prefers the channels answering fastest, still
+	// within the highest available priority tier and still weighted-random among
+	// those that tie. It never picks purely by latency: that would hand every
+	// request to whichever channel is momentarily ahead.
+	LoadBalanceLeastLatency = "least_latency"
+)
+
+// DefaultLoadBalanceStrategy keeps an upgraded database routing exactly as it did.
+const DefaultLoadBalanceStrategy = LoadBalanceWeighted
+
+// ValidLoadBalanceStrategy reports whether a stored or submitted value names a
+// strategy routing knows how to run.
+func ValidLoadBalanceStrategy(value string) bool {
+	switch value {
+	case LoadBalanceWeighted, LoadBalanceLeastLatency:
+		return true
+	default:
+		return false
+	}
+}
+
 // RuntimeSettings is the operator-editable policy stored in SQLite.
 type RuntimeSettings struct {
 	LogBodyKeepCount                  int64  `json:"log_body_keep_count"`
@@ -184,8 +236,11 @@ type RuntimeSettings struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
-	Revision                          int64  `json:"revision"`
-	UpdatedAt                         string `json:"updated_at"`
+	// LoadBalanceStrategy selects how routing picks inside a priority tier. See
+	// the LoadBalance* constants.
+	LoadBalanceStrategy string `json:"load_balance_strategy"`
+	Revision            int64  `json:"revision"`
+	UpdatedAt           string `json:"updated_at"`
 	// DatabaseOverride records that these values came from SQLite rather than
 	// the startup defaults. It is not part of the stored row.
 	DatabaseOverride bool `json:"-"`
@@ -205,6 +260,7 @@ func DefaultRuntimeSettings() RuntimeSettings {
 		AutoWeightRecoveryIntervalSeconds: DefaultAutoWeightRecoveryIntervalSeconds,
 		ProxyEnabled:                      false,
 		ProxyURL:                          "",
+		LoadBalanceStrategy:               DefaultLoadBalanceStrategy,
 		Revision:                          0,
 		UpdatedAt:                         "",
 		DatabaseOverride:                  false,
@@ -233,6 +289,9 @@ func (s *RuntimeSettings) Validate() error {
 	}
 	if err := validateProxyURL(s.ProxyURL, s.ProxyEnabled); err != nil {
 		return err
+	}
+	if !ValidLoadBalanceStrategy(s.LoadBalanceStrategy) {
+		return ErrString("load_balance_strategy must be weighted or least_latency")
 	}
 	return nil
 }
@@ -277,7 +336,25 @@ type RuntimeSettingsIn struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
-	Revision                          int64  `json:"revision"`
+	// LoadBalanceStrategy is optional in the request body: an empty value resolves
+	// to the default rather than failing validation, so a console built before
+	// this field existed can still save the other settings instead of having
+	// every write refused.
+	//
+	// This endpoint replaces the whole settings row, as it already did for every
+	// other field, so a caller that omits the strategy resets it to weighted. A
+	// console editing one field must read the current settings and send them back
+	// in full.
+	LoadBalanceStrategy string `json:"load_balance_strategy"`
+	Revision            int64  `json:"revision"`
+}
+
+// NormalizedLoadBalanceStrategy resolves an absent strategy to the default.
+func (in *RuntimeSettingsIn) NormalizedLoadBalanceStrategy() string {
+	if strings.TrimSpace(in.LoadBalanceStrategy) == "" {
+		return DefaultLoadBalanceStrategy
+	}
+	return strings.TrimSpace(in.LoadBalanceStrategy)
 }
 
 func (in *RuntimeSettingsIn) Validate() error {
@@ -296,6 +373,7 @@ func (in *RuntimeSettingsIn) Validate() error {
 	candidate.AutoWeightRecoveryIntervalSeconds = in.AutoWeightRecoveryIntervalSeconds
 	candidate.ProxyEnabled = in.ProxyEnabled
 	candidate.ProxyURL = in.ProxyURL
+	candidate.LoadBalanceStrategy = in.NormalizedLoadBalanceStrategy()
 	return candidate.Validate()
 }
 
@@ -311,6 +389,7 @@ type RuntimeSettingsOut struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
+	LoadBalanceStrategy               string `json:"load_balance_strategy"`
 	Revision                          int64  `json:"revision"`
 	UpdatedAt                         string `json:"updated_at"`
 	DatabaseOverride                  bool   `json:"database_override"`
@@ -329,6 +408,7 @@ func NewRuntimeSettingsOut(s *RuntimeSettings) RuntimeSettingsOut {
 		AutoWeightRecoveryIntervalSeconds: s.AutoWeightRecoveryIntervalSeconds,
 		ProxyEnabled:                      s.ProxyEnabled,
 		ProxyURL:                          s.ProxyURL,
+		LoadBalanceStrategy:               s.LoadBalanceStrategy,
 		Revision:                          s.Revision,
 		UpdatedAt:                         s.UpdatedAt,
 		DatabaseOverride:                  s.DatabaseOverride,

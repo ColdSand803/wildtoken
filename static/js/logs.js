@@ -1,5 +1,28 @@
 // Request log list, performance formatting, snapshots, and detail dialog.
 const LOG_SENSITIVE_MASK = "******";
+const FAILURE_STAGE_LABELS = {
+  first_event: "首事件前失败",
+  stream: "传输中断",
+  client_cancelled: "客户端取消",
+  connect: "连接建立失败",
+  upstream_status: "上游状态异常",
+  request_build: "请求构建失败",
+  response_body: "响应体读取失败",
+  no_route: "未找到路由",
+  rate_limited: "渠道限流",
+  gateway: "网关错误",
+};
+
+function formatFailureStage(stage) {
+  if (!stage) return "";
+  return FAILURE_STAGE_LABELS[stage] || String(stage);
+}
+
+function formatFailureRetryable(retryable) {
+  if (retryable === null || retryable === undefined) return "";
+  return retryable ? "可重试错误" : "不可重试错误";
+}
+
 const LOG_RATE_ANIMATION_MS = 520;
 const LOG_STREAM_PATH = "/api/admin/logs/stream";
 const LOG_STREAM_RELOAD_DEBOUNCE_MS = 240;
@@ -76,16 +99,24 @@ function formatLogChannelStack(log) {
   const name = (log?.upstream_name || "").trim();
   const nameHidden = logSensitiveHidden && Boolean(name);
   const displayName = nameHidden ? LOG_SENSITIVE_MASK : name;
+  const attemptIndex = Number(log?.attempt_index) || 0;
+  const attemptBadge = attemptIndex > 0
+    ? `<span class="log-row-attempt-badge" title="重试第 ${attemptIndex} 次 (关联请求: ${escapeHtml(log?.request_uid || "-")})">重试 #${attemptIndex}</span>`
+    : "";
+
   if (id === null || id === undefined) {
     if (name) {
       return `
         <div class="channel-stack">
           <strong${nameHidden ? " class=\"log-sensitive-value\"" : ` title="${escapeHtml(name)}"`}>${escapeHtml(nameHidden ? LOG_SENSITIVE_MASK : name)}</strong>
           <span class="muted">无 ID</span>
+          ${attemptBadge}
         </div>
       `;
     }
-    return "<span class=\"muted\">无（未匹配到渠道）</span>";
+    return attemptBadge
+      ? `<div class="channel-stack"><span class="muted">无（未匹配到渠道）</span>${attemptBadge}</div>`
+      : "<span class=\"muted\">无（未匹配到渠道）</span>";
   }
   const title = name ? `#${id} · ${displayName}` : `#${id}`;
   const nameLine = name
@@ -95,6 +126,7 @@ function formatLogChannelStack(log) {
     <div class="channel-stack">
       <strong title="${escapeHtml(title)}">#${id}</strong>
       ${nameLine}
+      ${attemptBadge}
     </div>
   `;
 }
@@ -205,6 +237,7 @@ function formatTokens(log) {
   const rateStyle = rateMatch
     ? ` style="--cache-rate:${Math.min(100, Math.max(0, Number(rateMatch[1])))}"`
     : "";
+
   return `
     <span class="token-triple" aria-label="输入 输出 总计 缓存命中 缓存率 思考 tokens">
       ${metrics.map(([label, value]) => `
@@ -289,9 +322,68 @@ function firstTokenTone(ms) {
 }
 
 function formatFirstTokenTime(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) {
+    return `<span class="first-token-time neutral" title="首字耗时不可用">不可用</span>`;
+  }
   const label = formatSeconds(ms);
   const tone = firstTokenTone(ms);
   return `<span class="first-token-time ${tone}" title="首字耗时 ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+}
+
+function formatGatewayPrepTime(ms, attemptIndex) {
+  const isRetry = attemptIndex !== null && attemptIndex !== undefined && Number(attemptIndex) > 0;
+  const titlePrefix = isRetry ? "网关准备（含前序重试与退避）" : "网关准备";
+  if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) {
+    return `<span class="first-token-time neutral" title="${escapeHtml(titlePrefix)}耗时不可用">不可用</span>`;
+  }
+  const label = formatSeconds(ms);
+  return `<span class="first-token-time neutral" title="${escapeHtml(titlePrefix)} ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+}
+
+function formatHeadersArrivalTime(ms) {
+  if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) {
+    return `<span class="first-token-time neutral" title="连接与响应头耗时不可用">不可用</span>`;
+  }
+  const label = formatSeconds(ms);
+  return `<span class="first-token-time neutral" title="连接与响应头 ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+}
+
+/* 耗时四段：原来是一行 `A 0.0s · B 5.4s · C 2.8s · ...` 的长句，而
+   .log-detail-meta-card small 是 nowrap + ellipsis，三列网格里必然被截成
+   "…总耗…"。改成会换行的小块流，每块自带一个和下面瀑布同色的色点，
+   顺带把图例和数值合成一处。 */
+function formatLogTimingChips(chips) {
+  const body = chips.filter(Boolean).map((chip) => {
+    const swatch = chip.segClass
+      ? `<span class="log-timing-chip-dot ${chip.segClass}" aria-hidden="true"></span>`
+      : "";
+    return `<span class="log-timing-chip"${chip.title ? ` title="${escapeHtml(chip.title)}"` : ""}>
+      ${swatch}<span class="log-timing-chip-label">${escapeHtml(chip.label)}</span>${chip.valueMarkup}
+    </span>`;
+  }).join("");
+  return body ? `<div class="log-timing-chips">${body}</div>` : "";
+}
+
+/* 瀑布条。段的描述由调用方给（每段：宽度百分比字符串、皮肤 class、悬浮卡内容），
+   几何/悬浮/键盘可达一律走 wtSegmentBar（static/js/components.js），
+   和看板的状态分布、错误时间分布是同一套。 */
+function formatLogTimingBar(segments, title) {
+  const usable = segments.filter((seg) => seg && Number(seg.width) > 0);
+  if (!usable.length) return "";
+  return wtSegmentBar({
+    trackClass: "log-detail-timing-bar",
+    title,
+    ariaLabel: title,
+    segments: usable.map((seg) => ({
+      className: `timing-seg ${seg.segClass}`,
+      width: seg.width,
+      interactive: true,
+      tip: { title: seg.label, lines: [seg.value, `占总耗时 ${seg.width}%`] },
+      title: seg.title,
+      ariaLabel: `${seg.label} ${seg.value}`,
+      role: "img",
+    })),
+  });
 }
 
 function outputTokensPerSecond(log) {
@@ -565,17 +657,39 @@ function normalizeLogListRow(log) {
 
 function logMatchesStatusFilter(log, status) {
   if (!status) return true;
-  const statusCode = Number(log.status_code);
-  if (status === "none") {
-    return log.status_code === null || log.status_code === undefined;
+  const raw = log?.status_code;
+  if (raw === null || raw === undefined || raw === "" || !Number.isFinite(Number(raw))) {
+    return status === "none" || status === "error";
   }
-  if (!Number.isFinite(statusCode)) {
-    return false;
-  }
+  const statusCode = Number(raw);
+  if (status === "none") return false;
   if (status === "2xx") return statusCode >= 200 && statusCode < 300;
   if (status === "4xx") return statusCode >= 400 && statusCode < 500;
   if (status === "5xx") return statusCode >= 500 && statusCode < 600;
+  if (status === "other") return (statusCode >= 100 && statusCode < 200) || (statusCode >= 300 && statusCode < 400);
+  if (status === "error") return statusCode < 200 || statusCode >= 300;
   return true;
+}
+
+function parseUtcDateMs(val) {
+  if (!val || typeof val !== "string") return NaN;
+  const str = val.trim();
+  if (!str) return NaN;
+  if (str.includes("T") || str.endsWith("Z") || /[+-]\d{2}:\d{2}$/.test(str)) {
+    return Date.parse(str);
+  }
+  return Date.parse(str.replace(" ", "T") + "Z");
+}
+
+function logMatchesTimeRange(createdAt, startIso, endIso) {
+  if (!createdAt || !startIso || !endIso) return true;
+  const logMs = parseUtcDateMs(createdAt);
+  const startMs = parseUtcDateMs(startIso);
+  const endMs = parseUtcDateMs(endIso);
+  if (!Number.isFinite(logMs) || !Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+    return true;
+  }
+  return logMs >= startMs && logMs < endMs;
 }
 
 function logMatchesSearchFilter(log, search) {
@@ -599,19 +713,51 @@ function logMatchesSearchFilter(log, search) {
 }
 
 function logMatchesCurrentFilters(log) {
-  const upstreamId = logUpstreamFilter.value;
+  if (!log || typeof log !== "object") return false;
+
+  const upstreamId = typeof logUpstreamFilter !== "undefined" && logUpstreamFilter ? logUpstreamFilter.value : "";
   if (upstreamId && String(log.upstream_id ?? "") !== upstreamId) {
     return false;
   }
-  const clientType = logClientFilter?.value || "";
+  const currentTokenId = typeof getLogDownstreamTokenId === "function"
+    ? getLogDownstreamTokenId()
+    : (typeof logDownstreamTokenId !== "undefined" ? logDownstreamTokenId : null);
+  if (currentTokenId !== null && currentTokenId !== undefined) {
+    if (log.downstream_token_id === null || log.downstream_token_id === undefined || Number(log.downstream_token_id) !== Number(currentTokenId)) {
+      return false;
+    }
+  }
+  const clientType = typeof logClientFilter !== "undefined" && logClientFilter ? logClientFilter.value : "";
   if (clientType && String(log.client_type || "unknown") !== clientType) {
     return false;
   }
-  const status = logStatusFilter?.value || "";
+  const status = typeof logStatusFilter !== "undefined" && logStatusFilter ? logStatusFilter.value : "";
   if (!logMatchesStatusFilter(log, status)) {
     return false;
   }
-  return logMatchesSearchFilter(log, logSearchInput?.value || "");
+  const streamVal = typeof logStreamFilter !== "undefined" && logStreamFilter ? logStreamFilter.value : "";
+  if (streamVal === "true" || streamVal === "false") {
+    const isStream = Boolean(log.stream);
+    if (isStream !== (streamVal === "true")) {
+      return false;
+    }
+  }
+  const minDurationVal = typeof logMinDurationInput !== "undefined" && logMinDurationInput ? logMinDurationInput.value.trim() : "";
+  if (minDurationVal !== "") {
+    const minMs = Number(minDurationVal);
+    if (Number.isFinite(minMs) && minMs >= 0) {
+      if (log.duration_ms === null || log.duration_ms === undefined || Number(log.duration_ms) < minMs) {
+        return false;
+      }
+    }
+  }
+  const timeRange = typeof getLogTimeRange === "function" ? getLogTimeRange() : null;
+  if (timeRange && timeRange.start && timeRange.end) {
+    if (!logMatchesTimeRange(log.created_at, timeRange.start, timeRange.end)) {
+      return false;
+    }
+  }
+  return logMatchesSearchFilter(log, typeof logSearchInput !== "undefined" && logSearchInput ? logSearchInput.value : "");
 }
 
 function normalizeLogStreamPayload(data) {
@@ -963,7 +1109,35 @@ async function openLogStream(controller) {
     if (!token) return;
     const headers = new Headers({ Accept: "text/event-stream" });
     headers.set("x-admin-token", token);
-    const response = await fetch(LOG_STREAM_PATH, {
+
+    const streamParams = new URLSearchParams();
+    const upstreamId = typeof logUpstreamFilter !== "undefined" && logUpstreamFilter ? logUpstreamFilter.value : "";
+    const currentTokenId = typeof getLogDownstreamTokenId === "function"
+      ? getLogDownstreamTokenId()
+      : (typeof logDownstreamTokenId !== "undefined" ? logDownstreamTokenId : null);
+    const search = typeof logSearchInput !== "undefined" && logSearchInput ? (logSearchInput.value || "").trim() : "";
+    const status = typeof logStatusFilter !== "undefined" && logStatusFilter ? logStatusFilter.value : "";
+    const clientType = typeof logClientFilter !== "undefined" && logClientFilter ? logClientFilter.value : "";
+    const streamVal = typeof logStreamFilter !== "undefined" && logStreamFilter ? logStreamFilter.value : "";
+    const minDurationVal = typeof logMinDurationInput !== "undefined" && logMinDurationInput ? logMinDurationInput.value.trim() : "";
+    const { start: rangeStart, end: rangeEnd } = typeof getLogTimeRange === "function" ? getLogTimeRange() : { start: "", end: "" };
+
+    if (upstreamId) streamParams.set("upstream_id", upstreamId);
+    if (currentTokenId !== null && currentTokenId !== undefined) streamParams.set("downstream_token_id", String(currentTokenId));
+    if (search) streamParams.set("search", search);
+    if (status) streamParams.set("status", status);
+    if (clientType) streamParams.set("client_type", clientType);
+    if (streamVal === "true" || streamVal === "false") streamParams.set("stream", streamVal);
+    if (minDurationVal !== "" && /^\d+$/.test(minDurationVal)) streamParams.set("min_duration_ms", minDurationVal);
+    if (rangeStart && rangeEnd) {
+      streamParams.set("start", rangeStart);
+      streamParams.set("end", rangeEnd);
+    }
+
+    const streamQuery = streamParams.toString();
+    const streamPath = streamQuery ? `${LOG_STREAM_PATH}?${streamQuery}` : LOG_STREAM_PATH;
+
+    const response = await fetch(streamPath, {
       cache: "no-store",
       headers,
       signal: controller.signal,
@@ -1042,6 +1216,15 @@ function stopLogStream() {
   updateLiveIndicator();
 }
 
+function restartLogStream() {
+  if (logStreamController !== null || logStreamReconnectTimer !== null) {
+    stopLogStream();
+  }
+  if (shouldStreamLogs()) {
+    startLogStream();
+  }
+}
+
 function logRenderOptions() {
   return {
     noMatch: logPageFiltersActive && logPageItems.length === 0,
@@ -1066,12 +1249,18 @@ function updateLogSensitiveToggle() {
   logSensitiveToggle.classList.toggle("is-active", hidden);
 }
 
+/* 详情卡整块重刷会把悬浮卡一起冲掉，所以写入和重绑必须成对出现——
+   三个调用点（打开、脱敏切换、轮询刷新）都走这里。 */
+function renderLogDetailMeta(detail) {
+  if (!logDetailMeta) return;
+  logDetailMeta.innerHTML = formatLogDetailMeta(detail);
+  wtBindHoverCard(logDetailMeta);
+}
+
 function refreshOpenLogDetail() {
   if (!currentLogDetail || !logDetailDialog?.open) return;
   logDetailSummary.textContent = formatLogDetailSummary(currentLogDetail);
-  if (logDetailMeta) {
-    logDetailMeta.innerHTML = formatLogDetailMeta(currentLogDetail);
-  }
+  renderLogDetailMeta(currentLogDetail);
 }
 
 function setLogSensitiveHidden(hidden) {
@@ -1144,6 +1333,13 @@ function createLogRow(log, options = {}) {
   const channel = formatLogChannelStack(log);
   const status = formatStatusBadge(log.status_code);
   const throughput = formatThroughput(log);
+  const failureStage = log.failure_stage ? formatFailureStage(log.failure_stage) : "";
+  const failureStageTag = failureStage
+    ? `<span class="log-failure-stage-tag" title="失败阶段：${escapeHtml(failureStage)}">${escapeHtml(failureStage)}</span>`
+    : "";
+  const statusMarkup = failureStageTag
+    ? `<div class="log-status-stack">${status}${failureStageTag}</div>`
+    : status;
   row.innerHTML = `
     <td class="time-cell" data-col="time">
       <span>${escapeHtml(time)}</span>
@@ -1156,7 +1352,7 @@ function createLogRow(log, options = {}) {
     <td class="col-reasoning" data-col="reasoning">
       ${renderLogReasoningEffort(log)}
     </td>
-    <td data-col="status">${status}</td>
+    <td data-col="status">${statusMarkup}</td>
     <td class="duration-cell" data-col="duration">
       <span class="latency-metrics">
         <span class="latency-metric"><small>首字</small>${formatFirstTokenTime(log.first_token_ms)}</span>
@@ -1422,6 +1618,267 @@ function formatLogDetailMeta(detail) {
     `
     : "";
 
+  let timingLine = "";
+  let timingBarHtml = "";
+
+  const totalMs = detail.duration_ms != null && Number.isFinite(Number(detail.duration_ms))
+    ? Number(detail.duration_ms)
+    : null;
+
+  const hasPreUpstream = detail.pre_upstream_ms != null && Number.isFinite(Number(detail.pre_upstream_ms));
+  const preUpstreamMs = hasPreUpstream ? Math.max(0, Number(detail.pre_upstream_ms)) : null;
+
+  const attemptIndex = detail.attempt_index != null && Number.isFinite(Number(detail.attempt_index))
+    ? Number(detail.attempt_index)
+    : null;
+  const isRetry = attemptIndex !== null && attemptIndex > 0;
+  const gatewayLabelName = isRetry ? "网关准备(含重试)" : "网关准备";
+  const gatewayFullTitle = isRetry ? "网关准备（含前序重试与退避）" : "网关准备";
+
+  const hasHeaders = detail.upstream_headers_ms != null && Number.isFinite(Number(detail.upstream_headers_ms));
+  const upstreamHeadersMs = hasHeaders ? Math.max(0, Number(detail.upstream_headers_ms)) : null;
+
+  const hasSampledOrigins = hasPreUpstream || hasHeaders;
+
+  if (detail.stream) {
+    const hasFirstToken = detail.first_token_ms != null && Number.isFinite(Number(detail.first_token_ms));
+    const firstTokenMs = hasFirstToken ? Math.max(0, Number(detail.first_token_ms)) : null;
+    const firstTokenLabel = hasFirstToken
+      ? formatFirstTokenTime(firstTokenMs)
+      : `<span class="first-token-time neutral" title="首字耗时不可用">不可用</span>`;
+
+    const hasGeneration = hasFirstToken && hasHeaders && (firstTokenMs >= upstreamHeadersMs);
+    const generationMs = hasGeneration ? Math.max(0, firstTokenMs - upstreamHeadersMs) : null;
+    const generationLabel = hasGeneration
+      ? formatSeconds(generationMs)
+      : `<span class="first-token-time neutral" title="上游生成耗时不可用">不可用</span>`;
+
+    const hasTransfer = hasFirstToken && totalMs != null && (totalMs >= firstTokenMs);
+    const transferMs = hasTransfer ? Math.max(0, totalMs - firstTokenMs) : null;
+    const transferLabel = hasTransfer
+      ? formatSeconds(transferMs)
+      : `<span class="first-token-time neutral" title="传输耗时不可用">不可用</span>`;
+
+    if (hasSampledOrigins) {
+      const gatewayValueMarkup = formatGatewayPrepTime(preUpstreamMs, attemptIndex);
+      const headersValueMarkup = formatHeadersArrivalTime(upstreamHeadersMs);
+      const generationValueMarkup = hasGeneration
+        ? `<span class="first-token-time neutral" title="上游生成 ${escapeHtml(generationLabel)}">${escapeHtml(generationLabel)}</span>`
+        : generationLabel;
+      const transferValueMarkup = hasTransfer
+        ? `<span class="first-token-time neutral" title="传输耗时 ${escapeHtml(transferLabel)}">${escapeHtml(transferLabel)}</span>`
+        : transferLabel;
+
+      /* 四段把首字拆成了「连接/Header」+「上游生成」，firstTokenMs 退化成两段的
+         分界点，界面上就没有首字了——而它是流式请求最先要看的数。它横跨两段、
+         不对应瀑布里任何单一色块，所以和「总耗时」一样不给色点：没有点正好说明
+         这是累积到某一刻的读数，不是又一个独立分段。 */
+      timingLine = formatLogTimingChips([
+        { segClass: "timing-seg--gateway", label: gatewayLabelName, valueMarkup: gatewayValueMarkup, title: gatewayFullTitle },
+        { segClass: "timing-seg--headers", label: "连接/Header", valueMarkup: headersValueMarkup, title: "连接与响应头" },
+        { segClass: "timing-seg--generation", label: "上游生成", valueMarkup: generationValueMarkup, title: "上游收到请求到吐出首字" },
+        { label: "首字", valueMarkup: firstTokenLabel, title: "首字耗时 (TTFB)：连接/Header + 上游生成" },
+        { segClass: "timing-seg--transfer", label: "传输", valueMarkup: transferValueMarkup, title: "首字之后的流式传输" },
+        { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+      ]);
+
+      if (hasFirstToken && totalMs != null && totalMs > 0) {
+        const fullTotal = (preUpstreamMs || 0) + totalMs;
+        if (fullTotal > 0) {
+          const prePct = preUpstreamMs ? (preUpstreamMs / fullTotal * 100).toFixed(1) : "0.0";
+          const hdrMs = hasHeaders ? Math.min(upstreamHeadersMs, firstTokenMs) : 0;
+          const hdrPct = hdrMs ? (hdrMs / fullTotal * 100).toFixed(1) : "0.0";
+          const genMs = hasGeneration ? generationMs : (hasFirstToken ? Math.max(0, firstTokenMs - hdrMs) : 0);
+          const genPct = genMs ? (genMs / fullTotal * 100).toFixed(1) : "0.0";
+          const txMs = hasTransfer ? transferMs : 0;
+          const txPct = txMs ? (txMs / fullTotal * 100).toFixed(1) : "0.0";
+
+          timingBarHtml = formatLogTimingBar([
+            {
+              segClass: "timing-seg--gateway",
+              width: prePct,
+              label: gatewayFullTitle,
+              value: `${preUpstreamMs ?? 0}ms`,
+              title: `${gatewayFullTitle}: ${preUpstreamMs}ms`,
+            },
+            {
+              segClass: "timing-seg--headers",
+              width: hdrPct,
+              label: "连接与响应头",
+              value: `${hdrMs}ms`,
+              title: `连接与响应头: ${hdrMs}ms`,
+            },
+            {
+              segClass: "timing-seg--generation",
+              width: genPct,
+              label: "上游生成",
+              value: `${genMs}ms`,
+              title: `上游生成: ${genMs}ms (首字 ${firstTokenMs}ms)`,
+            },
+            {
+              segClass: "timing-seg--transfer",
+              width: txPct,
+              label: "传输耗时",
+              value: `${txMs}ms`,
+              title: `传输耗时: ${txMs}ms`,
+            },
+          ], `总耗时 ${totalMs}ms (网关 ${preUpstreamMs ?? "-"}ms + 连接 ${upstreamHeadersMs ?? "-"}ms + 生成 ${genMs}ms + 传输 ${txMs}ms)`);
+        }
+      }
+    } else {
+      // Legacy streaming fallback (when neither pre_upstream_ms nor upstream_headers_ms exists)
+      timingLine = formatLogTimingChips([
+        { segClass: "timing-seg--ttfb", label: "首字", valueMarkup: firstTokenLabel, title: "首字耗时 (TTFB)" },
+        {
+          segClass: "timing-seg--transfer",
+          label: "传输",
+          valueMarkup: escapeHtml(hasTransfer ? transferLabel : "-"),
+          title: "首字之后的流式传输",
+        },
+        { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+      ]);
+
+      if (firstTokenMs != null && totalMs != null && totalMs > 0) {
+        const ttfbRatio = Math.min(1, Math.max(0, firstTokenMs / totalMs));
+        const transferRatio = Math.max(0, 1 - ttfbRatio);
+        timingBarHtml = formatLogTimingBar([
+          {
+            segClass: "timing-seg--ttfb",
+            width: (ttfbRatio * 100).toFixed(1),
+            label: "首字耗时 (TTFB)",
+            value: `${firstTokenMs}ms`,
+            title: `首字耗时 (TTFB): ${firstTokenMs}ms`,
+          },
+          {
+            segClass: "timing-seg--transfer",
+            width: (transferRatio * 100).toFixed(1),
+            label: "传输耗时",
+            value: `${transferMs}ms`,
+            title: `传输耗时: ${transferMs}ms`,
+          },
+        ], `总耗时 ${totalMs}ms (首字 ${firstTokenMs}ms + 传输 ${transferMs}ms)`);
+      }
+    }
+  } else {
+    // Non-streaming
+    if (hasSampledOrigins) {
+      const gatewayValueMarkup = formatGatewayPrepTime(preUpstreamMs, attemptIndex);
+      const headersValueMarkup = formatHeadersArrivalTime(upstreamHeadersMs);
+      const hasTransfer = hasHeaders && totalMs != null && totalMs >= upstreamHeadersMs;
+      const transferMs = hasTransfer ? Math.max(0, totalMs - upstreamHeadersMs) : null;
+      const transferLabel = hasTransfer ? formatSeconds(transferMs) : null;
+
+      const gatewayChip = {
+        segClass: "timing-seg--gateway",
+        label: gatewayLabelName,
+        valueMarkup: gatewayValueMarkup,
+        title: gatewayFullTitle,
+      };
+      const headersChip = {
+        segClass: "timing-seg--headers",
+        label: "连接/Header",
+        valueMarkup: headersValueMarkup,
+        title: "连接与响应头",
+      };
+      if (hasHeaders && hasTransfer) {
+        timingLine = formatLogTimingChips([
+          gatewayChip,
+          headersChip,
+          {
+            segClass: "timing-seg--transfer",
+            label: "响应传输",
+            valueMarkup: escapeHtml(transferLabel),
+            title: "响应体传输",
+          },
+          { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+        ]);
+      } else if (hasHeaders) {
+        timingLine = formatLogTimingChips([
+          gatewayChip,
+          headersChip,
+          { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+        ]);
+      } else {
+        timingLine = formatLogTimingChips([
+          gatewayChip,
+          { label: "上游耗时", valueMarkup: formatTotalDurationTime(detail) },
+        ]);
+      }
+
+      if (totalMs != null && totalMs > 0) {
+        const fullTotal = (preUpstreamMs || 0) + totalMs;
+        if (fullTotal > 0) {
+          const prePct = preUpstreamMs ? (preUpstreamMs / fullTotal * 100).toFixed(1) : "0.0";
+          const hdrMs = hasHeaders ? Math.min(upstreamHeadersMs, totalMs) : 0;
+          const hdrPct = hdrMs ? (hdrMs / fullTotal * 100).toFixed(1) : "0.0";
+          const txMs = hasTransfer ? transferMs : (hasHeaders ? 0 : totalMs);
+          const txPct = txMs ? (txMs / fullTotal * 100).toFixed(1) : "0.0";
+          const txLabel = hasHeaders ? "响应传输" : "上游耗时";
+
+          timingBarHtml = formatLogTimingBar([
+            {
+              segClass: "timing-seg--gateway",
+              width: prePct,
+              label: gatewayFullTitle,
+              value: `${preUpstreamMs ?? 0}ms`,
+              title: `${gatewayFullTitle}: ${preUpstreamMs}ms`,
+            },
+            {
+              segClass: "timing-seg--headers",
+              width: hdrPct,
+              label: "连接与响应头",
+              value: `${hdrMs}ms`,
+              title: `连接与响应头: ${hdrMs}ms`,
+            },
+            {
+              segClass: "timing-seg--transfer",
+              width: txPct,
+              label: txLabel,
+              value: `${txMs}ms`,
+              title: `${txLabel}: ${txMs}ms`,
+            },
+          ], `总耗时 ${totalMs}ms (网关 ${preUpstreamMs ?? "-"}ms + 连接 ${upstreamHeadersMs ?? "-"}ms + 传输 ${txMs}ms)`);
+        }
+      }
+    } else {
+      timingLine = formatLogTimingChips([
+        { label: "总耗时", valueMarkup: formatTotalDurationTime(detail) },
+      ]);
+    }
+  }
+
+  let attemptBadge = "";
+  if (attemptIndex !== null && attemptIndex > 0) {
+    attemptBadge = `<small class="log-detail-route-attempt" title="重试第 ${attemptIndex} 次 (关联请求: ${escapeHtml(detail.request_uid || "-")})">重试 #${attemptIndex}</small>`;
+  }
+
+  let uidBadge = "";
+  if (detail.request_uid) {
+    const uid = escapeHtml(detail.request_uid);
+    uidBadge = `<small class="log-detail-route-uid" title="请求唯一标识 (UID): ${uid}">UID: ${uid}</small>`;
+  }
+
+  const stageName = detail.failure_stage ? formatFailureStage(detail.failure_stage) : "";
+  const stageBadge = stageName
+    ? `<span class="log-detail-failure-stage-badge" title="失败阶段：${escapeHtml(stageName)}">阶段: ${escapeHtml(stageName)}</span>`
+    : "";
+  const retryableBadge = (detail.failure_retryable !== null && detail.failure_retryable !== undefined)
+    ? `<span class="log-detail-retryable-badge ${detail.failure_retryable ? "is-retryable" : "is-non-retryable"}">${detail.failure_retryable ? "可重试错误" : "不可重试错误"}</span>`
+    : "";
+  /* 状态徽标不再套在 <strong> 里。那层 strong 挂着 .log-detail-meta-card strong
+     的 overflow:hidden + nowrap + ellipsis——那套是给渠道名/模型名这类纯文本准备的
+     截断规则，而这里放的是个带边框、min-height:22px 的 inline-flex 徽标：strong 的
+     行盒（13px × 1.25 = 16.25px）本来矮于徽标，靠徽标自己把行盒顶到 22px，于是
+     上下余量正好是 0，边框就压在裁切线上。字体栈换一档（各主题的 --font-mono 不同）
+     或缩放比一变，圆整方向一反就把边框切掉——这就是"有时候上下像被裁了"。
+
+     顺带修掉一个结构问题：带阶段徽标时这里原来是 <div> 套在 <strong> 里，块级元素
+     塞进行内元素是非法嵌套，浏览器会把 strong 拆开，行盒更没法算准。
+     现在统一是一个不参与截断的 div，样式由 .log-detail-status-head 负责。 */
+  const statusHeadMarkup = `<div class="log-detail-status-head">`
+    + `<span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span>`
+    + `${stageBadge}${retryableBadge}</div>`;
+
   return `
     <div class="log-detail-meta-card log-detail-route-card">
       <span class="log-detail-meta-label">请求路由</span>
@@ -1430,11 +1887,14 @@ function formatLogDetailMeta(detail) {
       <small class="log-detail-route-request" title="${escapeHtml(detail.method)} /${escapeHtml(detail.path)} · ${escapeHtml(streamLabel)}">
         ${escapeHtml(detail.method)} /${escapeHtml(detail.path)} · ${escapeHtml(streamLabel)}
       </small>
+      ${uidBadge}
+      ${attemptBadge}
     </div>
     <div class="log-detail-meta-card">
       <span class="log-detail-meta-label">状态与耗时</span>
-      <strong><span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span></strong>
-      <small>首字 ${formatFirstTokenTime(detail.first_token_ms)} · 总耗时 ${formatTotalDurationTime(detail)}</small>
+      ${statusHeadMarkup}
+      ${timingLine}
+      ${timingBarHtml}
       ${formatTokensPerSecondLine(detail)}
       ${statusErrorLine}
     </div>
@@ -1544,10 +2004,117 @@ function renderLogDetailSection(details) {
   pre.textContent = currentLogDetail ? formatHttpSnapshot(currentLogDetail[details.dataset.field]) : "";
 }
 
+
+function renderLogRetryChain(detail) {
+  const container = typeof logDetailRetryChain !== "undefined" && logDetailRetryChain
+    ? logDetailRetryChain
+    : (typeof document !== "undefined" ? document.querySelector("#log-detail-retry-chain") : null);
+  if (!container) return;
+
+  if (!detail || !detail.request_uid) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+
+  const candidateMap = new Map();
+  if (Array.isArray(logPageItems)) {
+    for (const item of logPageItems) {
+      if (item && item.request_uid === detail.request_uid) {
+        candidateMap.set(item.id, item);
+      }
+    }
+  }
+  if (detail && detail.id) {
+    candidateMap.set(detail.id, detail);
+  }
+
+  const attempts = Array.from(candidateMap.values());
+  const maxAttemptIndex = attempts.reduce((max, item) => Math.max(max, Number(item.attempt_index) || 0), 0);
+
+  if (attempts.length <= 1 && maxAttemptIndex === 0) {
+    container.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+
+  attempts.sort((a, b) => {
+    const idxA = Number(a.attempt_index) || 0;
+    const idxB = Number(b.attempt_index) || 0;
+    if (idxA !== idxB) return idxA - idxB;
+    return (Number(a.id) || 0) - (Number(b.id) || 0);
+  });
+
+  container.hidden = false;
+  const uid = escapeHtml(detail.request_uid);
+
+  const stepsHtml = attempts.map((attempt) => {
+    const isCurrent = Number(attempt.id) === Number(detail.id);
+    const idx = Number(attempt.attempt_index) || 0;
+    const stepLabel = idx === 0 ? "首次尝试" : `重试 #${idx}`;
+    const statusText = attempt.status_code === null || attempt.status_code === undefined
+      ? "无响应"
+      : `HTTP ${attempt.status_code}`;
+    const statusTone = attempt.status_code === null || attempt.status_code === undefined
+      ? "neutral"
+      : attempt.status_code >= 400
+        ? "danger"
+        : attempt.status_code >= 200 && attempt.status_code < 300
+          ? "ok"
+          : "neutral";
+    const channelLabel = formatLogChannelLabel(attempt);
+    const dur = attempt.duration_ms != null && Number.isFinite(Number(attempt.duration_ms))
+      ? `${Math.round(Number(attempt.duration_ms))}ms`
+      : "-";
+    const stage = attempt.failure_stage ? (typeof formatFailureStage === "function" ? formatFailureStage(attempt.failure_stage) : String(attempt.failure_stage)) : "";
+    const stageBadge = stage ? `<span class="retry-step-stage" title="失败阶段：${escapeHtml(stage)}">${escapeHtml(stage)}</span>` : "";
+
+    return `
+      <button
+        type="button"
+        class="retry-chain-step ${isCurrent ? "is-current" : ""}"
+        data-retry-log-id="${attempt.id}"
+        ${isCurrent ? 'aria-current="step"' : ""}
+        title="查看尝试 #${idx} (ID #${attempt.id}) 详情"
+      >
+        <span class="retry-step-idx">${escapeHtml(stepLabel)}</span>
+        <span class="retry-step-channel" title="${escapeHtml(channelLabel)}">${escapeHtml(channelLabel)}</span>
+        <span class="retry-step-status ${statusTone}">${escapeHtml(statusText)}</span>
+        <span class="retry-step-duration">${escapeHtml(dur)}</span>
+        ${stageBadge}
+      </button>
+    `;
+  }).join("");
+
+  container.innerHTML = `
+    <div class="retry-chain-header">
+      <span class="retry-chain-title">请求重试链路</span>
+      <span class="retry-chain-meta">共 ${attempts.length} 次尝试 · UID: ${uid}</span>
+    </div>
+    <div class="retry-chain-items">
+      ${stepsHtml}
+    </div>
+  `;
+
+  const buttons = container.querySelectorAll("button[data-retry-log-id]");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const targetId = Number(btn.dataset.retryLogId);
+      if (targetId && targetId !== Number(detail.id)) {
+        showLogDetail(targetId);
+      }
+    });
+  });
+}
+
 async function showLogDetail(logId) {
   currentLogDetail = null;
   logDetailTitle.textContent = "请求详情";
   logDetailSummary.textContent = "正在加载...";
+  if (logDetailRetryChain) {
+    logDetailRetryChain.hidden = true;
+    logDetailRetryChain.innerHTML = "";
+  }
   if (logDetailMeta) {
     logDetailMeta.innerHTML = `
       <div class="log-detail-meta-card log-detail-loading-card">
@@ -1574,8 +2141,9 @@ async function showLogDetail(logId) {
     logDetailTitle.textContent = "请求详情";
     logDetailSummary.textContent = formatLogDetailSummary(detail);
     if (logDetailMeta) {
-      logDetailMeta.innerHTML = formatLogDetailMeta(detail);
+      renderLogDetailMeta(detail);
     }
+    renderLogRetryChain(detail);
     for (const details of logDetailSections) {
       if (details.open) {
         renderLogDetailSection(details);
@@ -1591,6 +2159,10 @@ async function showLogDetail(logId) {
           <small>请稍后重试或刷新日志列表。</small>
         </div>
       `;
+    }
+    if (logDetailRetryChain) {
+      logDetailRetryChain.hidden = true;
+      logDetailRetryChain.innerHTML = "";
     }
   }
 }
@@ -1609,19 +2181,42 @@ async function loadLogs() {
   }
 
   try {
-    const upstreamId = logUpstreamFilter.value;
-    const search = (logSearchInput?.value || "").trim();
-    const status = logStatusFilter?.value || "";
-    const clientType = logClientFilter?.value || "";
-    const filtersActive = Boolean(upstreamId || search || status || clientType);
+    const upstreamId = typeof logUpstreamFilter !== "undefined" && logUpstreamFilter ? logUpstreamFilter.value : "";
+    const search = typeof logSearchInput !== "undefined" && logSearchInput ? (logSearchInput.value || "").trim() : "";
+    const status = typeof logStatusFilter !== "undefined" && logStatusFilter ? logStatusFilter.value : "";
+    const clientType = typeof logClientFilter !== "undefined" && logClientFilter ? logClientFilter.value : "";
+    const streamVal = typeof logStreamFilter !== "undefined" && logStreamFilter ? logStreamFilter.value : "";
+    const minDurationVal = typeof logMinDurationInput !== "undefined" && logMinDurationInput ? logMinDurationInput.value.trim() : "";
+    const currentTokenId = typeof getLogDownstreamTokenId === "function"
+      ? getLogDownstreamTokenId()
+      : (typeof logDownstreamTokenId !== "undefined" ? logDownstreamTokenId : null);
+    const { start, end } = typeof getLogTimeRange === "function" ? getLogTimeRange() : { start: "", end: "" };
+
+    const filtersActive = Boolean(
+      upstreamId ||
+      search ||
+      status ||
+      clientType ||
+      (currentTokenId !== null && currentTokenId !== undefined) ||
+      (start && end) ||
+      (streamVal === "true" || streamVal === "false") ||
+      (minDurationVal !== "" && /^\d+$/.test(minDurationVal))
+    );
     const params = new URLSearchParams({
       limit: String(logPageSize),
     });
     appendLogPaginationParams(params);
     if (upstreamId) params.set("upstream_id", upstreamId);
+    if (currentTokenId !== null && currentTokenId !== undefined) params.set("downstream_token_id", String(currentTokenId));
     if (search) params.set("search", search);
     if (status) params.set("status", status);
     if (clientType) params.set("client_type", clientType);
+    if (streamVal === "true" || streamVal === "false") params.set("stream", streamVal);
+    if (minDurationVal !== "" && /^\d+$/.test(minDurationVal)) params.set("min_duration_ms", minDurationVal);
+    if (start && end) {
+      params.set("start", start);
+      params.set("end", end);
+    }
 
     const page = await api(`/api/admin/logs?${params}`);
     if (requestGeneration !== logLoadGeneration) return;

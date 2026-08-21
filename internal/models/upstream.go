@@ -324,3 +324,50 @@ type UpstreamDetailOut struct {
 	HealthRecoveryRemainingSeconds *int64            `json:"health_recovery_remaining_seconds,omitempty"`
 	GroupIDs                       []int64           `json:"group_ids"`
 }
+
+// UpstreamLatencyOut is one channel's routing latency as the console shows it.
+//
+// This is the figure routing actually used, read from the in-memory tracker
+// rather than recomputed from request_logs. The dashboard's latency charts scan
+// that table, and a channel card that scanned it too would report a different
+// number than the one the decision was made on — which is worse than reporting
+// nothing.
+type UpstreamLatencyOut struct {
+	UpstreamID int64 `json:"upstream_id"`
+	// MedianMs is null until the channel has enough fresh samples to be ranked.
+	MedianMs *int32 `json:"median_ms"`
+	// SampleCount is present even below the minimum, so the console can say
+	// "collecting samples (2/5)" instead of "no data".
+	SampleCount int `json:"sample_count"`
+	// Usable reports whether this reading may rank the channel. False with a
+	// non-zero SampleCount is the under-sampled state.
+	Usable bool `json:"usable"`
+}
+
+// RoutingRulesOut is the strategy and the constants behind it, so the console can
+// explain a routing decision without hard-coding the numbers a second time.
+//
+// These are code constants rather than settings. They are published because an
+// operator looking at "no samples" needs to know how many would be enough and
+// how long one lasts; they are not published as editable, because nothing in the
+// admin API writes them.
+type RoutingRulesOut struct {
+	MinSamples         int     `json:"min_samples"`
+	StaleWindowSeconds int64   `json:"stale_window_seconds"`
+	SampleCapacity     int     `json:"sample_capacity"`
+	ToleranceRatio     float64 `json:"tolerance_ratio"`
+	ToleranceFloorMs   int32   `json:"tolerance_floor_ms"`
+}
+
+// UpstreamRoutingOut answers "what is routing doing right now".
+type UpstreamRoutingOut struct {
+	// Strategy is the effective load-balance strategy. See the LoadBalance*
+	// constants.
+	Strategy string `json:"strategy"`
+	// LatencyActive reports whether Latency figures take part in the decision. It
+	// is false under the weighted strategy even though samples are still being
+	// collected, so the console does not present a column that changes nothing.
+	LatencyActive bool                 `json:"latency_active"`
+	Rules         RoutingRulesOut      `json:"rules"`
+	Latency       []UpstreamLatencyOut `json:"latency"`
+}

@@ -4,6 +4,8 @@ package handlers
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -80,6 +82,71 @@ func writeProtocolError(w http.ResponseWriter, status int, path, message, errorT
 	})
 }
 
+// ModelNotAllowedCode identifies a model refused by the token's whitelist at the
+// top level of the refusal, mirroring the other downstream rejections: a caller
+// that does not speak either vendor's error shape can branch on it.
+const ModelNotAllowedCode = "MODEL_NOT_ALLOWED"
+
+// ModelNotAllowedMessage is the operator-facing summary carried alongside the code.
+const ModelNotAllowedMessage = "该 API key 不允许调用此模型"
+
+// modelPermittedByToken judges a request against the token's whitelist.
+//
+// A restricted token is refused when the body named no model at all. That is the
+// strict direction, and it is chosen deliberately: the alternative admits any
+// request whose model the gateway could not read, which turns a malformed or
+// unrecognised body into a way past the whitelist. An unrestricted token is
+// unaffected, so this only ever applies to a credential an operator has narrowed
+// on purpose.
+func modelPermittedByToken(policy models.AllowedModelsPolicy, model *string) bool {
+	if policy.Unrestricted() {
+		return true
+	}
+	if model == nil {
+		return false
+	}
+	return policy.Permits(*model)
+}
+
+// modelNotAllowedDetail explains the refusal, naming the permitted list.
+//
+// The list is disclosed because the caller holds the credential it describes:
+// they can already discover it by trying models, and telling them saves a support
+// round trip. It is not disclosed for a request that named no model, where there
+// is nothing to compare it against and the useful correction is different.
+func modelNotAllowedDetail(model *string, policy models.AllowedModelsPolicy) string {
+	patterns := strings.Join(policy.Patterns(), ", ")
+	if model == nil || strings.TrimSpace(*model) == "" {
+		return "this API key is restricted to specific models, so the request must name one; " +
+			"allowed: " + patterns
+	}
+	return "model " + *model + " is not allowed for this API key; allowed: " + patterns
+}
+
+// writeModelNotAllowedRejection refuses a model the token may not call.
+//
+// 403 rather than 400: the request is well formed and the model may well exist —
+// this credential is not permitted to use it. Both vendor dialects have a
+// permission error shape, and an SDK reading either will not retry it, which is
+// the correct behaviour for a refusal that will not change on its own.
+func writeModelNotAllowedRejection(w http.ResponseWriter, anthropic bool, detail string) {
+	body := map[string]any{
+		"code":    ModelNotAllowedCode,
+		"message": ModelNotAllowedMessage,
+	}
+	if anthropic {
+		body["type"] = "error"
+		body["error"] = map[string]string{"type": "permission_error", "message": detail}
+	} else {
+		body["error"] = map[string]string{
+			"message": detail,
+			"type":    "invalid_request_error",
+			"code":    "model_not_allowed",
+		}
+	}
+	apperr.WriteJSON(w, http.StatusForbidden, body)
+}
+
 // UpstreamRateLimitedCode identifies "every routable channel is rate-limited"
 // at the top level of the refusal, mirroring the API-key rejections in
 // middleware: a caller that does not speak either vendor's error shape can
@@ -145,23 +212,57 @@ func noRouteReason(selector, model *string, groupName string) string {
 // backstop for a panic or an early return that forgets.
 type abortLogGuard struct {
 	logWriter *proxy.LogWriter
+	// startedAt is when the gateway accepted this request. It is both this
+	// guard's own duration origin and the origin every attempt's pre_upstream_ms
+	// is measured from, so the two figures cannot disagree about when the
+	// request began.
 	startedAt time.Time
-	entry     *proxy.LogEntry
+	// requestUID is minted here because this is the first thing built per
+	// request, so every row the request produces — including the abort fallback —
+	// can carry it.
+	requestUID string
+	entry      *proxy.LogEntry
 }
 
 func newAbortLogGuard(logWriter *proxy.LogWriter, method, path string) *abortLogGuard {
 	status := int32(499)
 	message := "client disconnected before proxy completed"
+	requestUID := newRequestUID()
 	return &abortLogGuard{
-		logWriter: logWriter,
-		startedAt: time.Now(),
+		logWriter:  logWriter,
+		startedAt:  time.Now(),
+		requestUID: requestUID,
 		entry: &proxy.LogEntry{
 			Method:     method,
 			Path:       path,
 			StatusCode: &status,
 			Error:      &message,
+			// The uid is set even on this fallback row, so a request that failed
+			// before reaching an upstream is still identifiable as one request.
+			// AttemptIndex stays nil: no attempt was made, which is not the same
+			// as attempt 0.
+			RequestUID: &requestUID,
 		},
 	}
+}
+
+// requestUIDBytes is 8 random bytes: enough that two concurrent requests
+// colliding is not a practical concern, while keeping the column short since it
+// is written on every log row.
+const requestUIDBytes = 8
+
+// newRequestUID mints the key that ties one request's attempt rows together.
+//
+// A failure to read the system's randomness leaves the uid empty rather than
+// failing the request. The value is only a correlation key for the console: a
+// proxied request must not be refused because grouping its log rows was not
+// possible.
+func newRequestUID() string {
+	buffer := make([]byte, requestUIDBytes)
+	if _, err := rand.Read(buffer); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(buffer)
 }
 
 func (g *abortLogGuard) setModel(model *string) {
@@ -178,6 +279,15 @@ func (g *abortLogGuard) setDownstreamToken(tokenID int64, tokenName string) {
 	}
 	g.entry.DownstreamTokenID = &tokenID
 	g.entry.DownstreamTokenName = &tokenName
+}
+
+// setQuotaPeriod records the reset cycle the request was admitted under, so a row
+// this guard writes settles against that cycle rather than the current one.
+func (g *abortLogGuard) setQuotaPeriod(stamp string) {
+	if g.entry == nil {
+		return
+	}
+	g.entry.QuotaPeriodStamp = stamp
 }
 
 func (g *abortLogGuard) setClientType(clientType string) {
@@ -211,7 +321,7 @@ func (g *abortLogGuard) setRequestSnapshots(downstream, upstream json.RawMessage
 func (g *abortLogGuard) disarm() { g.entry = nil }
 
 // logAndDisarm records a specific failure instead of the default abort.
-func (g *abortLogGuard) logAndDisarm(statusCode int32, message string) {
+func (g *abortLogGuard) logAndDisarm(statusCode int32, message string, stage proxy.FailureStage) {
 	entry := g.entry
 	g.entry = nil
 	if entry == nil {
@@ -220,6 +330,7 @@ func (g *abortLogGuard) logAndDisarm(statusCode int32, message string) {
 	entry.StatusCode = &statusCode
 	entry.Error = &message
 	entry.DurationMs = g.elapsed()
+	entry.SetFailure(stage, statusCode)
 	g.logWriter.Schedule(*entry)
 }
 
@@ -231,6 +342,9 @@ func (g *abortLogGuard) finish() {
 		return
 	}
 	entry.DurationMs = g.elapsed()
+	// The default entry is a 499: this guard only fires for a request that ended
+	// before anything else could describe it.
+	entry.SetFailure(proxy.FailureStageClientCancelled, 499)
 	g.logWriter.Schedule(*entry)
 }
 
@@ -256,6 +370,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		defer guard.finish()
 		guard.setDownstreamToken(auth.TokenID, auth.TokenName)
 		guard.setClientType(auth.ClientType)
+		guard.setQuotaPeriod(auth.QuotaPeriodStamp)
 
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDownstreamBodyBytes))
 		if err != nil {
@@ -263,18 +378,32 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			// means the caller went away mid-upload.
 			var maxBytesError *http.MaxBytesError
 			if errors.As(err, &maxBytesError) {
-				guard.logAndDisarm(400, "failed to read downstream request body: "+err.Error())
+				guard.logAndDisarm(400, "failed to read downstream request body: "+err.Error(),
+					proxy.FailureStageGateway)
 				apperr.BadRequest("failed to read body: " + err.Error()).Write(w)
 				return
 			}
 			guard.logAndDisarm(499,
-				"client disconnected while reading downstream request body: "+err.Error())
+				"client disconnected while reading downstream request body: "+err.Error(),
+				proxy.FailureStageClientCancelled)
 			apperr.BadRequest("failed to read body: " + err.Error()).Write(w)
 			return
 		}
 
 		model := parseModelFromBody(body)
 		guard.setModel(model)
+
+		// The whitelist is judged on the model the client asked for, before any
+		// channel mapping rewrites it. A channel that maps gpt-4o onto some other
+		// provider's id must not be able to launder a model past this check, and
+		// the operator wrote the list in terms of what their callers send.
+		if !modelPermittedByToken(auth.AllowedModels, model) {
+			detail := modelNotAllowedDetail(model, auth.AllowedModels)
+			guard.logAndDisarm(http.StatusForbidden, detail, proxy.FailureStageGateway)
+			writeModelNotAllowedRejection(w, models.IsAnthropicMessages(path), detail)
+			return
+		}
+
 		selector := upstreamSelector(r)
 
 		runtimeSettings := state.Runtime.Get()
@@ -282,12 +411,15 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 
 		// A direct selection is resolved once; the retry loop reuses it rather
 		// than re-running a selector that can only ever pick the same channel.
+		selectionPolicy := state.SelectionPolicy()
+
 		var directSelection *proxy.Selection
 		if selector != nil {
 			directSelection, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
-				state.AutoWeight, policy, selector, model, auth.GroupID, nil)
+				state.AutoWeight, policy, selectionPolicy, selector, model, auth.GroupID, nil)
 			if err != nil {
-				guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
+				guard.logAndDisarm(500, "upstream selection failed: "+err.Error(),
+					proxy.FailureStageGateway)
 				apperr.WriteError(w, err)
 				return
 			}
@@ -303,6 +435,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			selector:        selector,
 			directSelection: directSelection,
 			policy:          policy,
+			selectionPolicy: selectionPolicy,
 			runtimeSettings: runtimeSettings,
 		})
 		if err != nil {
@@ -337,6 +470,7 @@ type proxyAttemptConfig struct {
 	selector        *string
 	directSelection *proxy.Selection
 	policy          proxy.AutoWeightPolicy
+	selectionPolicy proxy.SelectionPolicy
 	runtimeSettings models.RuntimeSettings
 }
 
@@ -357,6 +491,13 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 	// re-selection falls over to the remaining candidates instead of drawing the
 	// same channel again. Nil until the first refusal.
 	var rateLimited map[int64]bool
+	// failedUpstreams collects the channels that already failed this request.
+	// They are preferred against rather than banned: routing tries to find one
+	// that has not failed yet, and only if there is none does it come back to a
+	// channel that has. A hard ban would break the single-channel case the retry
+	// interval exists for, where trying the same channel again after a pause is
+	// the whole point.
+	var failedUpstreams map[int64]bool
 
 	for attempt := 0; ; attempt++ {
 		// Selection repeats until a channel's rate limit admits the request;
@@ -367,11 +508,10 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			selected = config.directSelection
 			if config.selector == nil {
 				var err error
-				selected, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
-					state.AutoWeight, config.policy, nil, config.model, config.auth.GroupID,
-					rateLimited)
+				selected, err = selectWithFailover(r, state, config, rateLimited, failedUpstreams)
 				if err != nil {
-					config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
+					config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error(),
+						proxy.FailureStageGateway)
 					return nil, err
 				}
 			} else if selected != nil && rateLimited[selected.Upstream.ID] {
@@ -397,12 +537,13 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				// Routing had candidates, but every one of them refused: the
 				// request is only deferred, not unroutable, so the answer is a
 				// 429 rather than the no-route 503.
-				config.guard.logAndDisarm(429, "all candidate channels are rate limited")
+				config.guard.logAndDisarm(429, "all candidate channels are rate limited",
+					proxy.FailureStageRateLimited)
 				writeUpstreamRateLimitRejection(w, config.path)
 				return nil, nil
 			}
 			reason := noRouteReason(config.selector, config.model, config.groupName)
-			config.guard.logAndDisarm(503, reason)
+			config.guard.logAndDisarm(503, reason, proxy.FailureStageNoRoute)
 			writeProtocolError(w, http.StatusServiceUnavailable,
 				config.path, reason, "upstream_not_configured")
 			return nil, nil
@@ -418,7 +559,8 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				// Logged here because no attempt was made to log it: this is
 				// the one error path out of this function that ProxyRequest
 				// never saw.
-				config.guard.logAndDisarm(499, "client disconnected during retry backoff")
+				config.guard.logAndDisarm(499, "client disconnected during retry backoff",
+					proxy.FailureStageClientCancelled)
 				return nil, apperr.Upstream("client disconnected during retry backoff")
 			case <-time.After(time.Duration(config.runtimeSettings.SameUpstreamRetryIntervalMs) *
 				time.Millisecond):
@@ -440,32 +582,33 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			// keeps full weight and keeps being chosen to fail again.
 			state.AutoWeight.RecordFailure(selected.Upstream.ID,
 				selected.Upstream.AutoWeightEnabled == 1, config.policy)
-			config.guard.logAndDisarm(502, err.Error())
+			config.guard.logAndDisarm(502, err.Error(), proxy.FailureStageRequestBuild)
 			return nil, err
 		}
 		config.guard.setRequestSnapshots(prepared.DownstreamSnapshot, prepared.UpstreamSnapshot)
 
+		// Whether another attempt could follow is decided before this one runs,
+		// because the streaming path needs to know: holding a 2xx SSE response
+		// back to see whether it produces an event is only worth its latency when
+		// there is somewhere else to go.
 		response, err := proxy.ProxyRequest(r.Context(), state.ProxyDeps(), config.policy,
 			&selected.Upstream, proxy.RequestContext{
 				DownstreamTokenID:   config.auth.TokenID,
 				DownstreamTokenName: config.auth.TokenName,
+				QuotaPeriodStamp:    config.auth.QuotaPeriodStamp,
 				ClientType:          config.auth.ClientType,
 				RequestModel:        config.model,
 				ForwardModel:        selected.ForwardModel,
 				Method:              r.Method,
 				Path:                config.path,
 				LogBodyMaxBytes:     logBodyMaxBytes,
+				RequestUID:          config.guard.requestUID,
+				AttemptIndex:        int32(attempt),
+				ReceivedAt:          config.guard.startedAt,
+				FailoverEligible:    attempt < maxRetries,
 			}, prepared)
 
-		failed := err != nil || response.Status < 200 || response.Status >= 300
-		if !failed || attempt >= maxRetries {
-			return response, err
-		}
-		// A client that has gone is not owed another attempt. Retrying spent
-		// another channel's rate-limit allowance and wrote another log row for
-		// a request nobody was waiting for, so one disconnect could leave a
-		// handful of 499s behind it.
-		if r.Context().Err() != nil {
+		if !shouldFailover(r, response, err) || attempt >= maxRetries {
 			return response, err
 		}
 
@@ -480,8 +623,77 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 
 		upstreamID := selected.Upstream.ID
 		previousUpstreamID = &upstreamID
+		if failedUpstreams == nil {
+			failedUpstreams = map[int64]bool{}
+		}
+		failedUpstreams[upstreamID] = true
 		lastFailure = &attemptResult{response: response, err: err}
 	}
+}
+
+// selectWithFailover routes an attempt, preferring a channel that has not
+// already failed this request.
+//
+// Two passes rather than one exclusion set: the first asks for a channel that is
+// neither rate-limited nor already failed, and only when there is none does the
+// second allow a channel that failed to be tried again. Banning failed channels
+// outright would turn a single-channel deployment's retry into an immediate
+// no-route, and preferring nothing would keep drawing the broken channel while a
+// healthy one sat unused — routing draws by weight, and one failure barely moves
+// a weight.
+func selectWithFailover(r *http.Request, state *appstate.State, config proxyAttemptConfig,
+	rateLimited, failedUpstreams map[int64]bool) (*proxy.Selection, error) {
+	if len(failedUpstreams) > 0 {
+		exclude := make(map[int64]bool, len(rateLimited)+len(failedUpstreams))
+		for id := range rateLimited {
+			exclude[id] = true
+		}
+		for id := range failedUpstreams {
+			exclude[id] = true
+		}
+		selected, err := proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
+			state.AutoWeight, config.policy, config.selectionPolicy, nil, config.model,
+			config.auth.GroupID, exclude)
+		if err != nil || selected != nil {
+			return selected, err
+		}
+	}
+	return proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
+		state.AutoWeight, config.policy, config.selectionPolicy, nil, config.model,
+		config.auth.GroupID, rateLimited)
+}
+
+// shouldFailover decides whether an attempt's outcome earns another channel.
+//
+// The proxy used to retry every non-2xx response. That made one wrong credential
+// fan out across every channel serving the model — each answering 401, each
+// charged for it, the caller waiting through the whole list for the same refusal
+// — and it retried 3xx redirects, which are not failures at all.
+//
+// The order of these checks is the policy:
+//
+//  1. A client that has gone is owed nothing. Retrying spent another channel's
+//     rate-limit allowance and wrote another log row for a request nobody was
+//     waiting for.
+//  2. A transport-level error is the channel's own, and switching is worth it.
+//     ProxyRequest has already decided this is not a client abort; it returns an
+//     error for a failed dial, a body that died, and a stream that never spoke.
+//  3. A response's status decides the rest, by the matrix in
+//     proxy.IsRetryableUpstreamStatus.
+func shouldFailover(r *http.Request, response *proxy.Response, err error) bool {
+	if r.Context().Err() != nil {
+		return false
+	}
+	if err != nil {
+		return true
+	}
+	if response == nil {
+		return false
+	}
+	if response.Status >= 200 && response.Status < 300 {
+		return false
+	}
+	return proxy.IsRetryableUpstreamStatus(response.Status)
 }
 
 type attemptResult struct {
@@ -675,11 +887,20 @@ func ListModelsHandler(state *appstate.State) http.HandlerFunc {
 				return
 			}
 			writeRawJSON(w, OpenAIModelsListResponse(
-				AggregateModelIDs([]models.UpstreamRow{upstream})))
+				permittedModelIDs(AggregateModelIDs([]models.UpstreamRow{upstream}),
+					auth.AllowedModels)))
 			return
 		}
 
-		if cached := state.ModelsCache.Get(auth.GroupID); cached != nil {
+		// The key carries the token's policy fingerprint, so a restricted token
+		// cannot read an entry computed for an unrestricted one — and editing a
+		// whitelist moves the token to a different key rather than needing this
+		// cache to be invalidated on token writes.
+		cacheKey := appstate.ModelsCacheKey{
+			GroupID:           auth.GroupID,
+			PolicyFingerprint: auth.AllowedModels.Fingerprint(),
+		}
+		if cached := state.ModelsCache.Get(cacheKey); cached != nil {
 			writeRawJSON(w, cached)
 			return
 		}
@@ -689,16 +910,41 @@ func ListModelsHandler(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-		response := OpenAIModelsListResponse(AggregateModelIDs(upstreams))
+		response := OpenAIModelsListResponse(
+			permittedModelIDs(AggregateModelIDs(upstreams), auth.AllowedModels))
 
 		// Another concurrent miss may have already filled the cache.
-		if cached := state.ModelsCache.Get(auth.GroupID); cached != nil {
+		if cached := state.ModelsCache.Get(cacheKey); cached != nil {
 			writeRawJSON(w, cached)
 			return
 		}
-		state.ModelsCache.Set(auth.GroupID, response)
+		state.ModelsCache.Set(cacheKey, response)
 		writeRawJSON(w, response)
 	}
+}
+
+// permittedModelIDs narrows an aggregated model list to what a token may call.
+//
+// The intersection runs over concrete ids only, which is what AggregateModelIDs
+// returns — model_prefixes never expand into ids, so a channel's prefix rule
+// contributes nothing here either way. A whitelist entry naming a model no
+// channel serves simply matches nothing; the list advertises what is both
+// reachable and permitted, which is the same pair the proxy path enforces.
+//
+// The result is never nil, so an empty intersection serializes as an empty list
+// rather than null: a token restricted to models its group cannot reach gets a
+// well-formed empty list, which is the honest answer and keeps SDKs working.
+func permittedModelIDs(ids []string, policy models.AllowedModelsPolicy) []string {
+	if policy.Unrestricted() {
+		return ids
+	}
+	permitted := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if policy.Permits(id) {
+			permitted = append(permitted, id)
+		}
+	}
+	return permitted
 }
 
 func writeRawJSON(w http.ResponseWriter, body json.RawMessage) {

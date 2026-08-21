@@ -169,24 +169,35 @@ func TestTopLogStatsRanksModelsAndChannels(t *testing.T) {
 		}
 	}
 
+	for id, name := range map[int]string{10: "cli-key", 20: "web-key"} {
+		if _, err := database.Exec(`INSERT INTO api_tokens (id, name, token, token_hash, token_preview)
+            VALUES (?, ?, ?, 'hash-' || ?, 'preview')`, id, name, "tok-"+name, name); err != nil {
+			t.Fatalf("insert api_token %d: %v", id, err)
+		}
+	}
+
 	rows := []struct {
-		id            int
-		upstreamID    int
-		upstreamName  string
-		upstreamModel string
-		totalTokens   int
+		id                  int
+		upstreamID          int
+		upstreamName        string
+		upstreamModel       string
+		downstreamTokenID   int
+		downstreamTokenName string
+		totalTokens         int
 	}{
-		{1, 1, "primary", "gpt-test", 100},
-		{2, 1, "primary", "gpt-test", 200},
-		{3, 2, "secondary", "claude-test", 50},
-		{4, 2, "secondary", "gpt-test", 10},
+		{1, 1, "primary", "gpt-test", 10, "cli-key", 100},
+		{2, 1, "primary", "gpt-test", 10, "cli-key", 200},
+		{3, 2, "secondary", "claude-test", 20, "web-key", 50},
+		{4, 2, "secondary", "gpt-test", 10, "cli-key", 10},
 	}
 	for _, row := range rows {
 		_, err := database.Exec(`INSERT INTO request_logs
             (id, method, path, client_type, upstream_id, upstream_name, upstream_model,
+             downstream_token_id, downstream_token_name,
              stream, status_code, total_tokens)
-            VALUES (?, 'POST', '/v1/responses', 'codex', ?, ?, ?, 0, 200, ?)`,
-			row.id, row.upstreamID, row.upstreamName, row.upstreamModel, row.totalTokens)
+            VALUES (?, 'POST', '/v1/responses', 'codex', ?, ?, ?, ?, ?, 0, 200, ?)`,
+			row.id, row.upstreamID, row.upstreamName, row.upstreamModel,
+			row.downstreamTokenID, row.downstreamTokenName, row.totalTokens)
 		if err != nil {
 			t.Fatalf("insert log %d: %v", row.id, err)
 		}
@@ -217,6 +228,15 @@ func TestTopLogStatsRanksModelsAndChannels(t *testing.T) {
 	}
 	if len(stats.ChannelTokens) == 0 || stats.ChannelTokens[0].Count != 300 {
 		t.Errorf("channel token ranking = %+v, want primary with 300", stats.ChannelTokens)
+	}
+	if len(stats.Tokens) != 2 || stats.Tokens[0].Name != "cli-key" || stats.Tokens[0].Count != 3 {
+		t.Errorf("token ranking = %+v, want cli-key first with 3", stats.Tokens)
+	}
+	if stats.Tokens[0].ID == nil || *stats.Tokens[0].ID != 10 {
+		t.Errorf("token id = %v, want 10", stats.Tokens[0].ID)
+	}
+	if len(stats.TokenTokens) == 0 || stats.TokenTokens[0].Count != 310 {
+		t.Errorf("token token ranking = %+v, want cli-key with 310", stats.TokenTokens)
 	}
 
 	// The limit is clamped into 1..=20.

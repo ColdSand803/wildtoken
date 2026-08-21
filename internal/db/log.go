@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +46,8 @@ const logListColumns = `id, created_at, method, path,
                 prompt_tokens, completion_tokens, total_tokens,
                 prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
                 duration_ms, first_token_ms,
+                request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
+                failure_stage, failure_retryable,
                 error`
 
 // LogTopWindow is a ranking window accepted by the top-stats endpoint.
@@ -122,6 +125,43 @@ func (w LogTopWindow) cutoffExpression() string {
 	}
 }
 
+// ResolveWindowRange expresses a preset window as the concrete [start, end)
+// instants it covers, in the models.TimestampFormat UTC shape.
+//
+// The dashboard's presets are relative SQLite expressions evaluated at query
+// time, which is fine for one aggregate but leaves a drill-down with nothing to
+// carry: "最近 24 小时" names no instant. Resolving here rather than in the
+// browser keeps one definition of where a window starts — notably 'today',
+// whose midnight is the server's local one, not the viewer's — so the log page
+// filters over the same rows the dashboard counted.
+//
+// LogTopWindowAll returns no bounds, and LogTopWindowCustom returns none either
+// because its caller already holds the explicit range it parsed.
+func ResolveWindowRange(window LogTopWindow, now time.Time) (start, end time.Time, ok bool) {
+	var from time.Time
+	switch window {
+	case LogTopWindowToday:
+		local := now.Local()
+		from = time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, local.Location())
+	case LogTopWindowOneDay:
+		from = now.AddDate(0, 0, -1)
+	case LogTopWindowThreeDays:
+		from = now.AddDate(0, 0, -3)
+	case LogTopWindowSevenDays:
+		from = now.AddDate(0, 0, -7)
+	case LogTopWindowThirtyDays:
+		from = now.AddDate(0, 0, -30)
+	default:
+		return time.Time{}, time.Time{}, false
+	}
+	// End is exclusive and the row being written this instant should be
+	// included, so it rounds up to the next whole second rather than
+	// truncating: created_at has second granularity, and a truncated bound
+	// would drop everything logged during the current second.
+	upper := now.UTC().Truncate(time.Second).Add(time.Second)
+	return from.UTC().Truncate(time.Second), upper, true
+}
+
 func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWindow,
 	startAt, endAt string) ([]any, error) {
 	switch window {
@@ -145,17 +185,157 @@ func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWin
 
 // LogFilter narrows a log listing. A nil field means the filter is not applied.
 type LogFilter struct {
-	UpstreamID *int64
-	Search     *string
-	Status     *string
-	ClientType *string
+	UpstreamID        *int64
+	DownstreamTokenID *int64
+	Search            *string
+	Status            *string
+	ClientType        *string
+	// Start and End bound created_at as [Start, End). Both carry the
+	// models.TimestampFormat UTC shape created_at itself uses, so the
+	// comparison is a plain string compare on a fixed-width zero-padded
+	// layout. Callers normalize whatever the operator typed into that shape
+	// before it reaches here; an RFC3339 literal with its 'T' and zone would
+	// compare wrong rather than fail loudly.
+	Start *string
+	End   *string
+	// Stream selects streaming or non-streaming requests.
+	Stream *bool
+	// MinDurationMs keeps rows that took at least this long. A row with no
+	// recorded duration never matches: an unknown duration cannot be shown to
+	// have crossed the threshold, and counting it would answer "slower than 3s?"
+	// with requests that may have been instant.
+	MinDurationMs *int64
+}
+
+const (
+	LogStatus2xx   = "2xx"
+	LogStatus4xx   = "4xx"
+	LogStatus5xx   = "5xx"
+	LogStatusOther = "other"
+	LogStatusNone  = "none"
+	LogStatusError = "error"
+)
+
+func ValidLogStatus(status string) bool {
+	switch status {
+	case LogStatus2xx, LogStatus4xx, LogStatus5xx, LogStatusOther, LogStatusNone, LogStatusError:
+		return true
+	default:
+		return false
+	}
+}
+
+// StatusMatches reports whether one status code belongs to a status category.
+//
+// It is the Go twin of the SQL the listing builds, so the live stream and the
+// paginated list cannot disagree about what an error is. A nil code is a row
+// that never got an HTTP status.
+func StatusMatches(status string, code *int32) bool {
+	if code == nil {
+		return status == LogStatusNone || status == LogStatusError
+	}
+	value := *code
+	switch status {
+	case LogStatus2xx:
+		return value >= 200 && value <= 299
+	case LogStatus4xx:
+		return value >= 400 && value <= 499
+	case LogStatus5xx:
+		return value >= 500 && value <= 599
+	case LogStatusOther:
+		return (value >= 100 && value <= 199) || (value >= 300 && value <= 399)
+	case LogStatusNone:
+		return false
+	case LogStatusError:
+		return value < 200 || value >= 300
+	default:
+		return true
+	}
+}
+
+// Matches reports whether a committed log row satisfies the filter.
+//
+// The live stream broadcasts every committed row, so without this the console's
+// filters only applied to the paginated history and live events arrived
+// unfiltered. Search compares the same fields as the SQL LIKE list.
+func (f LogFilter) Matches(entry models.RequestLogOut) bool {
+	// Both sides are the fixed-width UTC models.TimestampFormat, so ordering
+	// by string is ordering by time. [Start, End) matches the SQL exactly.
+	if f.Start != nil && entry.CreatedAt < *f.Start {
+		return false
+	}
+	if f.End != nil && entry.CreatedAt >= *f.End {
+		return false
+	}
+	if f.UpstreamID != nil && (entry.UpstreamID == nil || *entry.UpstreamID != *f.UpstreamID) {
+		return false
+	}
+	if f.DownstreamTokenID != nil &&
+		(entry.DownstreamTokenID == nil || *entry.DownstreamTokenID != *f.DownstreamTokenID) {
+		return false
+	}
+	if f.ClientType != nil && entry.ClientType != *f.ClientType {
+		return false
+	}
+	if f.Status != nil && !StatusMatches(*f.Status, entry.StatusCode) {
+		return false
+	}
+	if f.Stream != nil && (entry.Stream != 0) != *f.Stream {
+		return false
+	}
+	if f.MinDurationMs != nil &&
+		(entry.DurationMs == nil || int64(*entry.DurationMs) < *f.MinDurationMs) {
+		return false
+	}
+	if f.Search != nil {
+		needle := strings.ToLower(*f.Search)
+		fields := []*string{entry.Model, entry.RequestModel, entry.UpstreamModel,
+			entry.UpstreamName, entry.DownstreamTokenName, entry.Error}
+		matched := false
+		for _, field := range fields {
+			if field != nil && strings.Contains(strings.ToLower(*field), needle) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			if strings.Contains(strconv.FormatInt(entry.ID, 10), needle) {
+				matched = true
+			} else if entry.StatusCode != nil &&
+				strings.Contains(strconv.FormatInt(int64(*entry.StatusCode), 10), needle) {
+				matched = true
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
 }
 
 // appendFilters adds the WHERE fragments and their bind values.
 func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
+	// The range goes first because it is the only filter here an index can
+	// serve (idx_request_logs_created_at, and the composites leading with
+	// upstream_id/downstream_token_id). Everything below it — client_type,
+	// status_code, the leading-wildcard LIKE — can only be evaluated per row,
+	// so bounding created_at first is what keeps a filtered page from reading
+	// the whole table.
+	if f.Start != nil {
+		query.WriteString(" AND created_at >= ?")
+		args = append(args, *f.Start)
+	}
+	if f.End != nil {
+		query.WriteString(" AND created_at < ?")
+		args = append(args, *f.End)
+	}
 	if f.UpstreamID != nil {
 		query.WriteString(" AND upstream_id = ?")
 		args = append(args, *f.UpstreamID)
+	}
+	if f.DownstreamTokenID != nil {
+		query.WriteString(" AND downstream_token_id = ?")
+		args = append(args, *f.DownstreamTokenID)
 	}
 	if f.Search != nil {
 		// The wildcards are escaped so an operator searching for a literal '%'
@@ -176,19 +356,37 @@ func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
 	}
 	if f.Status != nil {
 		switch *f.Status {
-		case "2xx":
+		case LogStatus2xx:
 			query.WriteString(" AND status_code BETWEEN 200 AND 299")
-		case "4xx":
+		case LogStatus4xx:
 			query.WriteString(" AND status_code BETWEEN 400 AND 499")
-		case "5xx":
+		case LogStatus5xx:
 			query.WriteString(" AND status_code BETWEEN 500 AND 599")
-		case "none":
+		case LogStatusOther:
+			query.WriteString(" AND status_code IS NOT NULL AND ((status_code BETWEEN 100 AND 199) OR (status_code BETWEEN 300 AND 399))")
+		case LogStatusNone:
 			query.WriteString(" AND status_code IS NULL")
+		case LogStatusError:
+			query.WriteString(" AND (status_code IS NULL OR status_code < 200 OR status_code >= 300)")
 		}
 	}
 	if f.ClientType != nil {
 		query.WriteString(" AND client_type = ?")
 		args = append(args, *f.ClientType)
+	}
+	if f.Stream != nil {
+		// The column is an INTEGER flag, so the bool is bound as 0/1 rather
+		// than relying on the driver's mapping matching SQLite's storage.
+		value := 0
+		if *f.Stream {
+			value = 1
+		}
+		query.WriteString(" AND stream = ?")
+		args = append(args, value)
+	}
+	if f.MinDurationMs != nil {
+		query.WriteString(" AND duration_ms IS NOT NULL AND duration_ms >= ?")
+		args = append(args, *f.MinDurationMs)
 	}
 	return args
 }
@@ -207,6 +405,9 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
 	var durationMs, firstTokenMs sql.NullInt64
+	var requestUID, failureStage sql.NullString
+	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
+	var failureRetryable sql.NullBool
 
 	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Method, &entry.Path,
 		&downstreamTokenID, &downstreamTokenName, &entry.ClientType,
@@ -215,7 +416,9 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 		&entry.Stream, &statusCode,
 		&promptTokens, &completionTokens, &totalTokens,
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
-		&durationMs, &firstTokenMs, &logError)
+		&durationMs, &firstTokenMs, &requestUID, &attemptIndex,
+		&preUpstreamMs, &upstreamHeadersMs,
+		&failureStage, &failureRetryable, &logError)
 	if err != nil {
 		return entry, err
 	}
@@ -239,7 +442,24 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	entry.CompletionReasoningTokens = nullInt32Ptr(completionReasoningTokens)
 	entry.DurationMs = nullInt32Ptr(durationMs)
 	entry.FirstTokenMs = nullInt32Ptr(firstTokenMs)
+	entry.RequestUID = nullStringPtr(requestUID)
+	entry.AttemptIndex = nullInt32Ptr(attemptIndex)
+	entry.PreUpstreamMs = nullInt32Ptr(preUpstreamMs)
+	entry.UpstreamHeadersMs = nullInt32Ptr(upstreamHeadersMs)
+	entry.FailureStage = nullStringPtr(failureStage)
+	entry.FailureRetryable = nullBoolPtr(failureRetryable)
 	return entry, nil
+}
+
+// nullBoolPtr keeps a NULL verdict distinct from a stored false. A false says
+// the gateway judged the failure unretryable; a NULL says there was no failure
+// to judge, or the row predates the field.
+func nullBoolPtr(value sql.NullBool) *bool {
+	if !value.Valid {
+		return nil
+	}
+	converted := value.Bool
+	return &converted
 }
 
 // LogQueryTimeout bounds how long one log listing may run.
@@ -306,6 +526,9 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
               l.prompt_tokens, l.completion_tokens, l.total_tokens,
               l.prompt_cached_tokens, l.cache_creation_tokens, l.completion_reasoning_tokens,
               l.duration_ms, l.first_token_ms,
+              l.request_uid, l.attempt_index,
+              l.pre_upstream_ms, l.upstream_headers_ms,
+              l.failure_stage, l.failure_retryable,
               l.error,
               p.request_snapshot,
               p.upstream_request_override,
@@ -326,6 +549,9 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
 	var durationMs, firstTokenMs sql.NullInt64
+	var detailRequestUID, detailFailureStage sql.NullString
+	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
+	var detailFailureRetryable sql.NullBool
 	var requestSnapshot, upstreamRequestOverride sql.NullString
 	var responseSnapshot, downstreamResponseOverride sql.NullString
 	var upstreamRequestIsOverride, downstreamResponseIsOverride int32
@@ -337,7 +563,9 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 		&detail.Stream, &statusCode,
 		&promptTokens, &completionTokens, &totalTokens,
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
-		&durationMs, &firstTokenMs, &logError,
+		&durationMs, &firstTokenMs,
+		&detailRequestUID, &attemptIndex, &preUpstreamMs, &upstreamHeadersMs,
+		&detailFailureStage, &detailFailureRetryable, &logError,
 		&requestSnapshot, &upstreamRequestOverride, &upstreamRequestIsOverride,
 		&responseSnapshot, &downstreamResponseOverride, &downstreamResponseIsOverride)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -366,6 +594,12 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	detail.CompletionReasoningTokens = nullInt32Ptr(completionReasoningTokens)
 	detail.DurationMs = nullInt32Ptr(durationMs)
 	detail.FirstTokenMs = nullInt32Ptr(firstTokenMs)
+	detail.RequestUID = nullStringPtr(detailRequestUID)
+	detail.AttemptIndex = nullInt32Ptr(attemptIndex)
+	detail.PreUpstreamMs = nullInt32Ptr(preUpstreamMs)
+	detail.UpstreamHeadersMs = nullInt32Ptr(upstreamHeadersMs)
+	detail.FailureStage = nullStringPtr(detailFailureStage)
+	detail.FailureRetryable = nullBoolPtr(detailFailureRetryable)
 
 	// A cleared override flag means the peer snapshot was identical to the
 	// canonical one, so the canonical value is what the console should show.
@@ -418,6 +652,12 @@ const channelNameExpression = `CASE
               ELSE '#' || upstream_id
            END`
 
+// tokenNameExpression prefers a non-empty downstream_token_name snapshot, else "#<id>".
+const tokenNameExpression = `CASE
+              WHEN downstream_token_name IS NOT NULL AND TRIM(downstream_token_name) <> '' THEN TRIM(downstream_token_name)
+              ELSE '#' || downstream_token_id
+           END`
+
 const modelSourceFilter = "COALESCE(NULLIF(TRIM(upstream_model), ''), NULLIF(TRIM(model), '')) IS NOT NULL"
 
 const tokenMetricFilter = "total_tokens IS NOT NULL AND total_tokens > 0"
@@ -437,9 +677,9 @@ func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 	startAt, endAt string, limit int64) (models.RequestLogTopStatsOut, error) {
 	limit = min(max(limit, 1), 20)
 
-	// Channels aggregate by upstream_id so renamed or same-name channels stay
-	// distinct.
-	specs := [4]topLogCountSpec{
+	// Channels aggregate by upstream_id and Tokens by downstream_token_id so
+	// renamed or same-name items stay distinct.
+	specs := [6]topLogCountSpec{
 		{
 			nameExpression:   actualModelExpression,
 			groupExpression:  actualModelExpression,
@@ -469,9 +709,25 @@ func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 			metricFilter:     tokenMetricFilter,
 			exposeGroupID:    true,
 		},
+		{
+			nameExpression:   tokenNameExpression,
+			groupExpression:  "downstream_token_id",
+			sourceFilter:     "downstream_token_id IS NOT NULL",
+			metricExpression: "1",
+			withLatency:      true,
+			exposeGroupID:    true,
+		},
+		{
+			nameExpression:   tokenNameExpression,
+			groupExpression:  "downstream_token_id",
+			sourceFilter:     "downstream_token_id IS NOT NULL",
+			metricExpression: "COALESCE(total_tokens, 0)",
+			metricFilter:     tokenMetricFilter,
+			exposeGroupID:    true,
+		},
 	}
 
-	var rankings [4][]models.RequestLogTopItemOut
+	var rankings [6][]models.RequestLogTopItemOut
 	for i, spec := range specs {
 		items, err := topLogCounts(ctx, database, window, startAt, endAt, spec, limit)
 		if err != nil {
@@ -486,6 +742,8 @@ func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 		Channels:      rankings[1],
 		ModelTokens:   rankings[2],
 		ChannelTokens: rankings[3],
+		Tokens:        rankings[4],
+		TokenTokens:   rankings[5],
 	}, nil
 }
 

@@ -259,11 +259,17 @@ function clearTokenFilters() {
 }
 
 function clearLogFilters() {
-  if (logSearchInput) logSearchInput.value = "";
-  if (logStatusFilter) logStatusFilter.value = "";
-  if (logClientFilter) logClientFilter.value = "";
-  resetLogPagination();
-  loadLogs();
+  if (typeof logSearchInput !== "undefined" && logSearchInput) logSearchInput.value = "";
+  if (typeof logUpstreamFilter !== "undefined" && logUpstreamFilter) logUpstreamFilter.value = "";
+  if (typeof logStatusFilter !== "undefined" && logStatusFilter) logStatusFilter.value = "";
+  if (typeof logClientFilter !== "undefined" && logClientFilter) logClientFilter.value = "";
+  if (typeof logStreamFilter !== "undefined" && logStreamFilter) logStreamFilter.value = "";
+  if (typeof logMinDurationInput !== "undefined" && logMinDurationInput) logMinDurationInput.value = "";
+  if (typeof clearLogTimeRange === "function") clearLogTimeRange();
+  if (typeof setLogDownstreamTokenId === "function") setLogDownstreamTokenId(null);
+  if (typeof resetLogPagination === "function") resetLogPagination();
+  if (typeof loadLogs === "function") loadLogs();
+  if (typeof restartLogStream === "function") restartLogStream();
 }
 
 function currentViewName() {
@@ -331,7 +337,14 @@ function currentViewFromHash() {
   return validView(name) ? name : getDefaultHome();
 }
 
+// 当前已切到的视图。switchView 自己会补写 location.hash，那次改写又会派发
+// hashchange，处理器如果无条件再切一次，同一个视图就被加载两遍——后一次的
+// loadDashboardData 会 abort 前一次，首次打开不带 hash 的地址必然撞上。
+// hashchange 靠这个值区分"用户真的换页了"和"我们刚补的 hash"。
+let activeViewName = null;
+
 function switchView(name) {
+  activeViewName = name;
   for (const view of views) {
     view.hidden = view.dataset.view !== name;
   }
@@ -460,8 +473,27 @@ function startDashboardRefresh() {
     updateLiveIndicator();
     return;
   }
-  dashboardRefreshTimer = window.setInterval(loadDashboardData, DASHBOARD_REFRESH_MS);
+  const interval = Number(dashboardRefreshIntervalMs);
+  if (!Number.isFinite(interval) || interval <= 0) {
+    updateLiveIndicator();
+    return;
+  }
+  dashboardRefreshTimer = window.setInterval(loadDashboardData, interval);
   updateLiveIndicator();
+}
+
+function updateDashboardRefreshInterval(newInterval) {
+  const val = Number(newInterval);
+  dashboardRefreshIntervalMs = Number.isFinite(val) ? val : DASHBOARD_DEFAULT_REFRESH_MS;
+  try {
+    localStorage.setItem(DASHBOARD_REFRESH_KEY, String(dashboardRefreshIntervalMs));
+  } catch {
+    // storage fallback
+  }
+  stopDashboardRefresh();
+  if (currentViewFromHash() === "dashboard") {
+    startDashboardRefresh();
+  }
 }
 
 function stopDashboardRefresh() {
@@ -542,7 +574,14 @@ function closeAdminTokenDialog() {
   }
 }
 
-async function api(path, options = {}) {
+// rawApi performs the request and hands back the response itself.
+//
+// Split out of api() because one endpoint's body is not JSON: the database backup
+// answers with the snapshot as a byte stream, and reading it as JSON would turn a
+// working backup into a parse error. Everything about the request — the admin
+// credential, the 401 handling, the structured rejection body — is shared, so the
+// two paths cannot drift apart on how a failure is reported.
+async function rawApi(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if (options.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
@@ -554,8 +593,10 @@ async function api(path, options = {}) {
   const response = await fetch(path, { ...options, headers });
   if (!response.ok) {
     let message = `${response.status} ${response.statusText}`;
+    let payload = null;
     try {
       const data = await response.json();
+      payload = data;
       message = data.detail || data.error?.message || data.error || message;
     } catch (_) {
       // Keep the HTTP status message.
@@ -567,8 +608,21 @@ async function api(path, options = {}) {
     }
     const error = new Error(message);
     error.status = response.status;
+    // Kept because some endpoints answer a rejection with a structured report
+    // rather than only a message: a refused configuration import returns 400 with
+    // the item list naming which entry was at fault, which is the part an operator
+    // acts on. Callers that only read .message are unaffected.
+    error.payload = payload;
+    if (payload && Array.isArray(payload.items)) {
+      error.report = payload;
+    }
     throw error;
   }
+  return response;
+}
+
+async function api(path, options = {}) {
+  const response = await rawApi(path, options);
   if (response.status === 204) {
     return null;
   }
@@ -617,6 +671,7 @@ function fillServerSettings(settings) {
   settingsBodyKeepCount.value = settings.log_body_keep_count;
   settingsRetentionDays.value = settings.log_retention_days;
   settingsBodyMaxBytes.value = settings.log_body_max_bytes;
+  if (settingsLoadBalanceStrategy) settingsLoadBalanceStrategy.value = settings.load_balance_strategy || "weighted";
   settingsMaxRetries.value = settings.max_retries;
   settingsSameUpstreamRetryMs.value = settings.same_upstream_retry_interval_ms;
   settingsFailurePenalty.value = settings.auto_weight_failure_penalty;
@@ -636,7 +691,11 @@ function formatBytes(value) {
   const bytes = Number(value);
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  // GB is reached here, unlike where this started: a database backup is measured
+  // against the disk an operator has to fit it on, and "4096.0 MB" is a size they
+  // have to convert by hand before it means anything.
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`;
 }
 
 function formatUptime(value) {
@@ -702,7 +761,624 @@ function stopSystemUptimeTicker() {
   systemUptimeTimer = null;
 }
 
+// renderMetricsEndpointStatus shows whether /metrics is exposed and how it is
+// guarded.
+//
+// Only the access policy is rendered. The Prometheus series themselves are not
+// mirrored here: the console already has its own JSON metrics endpoint, and two
+// panels sourced from different contracts would disagree the moment either
+// changed.
+function renderMetricsEndpointStatus(status) {
+  if (!metricsEndpointStatusEl) return;
+
+  // An absent field means a gateway older than this panel. Saying so beats
+  // rendering the default-false as a deliberate "disabled".
+  if (!status || typeof status !== "object") {
+    metricsEndpointStatusEl.innerHTML = `<strong>端点状态不可用</strong><p>当前服务端未提供监控端点状态字段，请升级网关后再查看。</p>`;
+    return;
+  }
+
+  const path = typeof status.path === "string" && status.path ? status.path : "/metrics";
+  if (!status.enabled) {
+    metricsEndpointStatusEl.innerHTML = `<strong>状态：已关闭（默认）</strong><p><code>${escapeHtml(path)}</code> 当前返回 404，与未编译该功能无法区分。需在启动配置 <code>[metrics]</code> 段设置 <code>enabled = true</code>（或环境变量 <code>APP__METRICS__ENABLED=true</code>）后重启生效。</p>`;
+    return;
+  }
+
+  // The open configuration is called out rather than merely described: the
+  // endpoint reports traffic volumes and channel health, so an unguarded one is
+  // the case an operator most needs to notice.
+  const guard = status.token_required
+    ? `<p>访问策略：需携带独立的 <code>Authorization: Bearer &lt;token&gt;</code>。该令牌与管理员令牌相互独立，控制台不显示其内容。</p>`
+    : `<p class="metrics-endpoint-warn">访问策略：<strong>未设置令牌</strong>，任何能访问该端口的调用方都可读取流量规模与渠道健康。仅在监听地址本身不可从外部访问时才适用；否则请配置 <code>[metrics] token</code>。</p>`;
+  metricsEndpointStatusEl.innerHTML = `<strong>状态：已启用</strong><p>抓取路径：<code>${escapeHtml(path)}</code>（Prometheus 文本格式）。</p>${guard}<p>指标标签仅含渠道 ID、状态类别与协议；不含令牌 ID、令牌名称或模型名称，因此标签基数不随模型与令牌数量增长。</p>`;
+}
+
+// ── Configuration migration ──────────────────────────────
+//
+// The uploaded archive is held here rather than re-read from the file input on
+// apply: the preview and the apply must be the same bytes, and a file the operator
+// swapped between the two clicks would otherwise be applied against a plan they
+// never saw.
+let stagedConfigArchive = null;
+
+const CONFIG_SCOPE_LABELS = {
+  groups: "分组",
+  channels: "渠道",
+  tokens: "令牌策略",
+  settings: "系统设置",
+};
+
+const CONFIG_ACTION_LABELS = {
+  create: "新建",
+  update: "覆盖",
+  skip: "跳过",
+  fail: "拒绝",
+};
+
+function setConfigExportStatus(message = "", tone = "") {
+  if (!configExportStatus) return;
+  configExportStatus.textContent = message;
+  configExportStatus.dataset.tone = tone;
+}
+
+function setConfigImportStatus(message = "", tone = "") {
+  if (!configImportStatus) return;
+  configImportStatus.textContent = message;
+  configImportStatus.dataset.tone = tone;
+}
+
+function selectedExportScopes() {
+  return Array.from(document.querySelectorAll("[data-export-scope]"))
+    .filter((box) => box.checked)
+    .map((box) => box.dataset.exportScope);
+}
+
+// downloadArchive hands the archive to the browser as a file.
+//
+// Written to a blob URL rather than a data: URL because an archive with many
+// channels exceeds what some browsers accept in a URL, and the failure there is a
+// silently truncated download.
+function downloadArchive(archive) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const suffix = archive.encryption ? "encrypted" : "plain";
+  const blob = new Blob([JSON.stringify(archive, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `wildtoken-config-${stamp}-${suffix}.json`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoked so the archive is not reachable from the page for the rest of the
+  // session; it may contain credentials.
+  URL.revokeObjectURL(url);
+}
+
+async function runConfigExport() {
+  if (!configExportRun) return;
+  const scopes = selectedExportScopes();
+  if (!scopes.length) {
+    setConfigExportStatus("请至少选择一个导出范围。", "error");
+    return;
+  }
+  const includeSecrets = Boolean(configExportSecrets?.checked);
+  const password = configExportPassword?.value || "";
+  if (includeSecrets && password.trim().length < 8) {
+    setConfigExportStatus("包含密钥时必须设置至少 8 位的归档密码。", "error");
+    return;
+  }
+
+  configExportRun.disabled = true;
+  setConfigExportStatus("正在生成归档…", "");
+  try {
+    const archive = await api("/api/admin/config/export", {
+      method: "POST",
+      body: JSON.stringify({ scopes, include_secrets: includeSecrets, password }),
+    });
+    downloadArchive(archive);
+    const labels = scopes.map((scope) => CONFIG_SCOPE_LABELS[scope] || scope).join("、");
+    setConfigExportStatus(
+      `已导出：${labels}${archive.encryption ? "（已加密）" : "（未加密，不含密钥）"}。`,
+      "ok",
+    );
+    // Cleared on success so the password does not sit in the DOM for the rest of
+    // the session, where it would be readable by anything that can read the page.
+    if (configExportPassword) configExportPassword.value = "";
+  } catch (error) {
+    setConfigExportStatus(error.message || "导出失败。", "error");
+  } finally {
+    configExportRun.disabled = false;
+  }
+}
+
+function renderConfigImportReport(report, { dryRun }) {
+  if (!configImportReport) return;
+  if (!report) {
+    configImportReport.innerHTML = "";
+    return;
+  }
+
+  const heading = dryRun ? "预览结果（未写入）" : "导入结果";
+  const source = [];
+  if (report.app_version) source.push(`来源版本 ${escapeHtml(report.app_version)}`);
+  if (report.exported_at) source.push(`导出于 ${escapeHtml(report.exported_at)}`);
+  if (report.schema_version) source.push(`格式 v${escapeHtml(String(report.schema_version))}`);
+  if (report.includes_secrets) source.push("<strong>含密钥与令牌明文</strong>");
+
+  const counts = `<span class="config-count">新建 ${Number(report.created || 0)}</span>`
+    + `<span class="config-count">覆盖 ${Number(report.updated || 0)}</span>`
+    + `<span class="config-count">跳过 ${Number(report.skipped || 0)}</span>`;
+
+  const errors = Array.isArray(report.errors) ? report.errors : [];
+  const errorBlock = errors.length
+    ? `<div class="config-import-errors"><strong>未写入任何内容，以下条目被拒绝：</strong><ul>${
+        errors.map((message) => `<li>${escapeHtml(message)}</li>`).join("")
+      }</ul></div>`
+    : "";
+
+  const items = Array.isArray(report.items) ? report.items : [];
+  const rows = items.map((item) => {
+    const action = CONFIG_ACTION_LABELS[item.action] || item.action || "";
+    const scope = CONFIG_SCOPE_LABELS[item.scope] || item.scope || "";
+    return `<tr data-action="${escapeHtml(item.action || "")}"><td>${escapeHtml(scope)}</td>`
+      + `<td>${escapeHtml(item.name || "")}</td><td>${escapeHtml(action)}</td>`
+      + `<td>${escapeHtml(item.detail || "")}</td></tr>`;
+  }).join("");
+  const table = rows
+    ? `<table class="config-import-table"><thead><tr><th>范围</th><th>名称</th><th>处理</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table>`
+    : `<p class="settings-note">归档中没有需要处理的条目。</p>`;
+
+  configImportReport.innerHTML = `<div class="config-import-head"><strong>${heading}</strong>`
+    + `<div class="config-counts">${counts}</div></div>`
+    + (source.length ? `<p class="settings-note">${source.join(" · ")}</p>` : "")
+    + errorBlock + table;
+}
+
+// readArchiveFile parses the chosen file without sending it anywhere.
+//
+// A file that is not this format is refused here, so the operator hears about it
+// before a password is typed.
+async function readArchiveFile(file) {
+  const text = await file.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch (_) {
+    throw new Error("该文件不是 JSON，请选择导出得到的归档文件。");
+  }
+  if (!parsed || typeof parsed !== "object" || parsed.kind !== "wildtoken.config") {
+    throw new Error("该文件不是 WildToken 配置归档。");
+  }
+  return parsed;
+}
+
+async function submitConfigImport({ dryRun }) {
+  const file = configImportFile?.files?.[0];
+  if (!file && !stagedConfigArchive) {
+    setConfigImportStatus("请先选择归档文件。", "error");
+    return;
+  }
+
+  const button = dryRun ? configImportPreview : configImportApply;
+  if (button) button.disabled = true;
+  setConfigImportStatus(dryRun ? "正在校验归档…" : "正在导入…", "");
+  try {
+    if (file) stagedConfigArchive = await readArchiveFile(file);
+
+    const body = {
+      archive: stagedConfigArchive,
+      password: configImportPassword?.value || "",
+      on_conflict: configImportConflict?.value || "skip",
+      dry_run: dryRun,
+    };
+    const report = await api("/api/admin/config/import", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+
+    renderConfigImportReport(report, { dryRun });
+    if (dryRun) {
+      setConfigImportStatus("校验通过，未写入任何内容。确认后再执行导入。", "ok");
+      // Only a successful preview unlocks the apply: the operator has to have seen
+      // what the import would do before they can commit it.
+      if (configImportApply) configImportApply.disabled = false;
+    } else {
+      setConfigImportStatus("导入完成，配置已生效。", "ok");
+      if (configImportApply) configImportApply.disabled = true;
+      if (configImportPassword) configImportPassword.value = "";
+      stagedConfigArchive = null;
+      if (configImportFile) configImportFile.value = "";
+      // Refreshed because an import can have replaced the settings this page shows.
+      await loadSettingsPage();
+    }
+  } catch (error) {
+    setConfigImportStatus(error.message || "导入失败。", "error");
+    // A refused import is answered with the full report, which names the entry at
+    // fault — the operator needs that far more than the message alone.
+    renderConfigImportReport(error.report || null, { dryRun });
+    if (configImportApply) configImportApply.disabled = true;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function resetConfigImportState() {
+  stagedConfigArchive = null;
+  if (configImportApply) configImportApply.disabled = true;
+  renderConfigImportReport(null, { dryRun: true });
+  setConfigImportStatus("");
+}
+
+// ── Disaster recovery ────────────────────────────────────
+//
+// Deliberately a separate card from configuration migration above, for the same
+// reason the endpoints are separate route groups: an import writes named settings
+// into a running instance, a restore replaces every row it has — request logs,
+// usage counters and the admin credential included. Presenting the two as
+// variations of one operation would let approval of the smaller read as approval
+// of the larger.
+
+// The uploaded backup is held here so the bytes that were verified are the bytes
+// that get staged, exactly as the configuration import does. It also avoids
+// re-reading and re-encoding a database-sized file on the second click.
+let stagedBackupFile = null;
+// Set by a successful verification and cleared by anything that changes what would
+// be restored. The apply is gated on it, so nothing is staged that the operator has
+// not seen checked first.
+let restoreVerified = false;
+// True while a request is in flight, and true while a restore sits staged. Both
+// lock the same controls, for different reasons: one because a second click would
+// duplicate the work, the other because the database is already scheduled to be
+// replaced.
+let disasterRecoveryBusy = false;
+let restoreStagedAndPending = false;
+
+// The container's magic ends in two NUL bytes. Built rather than written as a
+// literal: a source file carrying raw NULs reads as binary to half the tools that
+// touch it, and an escape is easy to lose to a well-meaning reformat.
+const BACKUP_MAGIC = `WTBAK1${String.fromCharCode(0, 0)}`;
+const BACKUP_KIND = "wildtoken.backup";
+// Mirrors MaxBackupHeaderBytes on the server, so a file that would be refused there
+// is refused here before it is uploaded.
+const MAX_BACKUP_HEADER_BYTES = 64 * 1024;
+
+function setBackupStatus(message = "", tone = "") {
+  if (!backupStatus) return;
+  backupStatus.textContent = message;
+  backupStatus.dataset.tone = tone;
+}
+
+function setRestoreStatus(message = "", tone = "") {
+  if (!restoreStatus) return;
+  restoreStatus.textContent = message;
+  restoreStatus.dataset.tone = tone;
+}
+
+// shortFingerprint keeps a digest readable. The full value is of no use to a person
+// comparing two instances by eye, and the leading bytes are enough to see that two
+// differ.
+function shortFingerprint(value) {
+  const text = String(value || "");
+  if (!text) return "—";
+  return text.length > 16 ? `${text.slice(0, 16)}…` : text;
+}
+
+// applyDisasterRecoveryLocks is the one place that decides what is clickable.
+//
+// It also locks the configuration import, which is not this card's control: an
+// import written now would land in a database that is about to be replaced by the
+// staged restore, so it would be silently lost at the next start.
+function applyDisasterRecoveryLocks() {
+  const locked = disasterRecoveryBusy || restoreStagedAndPending;
+  if (backupRun) backupRun.disabled = disasterRecoveryBusy;
+  if (restoreVerify) restoreVerify.disabled = locked;
+  if (restoreFile) restoreFile.disabled = locked;
+  if (restorePassword) restorePassword.disabled = locked;
+  if (restoreConfirm) restoreConfirm.disabled = locked;
+  if (restoreAllowSchemaMismatch) restoreAllowSchemaMismatch.disabled = locked;
+  if (restoreCancel) restoreCancel.disabled = disasterRecoveryBusy;
+  if (restoreApply) {
+    const confirmed = (restoreConfirm?.value || "").trim() === "restore";
+    restoreApply.disabled = locked || !restoreVerified || !confirmed;
+  }
+  if (restoreStagedAndPending && configImportApply) {
+    configImportApply.disabled = true;
+  }
+}
+
+function setDisasterRecoveryBusy(busy) {
+  disasterRecoveryBusy = Boolean(busy);
+  applyDisasterRecoveryLocks();
+}
+
+// resetRestoreState is what any change to the input runs: a new file, a different
+// password or a toggled schema override all describe a different restore than the
+// one that was verified.
+function resetRestoreState() {
+  stagedBackupFile = null;
+  restoreVerified = false;
+  renderRestoreReport(null, { dryRun: true });
+  setRestoreStatus("");
+  applyDisasterRecoveryLocks();
+}
+
+function renderBackupInfo(info) {
+  if (!backupCurrentInfo) return;
+  if (!info) {
+    backupCurrentInfo.innerHTML = `<p class="settings-note">数据库信息暂不可用。</p>`;
+    return;
+  }
+  const pages = info.page_count
+    ? `${Number(info.page_count).toLocaleString("zh-CN")} 页 × ${formatBytes(info.page_size)}`
+    : "—";
+  const entries = [
+    ["当前版本", info.app_version || "—"],
+    ["备份格式", `v${Number(info.schema_version || 1)}`],
+    ["结构指纹", shortFingerprint(info.schema_fingerprint)],
+    ["数据库大小", formatBytes(info.size_bytes)],
+    ["页面", pages],
+  ];
+  backupCurrentInfo.innerHTML = `<dl class="backup-info-grid">${
+    entries.map(([label, value]) =>
+      `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(String(value))}</dd></div>`).join("")
+  }</dl>`;
+}
+
+function renderPendingRestore(pending) {
+  restoreStagedAndPending = Boolean(pending && pending.pending);
+  if (restorePending) restorePending.hidden = !restoreStagedAndPending;
+  if (restorePendingDetail) {
+    restorePendingDetail.innerHTML = restoreStagedAndPending
+      ? `<strong>已有一份恢复在等待重启生效</strong>`
+        + `<p>暂存于 ${escapeHtml(pending.staged_at || "—")} · ${escapeHtml(formatBytes(pending.size_bytes))}`
+        + ` · 校验和 ${escapeHtml(shortFingerprint(pending.checksum))}</p>`
+        + `<p><strong>需要重启服务</strong>才会用该备份替换当前数据库。在此之前，恢复与配置导入已锁定；如果改了主意，可以取消暂存，当前数据库不受影响。</p>`
+      : "";
+  }
+  applyDisasterRecoveryLocks();
+}
+
+// renderRestoreReport shows the uploaded file beside this instance, because "can I
+// restore this here" is a comparison, not a property of the file alone.
+function renderRestoreReport(result, { dryRun }) {
+  if (!restoreReport) return;
+  if (!result) {
+    restoreReport.innerHTML = "";
+    return;
+  }
+
+  const backup = result.backup || {};
+  const current = result.current || {};
+  const rows = [
+    ["应用版本", backup.app_version || "—", current.app_version || "—"],
+    ["创建时间", backup.created_at || "—", "—"],
+    ["结构指纹", shortFingerprint(backup.schema_fingerprint), shortFingerprint(current.schema_fingerprint)],
+    ["快照大小", formatBytes(backup.size_bytes), "—"],
+    ["加密", backup.encrypted ? "是" : "否", "—"],
+  ];
+  const table = `<table class="restore-compare"><thead><tr><th>项目</th><th>备份文件</th><th>当前实例</th></tr></thead><tbody>${
+    rows.map(([label, left, right]) =>
+      `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(String(left))}</td><td>${escapeHtml(String(right))}</td></tr>`).join("")
+  }</tbody></table>`;
+
+  const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+  const warningBlock = warnings.length
+    ? `<div class="restore-warnings"><ul>${
+        warnings.map((message) => `<li>${escapeHtml(message)}</li>`).join("")
+      }</ul></div>`
+    : "";
+
+  const heading = dryRun ? "校验结果（未写入）" : "恢复结果";
+  const verdict = result.verified
+    ? `<span class="restore-verdict" data-verified="true">校验通过</span>`
+    : `<span class="restore-verdict" data-verified="false">未通过校验</span>`;
+  // The restart requirement is stated in the report, not only in the status line:
+  // the status line is one sentence that the next action overwrites, and "staged
+  // but not applied" is the part an operator most needs to still be on screen.
+  const staged = result.staged
+    ? `<div class="restore-staged"><strong>已暂存，尚未生效。</strong>`
+      + `<p>当前进程正持有数据库，替换会在<strong>下次启动</strong>时发生，请重启服务。</p>`
+      + (result.rollback_path
+        ? `<p>被替换的数据库已另存为 <code>${escapeHtml(result.rollback_path)}</code>，恢复错了可以用它回退。</p>`
+        : "")
+      + `</div>`
+    : "";
+
+  restoreReport.innerHTML = `<div class="config-import-head"><strong>${heading}</strong>${verdict}</div>`
+    + warningBlock + staged + table;
+}
+
+// bytesToBase64 encodes in chunks.
+//
+// String.fromCharCode applied to a whole database at once exceeds the argument
+// limit and throws, which would report a perfectly good backup as a broken one.
+function bytesToBase64(bytes) {
+  const chunk = 0x8000;
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += chunk) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + chunk));
+  }
+  return btoa(binary);
+}
+
+// readBackupFile parses the container's header locally, without uploading anything.
+//
+// The header is plaintext by design, so the console can say what a file is — and
+// refuse one that is not a backup at all — before the operator types a password or
+// waits for a database-sized upload. Everything here is checked again on the server;
+// nothing is trusted from this side.
+async function readBackupFile(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  if (bytes.length < BACKUP_MAGIC.length + 4) {
+    throw new Error("该文件不是 WildToken 数据库备份。");
+  }
+  const magic = String.fromCharCode(...bytes.subarray(0, BACKUP_MAGIC.length));
+  if (magic !== BACKUP_MAGIC) {
+    throw new Error("该文件不是 WildToken 数据库备份；如果这是配置归档，请用上方的“配置迁移”卡片导入。");
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const headerLength = view.getUint32(BACKUP_MAGIC.length, false);
+  const bodyStart = BACKUP_MAGIC.length + 4 + headerLength;
+  if (headerLength === 0 || headerLength > MAX_BACKUP_HEADER_BYTES || bodyStart > bytes.length) {
+    throw new Error("备份文件已损坏：文件头长度不合法。");
+  }
+  let header;
+  try {
+    header = JSON.parse(new TextDecoder().decode(bytes.subarray(BACKUP_MAGIC.length + 4, bodyStart)));
+  } catch (_) {
+    throw new Error("备份文件已损坏：无法解析文件头。");
+  }
+  if (!header || typeof header !== "object" || header.kind !== BACKUP_KIND) {
+    throw new Error("该文件不是 WildToken 数据库备份。");
+  }
+  return { header, archive: bytesToBase64(bytes) };
+}
+
+function backupFileName(response) {
+  const disposition = response.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="([^"]+)"/);
+  return match ? match[1] : "wildtoken-backup.wtbak";
+}
+
+function downloadBackupBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  // Revoked immediately: this blob is the whole database, credentials included, and
+  // an object URL stays fetchable from the page until it is released.
+  URL.revokeObjectURL(url);
+}
+
+async function runDatabaseBackup() {
+  if (!backupRun) return;
+  const password = backupPassword?.value || "";
+  if (password && password.trim().length < 8) {
+    setBackupStatus("备份密码至少 8 位；留空则生成不加密的备份。", "error");
+    return;
+  }
+
+  setDisasterRecoveryBusy(true);
+  setBackupStatus("正在生成一致性快照…", "");
+  try {
+    // rawApi rather than api: the response body is the database, not JSON.
+    const response = await rawApi("/api/admin/disaster-recovery/backup", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+    const blob = await response.blob();
+    downloadBackupBlob(blob, backupFileName(response));
+    setBackupStatus(
+      `备份已生成并下载（${formatBytes(blob.size)}${password ? "，已加密" : "，未加密"}）。`,
+      "ok",
+    );
+    // Cleared on success so the password does not sit in the DOM for the rest of
+    // the session, where anything that can read the page can read it.
+    if (backupPassword) backupPassword.value = "";
+  } catch (error) {
+    setBackupStatus(error.message || "备份失败。", "error");
+  } finally {
+    setDisasterRecoveryBusy(false);
+  }
+}
+
+async function submitRestore({ dryRun }) {
+  const file = restoreFile?.files?.[0];
+  if (!file && !stagedBackupFile) {
+    setRestoreStatus("请先选择备份文件。", "error");
+    return;
+  }
+  if (!dryRun && (restoreConfirm?.value || "").trim() !== "restore") {
+    // Also enforced by the server, which requires the same phrase. Checked here so
+    // the operator is told what is missing rather than being handed a rejection.
+    setRestoreStatus("请在覆盖确认中输入 restore，确认用备份覆盖当前数据库的全部数据。", "error");
+    return;
+  }
+
+  setDisasterRecoveryBusy(true);
+  setRestoreStatus(dryRun ? "正在校验备份…" : "正在暂存恢复…", "");
+  try {
+    if (file) stagedBackupFile = await readBackupFile(file);
+
+    const body = {
+      archive: stagedBackupFile.archive,
+      password: restorePassword?.value || "",
+      dry_run: dryRun,
+      allow_schema_mismatch: Boolean(restoreAllowSchemaMismatch?.checked),
+    };
+    if (!dryRun) body.confirm = "restore";
+
+    const result = await api("/api/admin/disaster-recovery/restore", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    renderRestoreReport(result, { dryRun });
+
+    if (dryRun) {
+      restoreVerified = true;
+      setRestoreStatus("校验通过，未写入任何内容。填写覆盖确认后再执行恢复。", "ok");
+    } else {
+      restoreVerified = false;
+      stagedBackupFile = null;
+      if (restorePassword) restorePassword.value = "";
+      if (restoreConfirm) restoreConfirm.value = "";
+      if (restoreFile) restoreFile.value = "";
+      setRestoreStatus("恢复已暂存，需要重启服务后才会生效。", "ok");
+      await loadDisasterRecoveryInfo();
+    }
+  } catch (error) {
+    // Nothing on this instance has been touched at this point: the server verifies
+    // the whole file before it writes anything, so a wrong password or a damaged
+    // file leaves the database exactly as it was.
+    restoreVerified = false;
+    renderRestoreReport(null, { dryRun });
+    setRestoreStatus(`${error.message || "恢复失败。"}（当前数据库未被修改）`, "error");
+  } finally {
+    setDisasterRecoveryBusy(false);
+  }
+}
+
+async function cancelStagedRestore() {
+  setDisasterRecoveryBusy(true);
+  setRestoreStatus("正在取消暂存的恢复…", "");
+  try {
+    const result = await api("/api/admin/disaster-recovery/restore", { method: "DELETE" });
+    renderPendingRestore({ pending: false });
+    renderRestoreReport(null, { dryRun: true });
+    setRestoreStatus(
+      result?.rollback_kept
+        ? "已取消暂存的恢复，当前数据库不受影响；恢复前的副本已保留在服务器上。"
+        : "已取消暂存的恢复，当前数据库不受影响。",
+      "ok",
+    );
+    await loadDisasterRecoveryInfo();
+  } catch (error) {
+    setRestoreStatus(error.message || "取消失败。", "error");
+  } finally {
+    setDisasterRecoveryBusy(false);
+  }
+}
+
+async function loadDisasterRecoveryInfo() {
+  if (!backupCurrentInfo) return;
+  try {
+    const info = await api("/api/admin/disaster-recovery/info");
+    renderBackupInfo(info?.current);
+    renderPendingRestore(info?.pending_restore);
+  } catch (error) {
+    // Left as unavailable rather than as "no restore pending": a failed load says
+    // nothing about whether one is staged, and reporting none would be a claim this
+    // console cannot make.
+    renderBackupInfo(null);
+    setBackupStatus(error.message || "无法读取数据库信息。", "error");
+  }
+}
+
 function renderSystemInfo(system) {
+  renderMetricsEndpointStatus(system.metrics_endpoint);
   const uptimeSeconds = Number(system.uptime_seconds);
   systemUptimeBaseSeconds = Number.isFinite(uptimeSeconds) ? Math.max(0, uptimeSeconds) : null;
   systemUptimeSyncedAt = Date.now();
@@ -762,8 +1438,15 @@ async function loadSettingsPage() {
       setSettingsStatus("无法加载设置，请检查连接后重试。", "error");
       setRoutingSettingsStatus("无法加载路由策略，请检查连接后重试。", "error");
       if (systemInfoGrid) systemInfoGrid.innerHTML = `<p class="settings-loading">运行信息暂不可用。</p>`;
+      // Left as unknown rather than as "disabled": a failed load says nothing
+      // about whether the endpoint is exposed.
+      if (metricsEndpointStatusEl) metricsEndpointStatusEl.innerHTML = `<strong>端点状态暂不可用</strong><p>无法读取运行信息，请检查连接后重试。</p>`;
     }
   }
+  // Loaded separately from the block above so a failure there does not leave a
+  // staged restore unreported: an operator who cannot see one waiting would restart
+  // into a replaced database without knowing why.
+  await loadDisasterRecoveryInfo();
 }
 
 function closeModelTestDialog() {
@@ -915,11 +1598,12 @@ function runtimeSettingsPayload() {
     auto_weight_recovery_interval_seconds: Number(settingsRecoveryInterval.value),
     proxy_enabled: Boolean(settingsProxyEnabled?.checked),
     proxy_url: (settingsProxyUrl?.value || "").trim(),
+    load_balance_strategy: (settingsLoadBalanceStrategy?.value || loadedServerSettings?.load_balance_strategy || "weighted").trim(),
     revision: loadedServerSettings.revision,
   };
 }
 
-const nonIntegerSettingsKeys = new Set(["revision", "proxy_enabled", "proxy_url"]);
+const nonIntegerSettingsKeys = new Set(["revision", "proxy_enabled", "proxy_url", "load_balance_strategy"]);
 
 function runtimeSettingsAreIntegers(payload) {
   return Object.entries(payload).every(([key, value]) => nonIntegerSettingsKeys.has(key) || Number.isInteger(value));

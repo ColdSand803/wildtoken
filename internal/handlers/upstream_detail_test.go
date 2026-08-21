@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +25,22 @@ import (
 
 func upstreamTestState(t *testing.T) *appstate.State {
 	t.Helper()
-	database, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	return namedTestState(t, "")
+}
+
+// namedTestState is upstreamTestState with the database name qualified, so one test
+// can hold two independent instances at once.
+//
+// The name is part of the shared-cache URI: two states built from the same name are
+// the same database, which silently turns a migration test into an instance
+// importing its own configuration.
+func namedTestState(t *testing.T, instance string) *appstate.State {
+	t.Helper()
+	name := t.Name()
+	if instance != "" {
+		name += "-" + instance
+	}
+	database, err := sql.Open("sqlite", "file:"+name+"?mode=memory&cache=shared")
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
@@ -44,7 +60,16 @@ func upstreamTestState(t *testing.T) *appstate.State {
 		ModelsCache: appstate.NewModelsListCache(),
 		Routing:     proxy.NewRoutingCache(),
 		Quotas:      quota.NewTracker(),
-		StartedAt:   time.Now(),
+		ProbeRuns:   appstate.NewProbeRunState(),
+		// Wired because the server does (internal/app/server.go): the token-usage
+		// endpoint reads this snapshot before it looks at any request, so a nil
+		// cache here is a panic rather than an empty result.
+		LogStats: db.NewLogStatsCache(),
+		// Wired because the server does: applyRuntimeHealth publishes the scrape
+		// gauge from the channel-list path, so a state without it would only stay
+		// safe on the nil-receiver guard rather than exercising what production runs.
+		Prometheus: metrics.NewPrometheus(),
+		StartedAt:  time.Now(),
 	}
 }
 
@@ -69,8 +94,14 @@ func getUpstreamDetail(t *testing.T, state *appstate.State, id int64) models.Ups
 	return detail
 }
 
+// itoa renders an integer for a test URL or JSON body.
+//
+// This was `string([]byte{byte('0' + value)})`, which is correct only for 0-9 and
+// silently emits a garbage byte past that rather than failing — a body built with
+// it parsed as malformed JSON, and the test it broke reported a missing value
+// rather than a bad fixture.
 func itoa(value int64) string {
-	return string([]byte{byte('0' + value)})
+	return strconv.FormatInt(value, 10)
 }
 
 // TestTheDetailResponseCarriesTheChannelsGroups guards the regression that made

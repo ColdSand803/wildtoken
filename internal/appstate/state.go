@@ -54,23 +54,42 @@ func (s *SettingsStore) Set(settings models.RuntimeSettings) {
 // Concurrent misses may reload the same value, which is intentional and harmless.
 type ModelsListCache struct {
 	mu      sync.RWMutex
-	byGroup map[int64]json.RawMessage
+	byGroup map[ModelsCacheKey]json.RawMessage
+}
+
+// ModelsCacheKey identifies one cached model list.
+//
+// The group decides which channels are reachable; the policy fingerprint decides
+// which of their models this credential may see. Both belong in the key, and the
+// fingerprint is what carries the policy version the checklist requires: editing
+// a token's whitelist changes its fingerprint, so the next request reads a
+// different entry rather than the list computed under the old policy. No
+// invalidation step is needed on a token write, which matters because token edits
+// do not currently invalidate this cache at all.
+//
+// Tokens sharing a whitelist share an entry, so the key count is bounded by
+// distinct policies rather than by tokens.
+type ModelsCacheKey struct {
+	GroupID int64
+	// PolicyFingerprint is empty for an unrestricted token, which is the common
+	// case and shares one entry per group.
+	PolicyFingerprint string
 }
 
 func NewModelsListCache() *ModelsListCache {
-	return &ModelsListCache{byGroup: map[int64]json.RawMessage{}}
+	return &ModelsListCache{byGroup: map[ModelsCacheKey]json.RawMessage{}}
 }
 
-func (c *ModelsListCache) Get(groupID int64) json.RawMessage {
+func (c *ModelsListCache) Get(key ModelsCacheKey) json.RawMessage {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.byGroup[groupID]
+	return c.byGroup[key]
 }
 
-func (c *ModelsListCache) Set(groupID int64, value json.RawMessage) {
+func (c *ModelsListCache) Set(key ModelsCacheKey, value json.RawMessage) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.byGroup[groupID] = value
+	c.byGroup[key] = value
 }
 
 // Invalidate drops every group's entry, because one channel edit can change
@@ -79,6 +98,100 @@ func (c *ModelsListCache) Invalidate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	clear(c.byGroup)
+}
+
+// ProbeResult is one channel's outcome from the most recent batch probe.
+//
+// This is deliberately separate from the 24h traffic health the channel cards
+// also show: that one summarises real proxied requests, this one is a single
+// synthetic request an operator asked for just now. Merging them would let a
+// probe rewrite the traffic history, or a quiet channel look unreachable.
+type ProbeResult struct {
+	UpstreamID   int64   `json:"upstream_id"`
+	OK           bool    `json:"ok"`
+	StatusCode   *int32  `json:"status_code"`
+	DurationMs   *int32  `json:"duration_ms"`
+	ErrorSummary *string `json:"error_summary"`
+	CheckedAt    string  `json:"checked_at"`
+}
+
+// ProbeRunState holds the last batch-probe results and serialises the runs.
+//
+// Results live in memory rather than SQLite: they describe reachability at one
+// instant, which is stale by the time a restart is over, and persisting them
+// would invite reading an old row as current status. The trade-off is that a
+// restart clears the badges until the next run, which is noted in the API
+// contract.
+type ProbeRunState struct {
+	mu      sync.RWMutex
+	running bool
+	results map[int64]ProbeResult
+	// startedAt and finishedAt describe the most recent run for the console's
+	// "last checked" line.
+	startedAt  time.Time
+	finishedAt time.Time
+}
+
+func NewProbeRunState() *ProbeRunState {
+	return &ProbeRunState{results: map[int64]ProbeResult{}}
+}
+
+// TryStart claims the right to run a batch probe, returning false when one is
+// already in flight.
+//
+// A batch probe sends one request per channel, so a double-clicked button or two
+// open consoles would multiply that load against every upstream at once. The
+// second caller is refused rather than queued: by the time the first finishes,
+// its results are the answer the second wanted.
+func (p *ProbeRunState) TryStart(now time.Time) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.running {
+		return false
+	}
+	p.running = true
+	p.startedAt = now
+	return true
+}
+
+// Finish records a completed run and publishes its results.
+//
+// Results replace the previous run's entries for the channels probed and leave
+// the rest alone, so probing a subset does not erase badges for the others.
+func (p *ProbeRunState) Finish(results []ProbeResult, now time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, result := range results {
+		p.results[result.UpstreamID] = result
+	}
+	p.running = false
+	p.finishedAt = now
+}
+
+// Abandon releases the run lock without publishing results, for a run that was
+// cancelled before it could finish.
+func (p *ProbeRunState) Abandon() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.running = false
+}
+
+// Snapshot returns the cached results and whether a run is in flight.
+func (p *ProbeRunState) Snapshot() (map[int64]ProbeResult, bool, time.Time) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	copied := make(map[int64]ProbeResult, len(p.results))
+	for id, result := range p.results {
+		copied[id] = result
+	}
+	return copied, p.running, p.finishedAt
+}
+
+// Forget drops a channel's cached result, for when that channel is deleted.
+func (p *ProbeRunState) Forget(upstreamID int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.results, upstreamID)
 }
 
 // State is the shared application state every handler receives.
@@ -95,6 +208,18 @@ type State struct {
 	LogStats    *db.LogStatsCache
 	ModelsCache *ModelsListCache
 	Routing     *proxy.RoutingCache
+
+	// Prometheus holds the labelled series the scrape endpoint renders. Separate
+	// from Metrics, whose counters serve the console's JSON endpoint: the JSON
+	// shape may change with the console, while a metric name and its labels are a
+	// contract an operator's dashboards and alert rules are written against.
+	Prometheus *metrics.Prometheus
+
+	// Latency holds the bounded rolling response times least-latency routing
+	// ranks channels by. It is in memory only: the figures describe the last few
+	// minutes, so persisting them would mean a restart routing on measurements
+	// taken before it.
+	Latency *proxy.LatencyTracker
 	// TokenRateLimiter and UpstreamRateLimiter enforce the per-token and
 	// per-channel rate expressions. They must stay separate instances: both key
 	// their windows by an int64 id, so sharing one would let a token and a
@@ -103,7 +228,20 @@ type State struct {
 	UpstreamRateLimiter *ratelimit.Limiter
 	// Quotas holds the usage that a token has committed to but that its stored
 	// total does not show yet, so admission weighs requests still in flight.
-	Quotas    *quota.Tracker
+	Quotas *quota.Tracker
+	// ProbeRuns carries the last batch-probe results and keeps concurrent runs
+	// from multiplying probe load across every channel.
+	ProbeRuns *ProbeRunState
+
+	// DatabasePath is the resolved filesystem path of the SQLite database.
+	//
+	// Held here rather than re-derived from the configured URL by whoever needs it:
+	// the disaster-recovery endpoints write files beside this one, and a second
+	// parser that disagreed with the pool's about which file is the database would
+	// stage a restore onto the wrong path. Empty in tests that do not use it, and
+	// the endpoints refuse rather than guess when it is.
+	DatabasePath string
+
 	StartedAt time.Time
 }
 
@@ -114,6 +252,7 @@ func (s *State) ProxyDeps() proxy.Deps {
 		AutoWeight:     s.AutoWeight,
 		Metrics:        s.Metrics,
 		LogWriter:      s.LogWriter,
+		Latency:        s.Latency,
 		DefaultTimeout: time.Duration(s.Settings.Upstream.DefaultTimeoutSeconds * float64(time.Second)),
 	}
 }
@@ -122,6 +261,19 @@ func (s *State) ProxyDeps() proxy.Deps {
 func (s *State) AutoWeightPolicy() proxy.AutoWeightPolicy {
 	settings := s.Runtime.Get()
 	return proxy.NewAutoWeightPolicy(&settings)
+}
+
+// SelectionPolicy reads the current load-balancing strategy and the data it needs.
+//
+// Read per request rather than cached, for the same reason AutoWeightPolicy is:
+// an operator changing the strategy expects the next request to use it, not the
+// next restart.
+func (s *State) SelectionPolicy() proxy.SelectionPolicy {
+	settings := s.Runtime.Get()
+	return proxy.SelectionPolicy{
+		Strategy: settings.LoadBalanceStrategy,
+		Latency:  s.Latency,
+	}
 }
 
 // LoadRuntimeSettings reads the persisted policy, falling back to safe startup

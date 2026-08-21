@@ -42,9 +42,9 @@ func TestLogOverviewAggregatesTheSelectedWindow(t *testing.T) {
 	if day.ErrorRequests != 3 {
 		t.Errorf("1d errors = %d, want 3", day.ErrorRequests)
 	}
-	if day.Status2xx != 1 || day.Status4xx != 1 || day.Status5xx != 1 || day.StatusOther != 1 {
-		t.Errorf("1d status buckets = %d/%d/%d/%d, want 1/1/1/1",
-			day.Status2xx, day.Status4xx, day.Status5xx, day.StatusOther)
+	if day.Status2xx != 1 || day.Status4xx != 1 || day.Status5xx != 1 || day.StatusOther != 0 || day.StatusNone != 1 {
+		t.Errorf("1d status buckets = %d/%d/%d/%d/%d, want 1/1/1/0/1",
+			day.Status2xx, day.Status4xx, day.Status5xx, day.StatusOther, day.StatusNone)
 	}
 	if day.DurationCount != 2 {
 		t.Errorf("1d duration count = %d, want 2", day.DurationCount)

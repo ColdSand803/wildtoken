@@ -455,9 +455,17 @@ func sseBytesLineIsTerminal(line []byte) bool {
 
 // sseObservation accumulates what a stream reveals as its bytes pass through.
 type sseObservation struct {
-	lineBuf                 []byte
-	lineOverflow            bool
-	firstTokenMs            *int32
+	lineBuf      []byte
+	lineOverflow bool
+	firstTokenMs *int32
+	// firstEventSeen marks one complete SSE event: a non-comment line closed by
+	// a blank one. It is what the failover gate waits for, and it is separate
+	// from firstTokenMs on purpose — an event carrying only a role or a message
+	// id proves the channel is answering without carrying any content yet.
+	firstEventSeen bool
+	// eventLines counts the non-blank, non-comment lines of the event currently
+	// being read, so a blank line only closes an event that had substance.
+	eventLines              int
 	terminalEventPending    bool
 	terminalEventSeen       bool
 	usage                   TokenUsage
@@ -480,7 +488,18 @@ func (o *sseObservation) observeLine(line []byte, elapsedMs func() int32) {
 			o.terminalEventSeen = true
 		}
 		o.terminalEventPending = false
+		if o.eventLines > 0 {
+			o.firstEventSeen = true
+		}
+		o.eventLines = 0
 		return
+	}
+
+	// A comment line is not part of an event. Providers send them as keep-alive
+	// padding, so counting one would let a channel that only breathes pass for
+	// one that answered.
+	if !bytes.HasPrefix(bytes.TrimLeft(lineWithoutCR, " \t"), []byte(":")) {
+		o.eventLines++
 	}
 
 	if !o.terminalEventSeen && sseBytesLineIsTerminal(line) {
@@ -551,6 +570,14 @@ func (o *sseObservation) finish(elapsedMs func() int32) {
 	if o.terminalEventPending {
 		o.terminalEventSeen = true
 		o.terminalEventPending = false
+	}
+	// The end of the body closes the last event as surely as a blank line does.
+	// Without this, an upstream that sent a complete answer and then closed
+	// without the trailing newline would read as never having sent an event —
+	// and the failover gate would abandon a stream that had in fact answered.
+	if o.eventLines > 0 {
+		o.firstEventSeen = true
+		o.eventLines = 0
 	}
 }
 

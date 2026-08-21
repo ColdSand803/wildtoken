@@ -331,14 +331,14 @@ func TestAdmissionWeighsUsageTheStoredTotalDoesNotShowYet(t *testing.T) {
 	// A request that has finished but whose row is still queued has spent the
 	// budget even though the stored total reads zero. Admitting against the
 	// stored total alone handed the same tokens out twice.
-	tracker.Meter(created.ID, 1000)
+	tracker.Meter(created.ID, "", 1000)
 	if status := probe(); status != http.StatusTooManyRequests {
 		t.Errorf("a token whose usage was still queued got %d, want 429", status)
 	}
 
 	// Once the row commits, the hold is released and the stored total carries
 	// it instead.
-	tracker.Settle(created.ID, 1000)
+	tracker.Settle(created.ID, "", 1000)
 	if _, err := database.Exec(
 		"UPDATE api_tokens SET used_tokens = 1000 WHERE id = ?", created.ID); err != nil {
 		t.Fatalf("commit usage: %v", err)
@@ -346,7 +346,7 @@ func TestAdmissionWeighsUsageTheStoredTotalDoesNotShowYet(t *testing.T) {
 	if status := probe(); status != http.StatusTooManyRequests {
 		t.Errorf("an exhausted token got %d, want 429", status)
 	}
-	if held := tracker.Outstanding(created.ID); held != 0 {
+	if held := tracker.Outstanding(created.ID, ""); held != 0 {
 		t.Errorf("tracker still holds %d after the row committed", held)
 	}
 }

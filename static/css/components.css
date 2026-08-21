@@ -15,6 +15,113 @@
   width: 1px;
 }
 
+/* ── 公共分段条 ────────────────────────────────────────────
+   几何在这里，配色留在调用方原有的皮肤 class 上（.ops-bar-seg / .timing-seg--*
+   / .status-error-cell），所以主题包对那些 class 的定制照旧生效。
+   见 static/js/components.js 的 wtSegmentBar。 */
+/* 默认无缝：段与段直接相接。分段条读的是"各段占多大比例"，段间留缝的话轨道底色
+   会从缝里透出来，在深色皮肤上就是一道黑线——那道线看着像数据的一部分（像多了一个
+   极窄的分段），实际什么也不表示。
+   需要"格子感"的调用方自己加 gap（错误时间分布就是这种：每格是一个时间桶，桶与桶
+   本来就该分开数），见 .status-error-strip。 */
+.wt-segbar {
+  display: flex;
+  gap: 0;
+  min-width: 0;
+  position: relative;
+}
+
+.wt-segbar-seg {
+  display: block;
+  height: 100%;
+  min-width: 0;
+}
+
+/* 悬浮时纵向放大 1.25 倍——这是「错误时间分布」原来的手感，现在三处一致。
+   放大的段会越出轨道，所以带可悬浮段的轨道必须让 overflow 可见，
+   否则放大的部分会被裁掉、看着像没反应。 */
+.wt-segbar:has(.wt-segbar-seg.is-hoverable) {
+  overflow: visible;
+}
+
+.wt-segbar-seg.is-hoverable {
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.wt-segbar-seg.is-hoverable:hover,
+.wt-segbar-seg.is-hoverable:focus-visible {
+  filter: brightness(1.25);
+  outline: none;
+  transform: scaleY(1.25);
+}
+
+/* 圆角轨道 + overflow: visible 时首尾两段要自己收边，不然方角会戳出轨道轮廓。 */
+.wt-segbar-seg:first-child {
+  border-end-start-radius: inherit;
+  border-start-start-radius: inherit;
+}
+
+.wt-segbar-seg:last-child {
+  border-end-end-radius: inherit;
+  border-start-end-radius: inherit;
+}
+
+/* ── 公共悬浮卡 ────────────────────────────────────────────
+   延迟趋势的「当前时间桶」弹框就是这一个，现在状态分布、错误时间分布和请求详情
+   的耗时瀑布共用它。定位逻辑见 wtPositionHoverCard。 */
+.wt-hovercard-host {
+  position: relative;
+}
+
+.wt-hovercard,
+.dashboard-chart-tooltip {
+  background: var(--panel-elevated);
+  border: 1px solid var(--line-strong, var(--line));
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  display: grid;
+  gap: 3px;
+  left: 0;
+  margin: 0;
+  max-width: min(260px, calc(100% - 24px));
+  padding: 7px 9px;
+  /* 悬浮卡不能挡住下面的段——那些段是可点的下钻入口。 */
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  z-index: 3;
+}
+
+.wt-hovercard[hidden],
+.dashboard-chart-tooltip[hidden] {
+  display: none;
+}
+
+.wt-hovercard strong,
+.dashboard-chart-tooltip strong {
+  font-size: var(--text-xs);
+}
+
+.wt-hovercard span,
+.dashboard-chart-tooltip span {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wt-segbar-seg.is-hoverable {
+    transition: none;
+  }
+
+  .wt-segbar-seg.is-hoverable:hover,
+  .wt-segbar-seg.is-hoverable:focus-visible {
+    transform: none;
+  }
+}
+
 .wt-page {
   display: grid;
   gap: var(--space-5);
@@ -367,6 +474,9 @@ html[data-density="compact"] .wt-seg-btn {
      标题和成本提示本来就配了 ellipsis，但撑爆容器发生在布局阶段、比省略号
      生效更早，所以之前完全没用上。 */
   min-width: 0;
+  /* 整张卡片就是选中的入口，光标要说明这一点。内部那几个真按钮（启停开关、操作
+     菜单、查看详情）各自带 cursor，落在它们上面时不受这条影响。 */
+  cursor: pointer;
 }
 
 .channel-card:hover {
@@ -385,6 +495,13 @@ html[data-density="compact"] .wt-seg-btn {
   transform: none;
 }
 
+/* 选中的卡片。用描边而不是背景色，卡片内部已经有一堆彩色徽章和图表，
+   再叠一层底色会把它们的对比度压掉。 */
+.channel-card--selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
 /* Card header */
 
 .channel-card-header {
@@ -399,6 +516,36 @@ html[data-density="compact"] .wt-seg-btn {
   align-items: center;
   gap: 10px;
   min-width: 0;
+}
+
+/* 勾选框跟表格里的那一列是同一套语义，不能被卡片的 flex 压扁。 */
+/* 选中的入口是整张卡片，所以这个勾选框视觉上收起。不用 display:none——那会把它
+   从 Tab 序列和读屏里一起摘掉，键盘用户就再没有选中的办法了。sr-only 只是把它移出
+   视觉流，语义、状态、可聚焦性全部保留。 */
+.channel-card-check {
+  border: 0;
+  clip-path: inset(50%);
+  height: 1px;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* 键盘走到它时必须看得见，否则焦点凭空消失。聚焦即回到正常尺寸，落在卡片左上角。 */
+.channel-card-check:focus-visible {
+  clip-path: none;
+  cursor: pointer;
+  height: auto;
+  left: 12px;
+  outline: 2px solid var(--focus, var(--accent));
+  outline-offset: 2px;
+  position: absolute;
+  top: 12px;
+  width: auto;
+  z-index: 1;
 }
 
 .channel-card-title h3 {

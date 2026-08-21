@@ -804,11 +804,11 @@ html[data-theme="gojo"] .settings-revision {
   letter-spacing: 0.03em;
 }
 
-html[data-theme="gojo"] .summary-strip span {
+html[data-theme="gojo"] .summary-strip-cells > span {
   border-right: 1px solid rgb(139 156 187 / 16%);
 }
 
-html[data-theme="gojo"] .summary-strip strong,
+html[data-theme="gojo"] .summary-strip-value,
 html[data-theme="gojo"] .dashboard-kpi strong,
 html[data-theme="gojo"] .kpi-card strong {
   color: var(--gojo-white);
@@ -846,6 +846,7 @@ html[data-theme="gojo"] button:not(:where(
   .toast-close,
   .field-action,
   .action-menu-trigger,
+  .retry-chain-step,
   .icon-close,
   .icon-maximize,
   .icon-refresh,
@@ -879,6 +880,7 @@ html[data-theme="gojo"] button:not(:where(
   .toast-close,
   .field-action,
   .action-menu-trigger,
+  .retry-chain-step,
   .icon-close,
   .icon-maximize,
   .icon-refresh,
@@ -908,6 +910,7 @@ html[data-theme="gojo"] button:not(:where(
   .toast-close,
   .field-action,
   .action-menu-trigger,
+  .retry-chain-step,
   .icon-close,
   .icon-maximize,
   .icon-refresh,
@@ -931,6 +934,7 @@ html[data-theme="gojo"] button:not(:where(
   .toast-close,
   .field-action,
   .action-menu-trigger,
+  .retry-chain-step,
   .icon-close,
   .icon-maximize,
   .icon-refresh,
@@ -950,6 +954,7 @@ html[data-theme="gojo"] button:not(:where(
   .toast-close,
   .field-action,
   .action-menu-trigger,
+  .retry-chain-step,
   .icon-close,
   .icon-maximize,
   .icon-refresh,

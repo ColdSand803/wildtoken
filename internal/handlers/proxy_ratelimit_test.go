@@ -14,6 +14,7 @@ import (
 
 	"github.com/liguangsheng/wildtoken/internal/appstate"
 	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/middleware"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
@@ -30,7 +31,14 @@ func proxyRateLimitState(t *testing.T) *appstate.State {
 	state.UpstreamRateLimiter = ratelimit.NewLimiter()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 64, state.Quotas)
+	// One book shared between the state and the writer, as the server wires it: a
+	// second instance would let an admin write refresh a table the settlement path
+	// never reads.
+	// Wired as the server wires it, so a proxied request in these tests moves the
+	// same scrape counters production traffic does.
+	state.Prometheus = metrics.NewPrometheus()
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics,
+		db.NewLogStatsCache(), 64, state.Quotas, state.Prometheus)
 	t.Cleanup(func() {
 		state.LogWriter.Close()
 		state.TokenRateLimiter.Close()

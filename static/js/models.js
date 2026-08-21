@@ -671,14 +671,7 @@ rows.addEventListener("click", async (event) => {
 rows.addEventListener("change", (event) => {
   const check = event.target.closest("input[data-upstream-check]");
   if (!check) return;
-  const id = Number(check.dataset.upstreamCheck);
-  if (!Number.isFinite(id)) return;
-  if (check.checked) {
-    selectedUpstreamIds.add(id);
-  } else {
-    selectedUpstreamIds.delete(id);
-  }
-  updateBatchToolbar();
+  toggleUpstreamSelection(Number(check.dataset.upstreamCheck), check.checked);
 });
 
 rows.addEventListener("keydown", (event) => {
@@ -1010,28 +1003,68 @@ renderFormModelSelection();
 for (const link of navLinks) {
   link.addEventListener("click", () => switchView(link.dataset.view));
 }
-window.addEventListener("hashchange", () => switchView(currentViewFromHash()));
-
-logUpstreamFilter.addEventListener("change", () => {
-  resetLogPagination();
-  loadLogs();
+// 只响应真正的视图变化。switchView 补写 hash 触发的那次 hashchange 指向的还是
+// 同一个视图，重复加载没有意义，还会让本轮请求被下一轮 abort。导航链接和命令面板
+// 直接调 switchView，点当前页刷新的行为不受影响。
+window.addEventListener("hashchange", () => {
+  const next = currentViewFromHash();
+  if (next === activeViewName) return;
+  switchView(next);
 });
-if (logSearchInput) {
-  logSearchInput.addEventListener("input", debounce(() => {
+
+if (logUpstreamFilter) {
+  logUpstreamFilter.addEventListener("change", () => {
     resetLogPagination();
     loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
+  });
+}
+if (logSearchInput) {
+  logSearchInput.addEventListener("input", debounce(() => {
+    if (typeof setLogDownstreamTokenId === "function") setLogDownstreamTokenId(null);
+    resetLogPagination();
+    loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
   }, 150));
 }
 if (logStatusFilter) {
   logStatusFilter.addEventListener("change", () => {
     resetLogPagination();
     loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
   });
 }
 if (logClientFilter) {
   logClientFilter.addEventListener("change", () => {
     resetLogPagination();
     loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
+  });
+}
+if (logStreamFilter) {
+  logStreamFilter.addEventListener("change", () => {
+    resetLogPagination();
+    loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
+  });
+}
+if (logMinDurationInput) {
+  logMinDurationInput.addEventListener("input", debounce(() => {
+    resetLogPagination();
+    loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
+  }, 200));
+  logMinDurationInput.addEventListener("change", () => {
+    resetLogPagination();
+    loadLogs();
+    if (typeof restartLogStream === "function") restartLogStream();
+  });
+}
+if (batchProbeBtn) {
+  batchProbeBtn.addEventListener("click", () => {
+    if (typeof runBatchProbe === "function") {
+      runBatchProbe();
+    }
   });
 }
 if (logSensitiveToggle) {

@@ -74,6 +74,50 @@ CREATE TABLE IF NOT EXISTS request_logs (
     completion_reasoning_tokens INTEGER,
     duration_ms         INTEGER,
     first_token_ms      INTEGER,
+    -- request_uid ties together the rows written by one downstream request's
+    -- successive upstream attempts. Every attempt logs its own row, and without
+    -- this they were indistinguishable from unrelated requests that happened to
+    -- land in the same second.
+    request_uid         TEXT,
+    -- attempt_index is 0 for a request's first upstream attempt. It is what
+    -- tells pre_upstream_ms on a retry apart from the same field on a first
+    -- attempt, where the two measure very different intervals.
+    attempt_index       INTEGER,
+    -- pre_upstream_ms spans from the moment the gateway accepted the request to
+    -- the moment this attempt began its upstream call: reading the downstream
+    -- body, routing, rate-limit admission, request preparation, and — from
+    -- attempt 1 onward — every earlier attempt plus its retry backoff.
+    --
+    -- Deliberately not named queue_ms. Nothing here waits in a queue, and a
+    -- field by that name would invite the console to report a stage that does
+    -- not exist.
+    pre_upstream_ms     INTEGER,
+    -- upstream_headers_ms spans from this attempt's start to the arrival of the
+    -- upstream response headers, measured on the same origin as first_token_ms
+    -- and duration_ms. It is what separates connect/TLS/upload latency from the
+    -- upstream's own thinking time; without it a slow first token could not be
+    -- attributed to either.
+    upstream_headers_ms INTEGER,
+    -- failure_stage names where the attempt broke, because the status alone
+    -- cannot: a 502 is written for a failed dial, a body that died mid-read, and
+    -- a stream that closed before saying anything. NULL means the attempt
+    -- succeeded.
+    failure_stage       TEXT,
+    -- failure_retryable is the verdict the gateway reached at the time: whether
+    -- this failure class is one another channel may be given. Stored rather than
+    -- recomputed on read, so editing the retry policy cannot rewrite the history
+    -- of why a request stopped after one attempt.
+    failure_retryable   INTEGER,
+    -- Retired columns from the removed cost-estimation feature. Nothing reads or
+    -- writes them: every new row leaves all three NULL.
+    --
+    -- Kept rather than dropped because rows written while the feature existed hold
+    -- real settled amounts, and removing a column in SQLite means rebuilding the
+    -- whole table — on what is normally the largest table here, to reclaim three
+    -- NULL columns. Left in place so the rebuild is not run for cosmetics.
+    cost_micros         INTEGER,
+    cost_currency       TEXT,
+    pricing_rule_id     INTEGER,
     error               TEXT
 );`
 
@@ -117,6 +161,30 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     used_tokens  INTEGER NOT NULL DEFAULT 0,
     -- NULL means no limit.
     limit_tokens INTEGER,
+    -- A JSON array of the model ids and trailing-* prefixes this credential may
+    -- call. '[]' is the one spelling of "no restriction" that writes produce;
+    -- NULL means the same thing and is what rows predating the column carry, so
+    -- reads fold the two together (see models.ParseAllowedModels).
+    --
+    -- Matching is exact and case-insensitive, or an explicit trailing wildcard.
+    -- It is deliberately stricter than the model matching that picks a channel:
+    -- that one also accepts prefixes and suffixes of a channel's model names,
+    -- which would admit models this list does not name.
+    allowed_models TEXT NOT NULL DEFAULT '[]',
+    -- The reset cycle. 'none' is a lifetime total, which is how every token
+    -- behaved before these columns and so is the default.
+    quota_period TEXT NOT NULL DEFAULT 'none'
+        CHECK (quota_period IN ('none', 'daily', 'weekly', 'monthly')),
+    -- The IANA zone the period boundary falls in. UTC rather than the host's
+    -- local zone: a boundary that moves when the service is redeployed to another
+    -- region would reset a quota early or late with nothing to explain it.
+    quota_timezone TEXT NOT NULL DEFAULT 'UTC',
+    -- The cycle used_tokens was accumulated under, derived from quota_period and
+    -- quota_timezone. This is what makes rollover safe without a scheduled job:
+    -- usage is applied by an UPDATE that names the period it was earned in, so a
+    -- log row arriving after the boundary is added to the period it belongs to or
+    -- dropped, never to the new one. Empty string for quota_period = 'none'.
+    quota_period_key TEXT NOT NULL DEFAULT '',
     created_at  TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );`
@@ -167,6 +235,17 @@ const backfillUpstreamGroups = `INSERT INTO upstream_groups (upstream_id, group_
 // backfilled to the default group and kept NOT NULL by the application.
 const backfillTokenGroups = `UPDATE api_tokens SET group_id = 1 WHERE group_id IS NULL`
 
+// The cost-estimation feature was removed, and this drops the table it owned.
+//
+// Unconditional rather than gated on a version marker: DROP TABLE IF EXISTS is
+// already idempotent, and an instance that never had the table is the same case
+// as one that has already dropped it. Unlike the three retired request_logs
+// columns, this is a whole table nothing else references, so removing it costs
+// no rebuild.
+const dropModelPrices = `DROP TABLE IF EXISTS model_prices`
+
+const dropModelPricesIndex = `DROP INDEX IF EXISTS idx_model_prices_lookup`
+
 const createRuntimeSettings = `
 CREATE TABLE IF NOT EXISTS runtime_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -181,6 +260,11 @@ CREATE TABLE IF NOT EXISTS runtime_settings (
     auto_weight_recovery_interval_seconds INTEGER NOT NULL DEFAULT 60 CHECK (auto_weight_recovery_interval_seconds BETWEEN 1 AND 3600),
     proxy_enabled INTEGER NOT NULL DEFAULT 0 CHECK (proxy_enabled IN (0, 1)),
     proxy_url TEXT NOT NULL DEFAULT '',
+    -- The default is weighted because that is what every database written before
+    -- this column behaved as. The CHECK is what keeps routing from having to
+    -- decide what an unknown strategy means on the hot path.
+    load_balance_strategy TEXT NOT NULL DEFAULT 'weighted'
+        CHECK (load_balance_strategy IN ('weighted', 'least_latency')),
     revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`

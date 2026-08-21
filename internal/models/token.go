@@ -81,6 +81,43 @@ type APITokenRow struct {
 	UsedTokens  int64
 	LimitTokens *int64
 	RateLimit   *string
+	// AllowedModels is the stored JSON array. Nil covers a row written before the
+	// column existed; both nil and "[]" mean unrestricted.
+	AllowedModels *string
+	// QuotaPeriod controls automatic quota rollover. None is the legacy lifetime
+	// total; the other values bind usage to a calendar period in QuotaTimezone.
+	QuotaPeriod   string
+	QuotaTimezone string
+	// QuotaPeriodStamp is the cycle UsedTokens was accumulated under, which is not
+	// necessarily the current one — the counter is cleared by the first usage of a
+	// new period, not on the boundary itself.
+	QuotaPeriodStamp string
+}
+
+// UsedTokensNow reports the usage that counts against the limit at the given
+// instant.
+//
+// A stored total naming a closed period reads as zero, because the row has not been
+// cleared yet: clearing happens atomically with the first usage of the new period.
+// Reporting the stale figure would show a token as exhausted through the whole
+// first request of a fresh cycle, and the operator would see a quota that did not
+// reset when it said it would.
+//
+// This mirrors DownstreamCredential.UsedTokensInCurrentPeriod, deliberately: the
+// console and the admission path must not disagree about what has been spent.
+func (r APITokenRow) UsedTokensNow(at time.Time) int64 {
+	currentStamp := QuotaPeriodStamp(r.QuotaPeriod, at, LoadQuotaLocation(r.QuotaTimezone))
+	if currentStamp == "" || r.QuotaPeriodStamp == currentStamp {
+		return r.UsedTokens
+	}
+	// A different period *type* means the stamps are not comparable and the applying
+	// statement carries the total forward, so it still counts.
+	storedType, _, _ := strings.Cut(r.QuotaPeriodStamp, ":")
+	currentType, _, _ := strings.Cut(currentStamp, ":")
+	if storedType != currentType {
+		return r.UsedTokens
+	}
+	return 0
 }
 
 // APITokenIn is the create payload. A nil Token means "generate one".
@@ -98,6 +135,16 @@ type APITokenIn struct {
 	LimitExpression string `json:"limit_expression"`
 	// RateLimit is a rate limit expression such as "100/m" or "1000/h". Blank means no limit.
 	RateLimit *string `json:"rate_limit"`
+	// AllowedModels restricts which models this credential may call. An absent
+	// field, null and an empty array all mean unrestricted — the console can send
+	// whichever its form produces without changing the outcome.
+	AllowedModels []string `json:"allowed_models"`
+	// QuotaPeriod is the reset cycle: none, daily, weekly or monthly. Absent or
+	// blank means none, so a client that does not send the field gets the legacy
+	// lifetime total.
+	QuotaPeriod string `json:"quota_period"`
+	// QuotaTimezone is the IANA zone the boundary falls in. Blank means UTC.
+	QuotaTimezone string `json:"quota_timezone"`
 }
 
 // APITokenUpdateIn is a full replacement, so an absent `expires_at` clears the
@@ -116,6 +163,15 @@ type APITokenUpdateIn struct {
 	LimitExpression string `json:"limit_expression"`
 	// RateLimit is a rate limit expression such as "100/m" or "1000/h". Blank means no limit.
 	RateLimit *string `json:"rate_limit"`
+	// AllowedModels is a full replacement, like ExpiresAt and unlike Token: an
+	// absent or empty array clears the restriction. That is what the console's
+	// "clear the whitelist" action produces, and reading it as "leave it alone"
+	// would make a restriction impossible to remove.
+	AllowedModels []string `json:"allowed_models"`
+	// QuotaPeriod and QuotaTimezone are full replacements too. An absent period
+	// means none, which is how an operator turns automatic resets off.
+	QuotaPeriod   string `json:"quota_period"`
+	QuotaTimezone string `json:"quota_timezone"`
 }
 
 // RequestedToken is the replacement value, or "" when this edit keeps the
@@ -212,10 +268,59 @@ func (t *APITokenIn) Validate() error {
 	if _, err := t.NormalizedRateLimit(); err != nil {
 		return err
 	}
+	if _, err := t.NormalizedAllowedModels(); err != nil {
+		return err
+	}
+	if _, _, err := t.NormalizedQuotaCycle(); err != nil {
+		return err
+	}
 	if t.Token == nil {
 		return nil
 	}
 	return validateTokenValue(*t.Token)
+}
+
+// NormalizedAllowedModels renders the whitelist for storage.
+func (t *APITokenIn) NormalizedAllowedModels() (string, error) {
+	return NormalizeAllowedModels(t.AllowedModels)
+}
+
+// NormalizedQuotaCycle validates and resolves the reset cycle for storage.
+func (t *APITokenIn) NormalizedQuotaCycle() (period, timezone string, err error) {
+	return normalizeQuotaCycle(t.QuotaPeriod, t.QuotaTimezone)
+}
+
+// NormalizeQuotaCycle is normalizeQuotaCycle for callers outside the console's
+// create and update payloads — the configuration import writes a token row
+// directly, and resolving the cycle a second way there is how the two would come
+// to disagree about what a blank timezone means.
+func NormalizeQuotaCycle(rawPeriod, rawTimezone string) (period, timezone string, err error) {
+	return normalizeQuotaCycle(rawPeriod, rawTimezone)
+}
+
+// normalizeQuotaCycle resolves a submitted cycle, defaulting a blank period to
+// none and a blank timezone to UTC.
+//
+// An unrecognised period is refused rather than silently defaulted: a console that
+// sends "monthy" would otherwise store a token that never resets while its form
+// shows a monthly cycle.
+func normalizeQuotaCycle(rawPeriod, rawTimezone string) (string, string, error) {
+	period := strings.ToLower(strings.TrimSpace(rawPeriod))
+	if period == "" {
+		period = DefaultQuotaPeriod
+	}
+	if !ValidQuotaPeriod(period) {
+		return "", "", ErrString("quota_period must be none, daily, weekly or monthly")
+	}
+
+	timezone := strings.TrimSpace(rawTimezone)
+	if timezone == "" {
+		timezone = DefaultQuotaTimezone
+	}
+	if err := ValidateQuotaTimezone(timezone); err != nil {
+		return "", "", err
+	}
+	return period, timezone, nil
 }
 
 func (t *APITokenIn) NormalizedExpiresAt() (*string, error) {
@@ -245,11 +350,27 @@ func (t *APITokenUpdateIn) Validate() error {
 	if _, err := t.NormalizedRateLimit(); err != nil {
 		return err
 	}
+	if _, err := t.NormalizedAllowedModels(); err != nil {
+		return err
+	}
+	if _, _, err := t.NormalizedQuotaCycle(); err != nil {
+		return err
+	}
 	// A blank token means "leave it alone", so it never reaches the value rules.
 	if requested := t.RequestedToken(); requested != "" {
 		return validateTokenValue(requested)
 	}
 	return nil
+}
+
+// NormalizedAllowedModels renders the whitelist for storage.
+func (t *APITokenUpdateIn) NormalizedAllowedModels() (string, error) {
+	return NormalizeAllowedModels(t.AllowedModels)
+}
+
+// NormalizedQuotaCycle validates and resolves the reset cycle for storage.
+func (t *APITokenUpdateIn) NormalizedQuotaCycle() (period, timezone string, err error) {
+	return normalizeQuotaCycle(t.QuotaPeriod, t.QuotaTimezone)
 }
 
 func (t *APITokenUpdateIn) NormalizedExpiresAt() (*string, error) {
@@ -285,6 +406,15 @@ type APITokenOut struct {
 	GroupName    string     `json:"group_name"`
 	Quota        QuotaState `json:"quota"`
 	RateLimit    *string    `json:"rate_limit"`
+	// AllowedModels is the operator's own list, always serialized as an array so
+	// a client tests one field. An empty array is the wire form of "unrestricted";
+	// there is no null variant, so no client has to distinguish the two.
+	AllowedModels []string `json:"allowed_models"`
+	// QuotaPeriodState reports the cycle, the current period and the next reset,
+	// all derived server-side. The console must not compute a boundary itself: a
+	// browser in another timezone would show a reset at the wrong hour, and one
+	// with a skewed clock would show a period the gateway is not using.
+	QuotaPeriodState QuotaPeriodState `json:"quota_period_state"`
 }
 
 // APITokenCreatedOut is what the creation endpoint answers with.
@@ -294,19 +424,21 @@ type APITokenOut struct {
 // the list and detail endpoints return it too. This is not a one-time reveal,
 // and reading it as one understates where plaintext tokens are exposed.
 type APITokenCreatedOut struct {
-	ID           int64      `json:"id"`
-	Name         string     `json:"name"`
-	Description  string     `json:"description"`
-	Token        string     `json:"token"`
-	TokenPreview string     `json:"token_preview"`
-	Enabled      bool       `json:"enabled"`
-	ExpiresAt    *string    `json:"expires_at"`
-	CreatedAt    string     `json:"created_at"`
-	UpdatedAt    string     `json:"updated_at"`
-	GroupID      int64      `json:"group_id"`
-	GroupName    string     `json:"group_name"`
-	Quota        QuotaState `json:"quota"`
-	RateLimit    *string    `json:"rate_limit"`
+	ID               int64            `json:"id"`
+	Name             string           `json:"name"`
+	Description      string           `json:"description"`
+	Token            string           `json:"token"`
+	TokenPreview     string           `json:"token_preview"`
+	Enabled          bool             `json:"enabled"`
+	ExpiresAt        *string          `json:"expires_at"`
+	CreatedAt        string           `json:"created_at"`
+	UpdatedAt        string           `json:"updated_at"`
+	GroupID          int64            `json:"group_id"`
+	GroupName        string           `json:"group_name"`
+	Quota            QuotaState       `json:"quota"`
+	RateLimit        *string          `json:"rate_limit"`
+	AllowedModels    []string         `json:"allowed_models"`
+	QuotaPeriodState QuotaPeriodState `json:"quota_period_state"`
 }
 
 // TokenEnabledIn toggles a token.

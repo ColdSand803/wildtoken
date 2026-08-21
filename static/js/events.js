@@ -460,13 +460,148 @@ systemRefreshButton?.addEventListener("click", async () => {
 });
 rotateAdminTokenButton?.addEventListener("click", rotateAdminToken);
 
+// ── Configuration migration ──────────────────────────────
+configExportRun?.addEventListener("click", runConfigExport);
+configImportPreview?.addEventListener("click", () => submitConfigImport({ dryRun: true }));
+configImportApply?.addEventListener("click", () => submitConfigImport({ dryRun: false }));
+// Any change to what would be imported invalidates the plan the operator approved,
+// so the apply is locked again until they preview the new input.
+configImportFile?.addEventListener("change", resetConfigImportState);
+configImportConflict?.addEventListener("change", () => {
+  if (configImportApply) configImportApply.disabled = true;
+  setConfigImportStatus("冲突策略已更改，请重新预览。");
+});
+configImportPassword?.addEventListener("input", () => {
+  if (configImportApply) configImportApply.disabled = true;
+});
+
+// ── Disaster recovery ────────────────────────────────────
+backupRun?.addEventListener("click", runDatabaseBackup);
+restoreVerify?.addEventListener("click", () => submitRestore({ dryRun: true }));
+restoreApply?.addEventListener("click", () => submitRestore({ dryRun: false }));
+restoreCancel?.addEventListener("click", cancelStagedRestore);
+// Anything that changes what would be restored invalidates the verification the
+// apply is gated on, so the file has to be checked again before it can be staged.
+restoreFile?.addEventListener("change", resetRestoreState);
+restorePassword?.addEventListener("input", resetRestoreState);
+restoreAllowSchemaMismatch?.addEventListener("change", resetRestoreState);
+// The confirmation phrase does not change the restore, only whether it may run, so
+// it re-evaluates the locks instead of discarding the verification.
+restoreConfirm?.addEventListener("input", applyDisasterRecoveryLocks);
+
 // ── Dashboard controls ───────────────────────────────────
+if (dashboardRefreshSelect) {
+  dashboardRefreshSelect.value = String(dashboardRefreshIntervalMs);
+  dashboardRefreshSelect.addEventListener("change", () => {
+    updateDashboardRefreshInterval(Number(dashboardRefreshSelect.value));
+  });
+}
+
 if (dashboardChannelNameToggle) {
   updateDashboardChannelNameToggle();
   dashboardChannelNameToggle.addEventListener("click", () => {
     setDashboardChannelNameHidden(!dashboardChannelNameHidden);
   });
 }
+
+const dashboardRankGrid = document.querySelector(".dashboard-rank-grid");
+if (dashboardRankGrid) {
+  dashboardRankGrid.addEventListener("click", (event) => {
+    const row = event.target.closest(".dashboard-rank-row.is-clickable");
+    if (!row) return;
+    const rankType = row.dataset.rankType;
+    const targetId = row.dataset.targetId;
+    const targetName = row.dataset.targetName;
+    if (rankType === "channel") {
+      drillDownToLogs({ upstreamId: targetId || "", search: targetId ? "" : targetName });
+    } else if (rankType === "token") {
+      const parsedId = targetId !== null && targetId !== undefined && targetId !== "" && Number.isFinite(Number(targetId)) ? Number(targetId) : null;
+      drillDownToLogs({
+        downstreamTokenId: parsedId,
+        downstreamTokenName: targetName || "",
+        search: parsedId !== null ? "" : (targetName || ""),
+      });
+    } else if (rankType === "model") {
+      drillDownToLogs({ search: targetName || "" });
+    }
+  });
+  dashboardRankGrid.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest(".dashboard-rank-row.is-clickable");
+    if (!row) return;
+    event.preventDefault();
+    const rankType = row.dataset.rankType;
+    const targetId = row.dataset.targetId;
+    const targetName = row.dataset.targetName;
+    if (rankType === "channel") {
+      drillDownToLogs({ upstreamId: targetId || "", search: targetId ? "" : targetName });
+    } else if (rankType === "token") {
+      const parsedId = targetId !== null && targetId !== undefined && targetId !== "" && Number.isFinite(Number(targetId)) ? Number(targetId) : null;
+      drillDownToLogs({
+        downstreamTokenId: parsedId,
+        downstreamTokenName: targetName || "",
+        search: parsedId !== null ? "" : (targetName || ""),
+      });
+    } else if (rankType === "model") {
+      drillDownToLogs({ search: targetName || "" });
+    }
+  });
+}
+
+const dashboardView = document.querySelector("#view-dashboard");
+if (dashboardView) {
+  dashboardView.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-drill-status]");
+    if (!target) return;
+    const status = target.dataset.drillStatus;
+    const start = target.dataset.start || "";
+    const end = target.dataset.end || "";
+    const rangeLabel = target.dataset.rangeLabel || "";
+    if (status) {
+      drillDownToLogs({ status, start, end, rangeLabel });
+    }
+  });
+  dashboardView.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const target = event.target.closest("[data-drill-status]");
+    if (!target) return;
+    if (target.tagName === "BUTTON" && event.key === "Enter") return;
+    event.preventDefault();
+    const status = target.dataset.drillStatus;
+    const start = target.dataset.start || "";
+    const end = target.dataset.end || "";
+    const rangeLabel = target.dataset.rangeLabel || "";
+    if (status) {
+      drillDownToLogs({ status, start, end, rangeLabel });
+    }
+  });
+}
+
+logTokenFilterClear?.addEventListener("click", () => {
+  if (typeof setLogDownstreamTokenId === "function") {
+    setLogDownstreamTokenId(null);
+  }
+  if (typeof resetLogPagination === "function") {
+    resetLogPagination();
+  }
+  loadLogs();
+  if (typeof restartLogStream === "function") {
+    restartLogStream();
+  }
+});
+
+logRangeFilterClear?.addEventListener("click", () => {
+  if (typeof clearLogTimeRange === "function") {
+    clearLogTimeRange();
+  }
+  if (typeof resetLogPagination === "function") {
+    resetLogPagination();
+  }
+  loadLogs();
+  if (typeof restartLogStream === "function") {
+    restartLogStream();
+  }
+});
 
 // ── Dashboard time range ─────────────────────────────────
 function persistDashboardRange() {
@@ -601,21 +736,15 @@ upstreamTable?.addEventListener("click", (event) => {
 // ── Batch enable/disable ─────────────────────────────────
 if (upstreamSelectAll) {
   upstreamSelectAll.addEventListener("change", () => {
-    const filtered = getFilteredUpstreams();
-    if (upstreamSelectAll.checked) {
-      for (const item of filtered) {
-        selectedUpstreamIds.add(item.id);
-      }
-    } else {
-      for (const item of filtered) {
-        selectedUpstreamIds.delete(item.id);
-      }
-    }
-    // Sync visible checkboxes without full re-render when possible
-    for (const input of rows.querySelectorAll("input[data-upstream-check]")) {
-      const id = Number(input.dataset.upstreamCheck);
-      input.checked = selectedUpstreamIds.has(id);
-    }
+    setUpstreamSelectionForFiltered(upstreamSelectAll.checked);
+  });
+}
+if (upstreamSelectVisibleBtn) {
+  upstreamSelectVisibleBtn.addEventListener("click", () => setUpstreamSelectionForFiltered(true));
+}
+if (upstreamClearSelectionBtn) {
+  upstreamClearSelectionBtn.addEventListener("click", () => {
+    selectedUpstreamIds.clear();
     updateBatchToolbar();
   });
 }

@@ -13,7 +13,24 @@ function extractFunction(source, name) {
   const declarationStart = source.startsWith(asyncPrefix, start - asyncPrefix.length)
     ? start - asyncPrefix.length
     : start;
-  const bodyStart = source.indexOf("{", start);
+  // The body starts after the parameter list closes, not at the first brace: a
+  // destructured parameter such as ({ dryRun }) is a brace that opens and closes
+  // before the body, and counting from there extracts only the signature.
+  let parens = 0;
+  let paramsEnd = -1;
+  for (let index = source.indexOf("(", start); index < source.length; index += 1) {
+    if (source[index] === "(") parens += 1;
+    if (source[index] === ")") {
+      parens -= 1;
+      if (parens === 0) {
+        paramsEnd = index;
+        break;
+      }
+    }
+  }
+  assert.notEqual(paramsEnd, -1, `could not find the parameter list of ${name}`);
+
+  const bodyStart = source.indexOf("{", paramsEnd);
   let depth = 0;
   for (let index = bodyStart; index < source.length; index += 1) {
     const char = source[index];
@@ -256,4 +273,67 @@ test("the selected range and its custom dates are persisted", () => {
   // The old ranking-only preference should carry over rather than be dropped.
   assert.match(bootstrap, /DASHBOARD_TOP_WINDOW_KEY/);
   assert.match(events, /localStorage\.setItem\(DASHBOARD_RANGE_KEY/);
+});
+
+test("dashboardLoadGeneration and dashboardAbortController prevent stale overwrites across fast range switches", async () => {
+  const source = read("static/js/dashboard.js");
+  assert.ok(source.includes("dashboardLoadGeneration"), "dashboardLoadGeneration variable exists");
+  assert.ok(source.includes("dashboardAbortController"), "dashboardAbortController variable exists");
+  assert.ok(source.includes("currentGen !== dashboardLoadGeneration"), "checks generation before applying results");
+
+  let inFlightSignals = [];
+
+  const context = vm.createContext({
+    dashboardLoadGeneration: 0,
+    dashboardAbortController: null,
+    dashboardLoading: false,
+    dashboardOverview: null,
+    dashboardLogItems: [],
+    dashboardTokenUsage: null,
+    dashboardRuntimeMetrics: null,
+    dashboardTopStats: null,
+    lastDashboardLoadError: "",
+    upstreamsLoadedOnce: true,
+    upstreams: [],
+    DASHBOARD_LOG_LIMIT: 200,
+    DASHBOARD_TOP_LIMIT: 10,
+    DASHBOARD_DEFAULT_RANGE: "30d",
+    dashboardTimeRange: "30d",
+    renderedRange: "",
+    URLSearchParams,
+    dashboardRangeParams: (range) => new URLSearchParams({ range: range || context.dashboardTimeRange }),
+    setStatus: () => {},
+    dashboardScope: { textContent: "" },
+    api: async (url, options) => {
+      inFlightSignals.push(options?.signal);
+      if (url.includes("/overview")) {
+        const urlObj = new URL("http://localhost" + url);
+        const range = urlObj.searchParams.get("range");
+        if (range === "1d") {
+          // simulate slow response for 1d
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        return { range, status_2xx: 10 };
+      }
+      return {};
+    },
+  });
+
+  vm.runInContext("function renderDashboard() { globalThis.renderedRange = dashboardOverview?.range || ''; }", context);
+
+  const loadDashboardDataSource = extractFunction(source, "loadDashboardData");
+  vm.runInContext(`${loadDashboardDataSource}; this.loadDashboardData = loadDashboardData;`, context);
+
+  // Switch to 1d (slow)
+  context.dashboardTimeRange = "1d";
+  const p1 = context.loadDashboardData();
+
+  // Fast switch to 7d (fast)
+  context.dashboardTimeRange = "7d";
+  const p2 = context.loadDashboardData();
+
+  await Promise.all([p1, p2]);
+
+  // The final rendered range must be 7d, even though 1d finished later or was aborted
+  assert.equal(context.renderedRange, "7d");
 });

@@ -36,7 +36,21 @@ const ProvisionalCost int64 = 4096
 // it fronts are all single-process too.
 type Tracker struct {
 	mu     sync.Mutex
-	tokens map[int64]*outstanding
+	tokens map[tokenPeriod]*outstanding
+}
+
+// tokenPeriod scopes outstanding usage to one token's one reset cycle.
+//
+// Without the period in the key, holds taken before a boundary keep counting
+// against the budget after it: the first requests of a fresh cycle would be
+// weighed against traffic from the cycle that just ended, and a token with a busy
+// midnight would be refused at the exact moment its budget refilled.
+//
+// The period is empty for a token that never resets, which collapses to the
+// previous behaviour of one entry per token.
+type tokenPeriod struct {
+	tokenID   int64
+	periodKey string
 }
 
 // outstanding is the usage of one token that its stored total has yet to catch
@@ -52,7 +66,7 @@ type outstanding struct {
 
 // NewTracker returns a tracker with nothing outstanding.
 func NewTracker() *Tracker {
-	return &Tracker{tokens: map[int64]*outstanding{}}
+	return &Tracker{tokens: map[tokenPeriod]*outstanding{}}
 }
 
 // Reservation is one admitted request's hold on a token's budget.
@@ -61,7 +75,7 @@ func NewTracker() *Tracker {
 // no budget to weigh, so there is nothing to track.
 type Reservation struct {
 	tracker *Tracker
-	tokenID int64
+	scope   tokenPeriod
 	held    bool
 }
 
@@ -74,25 +88,27 @@ func (r *Reservation) Release() {
 		return
 	}
 	r.held = false
-	r.tracker.release(r.tokenID)
+	r.tracker.release(r.scope)
 }
 
 // Admit weighs a request against a token's limit and reserves room for it.
 //
-// stored is the total the database holds; a nil limit is unlimited and always
-// admits.
+// stored is the total the database holds for periodKey; a nil limit is unlimited
+// and always admits. periodKey is empty for a token that never resets.
 //
 // An admitted request must release its reservation exactly once.
-func (t *Tracker) Admit(tokenID int64, stored int64, limit *int64) (Reservation, bool) {
+func (t *Tracker) Admit(tokenID int64, periodKey string, stored int64,
+	limit *int64) (Reservation, bool) {
 	if limit == nil {
 		return Reservation{}, true
 	}
+	scope := tokenPeriod{tokenID: tokenID, periodKey: periodKey}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	projected := stored
-	entry := t.tokens[tokenID]
+	entry := t.tokens[scope]
 	if entry != nil {
 		projected += entry.metered + entry.requests*ProvisionalCost
 	}
@@ -102,26 +118,27 @@ func (t *Tracker) Admit(tokenID int64, stored int64, limit *int64) (Reservation,
 
 	if entry == nil {
 		entry = &outstanding{}
-		t.tokens[tokenID] = entry
+		t.tokens[scope] = entry
 	}
 	entry.requests++
-	return Reservation{tracker: t, tokenID: tokenID, held: true}, true
+	return Reservation{tracker: t, scope: scope, held: true}, true
 }
 
 // Meter records usage that is known but not yet committed, so admission keeps
 // counting it until the stored total shows it.
-func (t *Tracker) Meter(tokenID int64, used int64) {
+func (t *Tracker) Meter(tokenID int64, periodKey string, used int64) {
 	if used <= 0 {
 		return
 	}
+	scope := tokenPeriod{tokenID: tokenID, periodKey: periodKey}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	entry := t.tokens[tokenID]
+	entry := t.tokens[scope]
 	if entry == nil {
 		entry = &outstanding{}
-		t.tokens[tokenID] = entry
+		t.tokens[scope] = entry
 	}
 	entry.metered += used
 }
@@ -129,29 +146,30 @@ func (t *Tracker) Meter(tokenID int64, used int64) {
 // Settle drops usage that no longer has to be held, because the row committed
 // and the stored total now carries it, or because the write was abandoned and
 // the total never will.
-func (t *Tracker) Settle(tokenID int64, used int64) {
+func (t *Tracker) Settle(tokenID int64, periodKey string, used int64) {
 	if used <= 0 {
 		return
 	}
+	scope := tokenPeriod{tokenID: tokenID, periodKey: periodKey}
 
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	entry := t.tokens[tokenID]
+	entry := t.tokens[scope]
 	if entry == nil {
 		return
 	}
 	entry.metered = max(entry.metered-used, 0)
-	t.discardIfIdle(tokenID, entry)
+	t.discardIfIdle(scope, entry)
 }
 
 // Outstanding reports the usage currently held for a token beyond its stored
 // total.
-func (t *Tracker) Outstanding(tokenID int64) int64 {
+func (t *Tracker) Outstanding(tokenID int64, periodKey string) int64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	entry := t.tokens[tokenID]
+	entry := t.tokens[tokenPeriod{tokenID: tokenID, periodKey: periodKey}]
 	if entry == nil {
 		return 0
 	}
@@ -166,22 +184,24 @@ func (t *Tracker) Tracked() int {
 	return len(t.tokens)
 }
 
-func (t *Tracker) release(tokenID int64) {
+func (t *Tracker) release(scope tokenPeriod) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	entry := t.tokens[tokenID]
+	entry := t.tokens[scope]
 	if entry == nil {
 		return
 	}
 	entry.requests = max(entry.requests-1, 0)
-	t.discardIfIdle(tokenID, entry)
+	t.discardIfIdle(scope, entry)
 }
 
-// discardIfIdle drops a token that holds nothing, so the tracker does not keep
-// an entry for every token the gateway has ever served.
-func (t *Tracker) discardIfIdle(tokenID int64, entry *outstanding) {
+// discardIfIdle drops a scope that holds nothing, so the tracker does not keep an
+// entry for every token-period the gateway has ever served. This is also what
+// bounds the map across period boundaries: a closed period's entry disappears once
+// its last request has settled.
+func (t *Tracker) discardIfIdle(scope tokenPeriod, entry *outstanding) {
 	if entry.requests == 0 && entry.metered == 0 {
-		delete(t.tokens, tokenID)
+		delete(t.tokens, scope)
 	}
 }

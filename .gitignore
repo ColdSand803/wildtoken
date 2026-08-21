@@ -6,6 +6,10 @@
 # Go build output
 /wildtoken
 /wildtoken.exe
+# `go build` inside cmd/ leaves the binary beside its package rather than at the
+# repository root, so the root-anchored patterns above do not catch it.
+cmd/wildtoken
+cmd/wildtoken.exe
 .wildtoken.bin
 
 # Local AI tool state

@@ -82,6 +82,10 @@ func Init(ctx context.Context, db *sql.DB) error {
 		seedDefaultGroup,
 		createUpstreamGroups,
 		createUpstreamGroupsIndex,
+		// Ordered after the creates: the index goes before the table it is on, so a
+		// drop cannot leave an index referring to a table that is gone.
+		dropModelPricesIndex,
+		dropModelPrices,
 	}
 	for _, statement := range statements {
 		if _, err := db.ExecContext(ctx, statement); err != nil {
@@ -111,6 +115,28 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"prompt_cached_tokens", "INTEGER"},
 		{"cache_creation_tokens", "INTEGER"},
 		{"completion_reasoning_tokens", "INTEGER"},
+		// Rows written before these columns existed keep them NULL. That is the
+		// only honest value: their timings were never sampled, and the console
+		// reports the stage as unavailable rather than deriving one.
+		{"request_uid", "TEXT"},
+		{"attempt_index", "INTEGER"},
+		{"pre_upstream_ms", "INTEGER"},
+		{"upstream_headers_ms", "INTEGER"},
+		// A legacy row's NULL here reads as "this attempt did not fail", which is
+		// wrong for the failures among them but is the only value that does not
+		// invent a stage. The console shows the stage as unavailable rather than
+		// guessing one from the status.
+		{"failure_stage", "TEXT"},
+		{"failure_retryable", "INTEGER"},
+		// Retired columns from the removed cost-estimation feature. Still ensured
+		// rather than dropped: CREATE TABLE declares them for a fresh install, so an
+		// instance upgraded from before they existed has to gain them too, or the two
+		// would have different schemas. That difference is what the backup's schema
+		// fingerprint compares, and it would make a snapshot from one instance look
+		// incompatible with the other over three columns nothing reads.
+		{"cost_micros", "INTEGER"},
+		{"cost_currency", "TEXT"},
+		{"pricing_rule_id", "INTEGER"},
 	} {
 		if err := ensureColumn(ctx, db, "request_logs", column.name, column.definition); err != nil {
 			return err
@@ -133,6 +159,22 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"used_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"limit_tokens", "INTEGER"},
 		{"rate_limit", "TEXT"},
+		// Defaulted to '[]' so an upgraded database reads as unrestricted, which
+		// is how every existing credential behaved before the column. NOT NULL is
+		// deliberately not asserted here: ALTER TABLE ADD COLUMN with a default
+		// fills existing rows, but a row written by an older binary against a
+		// newer file would still carry NULL, and ParseAllowedModels folds NULL
+		// into unrestricted rather than depending on the constraint.
+		{"allowed_models", "TEXT DEFAULT '[]'"},
+		// Defaulted to the legacy behaviour, so an upgraded database keeps treating
+		// every limit as a lifetime total until an operator chooses a cycle. The
+		// CHECK is omitted on the migrated column because SQLite cannot add a
+		// constrained column to a populated table; the stores validate instead, and
+		// an unrecognised value reads as 'none' rather than as an unpredictable
+		// reset.
+		{"quota_period", "TEXT DEFAULT 'none'"},
+		{"quota_timezone", "TEXT DEFAULT 'UTC'"},
+		{"quota_period_key", "TEXT DEFAULT ''"},
 	} {
 		if err := ensureColumn(ctx, db, "api_tokens", column.name, column.definition); err != nil {
 			return err
@@ -162,6 +204,8 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"auto_weight_recovery_interval_seconds", "INTEGER NOT NULL DEFAULT 60 CHECK (auto_weight_recovery_interval_seconds BETWEEN 1 AND 3600)"},
 		{"proxy_enabled", "INTEGER NOT NULL DEFAULT 0 CHECK (proxy_enabled IN (0, 1))"},
 		{"proxy_url", "TEXT NOT NULL DEFAULT ''"},
+		{"load_balance_strategy", "TEXT NOT NULL DEFAULT 'weighted' " +
+			"CHECK (load_balance_strategy IN ('weighted', 'least_latency'))"},
 	} {
 		if err := ensureColumn(ctx, db, "runtime_settings", column.name, column.definition); err != nil {
 			return err

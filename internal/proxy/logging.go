@@ -56,11 +56,48 @@ type LogEntry struct {
 	CompletionReasoningTokens *int32
 	FirstTokenMs              *int32
 	DurationMs                *int32
-	Error                     *string
-	DownstreamRequest         json.RawMessage
-	UpstreamRequest           json.RawMessage
-	UpstreamResponse          json.RawMessage
-	DownstreamResponse        json.RawMessage
+	// RequestUID, AttemptIndex, PreUpstreamMs and UpstreamHeadersMs carry the
+	// waterfall's raw sample points. See models.RequestLogOut for each field's
+	// interval; the shapes here are the same.
+	RequestUID        *string
+	AttemptIndex      *int32
+	PreUpstreamMs     *int32
+	UpstreamHeadersMs *int32
+	// FailureStage and FailureRetryable record where an attempt broke and whether
+	// the gateway's policy would have given that failure to another channel. Both
+	// are NULL on a successful attempt. Set them through SetFailure so the pair
+	// cannot disagree.
+	FailureStage     *string
+	FailureRetryable *bool
+	// QuotaPeriodStamp identifies the reset cycle this request was admitted under,
+	// so its usage is applied to that cycle even when the row commits after the
+	// boundary. It is carried rather than recomputed at write time: recomputing is
+	// exactly how a request from the closing minutes of a period comes to spend the
+	// next one's budget.
+	QuotaPeriodStamp   string
+	Error              *string
+	DownstreamRequest  json.RawMessage
+	UpstreamRequest    json.RawMessage
+	UpstreamResponse   json.RawMessage
+	DownstreamResponse json.RawMessage
+}
+
+// SetFailure records one attempt's failure stage together with the verdict that
+// follows from it.
+//
+// An empty stage clears both fields, which is what a success stores: a stage of
+// "none" would have to be excluded from every console filter by hand, and the
+// first place that forgot would report successes as failures of an unknown kind.
+func (e *LogEntry) SetFailure(stage FailureStage, statusCode int32) {
+	if stage == "" {
+		e.FailureStage = nil
+		e.FailureRetryable = nil
+		return
+	}
+	name := string(stage)
+	retryable := failureRetryable(stage, statusCode)
+	e.FailureStage = &name
+	e.FailureRetryable = &retryable
 }
 
 // LogStreamEvent reports that a committed request-log row became available to
@@ -87,6 +124,15 @@ type LogMetricsRecorder interface {
 	FinishCleanup(success bool, duration time.Duration)
 }
 
+// ScrapeRecorder is the labelled-series sink the Prometheus endpoint renders.
+//
+// An interface here rather than a concrete type so this package does not depend on
+// internal/metrics, matching how LogMetricsRecorder is already handled.
+type ScrapeRecorder interface {
+	RecordRequest(upstreamID int64, statusClass, protocol string, durationSeconds float64)
+	RecordTokens(prompt, completion, cacheRead, cacheCreate, reasoning int64)
+}
+
 type persistedLogRecord struct {
 	stats db.PersistedLogStats
 	event LogStreamEvent
@@ -99,7 +145,10 @@ type LogWriter struct {
 	metrics LogMetricsRecorder
 	events  *eventBroker
 	quotas  *quota.Tracker
-	done    chan struct{}
+	// scrape receives the labelled Prometheus series. Nil is a no-op, which is what
+	// a harness assembled without it gets.
+	scrape ScrapeRecorder
+	done   chan struct{}
 	// closeMu orders closing the queue against scheduling onto it. Sending on a
 	// closed channel panics and a select's default case does not prevent that,
 	// so the two are made exclusive rather than left to race: a stream still
@@ -114,12 +163,14 @@ type LogWriter struct {
 // which is also what drains the queue: ctx bounds each write rather than
 // abandoning the rows still waiting to be made.
 func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecorder,
-	logStats *db.LogStatsCache, queueCapacity int, quotas *quota.Tracker) *LogWriter {
+	logStats *db.LogStatsCache, queueCapacity int, quotas *quota.Tracker,
+	scrape ScrapeRecorder) *LogWriter {
 	writer := &LogWriter{
 		entries: make(chan LogEntry, max(queueCapacity, 1)),
 		metrics: metrics,
 		events:  newEventBroker(),
 		quotas:  quotas,
+		scrape:  scrape,
 		done:    make(chan struct{}),
 	}
 	go writer.run(ctx, database, logStats)
@@ -131,6 +182,12 @@ func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecor
 // A dropped log is preferable to blocking a proxied request on the writer.
 func (w *LogWriter) Schedule(entry LogEntry) {
 	w.metrics.RecordLogEnqueue()
+
+	// Recorded here rather than at flush, so a scrape counts requests the gateway
+	// actually served even when the queue drops their rows or the database write
+	// fails. Tying the counters to a successful insert would make an alert on
+	// traffic volume go quiet exactly when logging is in trouble.
+	w.recordScrapeSeries(entry)
 
 	// Held across the send so the queue cannot close underneath it.
 	w.closeMu.RLock()
@@ -149,7 +206,7 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 		// because until then the stored total still understates it. A dropped
 		// entry holds nothing: it will never reach the total either.
 		if tokenID, used, ok := quotaUsage(entry); ok {
-			w.quotas.Meter(tokenID, used)
+			w.quotas.Meter(tokenID, entry.QuotaPeriodStamp, used)
 		}
 	default:
 		w.metrics.RecordLogDequeue(1)
@@ -158,10 +215,88 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 	}
 }
 
+// recordScrapeSeries folds one attempt into the Prometheus counters.
+//
+// The labels are drawn only from bounded values: the channel id, the status class,
+// and the protocol implied by the path. The model string is deliberately not a
+// label — it arrives from the client, so labelling by it would let any caller mint
+// unbounded time series by varying one JSON field.
+func (w *LogWriter) recordScrapeSeries(entry LogEntry) {
+	if w.scrape == nil {
+		return
+	}
+
+	upstreamID := int64(0)
+	if entry.UpstreamID != nil {
+		upstreamID = *entry.UpstreamID
+	}
+	protocol := metricsProtocolOpenAI
+	if models.IsAnthropicMessages(entry.Path) {
+		protocol = metricsProtocolAnthropic
+	}
+
+	// Negative means "no measured duration", which the histogram skips: a request
+	// whose timing is unknown is not a fast one, and folding it in as zero would
+	// pull every latency quantile down.
+	durationSeconds := -1.0
+	if entry.DurationMs != nil && *entry.DurationMs >= 0 {
+		durationSeconds = float64(*entry.DurationMs) / 1000
+	}
+
+	w.scrape.RecordRequest(upstreamID, statusClassOf(entry.StatusCode), protocol,
+		durationSeconds)
+	w.scrape.RecordTokens(
+		int32PtrToInt64Value(entry.PromptTokens),
+		int32PtrToInt64Value(entry.CompletionTokens),
+		int32PtrToInt64Value(entry.PromptCachedTokens),
+		int32PtrToInt64Value(entry.CacheCreationTokens),
+		int32PtrToInt64Value(entry.CompletionReasoningTokens),
+	)
+}
+
+// The label values, duplicated as constants rather than imported from
+// internal/metrics: this package does not depend on that one (see ScrapeRecorder),
+// and a test asserts the two sets agree so the duplication cannot drift.
+const (
+	metricsProtocolOpenAI    = "openai"
+	metricsProtocolAnthropic = "anthropic"
+	metricsStatus2xx         = "2xx"
+	metricsStatus4xx         = "4xx"
+	metricsStatus5xx         = "5xx"
+	metricsStatusOther       = "other"
+	metricsStatusNone        = "none"
+)
+
+// statusClassOf buckets a status code. A nil code is "none" — the attempt never got
+// a status, which is distinct from succeeding.
+func statusClassOf(status *int32) string {
+	if status == nil {
+		return metricsStatusNone
+	}
+	switch code := *status; {
+	case code >= 200 && code <= 299:
+		return metricsStatus2xx
+	case code >= 400 && code <= 499:
+		return metricsStatus4xx
+	case code >= 500 && code <= 599:
+		return metricsStatus5xx
+	default:
+		return metricsStatusOther
+	}
+}
+
+func int32PtrToInt64Value(value *int32) int64 {
+	if value == nil || *value < 0 {
+		return 0
+	}
+	return int64(*value)
+}
+
 // quotaUsage reports the token and amount a log entry contributes to a quota.
 //
 // It is the single definition of what counts, so the hold taken at enqueue and
-// the increment applied at commit can never disagree.
+// the increment applied at commit can never disagree. The period the amount
+// belongs to travels on the entry as QuotaPeriodStamp.
 func quotaUsage(entry LogEntry) (tokenID int64, used int64, ok bool) {
 	if entry.DownstreamTokenID == nil || entry.TotalTokens == nil || *entry.TotalTokens <= 0 {
 		return 0, 0, false
@@ -262,7 +397,10 @@ func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.Lo
 	defer func() {
 		for _, entry := range entries {
 			if tokenID, used, ok := quotaUsage(entry); ok {
-				w.quotas.Settle(tokenID, used)
+				// Released against the same period the hold was taken in. Using the
+				// current period would leave the closed period's hold outstanding
+				// forever, permanently shrinking the budget it applied to.
+				w.quotas.Settle(tokenID, entry.QuotaPeriodStamp, used)
 			}
 		}
 	}()
@@ -387,8 +525,12 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
          reasoning_effort, response_reasoning_effort, stream, status_code,
          prompt_tokens, completion_tokens, total_tokens,
          prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
-         duration_ms, first_token_ms, error, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         duration_ms, first_token_ms,
+         request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
+         failure_stage, failure_retryable,
+         error, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,
 			entry.RequestModel, entry.UpstreamModel, entry.ReasoningEffort,
@@ -396,6 +538,8 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 			entry.PromptTokens, entry.CompletionTokens, entry.TotalTokens,
 			entry.PromptCachedTokens, entry.CacheCreationTokens,
 			entry.CompletionReasoningTokens, entry.DurationMs, entry.FirstTokenMs,
+			entry.RequestUID, entry.AttemptIndex, entry.PreUpstreamMs,
+			entry.UpstreamHeadersMs, entry.FailureStage, entry.FailureRetryable,
 			entry.Error, createdAt)
 		if err != nil {
 			return nil, apperr.Database(err)
@@ -426,10 +570,13 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 		// at enqueue cannot drift apart. They were two copies of one condition,
 		// which is only correct for as long as nobody edits one of them.
 		if tokenID, used, ok := quotaUsage(entry); ok {
-			_, err := tx.ExecContext(ctx,
-				"UPDATE api_tokens SET used_tokens = used_tokens + ? WHERE id = ?",
-				used, tokenID)
-			if err != nil {
+			// Applied through the period-aware statement rather than a plain
+			// increment. It performs the rollover as part of recording the first
+			// usage of a new cycle, and drops usage that belongs to a cycle already
+			// closed — which is what keeps a request admitted before a boundary from
+			// spending the budget after it. See db.ApplyTokenUsage.
+			if err := db.ApplyTokenUsage(ctx, tx, tokenID, used,
+				entry.QuotaPeriodStamp); err != nil {
 				return nil, apperr.Database(err)
 			}
 		}
@@ -468,6 +615,12 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 					CompletionReasoningTokens: entry.CompletionReasoningTokens,
 					DurationMs:                entry.DurationMs,
 					FirstTokenMs:              entry.FirstTokenMs,
+					RequestUID:                entry.RequestUID,
+					AttemptIndex:              entry.AttemptIndex,
+					PreUpstreamMs:             entry.PreUpstreamMs,
+					UpstreamHeadersMs:         entry.UpstreamHeadersMs,
+					FailureStage:              entry.FailureStage,
+					FailureRetryable:          entry.FailureRetryable,
 					Error:                     entry.Error,
 				},
 			},

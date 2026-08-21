@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +21,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/middleware"
 	"github.com/liguangsheng/wildtoken/internal/models"
+	"github.com/liguangsheng/wildtoken/internal/proxy"
 	"github.com/liguangsheng/wildtoken/internal/themes"
 )
 
@@ -327,8 +330,28 @@ func AdminSystemInfo(state *appstate.State) http.HandlerFunc {
 				LogBodyMaxBytes:  settings.LogBodyMaxBytes,
 				Revision:         settings.Revision,
 			},
-			RuntimeMetrics: runtimeMetricsOut(state.Metrics.Snapshot()),
+			RuntimeMetrics:  runtimeMetricsOut(state.Metrics.Snapshot()),
+			MetricsEndpoint: metricsEndpointStatus(state),
 		})
+	}
+}
+
+// metricsEndpointStatus reports the scrape endpoint's access policy.
+//
+// Read from the startup configuration rather than the runtime settings row,
+// because that is where it lives: exposing the endpoint is a deployment decision
+// (it changes what the listener answers), not a policy the console can edit. The
+// console renders this read-only for that reason.
+func metricsEndpointStatus(state *appstate.State) models.MetricsEndpointStatusOut {
+	metricsSettings := state.Settings.Metrics
+	return models.MetricsEndpointStatusOut{
+		Enabled: metricsSettings.Enabled,
+		Path:    "/metrics",
+		// Derived from the configuration rather than reported as the token itself:
+		// what the console needs to show is whether the endpoint is guarded, and an
+		// enabled endpoint with no token is the case worth surfacing.
+		TokenRequired:    strings.TrimSpace(metricsSettings.Token) != "",
+		ConfiguredByFile: true,
 	}
 }
 
@@ -536,18 +559,10 @@ func AdminListLogs(state *appstate.State) http.HandlerFunc {
 		// takes. Deep pages are what the cursor endpoint is for.
 		offset := clampInt32(queryInt32(query.Get("offset"), 0), 0, maxLogListOffset)
 
-		// The search term becomes eight LIKE patterns evaluated against every
-		// row the query examines, so its length is a multiplier on the cost of
-		// the whole scan. Nothing an operator types to find a request is longer
-		// than this.
-		filter := db.LogFilter{
-			UpstreamID: optionalQueryInt64(query.Get("upstream_id")),
-			Search:     boundedQueryString(query.Get("search"), maxLogSearchChars),
-			ClientType: boundedQueryString(query.Get("client_type"), maxLogSearchChars),
-		}
-		if status := query.Get("status"); status == "2xx" || status == "4xx" ||
-			status == "5xx" || status == "none" {
-			filter.Status = &status
+		filter, err := parseLogFilter(query)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
 		}
 
 		var cursor *db.LogCursor
@@ -611,6 +626,15 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		// The live stream takes the same filters as the paginated list, so a
+		// filtered console view does not receive events it would never show.
+		filter, err := parseLogFilter(r.URL.Query())
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		filter = openEndedForLiveStream(filter, time.Now())
+
 		events, unsubscribe := state.LogWriter.Subscribe()
 		defer unsubscribe()
 
@@ -636,6 +660,9 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 				}
 				if state.Credentials.Version() != auth.CredentialVersion {
 					return
+				}
+				if !filter.Matches(event.Log) {
+					continue
 				}
 				encoded, err := json.Marshal(event)
 				if err != nil {
@@ -722,6 +749,33 @@ func parseDashboardRange(value, startValue, endValue, fallback string) (dashboar
 	return selection, nil
 }
 
+// resolvedRange reports the concrete [start, end) the selection covers, as
+// RFC3339 UTC, for the console to carry into a log drill-down.
+//
+// Presets are resolved against now; a custom range already parsed its own
+// bounds and only needs reshaping. "全部时间" has no bounds and returns nils,
+// which the drill-down reads as "do not filter by time".
+func (s dashboardRangeSelection) resolvedRange(now time.Time) (*string, *string) {
+	var start, end time.Time
+	if s.Window == db.LogTopWindowCustom {
+		var startErr, endErr error
+		start, startErr = time.Parse(models.TimestampFormat, s.StartAt)
+		end, endErr = time.Parse(models.TimestampFormat, s.EndAt)
+		if startErr != nil || endErr != nil {
+			return nil, nil
+		}
+	} else {
+		var ok bool
+		start, end, ok = db.ResolveWindowRange(s.Window, now)
+		if !ok {
+			return nil, nil
+		}
+	}
+	startValue := start.UTC().Format(time.RFC3339)
+	endValue := end.UTC().Format(time.RFC3339)
+	return &startValue, &endValue
+}
+
 // AdminTokenUsageStats reports token usage for the selected dashboard range.
 func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -789,6 +843,7 @@ func AdminLogOverview(state *appstate.State) http.HandlerFunc {
 		}
 		overview.Range = selection.Value
 		overview.RangeLabel = selection.Label
+		overview.ResolvedStart, overview.ResolvedEnd = selection.resolvedRange(time.Now())
 		apperr.WriteJSON(w, http.StatusOK, overview)
 	}
 }
@@ -844,10 +899,13 @@ func AdminGetLogDetail(state *appstate.State) http.HandlerFunc {
 // AdminUpstreamHealthHistory reports per-channel hourly success rate and
 // latency over the trailing hours (default 24), for the channel cards' mini
 // health trend.
+//
+// Console probes are excluded: this card answers "how is the channel serving
+// real traffic", and a probe an operator just fired is not that.
 func AdminUpstreamHealthHistory(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		hours := clampInt64(queryInt64(r.URL.Query().Get("hours"), 24), 1, 24*7)
-		health, err := db.UpstreamHealthHistory(r.Context(), state.DB, hours)
+		health, err := db.UpstreamHealthHistory(r.Context(), state.DB, hours, probeClientTypes())
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -855,6 +913,54 @@ func AdminUpstreamHealthHistory(state *appstate.State) http.HandlerFunc {
 		apperr.WriteJSON(w, http.StatusOK, map[string]any{
 			"hours":   hours,
 			"entries": health,
+		})
+	}
+}
+
+// AdminUpstreamsRouting reports the effective load-balance strategy, the rules
+// behind it, and each channel's current routing latency.
+//
+// Separate from AdminListUpstreams because that endpoint answers with a bare JSON
+// array: there is no envelope to add these fields to, and giving it one would
+// break every existing caller. Separate from the dashboard's latency charts
+// because those scan request_logs, while this reads the in-memory samples routing
+// actually decided on.
+func AdminUpstreamsRouting(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		settings := state.Runtime.Get()
+		readings := state.Latency.ReadAll()
+
+		latency := make([]models.UpstreamLatencyOut, 0, len(readings))
+		for upstreamID, reading := range readings {
+			entry := models.UpstreamLatencyOut{
+				UpstreamID:  upstreamID,
+				SampleCount: reading.SampleCount,
+				Usable:      reading.Usable,
+			}
+			// Left null below the minimum: a median of two samples is a number the
+			// console would have to explain away, and routing did not use it.
+			if reading.Usable {
+				median := reading.MedianMs
+				entry.MedianMs = &median
+			}
+			latency = append(latency, entry)
+		}
+		// Ordered so the response is stable between polls; a map's order is not.
+		sort.Slice(latency, func(i, j int) bool {
+			return latency[i].UpstreamID < latency[j].UpstreamID
+		})
+
+		apperr.WriteJSON(w, http.StatusOK, models.UpstreamRoutingOut{
+			Strategy:      settings.LoadBalanceStrategy,
+			LatencyActive: settings.LoadBalanceStrategy == models.LoadBalanceLeastLatency,
+			Rules: models.RoutingRulesOut{
+				MinSamples:         proxy.LatencyMinSamples,
+				StaleWindowSeconds: int64(proxy.LatencyStaleWindow.Seconds()),
+				SampleCapacity:     proxy.LatencySampleCapacity,
+				ToleranceRatio:     proxy.LatencyToleranceRatio,
+				ToleranceFloorMs:   proxy.LatencyToleranceFloorMs,
+			},
+			Latency: latency,
 		})
 	}
 }
@@ -881,6 +987,138 @@ func optionalQueryInt64(value string) *int64 {
 		return nil
 	}
 	return &parsed
+}
+
+// maxLogRangeDays bounds an explicit log range, matching the dashboard's own
+// custom-range ceiling so a drill-down can always carry the window it came from.
+const maxLogRangeDays = 366
+
+// parseLogFilter builds the filter shared by the paginated list and the live
+// stream.
+//
+// Both endpoints must agree on what the operator asked for — a console showing a
+// filtered history while receiving unfiltered live events was the bug this
+// contract exists to prevent — so they read their parameters here rather than
+// each keeping their own copy of the parsing.
+func parseLogFilter(query url.Values) (db.LogFilter, error) {
+	filter := db.LogFilter{
+		UpstreamID:        optionalQueryInt64(query.Get("upstream_id")),
+		DownstreamTokenID: optionalQueryInt64(query.Get("downstream_token_id")),
+		// The search term becomes eight LIKE patterns evaluated against every
+		// row the query examines, so its length is a multiplier on the cost of
+		// the whole scan. Nothing an operator types to find a request is longer
+		// than this.
+		Search:     boundedQueryString(query.Get("search"), maxLogSearchChars),
+		ClientType: boundedQueryString(query.Get("client_type"), maxLogSearchChars),
+	}
+
+	if rawStatus, present := query["status"]; present && len(rawStatus) > 0 {
+		status := strings.TrimSpace(rawStatus[0])
+		if !db.ValidLogStatus(status) {
+			return db.LogFilter{}, apperr.BadRequest(
+				"status must be one of: 2xx, 4xx, 5xx, other, none, error")
+		}
+		filter.Status = &status
+	}
+
+	start, end, err := parseLogRange(query.Get("start"), query.Get("end"))
+	if err != nil {
+		return db.LogFilter{}, err
+	}
+	filter.Start, filter.End = start, end
+
+	if raw := strings.TrimSpace(query.Get("stream")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return db.LogFilter{}, apperr.BadRequest("stream must be true or false")
+		}
+		filter.Stream = &value
+	}
+
+	// Unlike the older optional integers, an unparseable threshold is rejected
+	// rather than dropped. Silently ignoring it would return the unfiltered page
+	// under a UI that says a threshold is active — the operator would read "no
+	// requests slower than this" off a list that was never filtered.
+	if raw := strings.TrimSpace(query.Get("min_duration_ms")); raw != "" {
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value < 0 {
+			return db.LogFilter{}, apperr.BadRequest(
+				"min_duration_ms must be a non-negative integer")
+		}
+		filter.MinDurationMs = &value
+	}
+
+	return filter, nil
+}
+
+// openEndedForLiveStream drops an upper bound that has not passed yet, for the
+// live stream only.
+//
+// A dashboard preset like "最近 24 小时" resolves to an end of "now", and the
+// console forwards that pair to both endpoints. Applied literally to a stream,
+// that bound is in the past a second later, so every event after the connection
+// is filtered out: the log view goes permanently quiet with no error to explain
+// it. The window the operator picked means "up to now, ongoing", so the stream
+// keeps the lower bound and lets the future through.
+//
+// A range whose end has already passed is a closed historical window, and that
+// bound is kept — the stream then delivers nothing, which is the intended
+// "paused" behaviour for a historical view rather than an accident.
+//
+// This lives here rather than in parseLogFilter because it is exactly the
+// difference between the two endpoints: the list renders a fixed window, the
+// stream renders what arrives next.
+func openEndedForLiveStream(filter db.LogFilter, now time.Time) db.LogFilter {
+	if filter.End == nil {
+		return filter
+	}
+	// Both sides are the fixed-width UTC storage shape, so comparing as strings
+	// compares as time.
+	if *filter.End >= now.UTC().Format(models.TimestampFormat) {
+		filter.End = nil
+	}
+	return filter
+}
+
+// parseLogRange validates the [start, end) pair and converts it to the UTC
+// shape created_at stores.
+//
+// RFC3339 is what the browser can produce from a Date without hand-formatting,
+// but created_at is 'YYYY-MM-DD HH:MM:SS' in UTC. Comparing the two forms
+// directly is the failure worth guarding: SQLite would compare the strings
+// happily and silently match nothing, so the offset is resolved and the literal
+// reshaped here instead.
+func parseLogRange(startValue, endValue string) (*string, *string, error) {
+	startValue = strings.TrimSpace(startValue)
+	endValue = strings.TrimSpace(endValue)
+	if startValue == "" && endValue == "" {
+		return nil, nil, nil
+	}
+	// A half-open range would quietly widen the view to everything on one side
+	// of the bound, which is indistinguishable from a filter that failed to
+	// apply. Requiring both makes the mistake visible.
+	if startValue == "" || endValue == "" {
+		return nil, nil, apperr.BadRequest("start and end must be provided together")
+	}
+
+	start, err := time.Parse(time.RFC3339, startValue)
+	if err != nil {
+		return nil, nil, apperr.BadRequest("start must be an RFC3339 timestamp")
+	}
+	end, err := time.Parse(time.RFC3339, endValue)
+	if err != nil {
+		return nil, nil, apperr.BadRequest("end must be an RFC3339 timestamp")
+	}
+	if !start.Before(end) {
+		return nil, nil, apperr.BadRequest("start must be before end")
+	}
+	if end.Sub(start) > maxLogRangeDays*24*time.Hour {
+		return nil, nil, apperr.BadRequest("log range must not exceed 366 days")
+	}
+
+	normalizedStart := start.UTC().Format(models.TimestampFormat)
+	normalizedEnd := end.UTC().Format(models.TimestampFormat)
+	return &normalizedStart, &normalizedEnd, nil
 }
 
 func optionalQueryString(value string) *string {

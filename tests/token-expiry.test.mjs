@@ -9,7 +9,24 @@ function extractFunction(source, name) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} must exist`);
 
-  const bodyStart = source.indexOf("{", start);
+  // The body starts after the parameter list closes, not at the first brace: a
+  // destructured parameter such as ({ dryRun }) is a brace that opens and closes
+  // before the body, and counting from there extracts only the signature.
+  let parens = 0;
+  let paramsEnd = -1;
+  for (let index = source.indexOf("(", start); index < source.length; index += 1) {
+    if (source[index] === "(") parens += 1;
+    if (source[index] === ")") {
+      parens -= 1;
+      if (parens === 0) {
+        paramsEnd = index;
+        break;
+      }
+    }
+  }
+  assert.notEqual(paramsEnd, -1, `could not find the parameter list of ${name}`);
+
+  const bodyStart = source.indexOf("{", paramsEnd);
   let depth = 0;
   for (let index = bodyStart; index < source.length; index += 1) {
     const char = source[index];
@@ -202,9 +219,9 @@ test("the token table header and its body cells agree on the column count", () =
   const headerCount = [...table.matchAll(/<th[\s>]/g)].length;
 
   const source = read("static/js/tokens.js");
-  // 名称、描述、令牌预览、分组、限额、有效期、状态、操作
-  assert.equal(headerCount, 8);
-  assert.match(source, /skeletonRowsMarkup\(8, 5\)/);
-  assert.match(source, /emptyStateCell\(8, \{/);
-  assert.match(source, /noMatchStateCell\(8, \{/);
+  // 名称、描述、令牌预览、分组、允许模型、限额、有效期、状态、操作
+  assert.equal(headerCount, 9);
+  assert.match(source, /skeletonRowsMarkup\(9, 5\)/);
+  assert.match(source, /emptyStateCell\(9, \{/);
+  assert.match(source, /noMatchStateCell\(9, \{/);
 });

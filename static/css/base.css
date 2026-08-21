@@ -109,6 +109,7 @@ html[data-theme="dark"] {
   --text-lg: 16px;
   --text-xl: 18px;
   --text-2xl: 20px;
+  --text-3xl: 26px;
 
   /* Layout */
   --topbar-height: 56px;
@@ -1013,7 +1014,10 @@ html[data-theme="light"] .nav-link:hover {
   min-width: 72px;
 }
 
-.log-toolbar > .log-sensitive-toggle {
+/* 敏感开关是个方形图标按钮。选择器不能写成 .log-toolbar > .log-sensitive-toggle：
+   它现在坐在 .toolbar-actions 里（和「列」「刷新」同组，一起被推到行尾），
+   直接子选择器够不着它。 */
+.log-toolbar .log-sensitive-toggle {
   align-items: center;
   display: inline-flex;
   justify-content: center;
@@ -1096,9 +1100,16 @@ html[data-theme="light"] .nav-link:hover {
   min-width: 180px;
 }
 
+/* 上限从 300px 收到 260px。六个筛选器在 1440px（--content-max，也就是这条工具栏能拿到
+   的最大宽度）下占 1214px，行内只剩 144px，装不下 170px 的动作组——差的正是这 40px。
+   收掉之后默认状态整条工具栏是一行，刷新不再落到第二行去。
+   代价是渠道名能显示的字数少一档；下限 220px 没动，窄屏那边照旧。
+   注意这个"一行"只在默认状态成立：从看板下钻过来时会多出令牌/时间范围徽标，那时仍会
+   换行——换行本身不再难看（列/敏感/刷新是一组，跟着最后一个筛选器往下排，不会只剩
+   刷新孤零零右对齐），见 .log-toolbar > .toolbar-actions。 */
 .log-filter-channel select {
   min-width: 220px;
-  width: clamp(220px, 22vw, 300px);
+  width: clamp(220px, 22vw, 260px);
 }
 
 .view-toolbar {
@@ -1116,13 +1127,23 @@ html[data-theme="light"] .nav-link:hover {
 
    Both toolbars align to flex-end, so the buttons land on the baseline of the
    inputs rather than their labels. */
-.view-toolbar > .toolbar-actions,
-.log-toolbar > .toolbar-actions {
+.view-toolbar > .toolbar-actions {
   margin-inline-start: auto;
 }
 
-/* .log-toolbar > button covered 刷新 before it was wrapped; keep the width. */
-.log-toolbar > .toolbar-actions > button {
+/* 日志工具栏不跟着走这条。它有六个筛选器，实测到 1600px 视口都占满第一行，动作组
+   一定会换行；而 auto margin 在换行之后依然生效，于是那一组被推到一条空行的最右边
+   ——量出来 208px 的组坐在 1476px 宽的行上，左边空着 1268px。右对齐这个意图在这条
+   工具栏上其实达不到，留着只剩"孤岛"这一个效果。
+   去掉之后动作组紧跟最后一个筛选器往下排：能塞进第一行就跟在后面，塞不进就从第二行
+   左边开始，两种情况都不会剩一条空行。 */
+.log-toolbar > .toolbar-actions {
+  margin-inline-start: 0;
+}
+
+/* .log-toolbar > button covered 刷新 before it was wrapped; keep the width.
+   敏感开关是方形图标按钮，它有自己的 34px，别被这条拉宽。 */
+.log-toolbar > .toolbar-actions > button:not(.log-sensitive-toggle) {
   min-width: 72px;
 }
 
@@ -1202,29 +1223,81 @@ html[data-theme="light"] .nav-link:hover {
   padding: 0;
 }
 
-.summary-strip span {
+/* display: flex 上面、窄屏下 responsive.css 还改成 grid，两者都是作者样式，会压过
+   UA 样式表的 [hidden] { display: none }。#upstream-probe-summary 靠 hidden 属性
+   收起（upstreams.js 测活结束时设 true），没有这条兜底就永远收不回去。 */
+.summary-strip[hidden] {
+  display: none;
+}
+
+/* 数字格由一个渲染器整块重写 innerHTML，同一条上的其它格（渠道页的"最近测活"）
+   是另一个渲染器写的，所以各自要有容器。display: contents 让这层容器自己不参与
+   布局，里面的 span 仍然直接落在 .summary-strip 这条 flex/grid 上——窄屏那套
+   span:nth-child 分割线规则因此一条都不用改。 */
+.summary-strip-cells {
+  display: contents;
+}
+
+/* 这条只管格子这个盒（宽度、内边距、分割线），所以必须写成
+   .summary-strip-cells > span，不是 .summary-strip span：条里除了数字格还坐着别的
+   东西（渠道页最右边那格"最近测活"），后代选择器会把它内部的 span 也拉成 120px
+   等宽格子。这个坑这块样式已经踩过两次，见 enhancements.css 里测活条和路由摘要
+   各自的注释——那两块当初都是靠"别挂 .summary-strip"绕开的。
+   格子里的排版（标签、数字）改由下面几个显式类负责，压根不会漏出去。 */
+.summary-strip-cells > span {
   border-right: 1px solid var(--line);
   flex: 1 1 120px;
   min-width: 0;
-  padding: 10px 14px;
+  padding: 9px 14px 10px;
   white-space: nowrap;
 }
 
-.summary-strip span:last-child {
+.summary-strip-cells > span:last-child {
   border-right: 0;
 }
 
-.summary-strip strong {
+/* 标签在上、数字在下：先读到这一格是什么，再落到数值上。标签压到 11px 降灰、
+   数字放到 26px，一格里的主次全靠这个字号差撑起来。测活那格用的是同两个类，
+   五格因此长得一模一样。
+   两边的 line-height 都收着写：标签 1.25、数字 1.05——格子高度是被这两行撑起来
+   的，行高留松了，数字底下就空出一条和字号不相称的白。 */
+.summary-strip-label {
+  color: var(--muted);
+  display: block;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  /* 标签是中文，字距别跟着 KPI 卡那套大写拉丁文的 0.04em 走。 */
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.summary-strip-value {
   color: var(--text);
   display: block;
-  font-size: var(--text-lg);
+  font-size: var(--text-3xl);
   font-variant-numeric: tabular-nums;
   font-weight: 700;
   letter-spacing: -0.02em;
-  line-height: 1.2;
-  margin: 0 0 2px;
+  line-height: 1.05;
+  margin: 2px 0 0;
 }
 
-.summary-strip .summary-warn strong {
+/* 测活跑着的时候数字位是个破折号，别按数值那样加重。 */
+.summary-strip-value.is-pending {
+  color: var(--muted);
+  font-weight: 600;
+}
+
+/* 分母是"共多少"，只在人为增删渠道时变；压小降灰，把视线留给分子。和看板
+   "启用渠道"那张卡的 .kpi-denominator 是同一套读法。 */
+.summary-strip-denominator {
+  color: var(--muted);
+  font-size: 0.55em;
+  font-weight: 600;
+  letter-spacing: 0;
+  margin-left: 1px;
+}
+
+.summary-warn .summary-strip-value {
   color: var(--warning);
 }

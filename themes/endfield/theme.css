@@ -655,7 +655,7 @@ html[data-theme="endfield"] .dashboard-card:hover {
   border-top-color: var(--ef-signal-ink);
 }
 
-html[data-theme="endfield"] .summary-strip span,
+html[data-theme="endfield"] .summary-strip-cells > span,
 html[data-theme="endfield"] .system-info-grid,
 html[data-theme="endfield"] .system-info-item {
   border-color: var(--line);

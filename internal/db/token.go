@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/apperr"
 	"github.com/liguangsheng/wildtoken/internal/models"
@@ -39,7 +40,8 @@ const tokenColumns = `t.id, t.name, t.description, t.token_preview,
     t.expires_at, t.created_at, t.updated_at,
     COALESCE(t.group_id, 1),
     COALESCE((SELECT g.name FROM groups g WHERE g.id = t.group_id), 'default'),
-    COALESCE(t.used_tokens, 0), t.limit_tokens, t.rate_limit`
+    COALESCE(t.used_tokens, 0), t.limit_tokens, t.rate_limit, t.allowed_models,
+    t.quota_period, t.quota_timezone, t.quota_period_key`
 
 // tokenFrom is the FROM clause matching tokenColumns.
 const tokenFrom = " FROM api_tokens AS t"
@@ -103,12 +105,30 @@ func scanTokenRow(row interface{ Scan(...any) error }) (models.APITokenRow, stri
 	var groupName string
 	var limitTokens sql.NullInt64
 	var rateLimit sql.NullString
+	var allowedModels sql.NullString
+	var quotaPeriod, quotaTimezone, quotaPeriodStamp sql.NullString
 	err := row.Scan(&token.ID, &token.Name, &token.Description, &token.TokenPreview,
 		&token.Token, &token.Enabled, &expiresAt, &token.CreatedAt, &token.UpdatedAt,
-		&token.GroupID, &groupName, &token.UsedTokens, &limitTokens, &rateLimit)
+		&token.GroupID, &groupName, &token.UsedTokens, &limitTokens, &rateLimit,
+		&allowedModels, &quotaPeriod, &quotaTimezone, &quotaPeriodStamp)
 	if err != nil {
 		return token, "", err
 	}
+	if allowedModels.Valid {
+		token.AllowedModels = &allowedModels.String
+	}
+	// An unrecognised stored period reads as none, matching how admission reads it:
+	// the console and the request path must not disagree about whether a token
+	// resets.
+	token.QuotaPeriod = models.DefaultQuotaPeriod
+	if quotaPeriod.Valid && models.ValidQuotaPeriod(quotaPeriod.String) {
+		token.QuotaPeriod = quotaPeriod.String
+	}
+	token.QuotaTimezone = models.DefaultQuotaTimezone
+	if quotaTimezone.Valid && quotaTimezone.String != "" {
+		token.QuotaTimezone = quotaTimezone.String
+	}
+	token.QuotaPeriodStamp = quotaPeriodStamp.String
 	if expiresAt.Valid {
 		token.ExpiresAt = &expiresAt.String
 	}
@@ -122,6 +142,9 @@ func scanTokenRow(row interface{ Scan(...any) error }) (models.APITokenRow, stri
 }
 
 func tokenOut(row models.APITokenRow, groupName string) models.APITokenOut {
+	// One instant for both the usage and the period, so the two cannot straddle a
+	// boundary and describe different cycles.
+	now := time.Now()
 	return models.APITokenOut{
 		ID:           row.ID,
 		Name:         row.Name,
@@ -134,9 +157,31 @@ func tokenOut(row models.APITokenRow, groupName string) models.APITokenOut {
 		UpdatedAt:    row.UpdatedAt,
 		GroupID:      row.GroupID,
 		GroupName:    groupName,
-		Quota:        models.NewQuotaState(row.UsedTokens, row.LimitTokens),
-		RateLimit:    row.RateLimit,
+		// The current period's usage, not the row's raw total: on a resetting token
+		// the stored figure may describe a cycle that has already closed, and the
+		// counter is cleared by the first usage of the new period rather than on the
+		// boundary itself.
+		Quota:     models.NewQuotaState(row.UsedTokensNow(now), row.LimitTokens),
+		RateLimit: row.RateLimit,
+		// Always an array on the wire. A malformed stored value reads as an empty
+		// list rather than failing the request, so one row edited out of band
+		// cannot make the whole token list unreadable — the request path treats
+		// the same value as unrestricted, which is noted in the API contract.
+		AllowedModels: allowedModelsOut(row.AllowedModels),
+		// Derived server-side. A browser computing the boundary itself would show a
+		// reset at the wrong hour in another timezone, or a period the gateway is not
+		// using if its clock is skewed.
+		QuotaPeriodState: models.NewQuotaPeriodState(row.QuotaPeriod, row.QuotaTimezone, now),
 	}
+}
+
+// allowedModelsOut renders a stored whitelist for the console, never as null.
+func allowedModelsOut(stored *string) []string {
+	patterns := models.AllowedModelsFromStored(stored)
+	if patterns == nil {
+		return []string{}
+	}
+	return patterns
 }
 
 // rejectPastExpiry refuses an expiry that has already passed.
@@ -385,6 +430,14 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
 	}
+	allowedModels, err := input.NormalizedAllowedModels()
+	if err != nil {
+		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
+	}
+	quotaPeriod, quotaTimezone, err := input.NormalizedQuotaCycle()
+	if err != nil {
+		return models.APITokenCreatedOut{}, apperr.BadRequest(err.Error())
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -404,10 +457,11 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 	}
 
 	result, err := tx.ExecContext(ctx, `INSERT INTO api_tokens
-        (name, description, token, token_hash, token_preview, token_plain, enabled, expires_at, group_id, limit_tokens, rate_limit, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+        (name, description, token, token_hash, token_preview, token_plain, enabled, expires_at, group_id, limit_tokens, rate_limit, allowed_models, quota_period, quota_timezone, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		trimSpace(input.Name), trimSpace(input.Description), digest, digest, preview,
-		tokenValue, boolToInt64(input.Enabled), expiresAt, groupID, limitTokens, rateLimit)
+		tokenValue, boolToInt64(input.Enabled), expiresAt, groupID, limitTokens, rateLimit,
+		allowedModels, quotaPeriod, quotaTimezone)
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.Database(err)
 	}
@@ -432,19 +486,21 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 	}
 
 	return models.APITokenCreatedOut{
-		ID:           created.ID,
-		Name:         created.Name,
-		Description:  created.Description,
-		Token:        tokenValue,
-		TokenPreview: created.TokenPreview,
-		Enabled:      created.Enabled,
-		ExpiresAt:    created.ExpiresAt,
-		CreatedAt:    created.CreatedAt,
-		UpdatedAt:    created.UpdatedAt,
-		GroupID:      created.GroupID,
-		GroupName:    created.GroupName,
-		Quota:        created.Quota,
-		RateLimit:    created.RateLimit,
+		ID:               created.ID,
+		Name:             created.Name,
+		Description:      created.Description,
+		Token:            tokenValue,
+		TokenPreview:     created.TokenPreview,
+		Enabled:          created.Enabled,
+		ExpiresAt:        created.ExpiresAt,
+		CreatedAt:        created.CreatedAt,
+		UpdatedAt:        created.UpdatedAt,
+		GroupID:          created.GroupID,
+		GroupName:        created.GroupName,
+		Quota:            created.Quota,
+		RateLimit:        created.RateLimit,
+		AllowedModels:    created.AllowedModels,
+		QuotaPeriodState: created.QuotaPeriodState,
 	}, nil
 }
 
@@ -527,11 +583,25 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
 	if err != nil {
 		return models.APITokenOut{}, apperr.BadRequest(err.Error())
 	}
+	allowedModels, err := input.NormalizedAllowedModels()
+	if err != nil {
+		return models.APITokenOut{}, apperr.BadRequest(err.Error())
+	}
+	quotaPeriod, quotaTimezone, err := input.NormalizedQuotaCycle()
+	if err != nil {
+		return models.APITokenOut{}, apperr.BadRequest(err.Error())
+	}
 
+	// quota_period_key is deliberately not touched here. It records the cycle the
+	// stored usage was earned in, and the applying statement needs it intact to tell
+	// a period-type change from a rollover — rewriting it on an edit would either
+	// discard usage or hand back budget already spent.
 	query := `UPDATE api_tokens SET name = ?, description = ?, expires_at = ?,
-        group_id = ?, limit_tokens = ?, rate_limit = ?, updated_at = datetime('now')`
+        group_id = ?, limit_tokens = ?, rate_limit = ?, allowed_models = ?,
+        quota_period = ?, quota_timezone = ?, updated_at = datetime('now')`
 	args := []any{trimSpace(input.Name), trimSpace(input.Description),
-		expiresAt, groupID, limitTokens, rateLimit}
+		expiresAt, groupID, limitTokens, rateLimit, allowedModels,
+		quotaPeriod, quotaTimezone}
 	if replacement != "" {
 		// The same four columns CreateToken writes, kept in step: the legacy
 		// `token` column takes the digest because the startup migration

@@ -135,18 +135,30 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .summary-strip span {
+  /* nth-child 本来就是相对 DOM 父节点算的，而这四个格子的父节点就是
+     .summary-strip-cells（它只是 display: contents，不参与布局但仍是父节点），
+     所以加上子结合符收窄作用域之后，这三条的选中结果和原来完全一样。 */
+  .summary-strip-cells > span {
     border-bottom: 1px solid var(--line);
     border-right: 1px solid var(--line);
     white-space: normal;
   }
 
-  .summary-strip span:nth-child(2n) {
+  .summary-strip-cells > span:nth-child(2n) {
     border-right: 0;
   }
 
-  .summary-strip span:nth-last-child(-n + 2) {
+  .summary-strip-cells > span:nth-last-child(-n + 2) {
     border-bottom: 0;
+  }
+
+  /* 两列网格下，"最近测活"这一格的内容最长（成功/失败/跳过/时间戳），占满整行。
+     分割线也跟着从左边挪到上边——上面那条 nth-last-child 规则刚把第 3、4 格的
+     底边去掉，这里补回来的正好是同一条线，而且它随这一格的 hidden 一起消失。 */
+  .upstream-probe-summary {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    grid-column: 1 / -1;
   }
 
   .status {
@@ -175,15 +187,20 @@
     margin-inline-start: 0;
   }
 
-  .log-toolbar > .toolbar-actions > button {
+  /* 刷新按住整行的剩余宽度，列和敏感开关保持自己的窄身板——那两个是图标/短标签，
+     拉宽了只是一片空白。 */
+  .log-toolbar > .toolbar-actions > button:not(.log-sensitive-toggle) {
     flex: 1 1 0;
   }
 
-  .log-toolbar > .log-sensitive-toggle {
-    grid-column: auto;
-    justify-self: start;
+  .log-toolbar .log-sensitive-toggle {
+    flex: 0 0 auto;
     min-width: 34px;
     width: 34px;
+  }
+
+  .log-toolbar > .toolbar-actions > .col-menu-wrap {
+    flex: 0 0 auto;
   }
 
   .log-new-entries-notice {
@@ -585,25 +602,27 @@
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .summary-strip span {
+  .summary-strip-cells > span {
     border-right: 0;
   }
 
-  .summary-strip span:nth-last-child(-n + 2) {
+  .summary-strip-cells > span:nth-last-child(-n + 2) {
     border-bottom: 1px solid var(--line);
   }
 
-  .summary-strip span:last-child {
+  /* 单列下最后一个数字格的底边由它右邻（"最近测活"那格）的 border-top 顶上，
+     那一格收起时它也正好是整条的末尾，两种情况都不该自己再画一条。 */
+  .summary-strip-cells > span:last-child {
     border-bottom: 0;
   }
 
   .log-toolbar > button,
-  .log-toolbar > .toolbar-actions > button,
+  .log-toolbar > .toolbar-actions > button:not(.log-sensitive-toggle),
   .modal-footer button {
     width: 100%;
   }
 
-  .log-toolbar > .log-sensitive-toggle {
+  .log-toolbar .log-sensitive-toggle {
     width: 34px;
   }
 

@@ -1,3 +1,80 @@
+
+/**
+ * 解析允许调用的模型白名单输入框内容。
+ * 支持换行或逗号分隔，支持尾部通配符（如 claude-3-5-*）。
+ * 拒绝包含内部通配符（如 gpt-*-turbo）的模式。
+ * 去重（大小写无关）并保留输入的首个字形。
+ * 限制最多 200 个模型，单个模型长度最多 200 字符。
+ * 返回 { ok: true, allowedModels: string[] } 或 { ok: false, error: string }。
+ */
+function parseAllowedModelsInput(raw) {
+  if (raw === null || raw === undefined) {
+    return { ok: true, allowedModels: [] };
+  }
+  const text = Array.isArray(raw) ? raw.join("\n") : String(raw);
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return { ok: true, allowedModels: [] };
+  }
+
+  const entries = text
+    .split(/[\n,]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  if (entries.length > 200) {
+    return { ok: false, error: "允许模型最多支持配置 200 项。" };
+  }
+
+  const seen = new Set();
+  const allowedModels = [];
+
+  for (const entry of entries) {
+    if (entry.length > 200) {
+      return { ok: false, error: `模型名称「${entry.slice(0, 20)}...」过长，单个模型最多 200 字符。` };
+    }
+    if (/[\x00-\x1f\x7f]/.test(entry)) {
+      return { ok: false, error: "模型名称不能包含不可见控制字符。" };
+    }
+    const withoutTrailingStars = entry.replace(/\*+$/, "");
+    if (withoutTrailingStars.includes("*")) {
+      return {
+        ok: false,
+        error: `模型规则「${entry}」无效：通配符仅支持作为尾缀使用（例如 claude-3-*），不支持内部通配。`,
+      };
+    }
+
+    const normalized = entry.toLowerCase();
+    if (!seen.has(normalized)) {
+      seen.add(normalized);
+      allowedModels.push(entry);
+    }
+  }
+
+  return { ok: true, allowedModels };
+}
+
+function allowedModelsCellMarkup(allowedModels) {
+  const list = Array.isArray(allowedModels) ? allowedModels : [];
+  if (list.length === 0) {
+    return `<span class="token-model-all muted">全部模型</span>`;
+  }
+
+  const visible = list.slice(0, 2);
+  const remaining = list.length - visible.length;
+  const fullListText = list.join(", ");
+
+  const tags = visible
+    .map((m) => `<span class="badge token-model-tag">${escapeHtml(m)}</span>`)
+    .join("");
+
+  const moreBadge = remaining > 0
+    ? `<span class="badge token-model-more" title="${escapeHtml(fullListText)}">+${remaining}</span>`
+    : "";
+
+  return `<div class="token-models-cell" title="${escapeHtml(fullListText)}">${tags}${moreBadge}</div>`;
+}
+
 // ── 有效期 ───────────────────────────────────────────────────
 
 /* 有效期输入接受两种写法：1d3h 这样的时长，或 2026-09-01 12:00 这样的时刻。
@@ -176,12 +253,12 @@ function tokenPreviewCellMarkup(token) {
 
 function renderTokenRows() {
   if (tokensLoading && !tokensLoadedOnce) {
-    tokenRows.innerHTML = skeletonRowsMarkup(8, 5);
+    tokenRows.innerHTML = skeletonRowsMarkup(9, 5);
     return;
   }
 
   if (tokensLoadedOnce && tokens.length === 0 && !tokenFiltersActive()) {
-    tokenRows.innerHTML = emptyStateCell(8, {
+    tokenRows.innerHTML = emptyStateCell(9, {
       title: "暂无令牌",
       copy: "还没有创建下游 API 访问令牌。",
       actionLabel: "新增令牌",
@@ -192,7 +269,7 @@ function renderTokenRows() {
 
   const filtered = getFilteredTokens();
   if (tokensLoadedOnce && filtered.length === 0) {
-    tokenRows.innerHTML = noMatchStateCell(8, {
+    tokenRows.innerHTML = noMatchStateCell(9, {
       title: "无匹配令牌",
       copy: "当前搜索条件下没有结果。",
       actionLabel: "清除筛选",
@@ -212,6 +289,7 @@ function renderTokenRows() {
       ${renderDescriptionCell(t.description)}
       <td>${tokenPreviewCellMarkup(t)}</td>
       <td>${escapeHtml(t.group_name || "default")}</td>
+      <td>${allowedModelsCellMarkup(t.allowed_models)}</td>
       <td class="col-quota">${quotaCellMarkup(t)}</td>
       <td class="col-expiry">${expiryCellMarkup(t.expires_at, nowMs)}</td>
       <td class="col-status">
@@ -338,8 +416,17 @@ function resetTokenForm() {
   tokenEnabledCheckbox.checked = true;
   tokenFormTitle.textContent = "新增令牌";
   delete tokenGroupSelect?.dataset.pendingGroupId;
+  if (tokenAllowedModelsInput) {
+    tokenAllowedModelsInput.value = "";
+  }
   if (tokenLimitInput) {
     tokenLimitInput.value = "";
+  }
+  if (tokenQuotaPeriodSelect) {
+    tokenQuotaPeriodSelect.value = "none";
+  }
+  if (tokenQuotaTimezoneInput) {
+    tokenQuotaTimezoneInput.value = "";
   }
   if (tokenRateLimitInput) {
     tokenRateLimitInput.value = "";
@@ -370,27 +457,46 @@ function formatTokenCount(count) {
   return String(amount);
 }
 
+const QUOTA_PERIOD_LABELS = {
+  daily: "日配额",
+  weekly: "周配额",
+  monthly: "月配额",
+};
+
 function quotaCellMarkup(token) {
   const quota = token.quota || {};
   const used = Number(quota.used_tokens) || 0;
-  // 限速和限额挤同一列：限速命中率低，单独占列大多数行都是空的。
+  const periodState = token.quota_period_state;
+  const periodKey = periodState?.period;
+  const periodLabel = (periodKey && periodKey !== "none" && QUOTA_PERIOD_LABELS[periodKey]) || "";
+
+  let resetNote = "";
+  if (periodState?.next_reset_at) {
+    const tz = periodState.timezone || "UTC";
+    resetNote = ` · 下次重置：${formatLogTimestamp(periodState.next_reset_at)} (${tz})`;
+  }
+
+  const periodBadge = periodLabel
+    ? `<span class="badge quota-period-badge" title="周期类型：${escapeHtml(periodLabel)}${escapeHtml(resetNote)}">${escapeHtml(periodLabel)}</span>`
+    : "";
+
   const rateNote = token.rate_limit
     ? `<span class="muted quota-rate-note" title="限速 ${escapeHtml(token.rate_limit)}">${escapeHtml(token.rate_limit)}</span>`
     : "";
 
   if (quota.limit_tokens === null || quota.limit_tokens === undefined) {
-    return `<span class="quota-cell" title="已用 ${used.toLocaleString()} tokens，未设限额">`
+    const title = `已用 ${used.toLocaleString()} tokens，未设限额${resetNote}`;
+    return `<span class="quota-cell" title="${escapeHtml(title)}">`
       + `<span class="quota-used">${formatTokenCount(used)}</span>`
-      + `<span class="quota-sep">/</span><span class="muted">不限</span></span>${rateNote}`;
+      + `<span class="quota-sep">/</span><span class="muted">不限</span></span>${periodBadge}${rateNote}`;
   }
 
   const limit = Number(quota.limit_tokens) || 0;
   const remaining = Number(quota.remaining_tokens) || 0;
   const ratio = limit > 0 ? used / limit : 0;
-  // 用尽标红、接近用尽标黄，好在一列里扫出该处理哪个。
   const tone = quota.exhausted ? "danger" : ratio >= 0.8 ? "warn" : "";
   const title = `已用 ${used.toLocaleString()} / 剩余 ${remaining.toLocaleString()}`
-    + ` / 限额 ${limit.toLocaleString()} tokens`;
+    + ` / 限额 ${limit.toLocaleString()} tokens${resetNote}`;
 
   return `<span class="quota-cell ${tone}" title="${escapeHtml(title)}">`
     + `<span class="quota-used">${formatTokenCount(used)}</span>`
@@ -398,7 +504,7 @@ function quotaCellMarkup(token) {
     + `<span class="quota-remaining">${formatTokenCount(remaining)}</span>`
     + `<span class="quota-sep">/</span>`
     + `<span class="quota-limit">${escapeHtml(quota.limit_expression || formatTokenCount(limit))}</span>`
-    + `</span>${rateNote}`;
+    + `</span>${periodBadge}${rateNote}`;
 }
 
 function openTokenDialog(mode = "new") {
@@ -429,15 +535,23 @@ async function editToken(token) {
   tokenIdInput.value = token.id;
   tokenNameInput.value = token.name;
   tokenDescriptionInput.value = token.description || "";
-  // 明文缺失的老数据用户说已经清掉了，这里仍然兜一下，别让输入框写进 undefined。
   setTokenCustomField("edit", String(token.token || ""));
   tokenExpiresInput.value = expiryInputValue(token.expires_at);
+  if (tokenAllowedModelsInput) {
+    tokenAllowedModelsInput.value = Array.isArray(token.allowed_models)
+      ? token.allowed_models.join("\n")
+      : "";
+  }
   if (tokenLimitInput) {
-    // 回填服务端算好的最短表达式，这样不动表单再保存不会改变限额。
     tokenLimitInput.value = token.quota?.limit_expression || "";
   }
+  if (tokenQuotaPeriodSelect) {
+    tokenQuotaPeriodSelect.value = token.quota_period_state?.period || "none";
+  }
+  if (tokenQuotaTimezoneInput) {
+    tokenQuotaTimezoneInput.value = token.quota_period_state?.timezone || "";
+  }
   if (tokenRateLimitInput) {
-    // 限速存的就是操作员写的表达式原文，原样回显。
     tokenRateLimitInput.value = token.rate_limit || "";
   }
   renderExpiryPreview();
@@ -660,16 +774,23 @@ tokenForm.addEventListener("submit", async (event) => {
     return;
   }
 
+  const allowedRes = parseAllowedModelsInput(tokenAllowedModelsInput ? tokenAllowedModelsInput.value : "");
+  if (!allowedRes.ok) {
+    setStatus(`允许模型填写有误：${allowedRes.error}`, "error");
+    tokenAllowedModelsInput?.focus();
+    return;
+  }
+
   const payload = {
     name: tokenNameInput.value.trim(),
     description: tokenDescriptionInput.value.trim(),
-    // The server only takes absolute times, so a duration is resolved here
-    // against this machine's clock and sent as the instant it lands on.
     expires_at: expiry.expiresAtMs === null ? null : toStoredTimestamp(expiry.expiresAtMs),
     group_id: Number(tokenGroupSelect?.value) || 1,
     limit_expression: tokenLimitInput?.value.trim() || "",
-    // 空串等价「不限速」，后端把空白归一成 NULL，这里不用区分 null 和 ""。
     rate_limit: tokenRateLimitInput?.value.trim() || "",
+    allowed_models: allowedRes.allowedModels,
+    quota_period: tokenQuotaPeriodSelect?.value || "none",
+    quota_timezone: tokenQuotaTimezoneInput?.value.trim() || undefined,
   };
   const customToken = tokenCustomInput.value;
   if (id) {

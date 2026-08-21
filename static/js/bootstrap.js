@@ -1,4 +1,4 @@
-// Shared DOM references, mutable view state, and cross-view utilities.
+﻿// Shared DOM references, mutable view state, and cross-view utilities.
 const ADMIN_TOKEN_KEY = "wildtoken_admin_token";
 const adminTokenDialog = document.querySelector("#admin-token-dialog");
 const adminTokenForm = document.querySelector("#admin-token-form");
@@ -39,6 +39,8 @@ const selectPanel = document.querySelector("#select-panel");
 const upstreamActionMenu = document.querySelector("#upstream-action-menu");
 const rows = document.querySelector("#upstream-rows");
 const upstreamSummary = document.querySelector("#upstream-summary");
+const upstreamProbeSummary = document.querySelector("#upstream-probe-summary");
+const upstreamRoutingSummary = document.querySelector("#upstream-routing-summary");
 const upstreamCardsContainer = document.querySelector("#upstream-cards");
 const viewGridBtn = document.querySelector("#upstream-view-grid");
 const viewListBtn = document.querySelector("#upstream-view-list");
@@ -46,6 +48,7 @@ const upstreamTableWrap = document.querySelector(".view[data-view='upstreams'] .
 const form = document.querySelector("#upstream-form");
 const formTitle = document.querySelector("#form-title");
 const newButton = document.querySelector("#new-upstream");
+const batchProbeBtn = document.querySelector("#batch-probe");
 const resetButton = document.querySelector("#reset-form");
 const fetchModelsButton = document.querySelector("#fetch-models");
 const upstreamDialog = document.querySelector("#upstream-dialog");
@@ -221,6 +224,82 @@ const logUpstreamFilter = document.querySelector("#log-upstream-filter");
 const logSearchInput = document.querySelector("#log-search");
 const logStatusFilter = document.querySelector("#log-status-filter");
 const logClientFilter = document.querySelector("#log-client-filter");
+const logStreamFilter = document.querySelector("#log-stream-filter");
+const logMinDurationInput = document.querySelector("#log-min-duration");
+const logTokenFilterBadge = document.querySelector("#log-token-filter-badge");
+const logTokenFilterName = document.querySelector("#log-token-filter-name");
+const logTokenFilterClear = document.querySelector("#log-token-filter-clear");
+const logRangeFilterBadge = document.querySelector("#log-range-filter-badge");
+const logRangeFilterName = document.querySelector("#log-range-filter-name");
+const logRangeFilterClear = document.querySelector("#log-range-filter-clear");
+let logDownstreamTokenId = null;
+let logDownstreamTokenName = "";
+let logRangeStart = "";
+let logRangeEnd = "";
+let logRangeLabel = "";
+
+function updateLogFilterChips() {
+  if (logTokenFilterBadge) {
+    if (logDownstreamTokenId != null) {
+      logTokenFilterBadge.hidden = false;
+      if (logTokenFilterName) {
+        logTokenFilterName.textContent = logDownstreamTokenName
+          ? logDownstreamTokenName + " (#" + logDownstreamTokenId + ")"
+          : "#" + logDownstreamTokenId;
+      }
+    } else {
+      logTokenFilterBadge.hidden = true;
+      if (logTokenFilterName) {
+        logTokenFilterName.textContent = "";
+      }
+    }
+  }
+  if (logRangeFilterBadge) {
+    if (logRangeStart && logRangeEnd) {
+      logRangeFilterBadge.hidden = false;
+      if (logRangeFilterName) {
+        logRangeFilterName.textContent = logRangeLabel || `${logRangeStart} 至 ${logRangeEnd}`;
+      }
+    } else {
+      logRangeFilterBadge.hidden = true;
+      if (logRangeFilterName) {
+        logRangeFilterName.textContent = "";
+      }
+    }
+  }
+}
+
+function setLogDownstreamTokenId(id, name = "") {
+  logDownstreamTokenId = id != null && id !== "" && Number.isFinite(Number(id)) ? Number(id) : null;
+  logDownstreamTokenName = name ? String(name) : "";
+  updateLogFilterChips();
+}
+
+function getLogDownstreamTokenId() {
+  return logDownstreamTokenId;
+}
+
+function getLogDownstreamTokenName() {
+  return logDownstreamTokenName;
+}
+
+function setLogTimeRange(start = "", end = "", label = "") {
+  logRangeStart = start ? String(start).trim() : "";
+  logRangeEnd = end ? String(end).trim() : "";
+  logRangeLabel = label ? String(label).trim() : "";
+  updateLogFilterChips();
+}
+
+function getLogTimeRange() {
+  return { start: logRangeStart, end: logRangeEnd, label: logRangeLabel };
+}
+
+function clearLogTimeRange() {
+  logRangeStart = "";
+  logRangeEnd = "";
+  logRangeLabel = "";
+  updateLogFilterChips();
+}
 const logSensitiveToggle = document.querySelector("#log-sensitive-toggle");
 const logRefreshButton = document.querySelector("#log-refresh");
 const logNewEntriesNotice = document.querySelector("#log-new-entries-notice");
@@ -234,6 +313,7 @@ const logDetailDialog = document.querySelector("#log-detail-dialog");
 const logDetailTitle = document.querySelector("#log-detail-title");
 const logDetailSummary = document.querySelector("#log-detail-summary");
 const logDetailMeta = document.querySelector("#log-detail-meta");
+const logDetailRetryChain = document.querySelector("#log-detail-retry-chain");
 const logDetailClose = document.querySelector("#log-detail-close");
 const logDetailSections = document.querySelectorAll(".log-detail-section");
 const requestDetailGrid = document.querySelector(".request-detail-grid");
@@ -244,6 +324,22 @@ const LOG_REFRESH_KEY = "wildtoken_log_refresh_seconds";
 const DEFAULT_HOME_KEY = "wildtoken_default_home";
 const DEFAULT_REFRESH_MS = 10000;
 const DASHBOARD_REFRESH_MS = 15000;
+const DASHBOARD_REFRESH_KEY = "wildtoken_dashboard_refresh_interval";
+const DASHBOARD_DEFAULT_REFRESH_MS = 15000;
+let dashboardRefreshIntervalMs = (() => {
+  try {
+    const saved = localStorage.getItem(DASHBOARD_REFRESH_KEY);
+    if (saved !== null) {
+      const parsed = Number(saved);
+      if (Number.isFinite(parsed) && [0, 5000, 15000, 30000].includes(parsed)) {
+        return parsed;
+      }
+    }
+  } catch {
+    // fallback
+  }
+  return DASHBOARD_DEFAULT_REFRESH_MS;
+})();
 const DASHBOARD_LOG_LIMIT = 200;
 const DASHBOARD_TOP_LIMIT = 10;
 // Legacy key, read once so an existing ranking-period preference carries over.
@@ -361,6 +457,11 @@ const dashboardTopChannels = document.querySelector("#dashboard-top-channels");
 const dashboardChannelsMeta = document.querySelector("#dashboard-channels-meta");
 const dashboardTopChannelTokens = document.querySelector("#dashboard-top-channel-tokens");
 const dashboardChannelTokensMeta = document.querySelector("#dashboard-channel-tokens-meta");
+const dashboardTopTokens = document.querySelector("#dashboard-top-tokens");
+const dashboardTokensMeta = document.querySelector("#dashboard-tokens-meta");
+const dashboardTopTokenTokens = document.querySelector("#dashboard-top-token-tokens");
+const dashboardTokenTokensMeta = document.querySelector("#dashboard-token-tokens-meta");
+const dashboardRefreshSelect = document.querySelector("#dashboard-refresh-select");
 const dashboardChannelNameToggle = document.querySelector("#dashboard-channel-name-toggle");
 const dashboardErrorRows = document.querySelector("#dashboard-error-rows");
 const dashboardTokenRangeMeta = document.querySelector("#dashboard-token-range");
@@ -384,6 +485,9 @@ if (dashboardEndDate && dashboardCustomEndDate) {
 }
 if (dashboardCustomRange) {
   dashboardCustomRange.hidden = dashboardTimeRange !== "custom";
+}
+if (dashboardRefreshSelect) {
+  dashboardRefreshSelect.value = String(dashboardRefreshIntervalMs);
 }
 
 let dashboardChannelNameHidden = (() => {
@@ -409,6 +513,7 @@ let pageVisible = typeof document.visibilityState === "string"
   : true;
 const selectedUpstreamIds = new Set();
 let lastSummarySignature = "";
+let latestRoutingData = null;
 
 const upstreamSearchInput = document.querySelector("#upstream-search");
 const liveIndicator = document.querySelector("#live-indicator");
@@ -417,8 +522,13 @@ const batchActionsEl = document.querySelector("#upstream-batch-actions");
 const batchEnableBtn = document.querySelector("#batch-enable");
 const batchDisableBtn = document.querySelector("#batch-disable");
 const upstreamSelectAll = document.querySelector("#upstream-select-all");
+const upstreamSelectionCountEl = document.querySelector("#upstream-selection-count");
+const upstreamSelectVisibleBtn = document.querySelector("#upstream-select-visible");
+const upstreamClearSelectionBtn = document.querySelector("#upstream-clear-selection");
+const upstreamSelectControls = document.querySelector("#upstream-select-controls");
 const upstreamColMenuBtn = document.querySelector("#upstream-col-menu-btn");
 const upstreamColMenu = document.querySelector("#upstream-col-menu");
+const upstreamColMenuWrap = document.querySelector("#upstream-col-menu-wrap");
 const logColMenuBtn = document.querySelector("#log-col-menu-btn");
 const logColMenu = document.querySelector("#log-col-menu");
 const upstreamTable = document.querySelector("#upstream-table");
@@ -437,6 +547,7 @@ const settingsBodyKeepCount = document.querySelector("#settings-body-keep-count"
 const settingsRetentionDays = document.querySelector("#settings-retention-days");
 const settingsBodyMaxBytes = document.querySelector("#settings-body-max-bytes");
 const routingSettingsForm = document.querySelector("#routing-settings-form");
+const settingsLoadBalanceStrategy = document.querySelector("#settings-load-balance-strategy");
 const settingsMaxRetries = document.querySelector("#settings-max-retries");
 const settingsSameUpstreamRetryMs = document.querySelector("#settings-same-upstream-retry-ms");
 const settingsFailurePenalty = document.querySelector("#settings-failure-penalty");
@@ -459,6 +570,33 @@ const rotateConfirmCancel = document.querySelector("#rotate-confirm-cancel");
 const rotateConfirmSubmit = document.querySelector("#rotate-confirm-submit");
 const systemRefreshButton = document.querySelector("#system-refresh");
 const systemInfoGrid = document.querySelector("#system-info-grid");
+const metricsEndpointStatusEl = document.querySelector("#metrics-endpoint-status");
+const configExportSecrets = document.querySelector("#config-export-secrets");
+const configExportPassword = document.querySelector("#config-export-password");
+const configExportRun = document.querySelector("#config-export-run");
+const configExportStatus = document.querySelector("#config-export-status");
+const configImportFile = document.querySelector("#config-import-file");
+const configImportPassword = document.querySelector("#config-import-password");
+const configImportConflict = document.querySelector("#config-import-conflict");
+const configImportPreview = document.querySelector("#config-import-preview");
+const configImportApply = document.querySelector("#config-import-apply");
+const configImportStatus = document.querySelector("#config-import-status");
+const configImportReport = document.querySelector("#config-import-report");
+const backupCurrentInfo = document.querySelector("#backup-current-info");
+const backupPassword = document.querySelector("#backup-password");
+const backupRun = document.querySelector("#backup-run");
+const backupStatus = document.querySelector("#backup-status");
+const restoreFile = document.querySelector("#restore-file");
+const restorePassword = document.querySelector("#restore-password");
+const restoreAllowSchemaMismatch = document.querySelector("#restore-allow-schema-mismatch");
+const restoreConfirm = document.querySelector("#restore-confirm");
+const restoreVerify = document.querySelector("#restore-verify");
+const restoreApply = document.querySelector("#restore-apply");
+const restoreStatus = document.querySelector("#restore-status");
+const restoreReport = document.querySelector("#restore-report");
+const restorePending = document.querySelector("#restore-pending");
+const restorePendingDetail = document.querySelector("#restore-pending-detail");
+const restoreCancel = document.querySelector("#restore-cancel");
 const modelTestDialog = document.querySelector("#model-test-dialog");
 const modelTestForm = document.querySelector("#model-test-form");
 const modelTestTitle = document.querySelector("#model-test-title");
@@ -548,6 +686,9 @@ const tokenExpiresPresets = document.querySelector("#token-expires-presets");
 const tokenExpiresPreview = document.querySelector("#token-expires-preview");
 const tokenEnabledCheckbox = document.querySelector("#token-enabled");
 const tokenIdInput = document.querySelector("#token-id");
+const tokenAllowedModelsInput = document.querySelector("#token-allowed-models");
+const tokenQuotaPeriodSelect = document.querySelector("#token-quota-period");
+const tokenQuotaTimezoneInput = document.querySelector("#token-quota-timezone");
 
 let tokenRefreshTimer = null;
 let tokens = [];
@@ -1179,6 +1320,22 @@ function sparkDotScaleX(bounds, view) {
   return (bounds.height * view.width) / Math.max(bounds.width * view.height, 1);
 }
 
+/* 迷你图上横坐标为 x 的那一点，直接从已经画出来的 path 上取。曲线是
+   buildSmoothSparkPaths 平滑过的，相邻两个采样点之间并不走直线，按原始数值线性
+   插值另算一遍 y，在拐点附近能差出好几像素——hover 的圆点就飘在曲线外面。x 单调
+   递增（采样点等距，转成贝塞尔后横向控制点也等距），所以二分是可靠的。 */
+function sparkPathPointAtX(path, x) {
+  const total = path.getTotalLength();
+  let low = 0;
+  let high = total;
+  for (let iteration = 0; iteration < 14; iteration += 1) {
+    const mid = (low + high) / 2;
+    if (path.getPointAtLength(mid).x < x) low = mid;
+    else high = mid;
+  }
+  return path.getPointAtLength((low + high) / 2);
+}
+
 /* Catmull-Rom 转三次贝塞尔的平滑折线，渠道卡片的 6h 请求量和看板的延迟趋势
    共用这一个生成器，曲线手感才一致。coords 是已经换算到 SVG 坐标系的
    {x, y} 数组；返回描边路径和向 baselineY 封口的面积路径。控制点的 y 会被
@@ -1353,15 +1510,22 @@ function renderUpstreamSummaryCore() {
   }
   lastSummarySignature = signature;
 
-  const effectiveWeightHint = zeroEffectiveWeight > 0
-    ? `<span class="summary-hint">有效权重为 0 的动态渠道会按恢复周期重新加入</span>`
+  /* 那句"会按恢复周期重新加入"退到 title：它是一句固定说明，不是数据，摊在格面上
+     要占两行，把整条撑高一截，而另外几格的数字底下就空着同样高的一块白。走 title
+     和看板 KPI 卡的 hoverHint 是同一套做法（见 dashboard.js renderKpiCards：
+     "说明文字挪进 title，鼠标滑过才显示，卡面留给数字"）。没有零权重渠道时不挂，
+     免得留一个空 tooltip。 */
+  const zeroWeightTitle = zeroEffectiveWeight > 0
+    ? ' title="有效权重为 0 的动态渠道会按恢复周期重新加入"'
     : "";
 
+  /* 标签在上、数字在下：先读到这一格是什么，再落到数值上。标签必须是独立元素——
+     原来它是 strong 后面的一个裸文本节点，压不了字号也降不了灰。 */
   upstreamSummary.innerHTML = `
-    <span><strong>${total}</strong>渠道总数</span>
-    <span><strong>${enabled}</strong>启用</span>
-    <span><strong>${disabled}</strong>停用</span>
-    <span class="${zeroEffectiveWeight ? "summary-warn" : ""}"><strong>${zeroEffectiveWeight}</strong>有效权重为 0${effectiveWeightHint}</span>
+    <span><span class="summary-strip-label">渠道总数</span><strong class="summary-strip-value">${total}</strong></span>
+    <span><span class="summary-strip-label">启用</span><strong class="summary-strip-value">${enabled}</strong></span>
+    <span><span class="summary-strip-label">停用</span><strong class="summary-strip-value">${disabled}</strong></span>
+    <span class="${zeroEffectiveWeight ? "summary-warn" : ""}"${zeroWeightTitle}><span class="summary-strip-label">有效权重为 0</span><strong class="summary-strip-value">${zeroEffectiveWeight}</strong></span>
   `;
 }
 

@@ -441,10 +441,11 @@ function isFixedWeight(upstream) {
 
 function weightCellMarkup(upstream) {
   const baseWeight = formatEffectiveWeight(upstream.weight);
+  const latencyBadge = typeof formatLatencyRoutingBadge === "function" ? formatLatencyRoutingBadge(upstream.id) : "";
   if (isFixedWeight(upstream)) {
-    return `<strong>${baseWeight}</strong><span>固定权重</span>`;
+    return `<strong>${baseWeight}</strong><span>固定权重</span>${latencyBadge}`;
   }
-  return `<strong>${formatEffectiveWeight(upstream.effective_weight)} / ${baseWeight}</strong><span>有效权重 / 基础权重</span>`;
+  return `<strong>${formatEffectiveWeight(upstream.effective_weight)} / ${baseWeight}</strong><span>有效权重 / 基础权重</span>${latencyBadge}`;
 }
 
 function formatZeroWeightNote(upstream, remainingRecovery) {
@@ -466,6 +467,19 @@ try {
   // Ignore storage errors
 }
 
+/* 工具栏里有两组控件只对一个视图有意义：
+   —「列」配的是表格列的显隐，卡片视图下没有对应物；
+   — 计数/全选/清空是卡片视图选渠道的唯一入口，列表视图的表头第一列就是全选框，
+     留着就是同一件事的第二套按钮。
+   批量启用/停用作用于选中集合本身，与"怎么选"无关，两个视图都留着。 */
+function applyUpstreamViewChrome(view) {
+  const isGrid = view === "grid";
+  // 菜单是 wrap 的绝对定位子节点，连同 wrap 一起消失的话 aria-expanded 会留在 true。
+  if (isGrid) closeColMenus();
+  if (upstreamColMenuWrap) upstreamColMenuWrap.hidden = isGrid;
+  if (upstreamSelectControls) upstreamSelectControls.hidden = !isGrid;
+}
+
 function setUpstreamView(view) {
   currentUpstreamView = view;
   try {
@@ -473,6 +487,8 @@ function setUpstreamView(view) {
   } catch (e) {
     // Ignore storage errors
   }
+
+  applyUpstreamViewChrome(view);
 
   if (view === "grid") {
     if (upstreamTableWrap) upstreamTableWrap.hidden = true;
@@ -600,6 +616,7 @@ function renderRows() {
               <span class="status-switch-thumb"></span>
             </span>
           </button>
+          ${renderProbeBadgeMarkup(upstreamProbeResults.get(upstream.id))}
         </div>
         <span
           class="effective-zero-note"
@@ -711,7 +728,7 @@ function renderSparkline(points) {
         </linearGradient>
       </defs>
       <path d="${area}" fill="url(#${gradientId})" />
-      <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.5"
+      <path class="sparkline-line" d="${line}" fill="none" stroke="currentColor" stroke-width="1.5"
             vector-effect="non-scaling-stroke"/>
       <line class="channel-spark-hover-guide" x1="0" y1="0" x2="0" y2="40" vector-effect="non-scaling-stroke" />
       <circle class="channel-spark-hover-dot" r="2.5" cx="0" cy="0" />
@@ -723,17 +740,15 @@ function renderSparkline(points) {
 
 function bindChannelSparklineInteraction(container, values) {
   const svg = container?.querySelector(".sparkline-svg");
+  const linePath = svg?.querySelector(".sparkline-line");
   const hitArea = svg?.querySelector(".channel-spark-hit-area");
   const guide = svg?.querySelector(".channel-spark-hover-guide");
   const dot = svg?.querySelector(".channel-spark-hover-dot");
   const tooltip = container?.querySelector(".channel-spark-tooltip");
-  if (!svg || !hitArea || !guide || !dot || !tooltip || !Array.isArray(values) || values.length < 2) return;
+  if (!svg || !linePath || !hitArea || !guide || !dot || !tooltip || !Array.isArray(values) || values.length < 2) return;
   const { width, height } = CHANNEL_SPARK_VIEW;
   let frameId = null;
   let pendingEvent = null;
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
   const update = (event) => {
     pendingEvent = event;
     if (frameId != null) return;
@@ -749,7 +764,10 @@ function bindChannelSparklineInteraction(container, values) {
       const progress = next === index ? 0 : position - index;
       const value = values[index] + (values[next] - values[index]) * progress;
       const x = ratio * width;
-      const y = height - ((value - min) / range) * (height - 5);
+      /* 点的 y 从画出来的曲线上取，不按数值另算一遍：曲线是 Catmull-Rom 平滑过的，
+         采样点之间不走直线，自己按 (value-min)/range 算出来的 y 在拐点附近就掉到
+         曲线外面去了（截图里那个悬空的点）。 */
+      const { y } = sparkPathPointAtX(linePath, x);
       // 卡片宽度随窗口变化，缩放系数每帧重算，点才一直是圆的。
       const dotScaleX = sparkDotScaleX(bounds, CHANNEL_SPARK_VIEW);
       guide.setAttribute("x1", x);
@@ -759,8 +777,15 @@ function bindChannelSparklineInteraction(container, values) {
       dot.setAttribute("cy", y);
       tooltip.innerHTML = `<strong>请求量 (6h)</strong><span>${formatMetric(Math.round(value))}</span>`;
       tooltip.hidden = false;
-      tooltip.style.left = `${Math.min(Math.max(6, x * bounds.width / width + 8), container.clientWidth - tooltip.offsetWidth - 6)}px`;
-      tooltip.style.top = `${Math.max(6, y * bounds.height / height - 32)}px`;
+      /* 摆放交给公共的 wtPositionHoverCard（static/js/components.js），这里只把 SVG
+         视图坐标换算成容器内坐标。原来这两行是自己一套，和别处不一致：纵向固定上移
+         32px 而不按卡片实际高度算（内容超两行就压住曲线）、完全没有翻边（窄渠道卡上
+         弹层贴着右缘，而看板同类弹层会翻到左边）、夹紧还用的是 clientWidth 而非
+         getBoundingClientRect().width（缩放下两者不同）。 */
+      wtPositionHoverCard(container, tooltip, {
+        x: (x * bounds.width) / width,
+        y: (y * bounds.height) / height,
+      });
     });
   };
   const clear = () => {
@@ -778,7 +803,6 @@ function bindChannelSparklineInteraction(container, values) {
   hitArea.addEventListener("pointerleave", clear);
 }
 
-/* 统计数据按渠道缓存。渠道列表每 N 秒轮询一次，但统计的变化远没有那么快，
 /* 统计数据按渠道缓存。渠道列表每 N 秒轮询一次，但统计的变化远没有那么快，
    而且每张卡一个请求。没有缓存的话，每轮刷新都要等 N 个请求回来才能重建卡片，
    那段空窗就是肉眼看到的闪烁。 */
@@ -854,6 +878,7 @@ async function fetchAllUpstreamStats() {
             ? Number(healthRaw.success_rate)
             : null,
           avgMs: Number(healthRaw?.avg_ms) || 0,
+          timedCount: Number(healthRaw?.timed_count) || 0,
           buckets: Array.isArray(healthRaw?.buckets) ? healthRaw.buckets : [],
         },
       });
@@ -862,6 +887,318 @@ async function fetchAllUpstreamStats() {
   } catch (error) {
     /* 拉不到就先用旧缓存/占位显示，下个刷新周期自然重试。 */
     return false;
+  }
+}
+
+
+/* 渠道主动测活探针缓存与运行状态 */
+const upstreamProbeResults = new Map();
+let latestProbeCheckedAt = null;
+let probeRunning = false;
+let probePollTimer = null;
+
+function renderProbeBadgeMarkup(probeResult) {
+  if (!probeResult) {
+    return "<span class=\"probe-badge probe-badge--untested\" title=\"尚未测活\">未测活</span>";
+  }
+  if (probeResult.skipped) {
+    return "<span class=\"probe-badge probe-badge--skipped\" title=\"已跳过（未在测活范围内或已超时）\">已跳过</span>";
+  }
+  const timeStr = probeResult.checked_at ? (" · " + escapeHtml(probeResult.checked_at)) : "";
+  const ms = probeResult.duration_ms != null ? (probeResult.duration_ms + "ms") : "-";
+
+  if (probeResult.ok || (probeResult.status_code != null && probeResult.status_code < 400)) {
+    const code = probeResult.status_code ?? 200;
+    return "<span class=\"probe-badge probe-badge--ok\" title=\"探针测试正常 (HTTP " + code + " · " + ms + timeStr + ")\">HTTP " + code + " (" + ms + ")</span>";
+  }
+
+  if (probeResult.status_code != null && probeResult.status_code >= 400) {
+    const code = probeResult.status_code;
+    const err = probeResult.error_summary ? (" · " + escapeHtml(probeResult.error_summary)) : "";
+    return "<span class=\"probe-badge probe-badge--failed\" title=\"探针测试失败 (HTTP " + code + " · " + ms + err + timeStr + ")\">HTTP " + code + " (" + ms + ")</span>";
+  }
+
+  const err = probeResult.error_summary ? (" · " + escapeHtml(probeResult.error_summary)) : "";
+  return "<span class=\"probe-badge probe-badge--transport\" title=\"探针连接异常 (" + ms + err + timeStr + ")\">连接异常 (" + ms + ")</span>";
+}
+
+function renderProbeSummary(data) {
+  const summaryEl = typeof upstreamProbeSummary !== "undefined" && upstreamProbeSummary
+    ? upstreamProbeSummary
+    : (typeof document !== "undefined" ? document.querySelector("#upstream-probe-summary") : null);
+  const btn = typeof batchProbeBtn !== "undefined" && batchProbeBtn
+    ? batchProbeBtn
+    : (typeof document !== "undefined" ? document.querySelector("#batch-probe") : null);
+
+  if (btn) {
+    if (probeRunning) {
+      btn.disabled = true;
+      btn.textContent = "测活中...";
+    } else {
+      btn.disabled = false;
+      btn.textContent = "一键测活";
+    }
+  }
+
+  if (!summaryEl) return;
+
+  if (probeRunning) {
+    summaryEl.hidden = false;
+    /* 跑着的时候标签换成"测活中"、圆点开始呼吸，数字位先占一个破折号。这一格和
+       左边四格共用同一套标签/数字排版，整条的高度不该因为测活跑起来跳一下。 */
+    summaryEl.setAttribute?.("title", "正在批量测活渠道...");
+    summaryEl.innerHTML = `
+      <span class="summary-strip-label"><span class="probe-summary-dot is-running" aria-hidden="true"></span>测活中</span>
+      <strong class="summary-strip-value is-pending">—</strong>
+    `;
+    return;
+  }
+
+  if (!data || (!data.results?.length && !data.total && !data.checked_at)) {
+    summaryEl.hidden = true;
+    summaryEl.removeAttribute?.("title");
+    summaryEl.innerHTML = "";
+    return;
+  }
+
+  const total = Number(data.total ?? data.results?.length ?? 0);
+  const succeeded = Number(data.succeeded ?? data.results?.filter((r) => r.ok || (r.status_code != null && r.status_code < 400)).length ?? 0);
+  const skipped = Number(data.skipped ?? data.results?.filter((r) => r.skipped).length ?? 0);
+  const failed = Number(data.failed ?? (total - succeeded - skipped));
+  const partial = Boolean(data.partial);
+  const checkedAt = data.checked_at || latestProbeCheckedAt || "";
+
+  /* 格面只留"成功 / 总数"这一个比值，失败/跳过/超时和时间戳退到 title——和看板
+     "启用渠道"那张卡一样（dashboard.js 的 hoverHint：说明挪进 title，卡面留给
+     数字）。摊开写要多占一行，而另外四格没有这一行，数字底下就空出同样高的一块
+     白，五格的高度也就再不一致。 */
+  const details = [];
+  if (failed > 0) details.push(`失败 ${failed}`);
+  if (skipped > 0) details.push(`跳过 ${skipped}`);
+  if (partial) details.push("部分渠道测活超时，这一轮的数字不完整");
+  if (checkedAt) details.push(`测于 ${checkedAt}`);
+  // 第一行说清分子分母，细节另起一行，免得挤成一条读不断句的长句。
+  const title = [`最近测活：成功 ${succeeded} / 共 ${total} 个渠道`, details.join(" · ")]
+    .filter(Boolean)
+    .join("\n");
+
+  /* 说明退到 title 之后，"这一轮好不好"得有个不占高度的落点：圆点。失败优先，
+     其次是超时导致的不完整，都没有才是绿的。 */
+  const dotTone = failed > 0 ? " is-failed" : (partial ? " is-partial" : "");
+
+  summaryEl.hidden = false;
+  summaryEl.setAttribute?.("title", title);
+  summaryEl.innerHTML = `
+    <span class="summary-strip-label"><span class="probe-summary-dot${dotTone}" aria-hidden="true"></span>最近测活</span>
+    <strong class="summary-strip-value">${succeeded}<span class="summary-strip-denominator">/${total}</span></strong>
+  `;
+}
+
+async function fetchLatestProbeResults() {
+  try {
+    const data = await api("/api/admin/upstreams/probe-all");
+    if (!data) return null;
+
+    if (data.running) {
+      probeRunning = true;
+      renderProbeSummary(data);
+      if (!probePollTimer) {
+        probePollTimer = setTimeout(() => {
+          probePollTimer = null;
+          fetchLatestProbeResults();
+        }, 1000);
+      }
+      return data;
+    }
+
+    if (probePollTimer) {
+      clearTimeout(probePollTimer);
+      probePollTimer = null;
+    }
+    probeRunning = false;
+
+    if (Array.isArray(data.results)) {
+      upstreamProbeResults.clear();
+      for (const res of data.results) {
+        if (res && res.upstream_id != null) {
+          upstreamProbeResults.set(res.upstream_id, res);
+        }
+      }
+      latestProbeCheckedAt = data.checked_at || null;
+      renderProbeSummary(data);
+      if (typeof priorityEditorIsOpen === "function" && !priorityEditorIsOpen()) {
+        renderRows();
+      }
+    } else {
+      renderProbeSummary(null);
+    }
+    return data;
+  } catch (error) {
+    // 忽略后台静默获取失败
+    return null;
+  }
+}
+
+async function runBatchProbe({ includeDisabled = false } = {}) {
+  if (probeRunning) return;
+  probeRunning = true;
+  renderProbeSummary({ running: true });
+
+  const query = includeDisabled ? "?include_disabled=true" : "";
+  try {
+    const data = await api("/api/admin/upstreams/probe-all" + query, { method: "POST" });
+    probeRunning = false;
+    if (probePollTimer) {
+      clearTimeout(probePollTimer);
+      probePollTimer = null;
+    }
+
+    if (data && Array.isArray(data.results)) {
+      upstreamProbeResults.clear();
+      for (const item of data.results) {
+        if (item && item.upstream_id != null) {
+          upstreamProbeResults.set(item.upstream_id, item);
+        }
+      }
+      latestProbeCheckedAt = data.results?.[0]?.checked_at || new Date().toISOString();
+      renderProbeSummary(data);
+      if (typeof priorityEditorIsOpen === "function" && !priorityEditorIsOpen()) {
+        renderRows();
+      }
+      const succeeded = data.succeeded ?? 0;
+      const failed = data.failed ?? 0;
+      const skipped = data.skipped ?? 0;
+      let msg = "批量测活完成：成功 " + succeeded + "，失败 " + failed;
+      if (skipped > 0) msg += "，跳过 " + skipped;
+      if (typeof setStatus === "function") {
+        setStatus(msg, failed > 0 ? "warning" : "success");
+      }
+    }
+    return data;
+  } catch (error) {
+    if (error && error.status === 409) {
+      if (typeof setStatus === "function") {
+        setStatus("已有批量测活任务在运行中，正在同步最新进度...", "info");
+      }
+      return await fetchLatestProbeResults();
+    }
+    probeRunning = false;
+    if (probePollTimer) {
+      clearTimeout(probePollTimer);
+      probePollTimer = null;
+    }
+    renderProbeSummary(null);
+    if (typeof setStatus === "function") {
+      setStatus("批量测活失败：" + error.message, "error");
+    }
+    return null;
+  }
+}
+
+/* 同层调度延迟决策标签与汇总状态 */
+function formatLatencyRoutingBadge(upstreamId) {
+  if (!latestRoutingData || !latestRoutingData.latency_active) {
+    return "";
+  }
+  const latencyList = Array.isArray(latestRoutingData.latency) ? latestRoutingData.latency : [];
+  const entry = latencyList.find((item) => Number(item?.upstream_id) === Number(upstreamId));
+  const minSamples = latestRoutingData.rules?.min_samples ?? 5;
+
+  if (entry && entry.usable && entry.median_ms !== null && entry.median_ms !== undefined) {
+    const samples = entry.sample_count ?? minSamples;
+    return `<span class="latency-routing-tag latency-routing-tag--usable" title="近 5 分钟延迟中位数 ${entry.median_ms}ms (基于 ${samples} 个样本)">延迟中位数 ${entry.median_ms}ms (${samples})</span>`;
+  }
+
+  if (entry && (entry.median_ms === null || entry.median_ms === undefined) && Number(entry.sample_count) > 0) {
+    return `<span class="latency-routing-tag latency-routing-tag--sampling" title="正在采样（${entry.sample_count}/${minSamples}），当前视为未测量并保留竞争">采样中 (${entry.sample_count}/${minSamples})</span>`;
+  }
+
+  return `<span class="latency-routing-tag latency-routing-tag--unmeasured" title="未测量，与加权随机同等参与竞争">未测量 (参与竞争)</span>`;
+}
+
+/* 「同层调度」里的"层"指优先级层：请求先按优先级从高到低找到第一个还有可用渠道的
+   层级，同一层内部再用这里显示的策略挑一个。原来的标题只写"同层调度：最低延迟优先"，
+   没有一句话说清"层"是什么、也没说明挑选是怎么发生的，看不懂是应该的。
+
+   这块现在就写在渠道面板标题下的说明位，不再是列表上方一条独立的带框条——原来
+   标题行和说明段分两行、外面还套一层框，为一句话吃掉一整条的高度。合成一句、
+   徽标跟在句尾之后，占的正好是那句静态文案原本就占的位置。 */
+function renderUpstreamRoutingSummary(data = latestRoutingData) {
+  const summaryEl = typeof upstreamRoutingSummary !== "undefined" && upstreamRoutingSummary
+    ? upstreamRoutingSummary
+    : (typeof document !== "undefined" ? document.querySelector("#upstream-routing-summary") : null);
+  if (!summaryEl) return;
+
+  /* 拿不到 /routing 时退回静态文案。这里已经是面板的说明位，整块藏起来会让标题
+     底下空一截，和别的面板对不齐。 */
+  if (!data) {
+    summaryEl.innerHTML = `
+      <div class="routing-summary-strip-inner">
+        <div class="routing-summary-explain">按模型匹配、硬优先级和有效权重路由上游请求。</div>
+      </div>
+    `;
+    return;
+  }
+
+  const isLeastLatency = data.strategy === "least_latency";
+  const strategyName = isLeastLatency ? "最低延迟优先" : "加权随机";
+  const active = Boolean(data.latency_active);
+  const activeText = active ? "延迟决策已激活" : "延迟决策未激活";
+  const activeClass = active ? "is-active" : "is-inactive";
+  const rules = data.rules || {};
+  const minSamples = rules.min_samples ?? 5;
+  const staleWindow = rules.stale_window_seconds ?? 300;
+  const toleranceRatio = rules.tolerance_ratio != null ? Math.round(rules.tolerance_ratio * 100) : 20;
+  const toleranceFloor = rules.tolerance_floor_ms ?? 50;
+  const sampleCap = rules.sample_capacity ?? 32;
+
+  const howItPicks = isLeastLatency
+    ? `按<strong>${escapeHtml(strategyName)}</strong>挑：与最快渠道相差不超过 ${toleranceRatio}%（至少 ${toleranceFloor}ms）的渠道一起按权重抽签，明显更慢的不参与。`
+    : `按<strong>${escapeHtml(strategyName)}</strong>挑：权重越大，被抽中的概率越高。`;
+
+  /* 参数与退化规则只有在按延迟决策时才有意义，加权随机下它们全是死数字。
+     即便如此也默认收起——绝大多数时候要看的只有上面那一句话。 */
+  const detailsHtml = isLeastLatency
+    ? `
+      <details class="routing-summary-details">
+        <summary>延迟采样的参数与退化规则</summary>
+        <div class="routing-summary-details-body">
+          <div class="routing-summary-chips">
+            <span class="routing-chip" title="有效测量所需的最小请求采样数">最小样本: <strong>${minSamples}</strong></span>
+            <span class="routing-chip" title="样本滚动过期时间窗口">过期窗口: <strong>${staleWindow}s</strong></span>
+            <span class="routing-chip" title="最低延迟与次优渠道之间的加权容忍浮动带 (≥${toleranceFloor}ms)">容忍带: <strong>${toleranceRatio}%</strong></span>
+            <span class="routing-chip" title="单渠道内存有界采样容量">样本容量: <strong>${sampleCap}</strong></span>
+          </div>
+          <div class="routing-summary-rules-hint">
+            <span class="routing-hint-item">① 同优先级内无可用样本 → 退化为加权随机</span>
+            <span class="routing-hint-item">② 样本不足 ${minSamples} 个 → 视为未测量并保留竞争</span>
+            <span class="routing-hint-item">③ 样本过期 (> ${staleWindow}s) → 自动清除并标记为未测量</span>
+          </div>
+        </div>
+      </details>`
+    : "";
+
+  summaryEl.innerHTML = `
+    <div class="routing-summary-strip-inner">
+      <div class="routing-summary-explain">请求先按优先级从高到低，找到第一个还有可用渠道的层级；同优先级渠道之间${howItPicks}<span class="routing-summary-badge ${activeClass}"><span class="routing-summary-dot ${activeClass}" aria-hidden="true"></span>${escapeHtml(activeText)}</span></div>
+      ${detailsHtml}
+    </div>
+  `;
+}
+
+async function fetchLatestRoutingData() {
+  try {
+    const data = await api("/api/admin/upstreams/routing");
+    if (!data) return null;
+    latestRoutingData = data;
+    renderUpstreamRoutingSummary(data);
+    if (typeof priorityEditorIsOpen === "function" && !priorityEditorIsOpen()) {
+      renderRows();
+    }
+    return data;
+  } catch (error) {
+    // 忽略后台静默获取失败
+    return null;
   }
 }
 
@@ -893,6 +1230,7 @@ function createChannelCard(upstream) {
   const card = document.createElement("div");
   card.className = "channel-card";
   if (!upstream.enabled) card.classList.add("channel-card--disabled");
+  if (selectedUpstreamIds.has(upstream.id)) card.classList.add("channel-card--selected");
   card.dataset.cardUpstreamId = String(upstream.id);
 
   const statusClass = upstream.enabled ? "live" : "offline";
@@ -920,18 +1258,31 @@ function createChannelCard(upstream) {
   const successTone = healthPending || health.successRate == null
     ? ""
     : health.successRate >= 0.99 ? " is-ok" : health.successRate >= 0.9 ? " is-warn" : " is-bad";
-  const healthLatency = healthPending || !hasTraffic || !health.avgMs
+  const healthLatency = healthPending || !hasTraffic || (health.timedCount != null ? health.timedCount === 0 : !health.avgMs)
     ? "—"
     : formatSeconds(health.avgMs);
 
   card.innerHTML = `
     <div class="channel-card-header">
       <div class="channel-card-title">
+        <!-- 选中改成点卡片本身，所以这个勾选框视觉上收起来了（.channel-card-check
+             是 sr-only，聚焦时才现形）。但它必须留在 DOM 里：data-upstream-check 是
+             表格与卡片共用的那套选择契约，键盘的 Tab+空格和读屏的"复选框/已选中"
+             语义也全靠原生 input，换成 div 就得自己重造一遍且容易做残。 -->
+        <input
+          type="checkbox"
+          class="channel-card-check"
+          data-upstream-check="${upstream.id}"
+          aria-label="选择渠道 ${escapeHtml(upstream.name)}"
+          ${selectedUpstreamIds.has(upstream.id) ? "checked" : ""}
+        />
         <span class="status-dot status-dot--${statusClass}"></span>
         <h3 title="${escapeHtml(upstream.name)}">${escapeHtml(upstream.name)}</h3>
       </div>
       <div class="channel-card-header-actions">
         <span class="channel-card-badge">优先级 ${upstream.priority}</span>
+        ${typeof formatLatencyRoutingBadge === "function" ? formatLatencyRoutingBadge(upstream.id) : ""}
+        ${renderProbeBadgeMarkup(upstreamProbeResults.get(upstream.id))}
         <button
           type="button"
           class="status-switch ${upstream.enabled ? "on" : "off"}"
@@ -966,10 +1317,10 @@ function createChannelCard(upstream) {
     </div>
     <div class="channel-card-health">
       <div class="sparkline-header">
-        <span class="sparkline-label">24h 健康</span>
+        <span class="sparkline-label">24h 流量健康</span>
         <span class="health-summary">
-          <span class="health-stat${successTone}" title="24 小时成功率">在线率 ${successLabel}</span>
-          <span class="health-stat" title="24 小时平均耗时">均延迟 ${healthLatency}</span>
+          <span class="health-stat${successTone}" title="24 小时在线率（正常响应占总请求比例，排除客户端主动中断）">在线率 ${successLabel}</span>
+          <span class="health-stat" title="24 小时平均耗时（仅统计有耗时采样的请求）">均延迟 ${healthLatency}</span>
         </span>
       </div>
       ${renderHealthBars(healthPending ? null : health)}
@@ -1099,15 +1450,69 @@ function renderCards() {
   void hydrateVisibleCardStats(filtered);
 }
 
+/* 勾选状态只存在 selectedUpstreamIds 里，列表和卡片两个视图都用同一个
+   data-upstream-check 属性，所以这一个入口能同时服务两边。 */
+function toggleUpstreamSelection(id, checked) {
+  if (!Number.isFinite(id)) return;
+  if (checked) {
+    selectedUpstreamIds.add(id);
+  } else {
+    selectedUpstreamIds.delete(id);
+  }
+  updateBatchToolbar();
+}
+
+/* 全选/清空当前筛选结果。thead 里的全选框在卡片视图下是看不见的，
+   所以工具栏上的按钮和它共用这个函数。 */
+function setUpstreamSelectionForFiltered(selected) {
+  for (const item of getFilteredUpstreams()) {
+    if (selected) {
+      selectedUpstreamIds.add(item.id);
+    } else {
+      selectedUpstreamIds.delete(item.id);
+    }
+  }
+  updateBatchToolbar();
+}
+
+/* 不整表重渲染，只把两个视图里已经在 DOM 上的勾选框拨到正确状态。 */
+function syncUpstreamCheckboxes() {
+  const scopes = [rows, upstreamCardsContainer];
+  for (const scope of scopes) {
+    if (!scope) continue;
+    for (const input of scope.querySelectorAll("input[data-upstream-check]")) {
+      const id = Number(input.dataset.upstreamCheck);
+      input.checked = selectedUpstreamIds.has(id);
+      const card = input.closest(".channel-card");
+      if (card) card.classList.toggle("channel-card--selected", input.checked);
+    }
+  }
+}
+
 function updateBatchToolbar() {
   const count = selectedUpstreamIds.size;
+  syncUpstreamCheckboxes();
+
+  const filteredIds = getFilteredUpstreams().map((item) => item.id);
+  const selectedVisible = filteredIds.filter((id) => selectedUpstreamIds.has(id));
+
+  /* 工具栏常驻显示：卡片视图下没有表头全选框，隐藏工具栏就等于把"怎么选"
+     这件事藏起来了。零选中时按钮置灰，用文案说明当前状态。 */
   if (batchActionsEl) {
-    batchActionsEl.hidden = count === 0;
+    batchActionsEl.hidden = false;
   }
+  if (upstreamSelectionCountEl) {
+    upstreamSelectionCountEl.textContent = count === 0 ? "未选择渠道" : `已选 ${count} 个`;
+  }
+  if (batchEnableBtn) batchEnableBtn.disabled = count === 0;
+  if (batchDisableBtn) batchDisableBtn.disabled = count === 0;
+  if (upstreamClearSelectionBtn) upstreamClearSelectionBtn.disabled = count === 0;
+  if (upstreamSelectVisibleBtn) {
+    upstreamSelectVisibleBtn.disabled = filteredIds.length === 0
+      || selectedVisible.length === filteredIds.length;
+  }
+
   if (upstreamSelectAll) {
-    const filtered = getFilteredUpstreams();
-    const filteredIds = filtered.map((item) => item.id);
-    const selectedVisible = filteredIds.filter((id) => selectedUpstreamIds.has(id));
     upstreamSelectAll.checked = filteredIds.length > 0 && selectedVisible.length === filteredIds.length;
     upstreamSelectAll.indeterminate = selectedVisible.length > 0 && selectedVisible.length < filteredIds.length;
   }
@@ -1236,7 +1641,7 @@ function positionUpstreamActionMenu() {
   upstreamActionMenu.style.top = `${Math.round(top)}px`;
 }
 
-async function loadUpstreams() {
+async function loadUpstreams(options = {}) {
   const showSkeleton = !upstreamsLoadedOnce;
   if (showSkeleton) {
     upstreamsLoading = true;
@@ -1245,7 +1650,7 @@ async function loadUpstreams() {
     }
   }
   try {
-    upstreams = await api("/api/admin/upstreams");
+    upstreams = await api("/api/admin/upstreams", options);
     for (const upstream of upstreams) {
       upstream.effectiveRecoveryAtMs = upstream.health_recovery_remaining_seconds
         ? Date.now() + upstream.health_recovery_remaining_seconds * 1000
@@ -1259,7 +1664,20 @@ async function loadUpstreams() {
       renderUpstreamSummary();
     }
     renderLogFilterOptions();
+    if (typeof fetchLatestProbeResults === "function") {
+      fetchLatestProbeResults().catch(() => {});
+    }
+    if (typeof fetchLatestRoutingData === "function") {
+      fetchLatestRoutingData().catch(() => {});
+    }
   } catch (error) {
+    // 看板加载会把自己的 AbortController signal 透传进来（dashboard.js），下一轮
+    // 加载启动时上一轮就被取消。取消不是故障，浏览器给的 message 还是它自己的
+    // 默认文案（Chromium 是 signal is aborted without reason），照原样弹出去只会
+    // 让人以为渠道拉取失败了。
+    if (error?.name === "AbortError") {
+      return;
+    }
     const message = `加载失败：${error.message}`;
     if (message !== lastUpstreamLoadError) {
       setStatus(message, "error");
@@ -1374,7 +1792,7 @@ function renderChannelExportScope() {
   if (!channelExportScopeEl) return;
   const scope = channelExportScope();
   const detail = scope.all
-    ? `将导出全部 ${scope.count} 个渠道。勾选表格行可只导出选中的渠道。`
+    ? `将导出全部 ${scope.count} 个渠道。勾选渠道（列表或卡片模式均可）可只导出选中的渠道。`
     : `将导出已勾选的 ${scope.count} 个渠道。`;
   channelExportScopeEl.textContent = detail;
 }
@@ -1641,6 +2059,9 @@ if (viewListBtn) {
    行为完全一致。 */
 if (upstreamCardsContainer) {
   upstreamCardsContainer.addEventListener("click", async (event) => {
+    /* 勾选框自己会派发 change，点击代理别插手，否则会连带触发卡片上的其它动作。 */
+    if (event.target.closest("input[data-upstream-check]")) return;
+
     const emptyAction = event.target.closest("button[data-empty-action]");
     if (emptyAction) {
       if (emptyAction.dataset.emptyAction === "new-upstream") {
@@ -1668,13 +2089,32 @@ if (upstreamCardsContainer) {
     const actionButton = event.target.closest("button[data-action]");
     if (actionButton) {
       await handleUpstreamAction(actionButton);
+      return;
     }
+
+    /* 点卡片本身即选中。放在最后：上面每个分支都已 return，所以启停开关、操作菜单、
+       查看详情按下时不会顺带把卡片选上。
+
+       勾选框仍在 DOM 里（只是视觉隐藏），这里驱动它而不是直接改集合——它是
+       两个视图共用的那套 data-upstream-check 契约的一端，也是键盘与读屏的入口。
+       点整卡时它不会自己派发 change，所以手动派发一次，让 change 监听器照旧收口。 */
+    const card = event.target.closest(".channel-card");
+    if (!card) return;
+    const check = card.querySelector("input[data-upstream-check]");
+    if (!check) return;
+    check.checked = !check.checked;
+    check.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+
+  upstreamCardsContainer.addEventListener("change", (event) => {
+    const check = event.target.closest("input[data-upstream-check]");
+    if (!check) return;
+    toggleUpstreamSelection(Number(check.dataset.upstreamCheck), check.checked);
   });
 }
 
-// Initialize view on page load
-if (currentUpstreamView === "grid") {
-  setUpstreamView("grid");
-}
+/* 列表是默认视图，原来这里只在恢复出 grid 时才调一次 setUpstreamView，列表分支
+   一次都不跑。现在切视图要顺带收起「列」和那三个选择控件，两个分支都得走一遍。 */
+setUpstreamView(currentUpstreamView);
 
 
