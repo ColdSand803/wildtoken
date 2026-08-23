@@ -126,17 +126,25 @@
   }
 }
 
+/* 1.2 而不是更早的 1.45：两侧都要排满五列，右侧那列必须拿到够宽才不会把说明文字
+   挤成一叠。左侧靠换算串换行（见 .dashboard-kpi-value:has(.kpi-approx)）吸收变窄，
+   不需要再多要那 0.25。 */
 .dashboard-panel[data-dashboard-window="multi"] .dashboard-ops-usage {
-  grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+  align-items: start;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
 }
 
 .dashboard-panel[data-dashboard-window="multi"] #dashboard-runtime-kpis {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+/* 显式五列，不用 auto-fit。两张卡是同一组时间窗（今天/1D/7D/30D/全部）的两种度量，
+   要能逐列对读；auto-fit 按可用宽度自己决定列数，而父网格给两侧的宽度本就不等，
+   于是左边排到五列、右边只排到三列，同一个时间窗在两张卡里错位。列数是这里的语义，
+   不该由宽度反推。 */
 .dashboard-panel[data-dashboard-window="multi"] #dashboard-token-kpis,
 .dashboard-panel[data-dashboard-window="multi"] #dashboard-request-kpis {
-  grid-template-columns: repeat(auto-fit, minmax(148px, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .dashboard-ops .dashboard-metric-section {
@@ -502,6 +510,26 @@ html[data-theme] .dashboard-date-field input[type="date"],
   margin-left: 5px;
   /* 换算是次要信息，卡片挤窄时先让它断，主数字不动。 */
   white-space: nowrap;
+}
+
+/* 上面那句"先让它断"光靠 nowrap 是断不成的：主数字和换算是两个紧邻的 span，中间
+   没有空白，inline 流里根本没有断点，于是父级的 ellipsis 从换算串中间切一刀，
+   卡面留下"624.9M ≈6…"。
+
+   flex-wrap 提供的断点在弹性项之间，不依赖文本里的空白，所以整串换算会作为一个
+   整体掉到第二行，而不是被截断。同时 text-overflow 在 flex 容器上失效，这正是想要
+   的：主数字不该被省略号收走。
+
+   只对确实带换算的卡改布局——:has 之外的 KPI 仍走原来的 ellipsis 那条路，长数字
+   照旧用省略号收住，不会因为这条规则变成换行。 */
+.dashboard-kpi-value:has(.kpi-approx) {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  /* 换行后第二行贴左，5px 的 margin-left 只在同行时充当间距。 */
+  row-gap: 0;
+  /* 主数字自己仍不许断：nowrap 继承给弹性项，断点只在项之间。 */
+  text-overflow: clip;
 }
 
 /* 启用渠道的分母：压小、降灰，突出启用数。 */
