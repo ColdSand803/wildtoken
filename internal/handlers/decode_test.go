@@ -2,11 +2,13 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/liguangsheng/wildtoken/internal/apperr"
 	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
@@ -126,5 +128,58 @@ func TestDecodedChannelSurvivesARoundTrip(t *testing.T) {
 	}
 	if update.Name != "ch" || update.Priority != 100 {
 		t.Errorf("round trip lost data: %+v", update)
+	}
+}
+
+// TestRestoreSizedBodyDecodes guards the regression that made restore unusable on
+// any real database: the endpoint decoded through the console form's 4 MiB limit,
+// so a 42 MiB database — roughly 57 MiB once base64'd into the JSON — was refused.
+// MaxBytesReader marks the connection for closing, so the browser saw only
+// "Failed to fetch" with no status to explain it.
+func TestRestoreSizedBodyDecodes(t *testing.T) {
+	// Over the form limit, comfortably under the archive limit.
+	archive := strings.Repeat("A", 8<<20)
+	body := `{"archive":"` + archive + `","dry_run":true}`
+
+	var request models.RestoreRequest
+	if err := decodeLargeJSON(httptest.NewRecorder(), postJSON(body), &request); err != nil {
+		t.Fatalf("an archive over the form limit did not decode: %v", err)
+	}
+	if len(request.Archive) != len(archive) {
+		t.Errorf("archive truncated: got %d bytes, want %d",
+			len(request.Archive), len(archive))
+	}
+
+	// The same body through the form decoder is what used to break restore.
+	var viaForm models.RestoreRequest
+	if err := decodeJSON(httptest.NewRecorder(), postJSON(body), &viaForm); err == nil {
+		t.Error("the form decoder accepted an 8 MiB body, so this test no longer " +
+			"pins the limits apart")
+	}
+}
+
+// TestOversizedBodyReportsAStatus checks that going over the limit produces a 413
+// the caller can read, rather than a closed connection. The status is the whole
+// point: an operator who sees 413 knows the file is too large, whereas a failed
+// fetch is indistinguishable from the network dropping.
+func TestOversizedBodyReportsAStatus(t *testing.T) {
+	request := postJSON(`{"archive":"A"}`)
+	request.ContentLength = maxArchiveBodyBytes + 1
+
+	err := decodeLargeJSON(httptest.NewRecorder(), request, &models.RestoreRequest{})
+	if err == nil {
+		t.Fatal("an oversized body was accepted")
+	}
+
+	var appError *apperr.AppError
+	if !errors.As(err, &appError) {
+		t.Fatalf("error is not an AppError: %v", err)
+	}
+	status, message := appError.StatusAndMessage()
+	if status != http.StatusRequestEntityTooLarge {
+		t.Errorf("status = %d, want %d", status, http.StatusRequestEntityTooLarge)
+	}
+	if message == "" {
+		t.Error("the response carried no message, so the console has nothing to show")
 	}
 }

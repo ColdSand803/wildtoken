@@ -216,7 +216,7 @@ func AdminCreateBackup(state *appstate.State) http.HandlerFunc {
 func AdminRestoreBackup(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var request models.RestoreRequest
-		if err := decodeJSON(w, r, &request); err != nil {
+		if err := decodeLargeJSON(w, r, &request); err != nil {
 			apperr.WriteError(w, err)
 			return
 		}

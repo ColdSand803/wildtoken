@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -37,6 +38,19 @@ const maxLogListOffset int32 = 100_000
 // maxLogSearchChars caps a log search term.
 const maxLogSearchChars = 200
 
+const (
+	// maxJSONBodyBytes bounds an ordinary console form.
+	maxJSONBodyBytes int64 = 4 << 20 // 4 MiB
+
+	// maxArchiveBodyBytes bounds the two endpoints that receive a file. It is well
+	// under the backup container's own 512 MiB ceiling on purpose: base64 costs a
+	// third on top of the archive, the decoded bytes are a second copy, and an
+	// encrypted archive is opened in one shot, so the process holds several
+	// multiples of the file at peak. 256 MiB covers a database into the low
+	// hundreds of MiB without letting one request decide the instance's memory.
+	maxArchiveBodyBytes int64 = 256 << 20 // 256 MiB
+)
+
 // decodeJSON reads a JSON request body, ignoring fields the target does not
 // declare.
 //
@@ -45,25 +59,55 @@ const maxLogSearchChars = 200
 // create and update, so it always sends `clear_api_key`, which only the update
 // payload declares.
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
-	return decodeBody(w, r, target, false)
+	return decodeBody(w, r, target, false, maxJSONBodyBytes)
 }
 
 // decodeStrictJSON additionally rejects unknown fields, so a typo is reported
 // rather than silently ignored. It is reserved for payloads whose clients send
 // exactly the declared shape.
 func decodeStrictJSON(w http.ResponseWriter, r *http.Request, target any) error {
-	return decodeBody(w, r, target, true)
+	return decodeBody(w, r, target, true, maxJSONBodyBytes)
 }
 
-func decodeBody(w http.ResponseWriter, r *http.Request, target any, rejectUnknown bool) error {
+// decodeLargeJSON reads a body that legitimately carries a file. A database
+// restore and a config import both post their archive as base64 inside the JSON,
+// which the console form limit would reject long before the archive's own ceiling
+// applies — a 42 MiB database becomes roughly 57 MiB once encoded.
+//
+// Kept separate from decodeJSON rather than raising that limit for everything: an
+// ordinary console form has no reason to accept a body this size, and the
+// allowance is what bounds how much an authenticated caller can make the process
+// hold at once.
+func decodeLargeJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	return decodeBody(w, r, target, false, maxArchiveBodyBytes)
+}
+
+func decodeBody(w http.ResponseWriter, r *http.Request, target any,
+	rejectUnknown bool, limit int64) error {
+	// Checked before reading so an oversized body is answered with a status the
+	// caller can read. MaxBytesReader alone marks the connection for closing, and
+	// a browser that never receives the response reports only a failed fetch,
+	// which tells the operator nothing about what to do differently.
+	if r.ContentLength > limit {
+		return apperr.TooLarge(fmt.Sprintf(
+			"the request body is %d bytes, over the %d byte limit for this endpoint",
+			r.ContentLength, limit))
+	}
+
 	// The writer is what lets MaxBytesReader mark the connection for closing
 	// when a body runs over. Passing nil left an oversized request reading on
-	// against a connection the server would go on to reuse.
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4*1024*1024))
+	// against a connection the server would go on to reuse. Still needed for a
+	// request that arrives without a Content-Length to check.
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	if rejectUnknown {
 		decoder.DisallowUnknownFields()
 	}
 	if err := decoder.Decode(target); err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			return apperr.TooLarge(fmt.Sprintf(
+				"the request body is over the %d byte limit for this endpoint", limit))
+		}
 		return apperr.BadRequest("invalid request body: " + err.Error())
 	}
 	return nil
