@@ -226,3 +226,52 @@ function wtBindHoverCard(container, options) {
   wtHoverCardBindings.set(container, detach);
   return detach;
 }
+
+/* ── 锚定菜单的横向落位 ─────────────────────────────────────
+   这些菜单（列菜单等）默认 right: 0，从锚点右缘朝左展开——工具栏在行尾，
+   朝左是唯一不出容器的方向。但窄窗口下按钮本身就靠左，朝左展开会伸到左侧
+   rail 底下去。
+
+   而且盖住它的不是「层级不够」：.panel 挂着 animation: panel-in ... both，
+   终态 transform: translateY(0) 永久留着，非 none 的 transform 会建层叠
+   上下文，菜单的 z-index: 40 是在 .panel 内部解析的，而 .panel 在
+   .app-shell 里是 auto。rail 的 30 压住的是整棵子树，把 40 调多高都没用。
+   与其动全局层级或那条动画（牵连六个主题和所有面板），不如让菜单避开：
+   翻到锚点左缘朝右展开，那片区域没有东西压着。 */
+function wtMenuLeftBound(gap) {
+  /* rail 是 sticky 的，覆盖在面板上方，所以左边界是它的右缘而非视口 0。
+     移动端它变成底部整宽 dock，不构成左侧障碍。
+
+     两种形态用「竖 rail 是否比锚点更靠上」区分不了（dock 在底部，但页面滚到
+     底时纵向也能跟工具栏重叠），改按它自己的几何判：竖 rail 贴着视口左边缘
+     且高度远超宽度。主题包自带 rail，量出来的形态一样成立，不必逐包适配。 */
+  const rail = document.querySelector(".topbar");
+  if (!rail) return gap;
+  const rect = rail.getBoundingClientRect();
+  const isLeftRail = rect.width > 0 && rect.left <= gap && rect.height > rect.width * 1.5;
+  return isLeftRail ? rect.right + gap : gap;
+}
+
+function wtPositionAnchoredMenu(anchor, menu) {
+  if (!anchor || !menu || menu.hidden) return;
+
+  // 先回到 CSS 默认（right: 0）再量，避免上一次的落位影响这一次的宽度。
+  menu.style.left = "";
+  menu.style.right = "";
+
+  const gap = 8;
+  const rect = anchor.getBoundingClientRect();
+  const width = menu.offsetWidth;
+  const minLeft = wtMenuLeftBound(gap);
+  const maxRight = window.innerWidth - gap;
+
+  // 朝左展开放得下就不动,保持 CSS 默认。
+  if (rect.right - width >= minLeft) return;
+
+  /* 放不下就翻到右边。翻完仍越过右边界（菜单比可用宽度还宽）时夹住，
+     宁可盖一点锚点也不出视口——两边都不够时右边界优先，左边被 rail
+     盖住的部分是彻底点不到的，右边露在外面至少还能滚。 */
+  const left = Math.max(minLeft, Math.min(rect.left, maxRight - width));
+  menu.style.left = `${left - rect.left}px`;
+  menu.style.right = "auto";
+}

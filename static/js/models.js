@@ -768,6 +768,11 @@ document.addEventListener("click", (event) => {
 window.addEventListener("resize", () => closeUpstreamActionMenu());
 window.addEventListener("scroll", () => closeUpstreamActionMenu(), true);
 
+/* 列菜单朝左还是朝右是开的那一刻算的，改窗口宽度会让它失效。跟自定义下拉、
+   渠道行操作菜单一样收起来即可，不必跟着重算。纵向滚动不影响：它是相对
+   .col-menu-wrap 绝对定位，跟着工具栏走，而 rail 是 sticky，横向位置不变。 */
+window.addEventListener("resize", () => closeColMenus());
+
 newButton.addEventListener("click", () => {
   resetForm();
   openUpstreamDialog();
