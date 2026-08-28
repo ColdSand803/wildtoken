@@ -1689,10 +1689,14 @@ function renderColumnMenu(menu, columns, labels, locked, storageKey, table) {
 function closeColMenus() {
   if (upstreamColMenu) {
     upstreamColMenu.hidden = true;
+    upstreamColMenu.style.left = "";
+    upstreamColMenu.style.right = "";
     upstreamColMenuBtn?.setAttribute("aria-expanded", "false");
   }
   if (logColMenu) {
     logColMenu.hidden = true;
+    logColMenu.style.left = "";
+    logColMenu.style.right = "";
     logColMenuBtn?.setAttribute("aria-expanded", "false");
   }
 }
@@ -1704,6 +1708,12 @@ function toggleColMenu(menu, button) {
   if (open) {
     menu.hidden = false;
     button.setAttribute("aria-expanded", "true");
+    /* 落位必须在 unhide 之后：菜单收起时是 display: none，量不到宽度。
+       锚点取 .col-menu-wrap（定位父级）而非按钮，菜单的 left/right 是
+       相对它解析的。 */
+    if (typeof wtPositionAnchoredMenu === "function") {
+      wtPositionAnchoredMenu(menu.closest(".col-menu-wrap"), menu);
+    }
   }
 }
 
