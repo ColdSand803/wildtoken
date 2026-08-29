@@ -13,8 +13,21 @@ services:
       WILDTOKEN_THEME_DIR: /app/themes
     ports:
       - "3100:3100"
+    # 容器默认继承宿主机的解析器。部分上游域名的权威 NS 会拒绝一部分解析器的
+    # 查询——实测有的域名在 8.8.8.8、223.5.5.5 和某些企业 DNS 上都返回 REFUSED，
+    # 只有 Cloudflare 能解出来。这类渠道会以
+    # "lookup ... on 127.0.0.11:53: server misbehaving" 全部失败；127.0.0.11 是
+    # Docker 内置 DNS，它只是在转达上游解析器的拒绝，本身没有问题。
+    #
+    # 所以这里固定用公共解析器，并把 Cloudflare 放在首位。需要额外的内网 DNS
+    # 时不要改这个文件，写到 docker-compose.local.yml 里（见 .example），
+    # Compose 会把两边的 dns 列表按顺序拼接。
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     # 让容器内可以用 host.docker.internal 访问宿主机发布的端口，
     # 包括其他容器 -p 出来的服务（例如 http://host.docker.internal:3001）。
+    # 走的是 hosts 文件而非 DNS，不受上面 dns 设置影响。
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

@@ -1,0 +1,21 @@
+# 本机专用的 Compose 覆盖层，复制成 docker-compose.local.yml 后按需修改。
+# 该文件不进版本库，用来存放只对某一台机器有效、或不适合公开的配置
+# （内网 DNS、内网地址、本地端口等）。
+#
+# 用法——注意要同时传两个 -f，顺序不能反：
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#
+# 嫌每次都要带参数，可以让它自动生效，二选一：
+#   1. 改名为 docker-compose.override.yml（Compose 默认就会加载它，无需 -f）
+#   2. 在 .env 里写 COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml
+#
+# 如果忘了带 -f，容器只会用主文件里的公共 DNS。外网上游仍然正常，
+# 只是内网域名解析不到。
+
+services:
+  wildtoken:
+    # 主文件已配置 1.1.1.1 与 8.8.8.8；Compose 会把两边的列表拼接，
+    # 所以这里只需补充内网 DNS，它会排在公共解析器之后作为兜底。
+    dns:
+      - 10.0.0.1
