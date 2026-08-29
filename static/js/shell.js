@@ -194,6 +194,13 @@ function compareUpstreams(left, right) {
   if (comparison !== 0) {
     return upstreamSort.direction === "asc" ? comparison : -comparison;
   }
+  /* 按状态排时，同一状态内部再按优先级降序——高优先级在前，和路由实际挑
+     渠道的顺序一致，否则同为「启用」的几十个渠道只能按 id 摊开，看不出谁
+     先被选中。和下面的 id 一样放在方向翻转之后：次因子不跟着主列翻转，
+     点两下状态列只调换三组状态的先后，组内顺序保持稳定。 */
+  if (upstreamSort.key === "status" && left.priority !== right.priority) {
+    return right.priority - left.priority;
+  }
   return left.id - right.id;
 }
 
