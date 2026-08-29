@@ -440,12 +440,17 @@ async function saveModelSelection() {
         model_names: selectedModels,
         model_prefixes: upstream.model_prefixes,
         model_mappings: dialogMappings,
+        /* 这个弹窗只改模型，但 PUT 是整体替换：这里不带上的字段会被后端按默认值
+           写回去，也就是被清空。所以除了模型本身，其余字段都要原样回填。 */
+        effort_mappings: upstream.effort_mappings || {},
         priority: upstream.priority,
         weight: upstream.weight,
         auto_weight_enabled: upstream.auto_weight_enabled,
         timeout_seconds: upstream.timeout_seconds,
         enabled: upstream.enabled,
         extra_headers: upstream.extra_headers || {},
+        rate_limit: upstream.rate_limit ?? null,
+        group_ids: Array.isArray(upstream.group_ids) ? upstream.group_ids : [],
         clear_api_key: false,
       }),
     });
@@ -531,12 +536,16 @@ async function handleUpstreamAction(button) {
           model_names: detail.model_names || [],
           model_prefixes: detail.model_prefixes || [],
           model_mappings: detail.model_mappings || {},
+          effort_mappings: detail.effort_mappings || {},
           priority: detail.priority,
           weight: detail.weight,
           auto_weight_enabled: detail.auto_weight_enabled,
           timeout_seconds: detail.timeout_seconds,
           enabled: detail.enabled,
           extra_headers: detail.extra_headers || {},
+          // 撤销要还原成删除前的样子，漏掉的字段就是恢复后悄悄丢掉的配置。
+          rate_limit: detail.rate_limit ?? null,
+          group_ids: Array.isArray(detail.group_ids) ? detail.group_ids : [],
         };
       } catch {
         recreatePayload = null;

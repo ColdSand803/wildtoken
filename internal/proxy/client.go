@@ -97,18 +97,120 @@ func ExtractReasoningEffort(body []byte) *string {
 	return nil
 }
 
+// EffortMappingsFromRow decodes a channel's stored reasoning-effort rewrites.
+//
+// The empty and "{}" cases are answered without parsing, because this runs on
+// every proxied request and almost no channel configures a rewrite.
+func EffortMappingsFromRow(stored string) map[string]string {
+	trimmed := strings.TrimSpace(stored)
+	if trimmed == "" || trimmed == "{}" {
+		return nil
+	}
+	var mappings map[string]string
+	if err := json.Unmarshal([]byte(trimmed), &mappings); err != nil {
+		return nil
+	}
+	return mappings
+}
+
+// rewriteEffort reads one stored effort value and returns the JSON to put back
+// in its place, reporting false when the channel maps it to nothing or to what
+// it already says.
+//
+// The lookup is on the lower-cased value because that is the shape the stored
+// keys are normalized to; the replacement goes upstream exactly as written. It
+// is always written as a string, which is what every effort field these APIs
+// define accepts, even where the caller stated theirs as a number.
+func rewriteEffort(raw json.RawMessage, mappings map[string]string) (json.RawMessage, bool) {
+	var current any
+	if err := json.Unmarshal(raw, &current); err != nil {
+		return nil, false
+	}
+	formatted, ok := formatEffort(current)
+	if !ok {
+		return nil, false
+	}
+	replacement, ok := mappings[strings.ToLower(formatted)]
+	if !ok || replacement == formatted {
+		return nil, false
+	}
+	encoded, err := json.Marshal(replacement)
+	if err != nil {
+		return nil, false
+	}
+	return encoded, true
+}
+
+// applyEffortMappings rewrites every place a request states its reasoning
+// effort, reporting whether it changed anything.
+//
+// All three locations are rewritten rather than only the first one found. Which
+// of them an upstream reads is its own business, so leaving one still holding
+// the downstream value would let the original effort through — and a request
+// that states two different efforts is one no upstream promises to resolve the
+// way the gateway happened to guess.
+func applyEffortMappings(request map[string]json.RawMessage, mappings map[string]string) bool {
+	if len(mappings) == 0 {
+		return false
+	}
+	changed := false
+
+	if raw, present := request["reasoning_effort"]; present {
+		if replacement, ok := rewriteEffort(raw, mappings); ok {
+			request["reasoning_effort"] = replacement
+			changed = true
+		}
+	}
+
+	for _, parent := range []string{"reasoning", "output_config"} {
+		raw, present := request[parent]
+		if !present {
+			continue
+		}
+		// A non-object here is left alone: rewriting it would mean inventing a
+		// shape the caller did not send. Decoding into raw messages keeps the
+		// siblings of the effort — thinking, verbosity, summary — byte for byte.
+		var nested map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &nested); err != nil {
+			continue
+		}
+		effort, present := nested["effort"]
+		if !present {
+			continue
+		}
+		replacement, ok := rewriteEffort(effort, mappings)
+		if !ok {
+			continue
+		}
+		nested["effort"] = replacement
+		reencoded, err := json.Marshal(nested)
+		if err != nil {
+			continue
+		}
+		request[parent] = reencoded
+		changed = true
+	}
+
+	return changed
+}
+
 // PrepareUpstreamBody rewrites a JSON request body for its selected upstream.
 //
 // Streaming Chat Completions responses omit usage by default on many
 // OpenAI-compatible upstreams. It is requested explicitly so the gateway can
 // consistently record prompt, completion, and total token counts.
-func PrepareUpstreamBody(body []byte, forwardModel *string, path string) []byte {
+//
+// effortMappings replaces the reasoning effort the caller asked for with the one
+// the channel's upstream understands, so a downstream naming an effort its
+// provider does not have is translated rather than refused.
+func PrepareUpstreamBody(body []byte, forwardModel *string, path string,
+	effortMappings map[string]string) []byte {
 	var request map[string]json.RawMessage
 	if err := json.Unmarshal(body, &request); err != nil {
 		return body
 	}
 
-	changed := false
+	changed := applyEffortMappings(request, effortMappings)
 
 	if forwardModel != nil {
 		var currentModel string
@@ -162,12 +264,16 @@ func requestsStreaming(request map[string]json.RawMessage) bool {
 // real upstream call, instead of each redoing the same JSON parsing and
 // truncation work.
 type PreparedRequest struct {
-	URL                string
-	ForwardHeaders     map[string]string
-	UpstreamBody       []byte
-	ReasoningEffort    *string
-	DownstreamSnapshot json.RawMessage
-	UpstreamSnapshot   json.RawMessage
+	URL            string
+	ForwardHeaders map[string]string
+	UpstreamBody   []byte
+	// ReasoningEffort is what the caller asked for; UpstreamReasoningEffort is
+	// what the upstream was actually sent, which differ once the channel's
+	// effort mapping has rewritten one into the other.
+	ReasoningEffort         *string
+	UpstreamReasoningEffort *string
+	DownstreamSnapshot      json.RawMessage
+	UpstreamSnapshot        json.RawMessage
 }
 
 // PrepareRequest resolves one attempt against its selected upstream.
@@ -180,13 +286,30 @@ func PrepareRequest(downstreamHeaders http.Header, upstream *models.UpstreamRow,
 		return nil, err
 	}
 
-	upstreamBody := PrepareUpstreamBody(body, forwardModel, path)
+	effortMappings := EffortMappingsFromRow(upstream.EffortMappings)
+	upstreamBody := PrepareUpstreamBody(body, forwardModel, path, effortMappings)
+
+	// Both efforts are logged: the one the caller asked for, and the one the
+	// upstream was actually sent. Without the second, a channel that rewrites
+	// "max" into "xhigh" leaves a log saying the request ran at "max", which is
+	// the one thing that did not happen.
+	//
+	// The upstream value is re-read from the prepared body rather than inferred
+	// from the mapping table, so it reports what was really sent. That read is
+	// skipped when the channel maps nothing, because then nothing rewrote the
+	// effort and the two are the same string.
+	requestEffort := ExtractReasoningEffort(body)
+	upstreamEffort := requestEffort
+	if len(effortMappings) > 0 {
+		upstreamEffort = ExtractReasoningEffort(upstreamBody)
+	}
 
 	return &PreparedRequest{
-		URL:             url,
-		ForwardHeaders:  forwardHeaders,
-		UpstreamBody:    upstreamBody,
-		ReasoningEffort: ExtractReasoningEffort(body),
+		URL:                     url,
+		ForwardHeaders:          forwardHeaders,
+		UpstreamBody:            upstreamBody,
+		ReasoningEffort:         requestEffort,
+		UpstreamReasoningEffort: upstreamEffort,
 		DownstreamSnapshot: SnapshotRequest(method, url, forwardHeaders, body,
 			logBodyMaxBytes),
 		UpstreamSnapshot: SnapshotRequest(method, url, forwardHeaders, upstreamBody,
@@ -412,19 +535,20 @@ func baseLogEntry(requestCtx RequestContext, upstream *models.UpstreamRow,
 	clientType := requestCtx.ClientType
 
 	return LogEntry{
-		Method:              requestCtx.Method,
-		Path:                requestCtx.Path,
-		DownstreamTokenID:   &tokenID,
-		DownstreamTokenName: &tokenName,
-		ClientType:          &clientType,
-		UpstreamID:          &upstreamID,
-		UpstreamName:        &upstreamName,
-		Model:               requestCtx.ForwardModel,
-		RequestModel:        requestCtx.RequestModel,
-		UpstreamModel:       requestCtx.ForwardModel,
-		ReasoningEffort:     prepared.ReasoningEffort,
-		DownstreamRequest:   prepared.DownstreamSnapshot,
-		UpstreamRequest:     prepared.UpstreamSnapshot,
+		Method:                  requestCtx.Method,
+		Path:                    requestCtx.Path,
+		DownstreamTokenID:       &tokenID,
+		DownstreamTokenName:     &tokenName,
+		ClientType:              &clientType,
+		UpstreamID:              &upstreamID,
+		UpstreamName:            &upstreamName,
+		Model:                   requestCtx.ForwardModel,
+		RequestModel:            requestCtx.RequestModel,
+		UpstreamModel:           requestCtx.ForwardModel,
+		ReasoningEffort:         prepared.ReasoningEffort,
+		UpstreamReasoningEffort: prepared.UpstreamReasoningEffort,
+		DownstreamRequest:       prepared.DownstreamSnapshot,
+		UpstreamRequest:         prepared.UpstreamSnapshot,
 	}
 }
 

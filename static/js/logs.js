@@ -151,32 +151,54 @@ function renderLogModel(log) {
   `;
 }
 
+/* 思考强度有三个环节：下游请求的、实际发往上游的（渠道强度映射改写后）、
+   上游回报的。相邻重复的环节会被合并，所以没发生改写、上游也没回报强度时，
+   显示的仍然只是一个值。 */
 function getReasoningEffortRoute(log) {
-  const request = String(log?.reasoning_effort || "").trim();
-  const response = String(log?.response_reasoning_effort || "").trim();
-  const mapped = Boolean(request && response && request !== response);
-  return { request, response, mapped };
+  const steps = [
+    { label: "请求强度", value: String(log?.reasoning_effort || "").trim() },
+    { label: "上游强度", value: String(log?.upstream_reasoning_effort || "").trim() },
+    { label: "响应强度", value: String(log?.response_reasoning_effort || "").trim() },
+  ].filter((step) => step.value);
+
+  const chain = [];
+  for (const step of steps) {
+    if (chain.length > 0 && chain[chain.length - 1].value === step.value) {
+      continue;
+    }
+    chain.push(step);
+  }
+  return { chain, mapped: chain.length > 1 };
+}
+
+function reasoningEffortTitle(chain) {
+  return chain.map((step) => `${step.label}：${step.value}`).join("；");
 }
 
 function renderLogReasoningEffort(log) {
-  const route = getReasoningEffortRoute(log);
-  if (!route.request && !route.response) {
+  const { chain } = getReasoningEffortRoute(log);
+  if (chain.length === 0) {
     return '<span class="muted">-</span>';
   }
-  if (!route.mapped) {
-    const value = route.request || route.response;
+  if (chain.length === 1) {
+    const value = chain[0].value;
     return `<span class="model-text model-single" title="${escapeHtml(value)}">${escapeHtml(value)}</span>`;
   }
-  const title = `请求强度：${route.request}；响应强度：${route.response}`;
-  return `
-    <span class="model-route" title="${escapeHtml(title)}">
-      <span class="model-route-line">
-        <span class="model-text model-request">${escapeHtml(route.request)}</span>
-      </span>
+  const [first, ...rest] = chain;
+  const followers = rest
+    .map((step) => `
       <span class="model-route-line model-route-target">
         <span class="model-route-icon" aria-hidden="true">↳</span>
-        <span class="model-text model-upstream">${escapeHtml(route.response)}</span>
+        <span class="model-text model-upstream">${escapeHtml(step.value)}</span>
       </span>
+    `)
+    .join("");
+  return `
+    <span class="model-route" title="${escapeHtml(reasoningEffortTitle(chain))}">
+      <span class="model-route-line">
+        <span class="model-text model-request">${escapeHtml(first.value)}</span>
+      </span>
+      ${followers}
     </span>
   `;
 }
@@ -1116,17 +1138,15 @@ function formatStatusBadge(statusCode) {
   return `<span class="badge neutral status-other">${statusCode}</span>`;
 }
 
-function formatReasoningEffort(requestEffort, responseEffort, options = {}) {
+// 详情页的单行写法，环节的取值和合并规则与列表里的 getReasoningEffortRoute 一致。
+function formatReasoningEffort(log, options = {}) {
   const { badge = true, fallback = '<span class="muted">-</span>' } = options;
-  if (!requestEffort && !responseEffort) {
+  const { chain } = getReasoningEffortRoute(log);
+  if (chain.length === 0) {
     return fallback;
   }
 
-  const values = requestEffort === responseEffort
-    ? [requestEffort]
-    : [requestEffort, responseEffort].filter(Boolean);
-  const escapedValues = values.map(escapeHtml);
-  const value = escapedValues.join(" → ");
+  const value = chain.map((step) => escapeHtml(step.value)).join(" → ");
   return badge ? `<span class="badge neutral">${value}</span>` : value;
 }
 
@@ -1405,7 +1425,7 @@ function formatLogDetailMeta(detail) {
       : detail.status_code >= 200 && detail.status_code < 300
         ? "ok"
         : "neutral";
-  const reasoning = formatReasoningEffort(detail.reasoning_effort, detail.response_reasoning_effort, { badge: false, fallback: "" });
+  const reasoning = formatReasoningEffort(detail, { badge: false, fallback: "" });
   const modelText = formatLogModelText(detail);
   const modelLine = [escapeHtml(modelText), reasoning].filter(Boolean).join(" · ");
   const streamLabel = detail.stream ? "流式" : "非流式";

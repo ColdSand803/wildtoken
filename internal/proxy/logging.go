@@ -45,6 +45,7 @@ type LogEntry struct {
 	RequestModel              *string
 	UpstreamModel             *string
 	ReasoningEffort           *string
+	UpstreamReasoningEffort   *string
 	ResponseReasoningEffort   *string
 	Stream                    bool
 	StatusCode                *int32
@@ -384,14 +385,16 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 		result, err := tx.ExecContext(ctx, `INSERT INTO request_logs
         (method, path, downstream_token_id, downstream_token_name, client_type,
          upstream_id, upstream_name, model, request_model, upstream_model,
-         reasoning_effort, response_reasoning_effort, stream, status_code,
+         reasoning_effort, upstream_reasoning_effort, response_reasoning_effort,
+         stream, status_code,
          prompt_tokens, completion_tokens, total_tokens,
          prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
          duration_ms, first_token_ms, error, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,
 			entry.RequestModel, entry.UpstreamModel, entry.ReasoningEffort,
+			entry.UpstreamReasoningEffort,
 			entry.ResponseReasoningEffort, streamInt, entry.StatusCode,
 			entry.PromptTokens, entry.CompletionTokens, entry.TotalTokens,
 			entry.PromptCachedTokens, entry.CacheCreationTokens,
@@ -457,6 +460,7 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 					RequestModel:              entry.RequestModel,
 					UpstreamModel:             entry.UpstreamModel,
 					ReasoningEffort:           entry.ReasoningEffort,
+					UpstreamReasoningEffort:   entry.UpstreamReasoningEffort,
 					ResponseReasoningEffort:   entry.ResponseReasoningEffort,
 					Stream:                    streamInt,
 					StatusCode:                entry.StatusCode,
