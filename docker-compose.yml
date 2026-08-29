@@ -20,8 +20,8 @@ services:
     # Docker 内置 DNS，它只是在转达上游解析器的拒绝，本身没有问题。
     #
     # 所以这里固定用公共解析器，并把 Cloudflare 放在首位。需要额外的内网 DNS
-    # 时不要改这个文件，写到 docker-compose.local.yml 里（见 .example），
-    # Compose 会把两边的 dns 列表按顺序拼接。
+    # 时不要改这个文件，写到 docker-compose.override.yml 里（见 .example，
+    # Compose 会自动加载它），两边的 dns 列表会按顺序拼接。
     dns:
       - 1.1.1.1
       - 8.8.8.8
