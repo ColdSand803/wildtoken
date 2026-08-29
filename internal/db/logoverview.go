@@ -22,23 +22,23 @@ type LogOverviewOut struct {
 	// "全部"没有上一周期，字段为 null。
 	PreviousTotal *int64 `json:"previous_total"`
 	// PreviousStatus 是上一同长周期的分类计数，给状态分布图例的环比用。
-	PreviousStatus *StatusCounts      `json:"previous_status"`
-	ErrorRequests  int64              `json:"error_requests"`
-	Status2xx      int64              `json:"status_2xx"`
-	Status4xx      int64              `json:"status_4xx"`
-	Status5xx      int64              `json:"status_5xx"`
-	StatusOther    int64              `json:"status_other"`
-	DurationCount  int64              `json:"duration_count"`
-	AvgDurationMs  float64            `json:"avg_duration_ms"`
-	MinDurationMs  int64              `json:"min_duration_ms"`
-	MaxDurationMs  int64              `json:"max_duration_ms"`
+	PreviousStatus *StatusCounts `json:"previous_status"`
+	ErrorRequests  int64         `json:"error_requests"`
+	Status2xx      int64         `json:"status_2xx"`
+	Status4xx      int64         `json:"status_4xx"`
+	Status5xx      int64         `json:"status_5xx"`
+	StatusOther    int64         `json:"status_other"`
+	DurationCount  int64         `json:"duration_count"`
+	AvgDurationMs  float64       `json:"avg_duration_ms"`
+	MinDurationMs  int64         `json:"min_duration_ms"`
+	MaxDurationMs  int64         `json:"max_duration_ms"`
 	// P50/P95/P99 是全窗口耗时的最近邻分位数。均值会被一条慢请求拉高，
 	// 分位数区分"普遍变慢"和"偶发超时"。无有效耗时时为 null。
-	P50DurationMs  *float64           `json:"p50_duration_ms"`
-	P95DurationMs  *float64           `json:"p95_duration_ms"`
-	P99DurationMs  *float64           `json:"p99_duration_ms"`
-	BucketSeconds  int64              `json:"bucket_seconds"`
-	LatencySeries  []LatencyBucketOut `json:"latency_series"`
+	P50DurationMs *float64           `json:"p50_duration_ms"`
+	P95DurationMs *float64           `json:"p95_duration_ms"`
+	P99DurationMs *float64           `json:"p99_duration_ms"`
+	BucketSeconds int64              `json:"bucket_seconds"`
+	LatencySeries []LatencyBucketOut `json:"latency_series"`
 	// RequestSeries 按同一套分桶统计全部请求（不过滤耗时），是请求量趋势的
 	// 数据源——LatencySeries 里的 count 只数有耗时的行，当请求量用会偏低。
 	RequestSeries []RequestBucketOut `json:"request_series"`

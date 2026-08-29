@@ -11,9 +11,9 @@ import (
 // UpstreamHealthBucketOut is one hour of a channel's traffic: how many requests
 // were attempted, how many failed, and the average latency of timed rows.
 type UpstreamHealthBucketOut struct {
-	BucketEpoch int64  `json:"bucket_epoch"`
-	Total       int64  `json:"total"`
-	Errors      int64  `json:"errors"`
+	BucketEpoch int64   `json:"bucket_epoch"`
+	Total       int64   `json:"total"`
+	Errors      int64   `json:"errors"`
 	AvgMs       float64 `json:"avg_ms"`
 }
 
