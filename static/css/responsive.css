@@ -482,7 +482,7 @@
     align-items: stretch;
   }
 
-  .log-detail-section summary {
+  .log-detail-section > summary {
     gap: 10px;
     min-height: 52px;
     padding: 10px 12px;
@@ -492,7 +492,7 @@
     padding: 6px;
   }
 
-  .request-detail-grid pre {
+  .log-detail-code-frame > pre {
     font-size: 11px;
     /* Stay in the panel scroll by default; only focused mode nests a scrollbar. */
     max-height: none;
@@ -502,7 +502,7 @@
     word-break: break-word;
   }
 
-  .request-detail-grid.is-focused pre {
+  .request-detail-grid.is-focused .log-detail-code-frame > pre {
     max-height: min(56dvh, 420px);
     min-height: min(40dvh, 280px);
   }
@@ -630,7 +630,7 @@
     grid-template-rows: auto;
   }
 
-  .log-detail-section summary {
+  .log-detail-section > summary {
     grid-template-columns: minmax(0, 1fr) 26px;
   }
 

@@ -1125,6 +1125,26 @@ for (const button of document.querySelectorAll(".log-detail-expand")) {
     button.setAttribute("aria-pressed", String(willFocus));
   });
 }
+for (const button of document.querySelectorAll("[data-log-view-mode]")) {
+  button.addEventListener("click", () => setLogDetailViewMode(button.dataset.logViewMode));
+}
+updateLogViewModeControls();
+
+/* 会话内容是 innerHTML 塞进去的，全部折叠/展开按钮只能靠委托。作用范围限定
+   在按钮所在的那个面板，四个面板互不影响。 */
+logDetailDialog.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-conv-fold]");
+  if (!button) return;
+  const container = button.closest(".log-conversation");
+  if (!container) return;
+
+  const collapse = button.dataset.convFold === "collapse";
+  for (const block of container.querySelectorAll("details.conv-block")) {
+    block.open = !collapse;
+  }
+  button.dataset.convFold = collapse ? "expand" : "collapse";
+  button.textContent = collapse ? "全部展开" : "全部折叠";
+});
 logDetailClose.addEventListener("click", closeLogDetailDialog);
 dismissOnBackdropClick(logDetailDialog, closeLogDetailDialog);
 

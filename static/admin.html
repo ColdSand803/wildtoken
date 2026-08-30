@@ -1064,6 +1064,10 @@
             <h3>请求 / 响应快照</h3>
             <p>点击展开；正文会自动换行。需要逐段核查时可使用“放大查看”。</p>
           </div>
+          <div class="log-view-mode" role="group" aria-label="查看模式">
+            <button type="button" class="log-view-mode-button" data-log-view-mode="conversation" aria-pressed="true">会话</button>
+            <button type="button" class="log-view-mode-button" data-log-view-mode="raw" aria-pressed="false">原始</button>
+          </div>
         </div>
         <div class="request-detail-grid">
           <details class="log-detail-section" data-field="downstream_request">
@@ -1077,6 +1081,7 @@
             <div class="log-detail-code-frame">
               <button type="button" class="secondary ghost log-detail-expand" aria-pressed="false">放大查看</button>
               <pre id="downstream-request-detail"></pre>
+              <div class="log-conversation" id="downstream-request-conversation" hidden></div>
             </div>
           </details>
           <details class="log-detail-section" data-field="upstream_request">
@@ -1090,6 +1095,7 @@
             <div class="log-detail-code-frame">
               <button type="button" class="secondary ghost log-detail-expand" aria-pressed="false">放大查看</button>
               <pre id="upstream-request-detail"></pre>
+              <div class="log-conversation" id="upstream-request-conversation" hidden></div>
             </div>
           </details>
           <details class="log-detail-section" data-field="upstream_response">
@@ -1103,6 +1109,7 @@
             <div class="log-detail-code-frame">
               <button type="button" class="secondary ghost log-detail-expand" aria-pressed="false">放大查看</button>
               <pre id="upstream-response-detail"></pre>
+              <div class="log-conversation" id="upstream-response-conversation" hidden></div>
             </div>
           </details>
           <details class="log-detail-section" data-field="downstream_response">
@@ -1116,6 +1123,7 @@
             <div class="log-detail-code-frame">
               <button type="button" class="secondary ghost log-detail-expand" aria-pressed="false">放大查看</button>
               <pre id="downstream-response-detail"></pre>
+              <div class="log-conversation" id="downstream-response-conversation" hidden></div>
             </div>
           </details>
         </div>
@@ -1386,6 +1394,7 @@
     <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/shell.js"></script>
     <script src="/static/js/upstreams.js"></script>
+    <script src="/static/js/conversation.js"></script>
     <script src="/static/js/logs.js"></script>
     <script src="/static/js/models.js"></script>
     <script src="/static/js/tokens.js"></script>

@@ -1559,9 +1559,95 @@ function openLogDetailDialog() {
   }
 }
 
+/* 查看模式在会话与原始之间切换，记在 localStorage 里跨会话保留。隐私模式下
+   storage 会直接抛，所以读写都包起来，失败就退回默认值。 */
+const LOG_VIEW_MODE_STORAGE_KEY = "wildtoken.logViewMode";
+let logDetailViewMode = readStoredLogViewMode();
+
+function readStoredLogViewMode() {
+  try {
+    return window.localStorage.getItem(LOG_VIEW_MODE_STORAGE_KEY) === "raw" ? "raw" : "conversation";
+  } catch {
+    return "conversation";
+  }
+}
+
+function storeLogViewMode(mode) {
+  try {
+    window.localStorage.setItem(LOG_VIEW_MODE_STORAGE_KEY, mode);
+  } catch {
+    // 存不下就只在本次会话里生效。
+  }
+}
+
+// 从快照里取出正文文本和它的截断信息，供会话解析与截断提示使用。
+function snapshotBodyForConversation(snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || snapshot.cleared) return null;
+  const normalized = normalizeSnapshotBody(snapshot.body);
+  if (normalized.kind !== "text" || !normalized.text) return null;
+  return {
+    text: normalized.text,
+    meta: {
+      truncated: Boolean(normalized.truncated),
+      byteLength: normalized.byte_length,
+      capturedLength: new TextEncoder().encode(normalized.text).length,
+    },
+  };
+}
+
+function renderLogConversation(container, field, snapshot) {
+  const body = snapshotBodyForConversation(snapshot);
+  if (!body) {
+    container.innerHTML = `
+      <div class="conv-empty">
+        <strong>没有可解析的正文</strong>
+        <span>这条记录没有保存正文，或正文已按保留策略清理。</span>
+      </div>
+    `;
+    return;
+  }
+  const parsed = field.endsWith("_response")
+    ? parseConversationResponse(body.text)
+    : parseConversationRequest(body.text);
+  container.innerHTML = renderConversationHtml(parsed, body.meta);
+}
+
 function renderLogDetailSection(details) {
+  const field = details.dataset.field;
   const pre = details.querySelector("pre");
-  pre.textContent = currentLogDetail ? formatHttpSnapshot(currentLogDetail[details.dataset.field]) : "";
+  const conversation = details.querySelector(".log-conversation");
+  const snapshot = currentLogDetail ? currentLogDetail[field] : null;
+  const showConversation = logDetailViewMode === "conversation";
+
+  pre.hidden = showConversation;
+  if (conversation) conversation.hidden = !showConversation;
+
+  if (!currentLogDetail) {
+    pre.textContent = "";
+    if (conversation) conversation.innerHTML = "";
+    return;
+  }
+  if (showConversation && conversation) {
+    renderLogConversation(conversation, field, snapshot);
+    return;
+  }
+  pre.textContent = formatHttpSnapshot(snapshot);
+}
+
+// 切模式后，已经展开的面板要立刻按新模式重画。
+function setLogDetailViewMode(mode) {
+  logDetailViewMode = mode === "raw" ? "raw" : "conversation";
+  storeLogViewMode(logDetailViewMode);
+  updateLogViewModeControls();
+  for (const details of logDetailSections) {
+    if (details.open) renderLogDetailSection(details);
+  }
+}
+
+function updateLogViewModeControls() {
+  for (const button of document.querySelectorAll("[data-log-view-mode]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.logViewMode === logDetailViewMode));
+  }
 }
 
 async function showLogDetail(logId) {
@@ -1580,6 +1666,8 @@ async function showLogDetail(logId) {
   for (const details of logDetailSections) {
     details.open = false;
     details.querySelector("pre").textContent = "";
+    const conversation = details.querySelector(".log-conversation");
+    if (conversation) conversation.innerHTML = "";
   }
   requestDetailGrid?.classList.remove("is-focused");
   for (const button of document.querySelectorAll(".log-detail-expand")) {
