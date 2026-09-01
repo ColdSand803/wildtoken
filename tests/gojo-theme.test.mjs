@@ -77,3 +77,15 @@ test("Gojo gives the status switch a keyboard focus indicator", () => {
   const stripped = css.match(/\.status-switch:focus-visible \{[^}]+\}/);
   assert.ok(stripped, "expected an explicit :focus-visible rule on the switch");
 });
+
+test("Gojo renders the log view picker as a themed segmented control", () => {
+  assert.match(css, /\.log-view-mode \{[\s\S]*?background:[\s\S]*?#070a12;[\s\S]*?padding: 3px;[\s\S]*?\}/);
+  assert.match(css, /\.log-view-mode-button\[aria-pressed="true"\][\s\S]*?linear-gradient\(135deg/);
+  assert.match(css, /\.log-view-mode-button:focus-visible \{[\s\S]*?box-shadow: var\(--focus-ring\)/);
+
+  const primaryButtonSelectors = [...css.matchAll(/button:not\(:where\(([\s\S]*?)\)\)(?=[^{]*\{)/g)];
+  assert.ok(primaryButtonSelectors.length > 0, "expected Gojo primary-button selectors");
+  for (const [, exclusions] of primaryButtonSelectors) {
+    assert.match(exclusions, /\.log-view-mode-button/, "log mode leaked into the primary-button treatment");
+  }
+});
