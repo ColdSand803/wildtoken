@@ -1,0 +1,106 @@
+/* 凉砂·日：纸面留白，灰阶墨梯，半透明分隔线。改编自 antfu.me。
+   底色是纯白纸面，正文不用纯黑；层级几乎全靠墨色深浅与不透明度拉开，
+   而非换色相。分隔线一律 #888 加 alpha —— 同一个值在明暗两套里都成立，
+   这是这套风格的骨架。零渐变、零光晕、零毛玻璃。 */
+
+html[data-theme="co1dsand-light"] {
+  color-scheme: light;
+
+  /* 纸面 —— 白，代码框下沉一档 */
+  --bg: #ffffff;
+  --bg-elevated: #fafafa;
+  --panel: rgb(255 255 255 / 82%);
+  --panel-solid: #ffffff;
+  --panel-subtle: #fcfcfc;
+  --panel-muted: #fafafa;
+  --panel-elevated: #ffffff;
+  --glass: rgb(255 255 255 / 82%);
+  --glass-strong: rgb(255 255 255 / 94%);
+
+  /* 墨梯 —— antfu 的四级前景色。#222 给标题与主文，#888 给附注，
+     两端之间留两档过渡。#888 在白底上是 3.5:1，只用于次要信息。 */
+  --text: #222222;
+  --text-secondary: #555555;
+  --muted-strong: #6b6b6b;
+  --muted: #888888;
+
+  /* 分隔线 —— 半透明灰，与凉砂·夜逐字相同 */
+  --line: rgb(136 136 136 / 27%);
+  --line-strong: rgb(136 136 136 / 47%);
+  --line-soft: rgb(136 136 136 / 15%);
+
+  /* 强调 —— 没有品牌色，最深的墨就是强调色 */
+  --accent: #111111;
+  --accent-strong: #000000;
+  --accent-soft: rgb(17 17 17 / 5%);
+  --accent-border: rgb(17 17 17 / 22%);
+  --accent-glow: transparent;
+  --accent-on: #ffffff;
+  --brand-ink: #ffffff;
+
+  /* 语义色 —— 必须覆盖。base.css 的默认值是给深色底调的亮色，
+     直接搬到白底上对比度不够。这里取低饱和版本，全部 ≥ 4.5:1。 */
+  --danger: #b3453f;
+  --danger-soft: rgb(179 69 63 / 9%);
+  --danger-border: rgb(179 69 63 / 30%);
+  --danger-strong: #8f322d;
+  --ok: #3f7d58;
+  --ok-soft: rgb(63 125 88 / 10%);
+  --ok-border: rgb(63 125 88 / 30%);
+  --ok-strong: #2f6344;
+  --warning: #8a6414;
+  --warning-soft: rgb(138 100 20 / 10%);
+  --warning-border: rgb(138 100 20 / 30%);
+  --warning-strong: #6f5010;
+  --warning-text: #6f5010;
+
+  /* 焦点与投影 —— antfu 几乎不投影，这里压到只剩一层耳语。
+     --focus-ring 是完整的 box-shadow 值，不是颜色。 */
+  --focus: #111111;
+  --focus-ring: 0 0 0 3px rgb(17 17 17 / 16%);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 4%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 5%);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 7%);
+  --shadow-lg: 0 10px 34px rgb(0 0 0 / 10%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px rgb(17 17 17 / 10%);
+
+  /* 代码框 —— 比纸面低一档，不反色 */
+  --code-frame-bg: #fafafa;
+  --code-bg: #f4f4f4;
+  --code-text: #222222;
+  --code-muted: #888888;
+  --code-border: rgb(136 136 136 / 27%);
+
+  /* 交互面 —— hover 用半透明灰压一层，不换色 */
+  --row-hover: rgb(136 136 136 / 7%);
+  --row-disabled: rgb(136 136 136 / 4%);
+  --topbar-bg: rgb(255 255 255 / 88%);
+  --backdrop: rgb(0 0 0 / 32%);
+  --neutral-chip: rgb(136 136 136 / 15%);
+  --toast-neutral: #555555;
+
+  /* 极光关掉 —— 这套风格里没有渐变色团 */
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  /* 圆角收紧一档：默认是 6/8/12，这里 4/6/8 */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Inter 已由 admin.html 的 Google Fonts 链接加载；中文走系统字体 */
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", "Source Han Sans SC", system-ui, sans-serif;
+}
+
+/* 渐变色团整块拿掉，而不只是把颜色调成透明——省掉三个模糊层的合成开销。 */
+html[data-theme="co1dsand-light"] .aurora {
+  display: none;
+}
+
+/* 选中态也用那个半透明灰。 */
+html[data-theme="co1dsand-light"] ::selection {
+  background: rgb(136 136 136 / 27%);
+}

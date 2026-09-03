@@ -19,6 +19,7 @@ const BUNDLED_THEME_PACKS = Object.freeze([
   { id: "anthropic", label: "Anthropic Light", swatch: ["#faf9f5", "#d97757"], css: "/theme-packs/anthropic/theme.css", description: "Warm ivory paper surfaces with slate ink, a single clay accent, and serif display type." },
   { id: "anthropic-dark", label: "Anthropic Dark", swatch: ["#141413", "#d97757"], css: "/theme-packs/anthropic-dark/theme.css", description: "Slate ground with warm ivory ink, the same single clay accent, and serif display type." },
   { id: "gojo", label: "五条悟", swatch: ["#070910", "#63dcff"], css: "/theme-packs/gojo/theme.css", description: "Satoru Gojo character theme with a blindfold rail, Six Eyes focus states, and blue-red-violet Limitless fields." },
+  { id: "co1dsand-light", label: "凉砂·日", swatch: ["#ffffff", "#111111"], css: "/theme-packs/co1dsand-light/theme.css", description: "纸面留白、灰阶墨梯与半透明分隔线，改编自 antfu.me。" },
 ]);
 let THEMES = [...BUILT_IN_THEMES, ...BUNDLED_THEME_PACKS];
 
