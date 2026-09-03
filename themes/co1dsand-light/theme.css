@@ -124,3 +124,52 @@ html[data-theme="co1dsand-light"] .nav-link.active {
   background: var(--accent-soft);
   opacity: 1;
 }
+
+/* 品牌位换成凉砂的标记。base.css 给 .brand-mark 挂了
+   `filter: drop-shadow(0 0 10px var(--accent-glow))`，--accent-glow 已经是
+   transparent，所以这里不必再处理光晕。 */
+html[data-theme="co1dsand-light"] .brand-mark > svg:first-child {
+  display: none;
+}
+
+html[data-theme="co1dsand-light"] .brand-mark .co1dsand-logo {
+  display: block;
+}
+
+html[data-theme="co1dsand-light"] .co1dsand-logo-ink {
+  fill: var(--text);
+  fill-rule: nonzero;
+}
+
+/* 默认态就是画完的位置：动画一旦被关，标记仍然完整。 */
+html[data-theme="co1dsand-light"] .co1dsand-logo-sweep {
+  transform: translateX(70.7px);
+  animation: co1dsand-logo-draw 10s ease-in-out infinite both;
+}
+
+@keyframes co1dsand-logo-draw {
+  0%,
+  4% {
+    transform: translateX(-58.3px);
+  }
+  42%,
+  86% {
+    transform: translateX(70.7px);
+  }
+  98%,
+  to {
+    transform: translateX(-58.3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-theme="co1dsand-light"] .co1dsand-logo-sweep {
+    animation: none;
+  }
+}
+
+@media print {
+  html[data-theme="co1dsand-light"] .co1dsand-logo-sweep {
+    animation: none;
+  }
+}
