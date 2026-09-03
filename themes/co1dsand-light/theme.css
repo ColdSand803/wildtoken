@@ -104,3 +104,23 @@ html[data-theme="co1dsand-light"] .aurora {
 html[data-theme="co1dsand-light"] ::selection {
   background: rgb(136 136 136 / 27%);
 }
+
+/* 导航：antfu 的做法是可点元素平时压到半透明，hover 只升不透明度、不换色。
+   base.css 给的是 --radius-full 胶囊加 --muted-strong 墨色，这里收成方角，
+   墨色交给不透明度去分层。 */
+html[data-theme="co1dsand-light"] .nav-link {
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  opacity: 0.6;
+  transition: opacity 0.2s ease-out;
+}
+
+html[data-theme="co1dsand-light"] .nav-link:hover {
+  background: transparent;
+  opacity: 1;
+}
+
+html[data-theme="co1dsand-light"] .nav-link.active {
+  background: var(--accent-soft);
+  opacity: 1;
+}

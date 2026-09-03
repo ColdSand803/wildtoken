@@ -96,3 +96,21 @@ html[data-theme="co1dsand-dark"] .aurora {
 html[data-theme="co1dsand-dark"] ::selection {
   background: rgb(136 136 136 / 27%);
 }
+
+/* 导航：同凉砂·日，只是墨色由 token 自己翻过来。 */
+html[data-theme="co1dsand-dark"] .nav-link {
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  opacity: 0.6;
+  transition: opacity 0.2s ease-out;
+}
+
+html[data-theme="co1dsand-dark"] .nav-link:hover {
+  background: transparent;
+  opacity: 1;
+}
+
+html[data-theme="co1dsand-dark"] .nav-link.active {
+  background: var(--accent-soft);
+  opacity: 1;
+}
