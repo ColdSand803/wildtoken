@@ -41,6 +41,32 @@ test("两套凉砂的导航去掉了胶囊圆角", () => {
   }
 });
 
+/* 0.6 的不透明度会把前景往轨道底色 --panel-muted 拉，所以静止态的实际对比度取决于
+   起始墨色：日版用 --text（#222222）合成后只有 4.21:1，过不了 WCAG AA 的 4.5:1；
+   改用 --accent（#111111）合成到 #6e6e6e，4.87:1。夜版同样取 --accent 以保持日夜
+   手感一致（6.51:1）。这条一旦被改回 --text，日版就会重新掉到 AA 线下。 */
+test("两套凉砂的导航墨色取 --accent，保证 0.6 不透明度下仍过 AA", () => {
+  for (const [theme, css] of Object.entries(packs)) {
+    assert.match(
+      css,
+      new RegExp(`html\\[data-theme="${theme}"\\] \\.nav-link\\s*\\{[^}]*color: var\\(--accent\\);`),
+      `${theme} 的导航墨色必须是 var(--accent)——var(--text) 在 0.6 下过不了 AA`,
+    );
+  }
+});
+
+/* base.css 的 .nav-link.active 会叠 `var(--shadow-xs), 0 0 0 1px var(--accent-border)`，
+   跟本包「零光晕」的自述冲突，两个包都必须显式关掉。 */
+test("两套凉砂的当前项关掉了 base 的光环", () => {
+  for (const [theme, css] of Object.entries(packs)) {
+    assert.match(
+      css,
+      new RegExp(`html\\[data-theme="${theme}"\\] \\.nav-link\\.active\\s*\\{[^}]*box-shadow: none;`),
+      `${theme} 的当前项必须 box-shadow: none，否则残留 base 的描边光环`,
+    );
+  }
+});
+
 /* hover 换颜色就破了「只动不透明度」这条规矩。 */
 test("导航 hover 不改颜色", () => {
   for (const [theme, css] of Object.entries(packs)) {

@@ -97,10 +97,12 @@ html[data-theme="co1dsand-dark"] ::selection {
   background: rgb(136 136 136 / 27%);
 }
 
-/* 导航：同凉砂·日，只是墨色由 token 自己翻过来。 */
+/* 导航：同凉砂·日，只是墨色由 token 自己翻过来。墨色同样取 --accent
+   （#f0f0f0），日夜两套的手感因此一致；0.6 合成到轨道底色 --panel-muted
+   （#0c0c0c）后是 6.51:1。 */
 html[data-theme="co1dsand-dark"] .nav-link {
   border-radius: var(--radius-sm);
-  color: var(--text);
+  color: var(--accent);
   opacity: 0.6;
   transition: opacity 0.2s ease-out;
 }
@@ -110,8 +112,10 @@ html[data-theme="co1dsand-dark"] .nav-link:hover {
   opacity: 1;
 }
 
+/* 同凉砂·日：关掉 base.css 给当前项叠的那层光环。 */
 html[data-theme="co1dsand-dark"] .nav-link.active {
   background: var(--accent-soft);
+  box-shadow: none;
   opacity: 1;
 }
 

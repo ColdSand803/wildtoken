@@ -46,7 +46,9 @@ test("两套凉砂都把品牌位换成自己的 logo", () => {
   }
 });
 
-/* 默认态停在画完的位置，动画被关掉时标记依然完整可见。 */
+/* 默认态停在画完的位置，动画被关掉时标记依然完整可见。
+   两条 @media 的 `animation: none` 必须锚到本主题的 .co1dsand-logo-sweep 上：
+   只断言这两个 at-rule 里「某处」有 animation: none，换成任何别的选择器都能骗过去。 */
 test("扫过动画默认停在画完的位置，并尊重降低动效与打印", () => {
   for (const [theme, css] of Object.entries(packs)) {
     assert.match(
@@ -55,16 +57,38 @@ test("扫过动画默认停在画完的位置，并尊重降低动效与打印",
       `${theme} 的 sweep 默认态必须是画完的`,
     );
     assert.match(css, /@keyframes co1dsand-logo-draw/, `${theme} 缺少动画定义`);
+    for (const [atRule, pattern, label] of [
+      ["prefers-reduced-motion", /@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/, "降低动效偏好下"],
+      ["print", /@media print\s*\{([\s\S]*?)\n\}/, "打印时"],
+    ]) {
+      const block = pattern.exec(css);
+      assert.ok(block, `${theme} 缺少 @media ${atRule} 区块`);
+      assert.match(
+        block[1],
+        new RegExp(`html\\[data-theme="${theme}"\\] \\.co1dsand-logo-sweep\\s*\\{[^}]*animation: none;`),
+        `${theme} 必须在${label}停掉 .co1dsand-logo-sweep 的动画，而不是别的选择器`,
+      );
+    }
+  }
+});
+
+/* 关键帧两端与默认态是一组不变量：默认态的 70.7px 必须和 42%/86% 帧同值，
+   否则动画每轮结束时标记会跳一下；-58.3px 是起笔位置，改了就会露出未画完的字形。 */
+test("扫过动画的关键帧端点锁死，且与默认态同值", () => {
+  for (const [theme, css] of Object.entries(packs)) {
+    const frames = /@keyframes co1dsand-logo-draw\s*\{([\s\S]*?)\n\}/.exec(css);
+    assert.ok(frames, `${theme} 缺少 @keyframes co1dsand-logo-draw`);
+    assert.ok(frames[1].includes("-58.3px"), `${theme} 的关键帧缺少起笔端点 -58.3px`);
+    assert.ok(frames[1].includes("70.7px"), `${theme} 的关键帧缺少画完端点 70.7px`);
     assert.match(
-      css,
-      /@media \(prefers-reduced-motion: reduce\)\s*\{[\s\S]{0,300}?animation: none;/,
-      `${theme} 必须在降低动效偏好下停掉动画`,
+      frames[1],
+      /42%,\s*86%\s*\{\s*transform: translateX\(70\.7px\);/,
+      `${theme} 的 42%/86% 帧必须停在 70.7px`,
     );
-    assert.match(
-      css,
-      /@media print\s*\{[\s\S]{0,300}?animation: none;/,
-      `${theme} 必须在打印时停掉动画`,
+    const settled = new RegExp(
+      `html\\[data-theme="${theme}"\\] \\.co1dsand-logo-sweep\\s*\\{[^}]*transform: translateX\\(70\\.7px\\);`,
     );
+    assert.match(css, settled, `${theme} 的默认态必须与 42%/86% 帧同值，否则每轮收尾会跳`);
   }
 });
 

@@ -107,10 +107,13 @@ html[data-theme="co1dsand-light"] ::selection {
 
 /* 导航：antfu 的做法是可点元素平时压到半透明，hover 只升不透明度、不换色。
    base.css 给的是 --radius-full 胶囊加 --muted-strong 墨色，这里收成方角，
-   墨色交给不透明度去分层。 */
+   墨色交给不透明度去分层。
+   墨色取 --accent（#111111）而不是 --text（#222222）：0.6 的不透明度会把前景
+   往轨道底色 --panel-muted（#fafafa）拉，--text 合成后只有 4.21:1，过不了
+   WCAG AA；--accent 合成到 #6e6e6e，4.87:1 达标。 */
 html[data-theme="co1dsand-light"] .nav-link {
   border-radius: var(--radius-sm);
-  color: var(--text);
+  color: var(--accent);
   opacity: 0.6;
   transition: opacity 0.2s ease-out;
 }
@@ -120,8 +123,12 @@ html[data-theme="co1dsand-light"] .nav-link:hover {
   opacity: 1;
 }
 
+/* base.css 的 .nav-link.active 会叠一层 `var(--shadow-xs), 0 0 0 1px
+   var(--accent-border)` 的光环，跟本包「零光晕」的自述冲突，整条关掉。
+   当前项靠 --accent-soft 的底色和 base 的字重区分，不靠描边。 */
 html[data-theme="co1dsand-light"] .nav-link.active {
   background: var(--accent-soft);
+  box-shadow: none;
   opacity: 1;
 }
 

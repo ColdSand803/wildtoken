@@ -56,6 +56,15 @@ test("凉砂·夜 收掉了渐变光晕：aurora 关闭、accent-glow 透明", (
   assert.match(css, /html\[data-theme="co1dsand-dark"\] \.aurora\s*\{\s*display: none;/);
 });
 
+/* 与 co1dsand-light-theme.test.mjs 的同名断言对称：圆角和字体栈是两套共用的骨架，
+   夜版单独漂走就会在日夜切换时露出来。 */
+test("凉砂·夜 的圆角比默认更克制，字体栈补了中文", () => {
+  assert.ok(css.includes("--radius-sm: 4px;"));
+  assert.ok(css.includes("--radius: 6px;"));
+  assert.ok(css.includes("--radius-md: 8px;"));
+  assert.match(css, /--font-sans: "Inter", "PingFang SC", "Microsoft YaHei"/);
+});
+
 test("凉砂·夜 在主题注册表初始化前后都可选", () => {
   const cssHref = "/theme-packs/co1dsand-dark/theme.css";
   assert.match(
