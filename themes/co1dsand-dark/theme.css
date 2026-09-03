@@ -1,0 +1,98 @@
+/* 凉砂·夜：近黑纸面，灰阶墨梯，半透明分隔线。改编自 antfu.me。
+   底色 #050505 比代码框还深一档——这是原作的选择，让代码块自然浮起。
+   分隔线与凉砂·日逐字相同：#888 加 alpha 在两套底色上都成立。 */
+
+html[data-theme="co1dsand-dark"] {
+  color-scheme: dark;
+
+  /* 纸面 —— 近黑，代码框反而浮起一档 */
+  --bg: #050505;
+  --bg-elevated: #0e0e0e;
+  --panel: rgb(14 14 14 / 82%);
+  --panel-solid: #0e0e0e;
+  --panel-subtle: #0a0a0a;
+  --panel-muted: #0c0c0c;
+  --panel-elevated: #121212;
+  --glass: rgb(5 5 5 / 82%);
+  --glass-strong: rgb(5 5 5 / 94%);
+
+  /* 墨梯 —— 与日版反向。#888 是两套共用的那一档。 */
+  --text: #dddddd;
+  --text-secondary: #bbbbbb;
+  --muted-strong: #a0a0a0;
+  --muted: #888888;
+
+  /* 分隔线 —— 与凉砂·日逐字相同 */
+  --line: rgb(136 136 136 / 27%);
+  --line-strong: rgb(136 136 136 / 47%);
+  --line-soft: rgb(136 136 136 / 15%);
+
+  /* 强调 —— 最亮的墨 */
+  --accent: #f0f0f0;
+  --accent-strong: #ffffff;
+  --accent-soft: rgb(240 240 240 / 8%);
+  --accent-border: rgb(240 240 240 / 26%);
+  --accent-glow: transparent;
+  --accent-on: #050505;
+  --brand-ink: #050505;
+
+  /* 语义色 —— 深底上取偏亮的低饱和版本 */
+  --danger: #e07b74;
+  --danger-soft: rgb(224 123 116 / 12%);
+  --danger-border: rgb(224 123 116 / 32%);
+  --danger-strong: #ec938c;
+  --ok: #6bbf8a;
+  --ok-soft: rgb(107 191 138 / 12%);
+  --ok-border: rgb(107 191 138 / 32%);
+  --ok-strong: #85d1a1;
+  --warning: #d9a441;
+  --warning-soft: rgb(217 164 65 / 12%);
+  --warning-border: rgb(217 164 65 / 32%);
+  --warning-strong: #e8bf72;
+  --warning-text: #e8bf72;
+
+  /* 焦点与投影 —— --focus-ring 是完整的 box-shadow 值 */
+  --focus: #f0f0f0;
+  --focus-ring: 0 0 0 3px rgb(240 240 240 / 20%);
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 48%);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 55%);
+  --shadow-lg: 0 10px 34px rgb(0 0 0 / 62%);
+  --shadow: var(--shadow-sm);
+  --glow-accent: 0 0 0 1px rgb(240 240 240 / 10%);
+
+  /* 代码框 —— 比纸面浮起一档 */
+  --code-frame-bg: #0e0e0e;
+  --code-bg: #121212;
+  --code-text: #dddddd;
+  --code-muted: #888888;
+  --code-border: rgb(136 136 136 / 27%);
+
+  /* 交互面 */
+  --row-hover: rgb(136 136 136 / 7%);
+  --row-disabled: rgb(136 136 136 / 4%);
+  --topbar-bg: rgb(5 5 5 / 88%);
+  --backdrop: rgb(0 0 0 / 62%);
+  --neutral-chip: rgb(136 136 136 / 15%);
+  --toast-neutral: #bbbbbb;
+
+  /* 极光关掉 */
+  --aurora-a: transparent;
+  --aurora-b: transparent;
+  --aurora-c: transparent;
+
+  /* 圆角与字体 —— 与日版一致 */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", "Source Han Sans SC", system-ui, sans-serif;
+}
+
+html[data-theme="co1dsand-dark"] .aurora {
+  display: none;
+}
+
+html[data-theme="co1dsand-dark"] ::selection {
+  background: rgb(136 136 136 / 27%);
+}
