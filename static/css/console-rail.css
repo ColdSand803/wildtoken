@@ -174,7 +174,6 @@ html[data-theme="light"] .topbar-actions .nav-logout {
 html[data-theme="dark"] .topbar-actions .live-indicator,
 html[data-theme="light"] .topbar-actions .live-indicator {
   align-items: center;
-  display: flex;
   gap: var(--rail-gap);
   justify-content: flex-start;
   white-space: nowrap;

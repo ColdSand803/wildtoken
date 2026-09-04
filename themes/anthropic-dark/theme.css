@@ -407,7 +407,6 @@ html[data-theme="anthropic-dark"] .topbar-actions {
 html[data-theme="anthropic-dark"] .topbar-actions .live-indicator {
   align-items: center;
   border-top: 1px solid var(--line-soft);
-  display: flex;
   font-size: 10px;
   gap: var(--rail-gap);
   justify-content: flex-start;
