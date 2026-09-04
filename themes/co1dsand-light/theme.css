@@ -268,6 +268,14 @@ html[data-theme="co1dsand-light"] .topbar-brand {
   width: 100%;
 }
 
+/* 标记放到 48px —— antfu 站点的导航里它就是 48px（w-12 h-12），24px 是 base 为
+   横排顶栏定的，竖排的轨道里那一笔一划根本看不出来。118px 的轨道扣掉左右内边距
+   还有 98px，48px 居中摆得开。 */
+html[data-theme="co1dsand-light"] .brand-mark {
+  height: 48px;
+  width: 48px;
+}
+
 html[data-theme="co1dsand-light"] .brand-text {
   display: block;
   min-width: 0;
@@ -571,6 +579,12 @@ html[data-theme="co1dsand-light"] .content {
   html[data-theme="co1dsand-light"] .topbar-brand {
     gap: 3px;
     padding: 0 2px 8px;
+  }
+
+  /* 矮窗口里 48px 的标记会把导航挤下去，收到 30px。 */
+  html[data-theme="co1dsand-light"] .brand-mark {
+    height: 30px;
+    width: 30px;
   }
 
   html[data-theme="co1dsand-light"] .brand-label {

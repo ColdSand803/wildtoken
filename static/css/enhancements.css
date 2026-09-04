@@ -248,7 +248,9 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
    （.wt-segbar）的默认，这条只管皮肤——高度、圆角、底色。 */
 .ops-bar-track {
   display: flex;
-  height: 12px;
+  /* 高度经 --wt-segbar-height 报给公共组件，端头的圆角地板宽从它算。 */
+  --wt-segbar-height: 12px;
+  height: var(--wt-segbar-height);
   overflow: hidden;
   border-radius: 999px;
   background: var(--panel-muted);
@@ -521,7 +523,8 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
    （.wt-segbar）的默认，需要格子感的调用方才自己加 gap（见 .status-error-strip）。 */
 .log-detail-timing-bar {
   display: flex;
-  height: 10px;
+  --wt-segbar-height: 10px;
+  height: var(--wt-segbar-height);
   border-radius: 999px;
   background: var(--panel-muted);
   margin-top: 6px;
