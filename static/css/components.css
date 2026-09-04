@@ -864,3 +864,187 @@ html[data-density="compact"] .wt-seg-btn {
 .brand-mark .co1dsand-logo {
   display: none;
 }
+
+/* ── 凉砂标记的笔顺书写 ────────────────────────────────────────
+   同样不带主题前缀，理由同上：这套机制是标记自身的行为，与配色无关，两套凉砂
+   逐字相同。写进主题包就得复制两份、日夜各一，早晚漂移。这些选择器只存在于
+   .co1dsand-logo 内部，其它主题下整个 SVG 是 display: none，动画不会跑。
+   墨色由各主题包的 .co1dsand-logo-ink { fill } 决定。
+
+   静止值就是写完的样子：dashoffset 为 0、settle 全显、ink 不透明。动画一旦被
+   关掉（下面两条 @media），标记是完整的，不是缺一半。
+
+   每一笔的 dash 长度与它在周期里占的时间窗由 antfu 的 scripts/logo-skeleton.py
+   生成，逐字照搬。时间按弧长比例分配，笔速才是匀速；窗口之间的空档是提笔。 */
+.co1dsand-nib-0 {
+  stroke-dasharray: 176.8;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-0 13s linear infinite both;
+}
+
+.co1dsand-nib-1 {
+  stroke-dasharray: 109.3;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-1 13s linear infinite both;
+}
+
+.co1dsand-nib-2 {
+  stroke-dasharray: 183.67;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-2 13s linear infinite both;
+}
+
+.co1dsand-nib-3 {
+  stroke-dasharray: 81.63;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-3 13s linear infinite both;
+}
+
+.co1dsand-nib-4 {
+  stroke-dasharray: 112.54;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-4 13s linear infinite both;
+}
+
+/* 中心线到不了的那约 1.5% 墨，末笔落定后补上。在不可见的窗口里复位，
+   下一轮才从白纸开始，而不是把自己「反着擦掉」。 */
+.co1dsand-logo-settle {
+  opacity: 1;
+  animation: co1dsand-logo-settle 13s linear infinite both;
+}
+
+/* 写完的标记停住，然后淡出；mask 趁不可见时回卷。 */
+.co1dsand-logo-ink {
+  animation: co1dsand-logo-cycle 13s linear infinite both;
+}
+
+/* 每一笔先按未写的状态等着，在自己的窗口里走完，然后一直保持写完，直到墨迹淡出。
+   刻意用 linear：节奏靠窗口间距表达，不靠缓动曲线。 */
+@keyframes co1dsand-nib-0 {
+  0%,
+  3% {
+    stroke-dashoffset: 176.8;
+  }
+  20.1%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 176.8;
+  }
+}
+
+@keyframes co1dsand-nib-1 {
+  0%,
+  21.3% {
+    stroke-dashoffset: 109.3;
+  }
+  31.87%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 109.3;
+  }
+}
+
+@keyframes co1dsand-nib-2 {
+  0%,
+  33.07% {
+    stroke-dashoffset: 183.67;
+  }
+  50.84%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 183.67;
+  }
+}
+
+@keyframes co1dsand-nib-3 {
+  0%,
+  52.04% {
+    stroke-dashoffset: 81.63;
+  }
+  59.92%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 81.63;
+  }
+}
+
+@keyframes co1dsand-nib-4 {
+  0%,
+  61.12% {
+    stroke-dashoffset: 112.54;
+  }
+  72%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 112.54;
+  }
+}
+
+/* 末笔刚落就把中心线漏掉的墨补齐。 */
+@keyframes co1dsand-logo-settle {
+  0%,
+  72% {
+    opacity: 0;
+  }
+  76%,
+  97.5% {
+    opacity: 1;
+  }
+  99.9%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes co1dsand-logo-cycle {
+  0%,
+  94% {
+    opacity: 1;
+  }
+  97.5%,
+  99.9% {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .co1dsand-nib-0,
+  .co1dsand-nib-1,
+  .co1dsand-nib-2,
+  .co1dsand-nib-3,
+  .co1dsand-nib-4,
+  .co1dsand-logo-settle,
+  .co1dsand-logo-ink {
+    animation: none;
+  }
+}
+
+@media print {
+  .co1dsand-nib-0,
+  .co1dsand-nib-1,
+  .co1dsand-nib-2,
+  .co1dsand-nib-3,
+  .co1dsand-nib-4,
+  .co1dsand-logo-settle,
+  .co1dsand-logo-ink {
+    animation: none;
+  }
+}
