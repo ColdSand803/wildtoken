@@ -658,6 +658,7 @@ const fields = {
   weight: document.querySelector("#weight"),
   timeoutSeconds: document.querySelector("#timeout-seconds"),
   extraHeaders: document.querySelector("#extra-headers"),
+  effortMappings: document.querySelector("#effort-mappings"),
   rateLimit: document.querySelector("#upstream-rate-limit"),
   enabled: document.querySelector("#enabled"),
   fixedWeightEnabled: document.querySelector("#auto-weight-enabled"),
@@ -1258,16 +1259,17 @@ function joinList(value) {
   return (value || []).join(", ");
 }
 
-function parseModelMappings(value) {
+// 逐行解析「下游 => 渠道」映射；label 只用于报错，方便区分是哪张映射表写错了。
+function parseMappingLines(value, label) {
   const mappings = {};
-  for (const line of value.split(/\n/)) {
+  for (const line of String(value || "").split(/\n/)) {
     const clean = line.trim();
     if (!clean) {
       continue;
     }
     const match = clean.match(/^(.+?)(?:=>|=|:)(.+)$/);
     if (!match) {
-      throw new Error(`模型映射格式错误：${clean}`);
+      throw new Error(`${label}格式错误：${clean}`);
     }
     const downstream = match[1].trim();
     const upstream = match[2].trim();
@@ -1278,10 +1280,29 @@ function parseModelMappings(value) {
   return mappings;
 }
 
-function joinModelMappings(value) {
+function parseModelMappings(value) {
+  return parseMappingLines(value, "模型映射");
+}
+
+/* 思考强度匹配不区分大小写，键在这里就转成小写——后端存的也是小写，
+   这样表单里显示的内容和真正参与匹配的内容一致。 */
+function parseEffortMappings(value) {
+  const parsed = parseMappingLines(value, "思考强度映射");
+  const mappings = {};
+  for (const [downstream, upstream] of Object.entries(parsed)) {
+    mappings[downstream.toLowerCase()] = upstream;
+  }
+  return mappings;
+}
+
+function joinMappingLines(value) {
   return Object.entries(value || {})
     .map(([downstream, upstream]) => `${downstream} => ${upstream}`)
     .join("\n");
+}
+
+function joinModelMappings(value) {
+  return joinMappingLines(value);
 }
 
 function uniqueList(items) {

@@ -20,7 +20,7 @@ func int32Value(t *testing.T, value *int32) any {
 func TestStreamingChatRequestIncludesUsageAndPreservesOptions(t *testing.T) {
 	body := []byte(`{"model":"requested-model","stream":true,"stream_options":{"include_obfuscation":true}}`)
 
-	prepared := PrepareUpstreamBody(body, ptrTo("upstream-model"), "chat/completions")
+	prepared := PrepareUpstreamBody(body, ptrTo("upstream-model"), "chat/completions", nil)
 
 	var decoded map[string]any
 	if err := json.Unmarshal(prepared, &decoded); err != nil {
@@ -46,7 +46,7 @@ func TestUsageOptionIsNotAddedToOtherOrNonStreamingRequests(t *testing.T) {
 		{"chat/completions", `{"model":"m","stream":false}`},
 		{"responses", `{"model":"m","stream":true}`},
 	} {
-		prepared := PrepareUpstreamBody([]byte(testCase.body), nil, testCase.path)
+		prepared := PrepareUpstreamBody([]byte(testCase.body), nil, testCase.path, nil)
 		var decoded map[string]any
 		if err := json.Unmarshal(prepared, &decoded); err != nil {
 			t.Fatalf("decode %s: %v", testCase.path, err)
@@ -478,5 +478,187 @@ func TestAnUnusableUsageFigureIsReportedAbsentRatherThanSubstituted(t *testing.T
 		"application/json")
 	if usage.PromptTokens == nil || *usage.PromptTokens != 11 {
 		t.Errorf("prompt tokens = %v, want 11", usage.PromptTokens)
+	}
+}
+
+func TestEffortMappingRewritesEveryShapeAnEffortCanTake(t *testing.T) {
+	mappings := map[string]string{"max": "xhigh"}
+
+	for _, testCase := range []struct{ name, body, want string }{
+		{
+			name: "openai chat completions",
+			body: `{"model":"m","reasoning_effort":"max"}`,
+			want: "xhigh",
+		},
+		{
+			name: "responses api",
+			body: `{"model":"m","reasoning":{"effort":"max"}}`,
+			want: "xhigh",
+		},
+		{
+			name: "anthropic messages",
+			body: `{"model":"m","output_config":{"effort":"max"}}`,
+			want: "xhigh",
+		},
+		{
+			name: "the match ignores case and padding",
+			body: `{"model":"m","output_config":{"effort":"  MAX  "}}`,
+			want: "xhigh",
+		},
+	} {
+		prepared := PrepareUpstreamBody([]byte(testCase.body), nil, "messages", mappings)
+		effort := ExtractReasoningEffort(prepared)
+		if effort == nil || *effort != testCase.want {
+			t.Errorf("%s: effort = %v, want %s", testCase.name, effort, testCase.want)
+		}
+	}
+}
+
+func TestEffortMappingLeavesUnmappedAndUnconfiguredRequestsAlone(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		mappings map[string]string
+		body     string
+	}{
+		{"no mapping configured", nil, `{"reasoning_effort":"max"}`},
+		{"effort is not in the table", map[string]string{"max": "xhigh"}, `{"reasoning_effort":"low"}`},
+		{"request states no effort", map[string]string{"max": "xhigh"}, `{"model":"m"}`},
+	} {
+		prepared := PrepareUpstreamBody([]byte(testCase.body), nil, "messages", testCase.mappings)
+		if string(prepared) != testCase.body {
+			t.Errorf("%s: body was rewritten to %s, want it untouched", testCase.name, prepared)
+		}
+	}
+}
+
+// A rewrite must not cost the request the rest of the object it was found in:
+// dropping thinking or budget_tokens would change what the upstream is asked to
+// do, for the sake of translating one field beside them.
+func TestEffortMappingKeepsTheSiblingsOfTheEffortItRewrites(t *testing.T) {
+	body := []byte(`{"model":"m","thinking":{"type":"adaptive"},` +
+		`"output_config":{"effort":"max","verbosity":"low"}}`)
+
+	prepared := PrepareUpstreamBody(body, nil, "messages", map[string]string{"max": "xhigh"})
+
+	var decoded map[string]any
+	if err := json.Unmarshal(prepared, &decoded); err != nil {
+		t.Fatalf("decode prepared body: %v", err)
+	}
+	outputConfig, ok := decoded["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config was lost: %s", prepared)
+	}
+	if outputConfig["effort"] != "xhigh" {
+		t.Errorf("effort = %v, want xhigh", outputConfig["effort"])
+	}
+	if outputConfig["verbosity"] != "low" {
+		t.Errorf("a sibling of effort was dropped: %s", prepared)
+	}
+	thinking, ok := decoded["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "adaptive" {
+		t.Errorf("the thinking block was disturbed: %s", prepared)
+	}
+}
+
+// A client that states its effort twice must not reach the upstream with the two
+// disagreeing, because which one the upstream reads is its own business.
+func TestEffortMappingRewritesEveryEffortARequestStates(t *testing.T) {
+	body := []byte(`{"reasoning_effort":"max","output_config":{"effort":"max"}}`)
+
+	prepared := PrepareUpstreamBody(body, nil, "messages", map[string]string{"max": "xhigh"})
+
+	var decoded map[string]any
+	if err := json.Unmarshal(prepared, &decoded); err != nil {
+		t.Fatalf("decode prepared body: %v", err)
+	}
+	if decoded["reasoning_effort"] != "xhigh" {
+		t.Errorf("reasoning_effort = %v, want xhigh", decoded["reasoning_effort"])
+	}
+	outputConfig, _ := decoded["output_config"].(map[string]any)
+	if outputConfig["effort"] != "xhigh" {
+		t.Errorf("output_config.effort = %v, want xhigh", outputConfig["effort"])
+	}
+}
+
+func TestEffortMappingsFromRowSkipsTheEmptyColumn(t *testing.T) {
+	for _, stored := range []string{"", "  ", "{}", "not json"} {
+		if mappings := EffortMappingsFromRow(stored); mappings != nil {
+			t.Errorf("stored %q gave %v, want no mappings", stored, mappings)
+		}
+	}
+	mappings := EffortMappingsFromRow(`{"max":"xhigh"}`)
+	if mappings["max"] != "xhigh" {
+		t.Errorf("mappings = %v, want max mapped to xhigh", mappings)
+	}
+}
+
+// The log has to be able to say what the upstream was actually asked for, or a
+// channel that rewrites max into xhigh leaves behind a record claiming the
+// request ran at max — the one effort that never reached anyone.
+func TestPrepareRequestRecordsBothTheRequestedAndTheForwardedEffort(t *testing.T) {
+	body := []byte(`{"model":"m","output_config":{"effort":"max"}}`)
+
+	for _, testCase := range []struct {
+		name          string
+		stored        string
+		wantRequested string
+		wantForwarded string
+	}{
+		{
+			name:          "a channel that rewrites the effort records both sides",
+			stored:        `{"max":"xhigh"}`,
+			wantRequested: "max",
+			wantForwarded: "xhigh",
+		},
+		{
+			name:          "a channel that maps nothing forwards what it was given",
+			stored:        `{}`,
+			wantRequested: "max",
+			wantForwarded: "max",
+		},
+		{
+			name:          "a mapping that does not cover this effort leaves it alone",
+			stored:        `{"high":"medium"}`,
+			wantRequested: "max",
+			wantForwarded: "max",
+		},
+	} {
+		upstream := models.UpstreamRow{
+			ID: 1, Name: "channel", BaseURL: "https://api.example.test",
+			ExtraHeaders: "{}", EffortMappings: testCase.stored,
+		}
+		prepared, err := PrepareRequest(http.Header{}, &upstream, "POST", "messages",
+			"", nil, body, 4096)
+		if err != nil {
+			t.Fatalf("%s: prepare: %v", testCase.name, err)
+		}
+		if prepared.ReasoningEffort == nil || *prepared.ReasoningEffort != testCase.wantRequested {
+			t.Errorf("%s: requested effort = %v, want %s",
+				testCase.name, prepared.ReasoningEffort, testCase.wantRequested)
+		}
+		if prepared.UpstreamReasoningEffort == nil ||
+			*prepared.UpstreamReasoningEffort != testCase.wantForwarded {
+			t.Errorf("%s: forwarded effort = %v, want %s",
+				testCase.name, prepared.UpstreamReasoningEffort, testCase.wantForwarded)
+		}
+	}
+}
+
+// A request that names no effort must not gain one in the log just because the
+// channel carries a mapping table.
+func TestPrepareRequestLeavesBothEffortsUnsetWhenTheRequestNamesNone(t *testing.T) {
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: "https://api.example.test",
+		ExtraHeaders: "{}", EffortMappings: `{"max":"xhigh"}`,
+	}
+
+	prepared, err := PrepareRequest(http.Header{}, &upstream, "POST", "messages",
+		"", nil, []byte(`{"model":"m"}`), 4096)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if prepared.ReasoningEffort != nil || prepared.UpstreamReasoningEffort != nil {
+		t.Errorf("efforts = %v / %v, want both unset",
+			prepared.ReasoningEffort, prepared.UpstreamReasoningEffort)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -113,12 +114,17 @@ func exportChannels(ctx context.Context, database *sql.DB,
 		if err != nil {
 			return nil, err
 		}
+		effortMappings := out.EffortMappings
+		if effortMappings == nil {
+			effortMappings = map[string]string{}
+		}
 		channel := models.ConfigArchiveChannel{
 			Name:              out.Name,
 			BaseURL:           out.BaseURL,
 			ModelNames:        out.ModelNames,
 			ModelPrefixes:     out.ModelPrefixes,
 			ModelMappings:     out.ModelMappings,
+			EffortMappings:    &effortMappings,
 			Priority:          out.Priority,
 			Weight:            out.Weight,
 			AutoWeightEnabled: out.AutoWeightEnabled,
@@ -527,6 +533,9 @@ func (a *configApplier) applyChannels(channels []models.ConfigArchiveChannel) er
 			TimeoutSeconds:    &timeout,
 			RateLimit:         channel.RateLimit,
 		}
+		if channel.EffortMappings != nil {
+			input.EffortMappings = *channel.EffortMappings
+		}
 		if err := input.Validate(); err != nil {
 			return refuse(models.ConfigScopeChannels, channel.Name, err.Error())
 		}
@@ -553,7 +562,8 @@ func (a *configApplier) applyChannels(channels []models.ConfigArchiveChannel) er
 				a.record(models.ConfigScopeChannels, input.Name, action, "已存在，保留现有渠道")
 				continue
 			}
-			detail, err := a.updateChannel(existingID, &input, channel.APIKey != nil)
+			detail, err := a.updateChannel(existingID, &input, channel.APIKey != nil,
+				channel.EffortMappings != nil)
 			if err != nil {
 				return err
 			}
@@ -588,7 +598,7 @@ func (a *configApplier) channelIDByName(name string) (int64, bool, error) {
 }
 
 func (a *configApplier) insertChannel(input *models.UpstreamIn) error {
-	modelNames, modelPrefixes, modelMappings, extraHeaders, err := encodeUpstreamCollections(input)
+	encoded, err := encodeUpstreamCollections(input)
 	if err != nil {
 		return err
 	}
@@ -599,12 +609,13 @@ func (a *configApplier) insertChannel(input *models.UpstreamIn) error {
 
 	result, err := a.tx.ExecContext(a.ctx, `INSERT INTO upstreams
         (name, base_url, api_key, model_names, model_prefixes, model_mappings,
-         priority, weight, auto_weight_enabled, enabled, extra_headers, timeout_seconds,
-         rate_limit, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		input.Name, input.BaseURL, input.APIKey, modelNames, modelPrefixes, modelMappings,
-		input.Priority, input.Weight, boolToInt64(input.AutoWeightEnabled),
-		boolToInt64(input.Enabled), extraHeaders, *input.TimeoutSeconds, rateLimit)
+         effort_mappings, priority, weight, auto_weight_enabled, enabled,
+         extra_headers, timeout_seconds, rate_limit, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		input.Name, input.BaseURL, input.APIKey, encoded.Names, encoded.Prefixes,
+		encoded.ModelMappings, encoded.EffortMappings, input.Priority, input.Weight,
+		boolToInt64(input.AutoWeightEnabled), boolToInt64(input.Enabled),
+		encoded.Headers, *input.TimeoutSeconds, rateLimit)
 	if err != nil {
 		if IsUniqueViolation(err) {
 			return refuse(models.ConfigScopeChannels, input.Name, "channel name is already taken")
@@ -623,9 +634,12 @@ func (a *configApplier) insertChannel(input *models.UpstreamIn) error {
 //
 // Clearing the key on an archive exported without secrets would break a working
 // channel as a side effect of a migration that never mentioned credentials.
+// hasEffortMappings draws the same line for the effort rewrites: an archive
+// written before channels carried them says nothing about them, so they are left
+// as they are rather than reset to empty.
 func (a *configApplier) updateChannel(id int64, input *models.UpstreamIn,
-	hasKey bool) (string, error) {
-	modelNames, modelPrefixes, modelMappings, extraHeaders, err := encodeUpstreamCollections(input)
+	hasKey bool, hasEffortMappings bool) (string, error) {
+	encoded, err := encodeUpstreamCollections(input)
 	if err != nil {
 		return "", err
 	}
@@ -640,9 +654,17 @@ func (a *configApplier) updateChannel(id int64, input *models.UpstreamIn,
             enabled = ?, extra_headers = ?, timeout_seconds = ?, rate_limit = ?,
             updated_at = datetime('now')
         WHERE id = ?`
-	args := []any{input.BaseURL, modelNames, modelPrefixes, modelMappings,
+	args := []any{input.BaseURL, encoded.Names, encoded.Prefixes, encoded.ModelMappings,
 		input.Priority, input.Weight, boolToInt64(input.AutoWeightEnabled),
-		boolToInt64(input.Enabled), extraHeaders, *input.TimeoutSeconds, rateLimit, id}
+		boolToInt64(input.Enabled), encoded.Headers, *input.TimeoutSeconds, rateLimit, id}
+
+	if hasEffortMappings {
+		query = strings.Replace(query, "model_mappings = ?,",
+			"model_mappings = ?, effort_mappings = ?,", 1)
+		// The placeholder lands right after model_mappings, so the value has to be
+		// spliced in at the matching position rather than appended.
+		args = slices.Insert(args, 4, any(encoded.EffortMappings))
+	}
 
 	if hasKey {
 		query = strings.Replace(query, "SET base_url = ?", "SET api_key = ?, base_url = ?", 1)

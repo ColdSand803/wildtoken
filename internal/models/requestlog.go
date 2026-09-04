@@ -20,6 +20,7 @@ type RequestLogOut struct {
 	RequestModel              *string `json:"request_model"`
 	UpstreamModel             *string `json:"upstream_model"`
 	ReasoningEffort           *string `json:"reasoning_effort"`
+	UpstreamReasoningEffort   *string `json:"upstream_reasoning_effort"`
 	ResponseReasoningEffort   *string `json:"response_reasoning_effort"`
 	Stream                    int32   `json:"stream"`
 	StatusCode                *int32  `json:"status_code"`

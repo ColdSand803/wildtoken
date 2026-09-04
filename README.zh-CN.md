@@ -24,7 +24,7 @@
 
 - 🔌 **OpenAI 兼容网关：** 通过一个本地入口转发 Chat Completions、Responses、模型列表、流式响应以及其他 `/v1/*` 请求。
 - 🧩 **Anthropic Messages 兼容：** `POST /v1/messages` 支持标准 `x-api-key` 和 `anthropic-version` 请求头，并转发到 Anthropic 兼容上游。
-- 🛣️ **多上游聚合：** 每个渠道可配置 Base URL、上游 API Key、模型名、模型映射、模型前缀和额外 Header。
+- 🛣️ **多上游聚合：** 每个渠道可配置 Base URL、上游 API Key、模型名、模型映射、模型前缀、思考强度映射和额外 Header。
 - 🧭 **路由控制：** 支持 `X-WildToken-Upstream`、`?upstream=`、精确模型映射、模型名、前缀匹配、优先级分层、按权重随机和自动健康权重。
 - 🔁 **重试与故障切换：** 自动路由失败后可重新选择渠道；再次选到同一渠道时遵守同渠道重试间隔。
 - 🔐 **下游令牌管理：** 在后台创建客户端使用的 API Token，格式为 `sk-` 前缀加 32 位随机字母数字。完整值保存在数据库中，可在令牌列表里随时复制，也可在编辑时直接改写（旧值随即失效）。可以给令牌设有效期，填 `1d3h` 这样的时长或具体日期均可；到期后不再通过认证，记录仍保留，可随时续期。
@@ -197,6 +197,20 @@ gpt-4o-mini => provider-specific-fast-model
 curl 'http://127.0.0.1:3100/v1/models?upstream=openai' \
   -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>'
 ```
+
+## 🧠 思考强度映射
+
+各家上游支持的思考强度并不一致，渠道可以把下游请求的强度改写成上游认识的那个。在渠道编辑的 **高级设置** 里配置，每行一条：
+
+```text
+max => xhigh
+```
+
+下游请求 `max`，发给该上游时变成 `xhigh`。未列出的强度原样转发，匹配不区分大小写。
+
+请求里表达思考强度的三种写法都会被改写：顶层 `reasoning_effort`、嵌套 `reasoning.effort` 和嵌套 `output_config.effort`。强度旁边的其他字段（`thinking`、`verbosity`、`summary` 等）保持原样。
+
+日志会同时记录三个环节：下游请求的强度、实际发往上游的强度、上游回报的强度。相邻重复的环节合并显示，所以没有发生改写时仍然只显示一个值，发生改写时显示成 `max ↳ xhigh`。
 
 ## 🧾 Header 覆盖
 

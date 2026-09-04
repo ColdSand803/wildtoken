@@ -75,9 +75,22 @@ function parseHeaderOverrides(value = fields.extraHeaders.value) {
   return normalized;
 }
 
+/* 思考强度映射在「高级设置」里折叠着，格式写错时要先展开再聚焦，
+   否则报错指向的是一个用户根本看不见的输入框。 */
+function parseEffortMappingsFromForm() {
+  try {
+    return parseEffortMappings(fields.effortMappings.value);
+  } catch (error) {
+    setAdvancedSettingsOpen(true);
+    fields.effortMappings.focus();
+    throw error;
+  }
+}
+
 function payloadFromForm() {
   const extraHeaders = parseHeaderOverrides();
   const modelMappings = parseModelMappings(fields.modelMappings.value);
+  const effortMappings = parseEffortMappingsFromForm();
   return {
     name: fields.name.value.trim(),
     base_url: fields.baseUrl.value.trim(),
@@ -85,6 +98,7 @@ function payloadFromForm() {
     model_names: getFormModels(),
     model_prefixes: splitList(fields.modelPrefixes.value),
     model_mappings: modelMappings,
+    effort_mappings: effortMappings,
     priority: Number(fields.priority.value || 100),
     weight: Number(fields.weight.value),
     auto_weight_enabled: !fields.fixedWeightEnabled.checked,
@@ -100,6 +114,10 @@ function payloadFromForm() {
 /* 编辑/复制渠道时先把该渠道的分组记下来，等 openUpstreamDialog 真正打开弹窗时
    再填进去——填充要等分组列表拉回来，而打开弹窗是同步的。 */
 let pendingUpstreamGroupIds = null;
+
+function hasMappings(mappings) {
+  return Boolean(mappings) && typeof mappings === "object" && Object.keys(mappings).length > 0;
+}
 
 function hasExtraHeaders(headers) {
   return headers
@@ -253,11 +271,13 @@ async function editUpstream(upstream) {
     fields.fixedWeightEnabled.checked = !detail.auto_weight_enabled;
     fields.timeoutSeconds.value = detail.timeout_seconds;
     fields.extraHeaders.value = JSON.stringify(detail.extra_headers || {}, null, 2);
+    fields.effortMappings.value = joinMappingLines(detail.effort_mappings);
     fields.rateLimit.value = detail.rate_limit || "";
     fields.enabled.checked = detail.enabled;
     fields.clearApiKey.checked = false;
     // 限速也在高级设置里，配置过就展开，不然编辑时看不到已有的值。
-    setAdvancedSettingsOpen(hasExtraHeaders(detail.extra_headers) || Boolean(detail.rate_limit));
+    setAdvancedSettingsOpen(hasExtraHeaders(detail.extra_headers) || Boolean(detail.rate_limit)
+      || hasMappings(detail.effort_mappings));
     fetchModelsButton.disabled = false;
     formTitle.textContent = `编辑渠道：${detail.name}`;
     openUpstreamDialog();
@@ -279,9 +299,11 @@ function duplicateUpstream(upstream) {
   fields.fixedWeightEnabled.checked = !upstream.auto_weight_enabled;
   fields.timeoutSeconds.value = upstream.timeout_seconds;
   fields.extraHeaders.value = JSON.stringify(upstream.extra_headers || {}, null, 2);
+  fields.effortMappings.value = joinMappingLines(upstream.effort_mappings);
   fields.rateLimit.value = upstream.rate_limit || "";
   fields.enabled.checked = upstream.enabled;
-  setAdvancedSettingsOpen(hasExtraHeaders(upstream.extra_headers) || Boolean(upstream.rate_limit));
+  setAdvancedSettingsOpen(hasExtraHeaders(upstream.extra_headers) || Boolean(upstream.rate_limit)
+    || hasMappings(upstream.effort_mappings));
   formTitle.textContent = `复制渠道：${upstream.name}`;
   openUpstreamDialog();
   setStatus("已复制渠道配置，API Key 需要重新填写后再保存。", "ok");
@@ -421,6 +443,7 @@ function resetForm() {
   fields.modelMappings.value = "";
   setFormModels([]);
   fields.extraHeaders.value = "{}";
+  fields.effortMappings.value = "";
   fields.rateLimit.value = "";
   fields.enabled.checked = true;
   fields.fixedWeightEnabled.checked = false;

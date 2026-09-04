@@ -972,6 +972,7 @@ func TestUpstreamRoundTripsItsJSONColumns(t *testing.T) {
 	input.ModelNames = []string{"gpt-4o", "gpt-4o-mini"}
 	input.ModelPrefixes = []string{"gpt-"}
 	input.ModelMappings = map[string]string{"alias": "gpt-4o"}
+	input.EffortMappings = map[string]string{"max": "xhigh"}
 	input.ExtraHeaders = map[string]string{"x-tenant": "acme"}
 
 	created, err := CreateUpstream(ctx, db, &input, 300)
@@ -982,7 +983,8 @@ func TestUpstreamRoundTripsItsJSONColumns(t *testing.T) {
 		t.Errorf("timeout = %v, want the default 300", created.TimeoutSeconds)
 	}
 	if len(created.ModelNames) != 2 || created.ModelMappings["alias"] != "gpt-4o" ||
-		created.ExtraHeaders["x-tenant"] != "acme" {
+		created.ExtraHeaders["x-tenant"] != "acme" ||
+		created.EffortMappings["max"] != "xhigh" {
 		t.Errorf("JSON columns did not round-trip: %+v", created)
 	}
 	if created.APIKeySet {

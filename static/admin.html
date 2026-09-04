@@ -1039,7 +1039,7 @@
             <summary>
               <span>
                 <span class="section-title">高级设置</span>
-                <span class="section-copy">Header 覆盖 JSON 与限速</span>
+                <span class="section-copy">Header 覆盖 JSON、思考强度映射与限速</span>
               </span>
               <span class="section-summary-state" aria-hidden="true"></span>
             </summary>
@@ -1054,6 +1054,19 @@
               >{}</textarea>
               <span id="extra-headers-hint" class="field-hint">
                 Header 名大小写不敏感；这里的值最后写入，可覆盖下游请求头和渠道 API Key 生成的认证头。用 {client_header:User-Agent} 可读取同名下游 Header。Host、Content-Length 等传输头不可覆盖。
+              </span>
+            </label>
+            <label class="field">
+              <span class="field-label">思考强度映射（可选）</span>
+              <textarea
+                id="effort-mappings"
+                rows="3"
+                spellcheck="false"
+                aria-describedby="effort-mappings-hint"
+                placeholder="max =&gt; xhigh&#10;xhigh =&gt; high"
+              ></textarea>
+              <span id="effort-mappings-hint" class="field-hint">
+                每行一条 <code>下游 =&gt; 渠道</code>，用于上游不支持某个思考强度时改写。命中后把请求里的思考强度替换为渠道强度，未列出的强度原样转发。匹配不区分大小写，reasoning_effort、reasoning.effort 与 output_config.effort 三种写法都会改写。
               </span>
             </label>
             <label class="field">
@@ -1231,6 +1244,10 @@
             <h3>请求 / 响应快照</h3>
             <p>点击展开；正文会自动换行。需要逐段核查时可使用“放大查看”。</p>
           </div>
+          <div class="log-view-mode" role="group" aria-label="查看模式">
+            <button type="button" class="log-view-mode-button" data-log-view-mode="conversation" aria-pressed="true">会话</button>
+            <button type="button" class="log-view-mode-button" data-log-view-mode="raw" aria-pressed="false">原始</button>
+          </div>
         </div>
         <div class="request-detail-grid">
           <details class="log-detail-section" data-field="downstream_request">
@@ -1244,6 +1261,7 @@
             <div class="log-detail-code-frame">
               <button type="button" class="secondary ghost log-detail-expand" aria-pressed="false">放大查看</button>
               <pre id="downstream-request-detail"></pre>
+              <div class="log-conversation" id="downstream-request-conversation" hidden></div>
             </div>
           </details>
           <details class="log-detail-section" data-field="upstream_request">
@@ -1257,6 +1275,7 @@
             <div class="log-detail-code-frame">
               <button type="button" class="secondary ghost log-detail-expand" aria-pressed="false">放大查看</button>
               <pre id="upstream-request-detail"></pre>
+              <div class="log-conversation" id="upstream-request-conversation" hidden></div>
             </div>
           </details>
           <details class="log-detail-section" data-field="upstream_response">
@@ -1270,6 +1289,7 @@
             <div class="log-detail-code-frame">
               <button type="button" class="secondary ghost log-detail-expand" aria-pressed="false">放大查看</button>
               <pre id="upstream-response-detail"></pre>
+              <div class="log-conversation" id="upstream-response-conversation" hidden></div>
             </div>
           </details>
           <details class="log-detail-section" data-field="downstream_response">
@@ -1283,6 +1303,7 @@
             <div class="log-detail-code-frame">
               <button type="button" class="secondary ghost log-detail-expand" aria-pressed="false">放大查看</button>
               <pre id="downstream-response-detail"></pre>
+              <div class="log-conversation" id="downstream-response-conversation" hidden></div>
             </div>
           </details>
         </div>
@@ -1574,6 +1595,7 @@
     <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/shell.js"></script>
     <script src="/static/js/upstreams.js"></script>
+    <script src="/static/js/conversation.js"></script>
     <script src="/static/js/logs.js"></script>
     <script src="/static/js/models.js"></script>
     <script src="/static/js/tokens.js"></script>

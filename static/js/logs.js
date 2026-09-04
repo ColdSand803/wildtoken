@@ -183,32 +183,54 @@ function renderLogModel(log) {
   `;
 }
 
+/* 思考强度有三个环节：下游请求的、实际发往上游的（渠道强度映射改写后）、
+   上游回报的。相邻重复的环节会被合并，所以没发生改写、上游也没回报强度时，
+   显示的仍然只是一个值。 */
 function getReasoningEffortRoute(log) {
-  const request = String(log?.reasoning_effort || "").trim();
-  const response = String(log?.response_reasoning_effort || "").trim();
-  const mapped = Boolean(request && response && request !== response);
-  return { request, response, mapped };
+  const steps = [
+    { label: "请求强度", value: String(log?.reasoning_effort || "").trim() },
+    { label: "上游强度", value: String(log?.upstream_reasoning_effort || "").trim() },
+    { label: "响应强度", value: String(log?.response_reasoning_effort || "").trim() },
+  ].filter((step) => step.value);
+
+  const chain = [];
+  for (const step of steps) {
+    if (chain.length > 0 && chain[chain.length - 1].value === step.value) {
+      continue;
+    }
+    chain.push(step);
+  }
+  return { chain, mapped: chain.length > 1 };
+}
+
+function reasoningEffortTitle(chain) {
+  return chain.map((step) => `${step.label}：${step.value}`).join("；");
 }
 
 function renderLogReasoningEffort(log) {
-  const route = getReasoningEffortRoute(log);
-  if (!route.request && !route.response) {
+  const { chain } = getReasoningEffortRoute(log);
+  if (chain.length === 0) {
     return '<span class="muted">-</span>';
   }
-  if (!route.mapped) {
-    const value = route.request || route.response;
+  if (chain.length === 1) {
+    const value = chain[0].value;
     return `<span class="model-text model-single" title="${escapeHtml(value)}">${escapeHtml(value)}</span>`;
   }
-  const title = `请求强度：${route.request}；响应强度：${route.response}`;
-  return `
-    <span class="model-route" title="${escapeHtml(title)}">
-      <span class="model-route-line">
-        <span class="model-text model-request">${escapeHtml(route.request)}</span>
-      </span>
+  const [first, ...rest] = chain;
+  const followers = rest
+    .map((step) => `
       <span class="model-route-line model-route-target">
         <span class="model-route-icon" aria-hidden="true">↳</span>
-        <span class="model-text model-upstream">${escapeHtml(route.response)}</span>
+        <span class="model-text model-upstream">${escapeHtml(step.value)}</span>
       </span>
+    `)
+    .join("");
+  return `
+    <span class="model-route" title="${escapeHtml(reasoningEffortTitle(chain))}">
+      <span class="model-route-line">
+        <span class="model-text model-request">${escapeHtml(first.value)}</span>
+      </span>
+      ${followers}
     </span>
   `;
 }
@@ -1305,17 +1327,15 @@ function formatStatusBadge(statusCode) {
   return `<span class="badge neutral status-other">${statusCode}</span>`;
 }
 
-function formatReasoningEffort(requestEffort, responseEffort, options = {}) {
+// 详情页的单行写法，环节的取值和合并规则与列表里的 getReasoningEffortRoute 一致。
+function formatReasoningEffort(log, options = {}) {
   const { badge = true, fallback = '<span class="muted">-</span>' } = options;
-  if (!requestEffort && !responseEffort) {
+  const { chain } = getReasoningEffortRoute(log);
+  if (chain.length === 0) {
     return fallback;
   }
 
-  const values = requestEffort === responseEffort
-    ? [requestEffort]
-    : [requestEffort, responseEffort].filter(Boolean);
-  const escapedValues = values.map(escapeHtml);
-  const value = escapedValues.join(" → ");
+  const value = chain.map((step) => escapeHtml(step.value)).join(" → ");
   return badge ? `<span class="badge neutral">${value}</span>` : value;
 }
 
@@ -1601,7 +1621,7 @@ function formatLogDetailMeta(detail) {
       : detail.status_code >= 200 && detail.status_code < 300
         ? "ok"
         : "neutral";
-  const reasoning = formatReasoningEffort(detail.reasoning_effort, detail.response_reasoning_effort, { badge: false, fallback: "" });
+  const reasoning = formatReasoningEffort(detail, { badge: false, fallback: "" });
   const modelText = formatLogModelText(detail);
   const modelLine = [escapeHtml(modelText), reasoning].filter(Boolean).join(" · ");
   const streamLabel = detail.stream ? "流式" : "非流式";
@@ -1999,9 +2019,95 @@ function openLogDetailDialog() {
   }
 }
 
+/* 查看模式在会话与原始之间切换，记在 localStorage 里跨会话保留。隐私模式下
+   storage 会直接抛，所以读写都包起来，失败就退回默认值。 */
+const LOG_VIEW_MODE_STORAGE_KEY = "wildtoken.logViewMode";
+let logDetailViewMode = readStoredLogViewMode();
+
+function readStoredLogViewMode() {
+  try {
+    return window.localStorage.getItem(LOG_VIEW_MODE_STORAGE_KEY) === "raw" ? "raw" : "conversation";
+  } catch {
+    return "conversation";
+  }
+}
+
+function storeLogViewMode(mode) {
+  try {
+    window.localStorage.setItem(LOG_VIEW_MODE_STORAGE_KEY, mode);
+  } catch {
+    // 存不下就只在本次会话里生效。
+  }
+}
+
+// 从快照里取出正文文本和它的截断信息，供会话解析与截断提示使用。
+function snapshotBodyForConversation(snapshot) {
+  if (!snapshot || typeof snapshot !== "object" || snapshot.cleared) return null;
+  const normalized = normalizeSnapshotBody(snapshot.body);
+  if (normalized.kind !== "text" || !normalized.text) return null;
+  return {
+    text: normalized.text,
+    meta: {
+      truncated: Boolean(normalized.truncated),
+      byteLength: normalized.byte_length,
+      capturedLength: new TextEncoder().encode(normalized.text).length,
+    },
+  };
+}
+
+function renderLogConversation(container, field, snapshot) {
+  const body = snapshotBodyForConversation(snapshot);
+  if (!body) {
+    container.innerHTML = `
+      <div class="conv-empty">
+        <strong>没有可解析的正文</strong>
+        <span>这条记录没有保存正文，或正文已按保留策略清理。</span>
+      </div>
+    `;
+    return;
+  }
+  const parsed = field.endsWith("_response")
+    ? parseConversationResponse(body.text)
+    : parseConversationRequest(body.text);
+  container.innerHTML = renderConversationHtml(parsed, body.meta);
+}
+
 function renderLogDetailSection(details) {
+  const field = details.dataset.field;
   const pre = details.querySelector("pre");
-  pre.textContent = currentLogDetail ? formatHttpSnapshot(currentLogDetail[details.dataset.field]) : "";
+  const conversation = details.querySelector(".log-conversation");
+  const snapshot = currentLogDetail ? currentLogDetail[field] : null;
+  const showConversation = logDetailViewMode === "conversation";
+
+  pre.hidden = showConversation;
+  if (conversation) conversation.hidden = !showConversation;
+
+  if (!currentLogDetail) {
+    pre.textContent = "";
+    if (conversation) conversation.innerHTML = "";
+    return;
+  }
+  if (showConversation && conversation) {
+    renderLogConversation(conversation, field, snapshot);
+    return;
+  }
+  pre.textContent = formatHttpSnapshot(snapshot);
+}
+
+// 切模式后，已经展开的面板要立刻按新模式重画。
+function setLogDetailViewMode(mode) {
+  logDetailViewMode = mode === "raw" ? "raw" : "conversation";
+  storeLogViewMode(logDetailViewMode);
+  updateLogViewModeControls();
+  for (const details of logDetailSections) {
+    if (details.open) renderLogDetailSection(details);
+  }
+}
+
+function updateLogViewModeControls() {
+  for (const button of document.querySelectorAll("[data-log-view-mode]")) {
+    button.setAttribute("aria-pressed", String(button.dataset.logViewMode === logDetailViewMode));
+  }
 }
 
 
@@ -2127,6 +2233,8 @@ async function showLogDetail(logId) {
   for (const details of logDetailSections) {
     details.open = false;
     details.querySelector("pre").textContent = "";
+    const conversation = details.querySelector(".log-conversation");
+    if (conversation) conversation.innerHTML = "";
   }
   requestDetailGrid?.classList.remove("is-focused");
   for (const button of document.querySelectorAll(".log-detail-expand")) {
