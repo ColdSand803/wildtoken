@@ -152,6 +152,8 @@ function applyTheme(theme) {
     button.tabIndex = selected ? 0 : -1;
   });
   updateThemeHint(next);
+  // 梅枝背景层只有凉砂两包用，见 static/js/plum.js。
+  if (typeof syncPlumLayer === "function") syncPlumLayer(next);
   if (typeof updatePreferenceControls === "function") updatePreferenceControls();
 }
 
