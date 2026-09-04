@@ -79,9 +79,13 @@ test("Gojo gives the status switch a keyboard focus indicator", () => {
 });
 
 /* Gojo paints every button it does not explicitly exclude with the full Limitless
-   gradient. The retry-chain step is a <button> but reads as a row of record, not a
-   primary action — left out of the list, the whole row turns solid cyan and the
-   status badge plus channel name inside it become unreadable. */
+   gradient. Two controls are <button> elements that read as rows of record rather
+   than primary actions, and each has to be named in every copy of the exclusion
+   list — Gojo repeats it once per state.
+
+   Left out, the retry-chain step turns solid cyan and the status badge plus
+   channel name inside it become unreadable; the log view picker loses its
+   segmented look and both halves read as pressed. */
 test("Gojo leaves the retry-chain step out of its primary-action treatment", () => {
   const selectors = [
     ...css.matchAll(/html\[data-theme="gojo"\] button:not\(:where\(([\s\S]*?)\)\)/g),
@@ -93,5 +97,17 @@ test("Gojo leaves the retry-chain step out of its primary-action treatment", () 
       body.includes(".retry-chain-step"),
       `exclusion list #${index + 1} must spare the retry-chain step`,
     );
+  }
+});
+
+test("Gojo renders the log view picker as a themed segmented control", () => {
+  assert.match(css, /\.log-view-mode \{[\s\S]*?background:[\s\S]*?#070a12;[\s\S]*?padding: 3px;[\s\S]*?\}/);
+  assert.match(css, /\.log-view-mode-button\[aria-pressed="true"\][\s\S]*?linear-gradient\(135deg/);
+  assert.match(css, /\.log-view-mode-button:focus-visible \{[\s\S]*?box-shadow: var\(--focus-ring\)/);
+
+  const primaryButtonSelectors = [...css.matchAll(/button:not\(:where\(([\s\S]*?)\)\)(?=[^{]*\{)/g)];
+  assert.ok(primaryButtonSelectors.length > 0, "expected Gojo primary-button selectors");
+  for (const [, exclusions] of primaryButtonSelectors) {
+    assert.match(exclusions, /\.log-view-mode-button/, "log mode leaked into the primary-button treatment");
   }
 });

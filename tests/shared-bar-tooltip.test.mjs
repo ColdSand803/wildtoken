@@ -348,6 +348,9 @@ test("log detail timing waterfall uses the shared bar and rebinds its hovercard"
   const block = bar.slice(0, bar.indexOf("}"));
   assert.ok(!block.includes("overflow: hidden"), "瀑布条不能裁剪，否则放大动效被切");
   assert.ok(block.includes("height: 10px"), "6px 太薄，放大了也看不出来");
+  /* 无缝与看板的 .ops-bar-track 一致：段间留缝时轨道底色会从缝里透出来，看着像
+     数据里多了一个极窄的分段，实际什么也不表示。 */
+  assert.ok(!/\bgap:/.test(block), "瀑布条的段之间不留缝");
 });
 
 test("timing chips wrap outside the ellipsis rule so 网关准备 that line never truncates", () => {

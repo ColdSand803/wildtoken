@@ -12,8 +12,8 @@ import (
 )
 
 const upstreamColumns = `id, name, base_url, api_key, model_names, model_prefixes,
-    model_mappings, priority, weight, auto_weight_enabled, enabled, extra_headers,
-    timeout_seconds, rate_limit, created_at, updated_at`
+    model_mappings, effort_mappings, priority, weight, auto_weight_enabled, enabled,
+    extra_headers, timeout_seconds, rate_limit, created_at, updated_at`
 
 func parseJSONArray(value string) ([]string, error) {
 	parsed := []string{}
@@ -34,11 +34,16 @@ func parseJSONMap(value string) (map[string]string, error) {
 func scanUpstreamRow(row interface{ Scan(...any) error }) (models.UpstreamRow, error) {
 	var upstream models.UpstreamRow
 	var apiKey, rateLimit sql.NullString
+	// effort_mappings is scanned through a NullString even though the column
+	// carries a NOT NULL default: an UPDATE that predates this field could still
+	// have written a NULL into it, and scanning that straight into a string
+	// fails the whole query rather than the one channel.
+	var effortMappings sql.NullString
 	err := row.Scan(&upstream.ID, &upstream.Name, &upstream.BaseURL, &apiKey,
 		&upstream.ModelNames, &upstream.ModelPrefixes, &upstream.ModelMappings,
-		&upstream.Priority, &upstream.Weight, &upstream.AutoWeightEnabled,
-		&upstream.Enabled, &upstream.ExtraHeaders, &upstream.TimeoutSeconds,
-		&rateLimit, &upstream.CreatedAt, &upstream.UpdatedAt)
+		&effortMappings, &upstream.Priority, &upstream.Weight,
+		&upstream.AutoWeightEnabled, &upstream.Enabled, &upstream.ExtraHeaders,
+		&upstream.TimeoutSeconds, &rateLimit, &upstream.CreatedAt, &upstream.UpdatedAt)
 	if err != nil {
 		return upstream, err
 	}
@@ -47,6 +52,10 @@ func scanUpstreamRow(row interface{ Scan(...any) error }) (models.UpstreamRow, e
 	}
 	if rateLimit.Valid && rateLimit.String != "" {
 		upstream.RateLimit = &rateLimit.String
+	}
+	upstream.EffortMappings = "{}"
+	if effortMappings.Valid && effortMappings.String != "" {
+		upstream.EffortMappings = effortMappings.String
 	}
 	return upstream, nil
 }
@@ -66,6 +75,10 @@ func RowToUpstreamOut(row *models.UpstreamRow) (models.UpstreamOut, error) {
 	if err != nil {
 		return models.UpstreamOut{}, err
 	}
+	effortMappings, err := parseJSONMap(row.EffortMappings)
+	if err != nil {
+		return models.UpstreamOut{}, err
+	}
 	extraHeaders, err := parseJSONMap(row.ExtraHeaders)
 	if err != nil {
 		return models.UpstreamOut{}, err
@@ -79,6 +92,7 @@ func RowToUpstreamOut(row *models.UpstreamRow) (models.UpstreamOut, error) {
 		ModelNames:         modelNames,
 		ModelPrefixes:      modelPrefixes,
 		ModelMappings:      modelMappings,
+		EffortMappings:     effortMappings,
 		Priority:           row.Priority,
 		Weight:             row.Weight,
 		AutoWeightEnabled:  row.AutoWeightEnabled == 1,
@@ -180,26 +194,45 @@ func GetUpstreamByName(ctx context.Context, db *sql.DB, name string) (models.Ups
 	return upstream, true, nil
 }
 
-// encodeUpstreamCollections serializes the four JSON-backed columns.
-func encodeUpstreamCollections(input *models.UpstreamIn) (names, prefixes, mappings, headers string, err error) {
+// encodedCollections holds the JSON-backed columns of one channel, ready to bind.
+//
+// They travel as a struct rather than as a run of same-typed return values
+// because every one of them is a string: a pair swapped at a call site would
+// compile, and would quietly store a channel's headers as its model list.
+type encodedCollections struct {
+	Names          string
+	Prefixes       string
+	ModelMappings  string
+	EffortMappings string
+	Headers        string
+}
+
+// encodeUpstreamCollections serializes the JSON-backed columns.
+func encodeUpstreamCollections(input *models.UpstreamIn) (encodedCollections, error) {
+	encoded := encodedCollections{}
 	encode := func(value any) (string, error) {
-		encoded, err := json.Marshal(value)
+		marshaled, err := json.Marshal(value)
 		if err != nil {
 			return "", apperr.JSON(err)
 		}
-		return string(encoded), nil
+		return string(marshaled), nil
 	}
-	if names, err = encode(input.ModelNames); err != nil {
-		return
+
+	var err error
+	if encoded.Names, err = encode(input.ModelNames); err != nil {
+		return encoded, err
 	}
-	if prefixes, err = encode(input.ModelPrefixes); err != nil {
-		return
+	if encoded.Prefixes, err = encode(input.ModelPrefixes); err != nil {
+		return encoded, err
 	}
-	if mappings, err = encode(input.ModelMappings); err != nil {
-		return
+	if encoded.ModelMappings, err = encode(input.ModelMappings); err != nil {
+		return encoded, err
 	}
-	headers, err = encode(input.ExtraHeaders)
-	return
+	if encoded.EffortMappings, err = encode(input.EffortMappings); err != nil {
+		return encoded, err
+	}
+	encoded.Headers, err = encode(input.ExtraHeaders)
+	return encoded, err
 }
 
 func boolToInt64(value bool) int64 {
@@ -214,7 +247,7 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 	if input.TimeoutSeconds != nil {
 		timeout = *input.TimeoutSeconds
 	}
-	modelNames, modelPrefixes, modelMappings, extraHeaders, err := encodeUpstreamCollections(input)
+	encoded, err := encodeUpstreamCollections(input)
 	if err != nil {
 		return models.UpstreamOut{}, err
 	}
@@ -231,12 +264,13 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 
 	result, err := tx.ExecContext(ctx, `INSERT INTO upstreams
         (name, base_url, api_key, model_names, model_prefixes, model_mappings,
-         priority, weight, auto_weight_enabled, enabled, extra_headers, timeout_seconds,
-         rate_limit, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		input.Name, input.BaseURL, input.APIKey, modelNames, modelPrefixes, modelMappings,
-		input.Priority, input.Weight, boolToInt64(input.AutoWeightEnabled),
-		boolToInt64(input.Enabled), extraHeaders, timeout, rateLimit)
+         effort_mappings, priority, weight, auto_weight_enabled, enabled,
+         extra_headers, timeout_seconds, rate_limit, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		input.Name, input.BaseURL, input.APIKey, encoded.Names, encoded.Prefixes,
+		encoded.ModelMappings, encoded.EffortMappings, input.Priority, input.Weight,
+		boolToInt64(input.AutoWeightEnabled), boolToInt64(input.Enabled),
+		encoded.Headers, timeout, rateLimit)
 	if err != nil {
 		return models.UpstreamOut{}, apperr.Database(err)
 	}
@@ -276,7 +310,7 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 }
 
 func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.UpstreamUpdate) (models.UpstreamOut, error) {
-	modelNames, modelPrefixes, modelMappings, extraHeaders, err := encodeUpstreamCollections(&input.UpstreamIn)
+	encoded, err := encodeUpstreamCollections(&input.UpstreamIn)
 	if err != nil {
 		return models.UpstreamOut{}, err
 	}
@@ -320,12 +354,14 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 	_, err = tx.ExecContext(ctx, `UPDATE upstreams
         SET name = ?, base_url = ?, api_key = ?,
             model_names = ?, model_prefixes = ?, model_mappings = ?,
-            priority = ?, weight = ?, auto_weight_enabled = ?, enabled = ?, extra_headers = ?,
+            effort_mappings = ?, priority = ?, weight = ?, auto_weight_enabled = ?,
+            enabled = ?, extra_headers = ?,
             timeout_seconds = ?, rate_limit = ?, updated_at = datetime('now')
         WHERE id = ?`,
-		input.Name, input.BaseURL, apiKey, modelNames, modelPrefixes, modelMappings,
-		input.Priority, input.Weight, boolToInt64(input.AutoWeightEnabled),
-		boolToInt64(input.Enabled), extraHeaders, timeout, rateLimit, id)
+		input.Name, input.BaseURL, apiKey, encoded.Names, encoded.Prefixes,
+		encoded.ModelMappings, encoded.EffortMappings, input.Priority, input.Weight,
+		boolToInt64(input.AutoWeightEnabled), boolToInt64(input.Enabled),
+		encoded.Headers, timeout, rateLimit, id)
 	if err != nil {
 		return models.UpstreamOut{}, apperr.Database(err)
 	}

@@ -1,0 +1,8 @@
+{
+  "id": "co1dsand-dark",
+  "label": "凉砂·夜",
+  "css": "theme.css",
+  "swatch": ["#050505", "#f0f0f0"],
+  "version": "1.0.0",
+  "description": "近黑纸面、灰阶墨梯与半透明分隔线，改编自 antfu.me。"
+}

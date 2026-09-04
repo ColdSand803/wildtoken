@@ -41,7 +41,7 @@ const logListColumns = `id, created_at, method, path,
                 downstream_token_id, downstream_token_name,
                 client_type,
                 upstream_id, upstream_name, model, request_model, upstream_model,
-                reasoning_effort, response_reasoning_effort,
+                reasoning_effort, upstream_reasoning_effort, response_reasoning_effort,
                 stream, status_code,
                 prompt_tokens, completion_tokens, total_tokens,
                 prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
@@ -401,7 +401,7 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	var entry models.RequestLogOut
 	var downstreamTokenID, upstreamID sql.NullInt64
 	var downstreamTokenName, upstreamName, model, requestModel, upstreamModel sql.NullString
-	var reasoningEffort, responseReasoningEffort, logError sql.NullString
+	var reasoningEffort, upstreamReasoningEffort, responseReasoningEffort, logError sql.NullString
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
 	var durationMs, firstTokenMs sql.NullInt64
@@ -412,7 +412,7 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Method, &entry.Path,
 		&downstreamTokenID, &downstreamTokenName, &entry.ClientType,
 		&upstreamID, &upstreamName, &model, &requestModel, &upstreamModel,
-		&reasoningEffort, &responseReasoningEffort,
+		&reasoningEffort, &upstreamReasoningEffort, &responseReasoningEffort,
 		&entry.Stream, &statusCode,
 		&promptTokens, &completionTokens, &totalTokens,
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
@@ -431,6 +431,7 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	entry.RequestModel = nullStringPtr(requestModel)
 	entry.UpstreamModel = nullStringPtr(upstreamModel)
 	entry.ReasoningEffort = nullStringPtr(reasoningEffort)
+	entry.UpstreamReasoningEffort = nullStringPtr(upstreamReasoningEffort)
 	entry.ResponseReasoningEffort = nullStringPtr(responseReasoningEffort)
 	entry.Error = nullStringPtr(logError)
 	entry.StatusCode = nullInt32Ptr(statusCode)
@@ -521,7 +522,8 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
               l.client_type,
               l.upstream_id, l.upstream_name, l.model,
               l.request_model, l.upstream_model,
-              l.reasoning_effort, l.response_reasoning_effort,
+              l.reasoning_effort, l.upstream_reasoning_effort,
+              l.response_reasoning_effort,
               l.stream, l.status_code,
               l.prompt_tokens, l.completion_tokens, l.total_tokens,
               l.prompt_cached_tokens, l.cache_creation_tokens, l.completion_reasoning_tokens,
@@ -545,7 +547,7 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	var detail models.RequestLogDetailOut
 	var downstreamTokenID, upstreamID sql.NullInt64
 	var downstreamTokenName, upstreamName, model, requestModel, upstreamModel sql.NullString
-	var reasoningEffort, responseReasoningEffort, logError sql.NullString
+	var reasoningEffort, upstreamReasoningEffort, responseReasoningEffort, logError sql.NullString
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
 	var durationMs, firstTokenMs sql.NullInt64
@@ -559,7 +561,7 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	err := row.Scan(&detail.ID, &detail.CreatedAt, &detail.Method, &detail.Path,
 		&downstreamTokenID, &downstreamTokenName, &detail.ClientType,
 		&upstreamID, &upstreamName, &model, &requestModel, &upstreamModel,
-		&reasoningEffort, &responseReasoningEffort,
+		&reasoningEffort, &upstreamReasoningEffort, &responseReasoningEffort,
 		&detail.Stream, &statusCode,
 		&promptTokens, &completionTokens, &totalTokens,
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
@@ -583,6 +585,7 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	detail.RequestModel = nullStringPtr(requestModel)
 	detail.UpstreamModel = nullStringPtr(upstreamModel)
 	detail.ReasoningEffort = nullStringPtr(reasoningEffort)
+	detail.UpstreamReasoningEffort = nullStringPtr(upstreamReasoningEffort)
 	detail.ResponseReasoningEffort = nullStringPtr(responseReasoningEffort)
 	detail.Error = nullStringPtr(logError)
 	detail.StatusCode = nullInt32Ptr(statusCode)

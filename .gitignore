@@ -3,6 +3,10 @@
 .env.*
 !.env.example
 
+# Machine-specific Compose overrides (internal DNS, local addresses)
+docker-compose.local.yml
+docker-compose.override.yml
+
 # Go build output
 /wildtoken
 /wildtoken.exe

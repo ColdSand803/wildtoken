@@ -16,6 +16,7 @@ type UpstreamRow struct {
 	ModelNames        string // JSON array string "[]"
 	ModelPrefixes     string // JSON array string "[]"
 	ModelMappings     string // JSON object string "{}"
+	EffortMappings    string // JSON object string "{}"
 	Priority          int32
 	Weight            int64
 	AutoWeightEnabled int64 // 0 or 1
@@ -30,12 +31,17 @@ type UpstreamRow struct {
 
 // UpstreamIn is the create payload for an upstream.
 type UpstreamIn struct {
-	Name              string            `json:"name"`
-	BaseURL           string            `json:"base_url"`
-	APIKey            *string           `json:"api_key"`
-	ModelNames        []string          `json:"model_names"`
-	ModelPrefixes     []string          `json:"model_prefixes"`
-	ModelMappings     map[string]string `json:"model_mappings"`
+	Name          string            `json:"name"`
+	BaseURL       string            `json:"base_url"`
+	APIKey        *string           `json:"api_key"`
+	ModelNames    []string          `json:"model_names"`
+	ModelPrefixes []string          `json:"model_prefixes"`
+	ModelMappings map[string]string `json:"model_mappings"`
+	// EffortMappings rewrites the reasoning effort a downstream request asked
+	// for into the value this channel's upstream should be sent, keyed by the
+	// downstream value in lower case ("max" -> "xhigh"). An effort with no
+	// entry here is forwarded unchanged.
+	EffortMappings    map[string]string `json:"effort_mappings"`
 	Priority          int32             `json:"priority"`
 	Weight            int64             `json:"weight"`
 	AutoWeightEnabled bool              `json:"auto_weight_enabled"`
@@ -54,6 +60,7 @@ func DefaultUpstreamIn() UpstreamIn {
 		ModelNames:        []string{},
 		ModelPrefixes:     []string{},
 		ModelMappings:     map[string]string{},
+		EffortMappings:    map[string]string{},
 		Priority:          100,
 		Weight:            100,
 		AutoWeightEnabled: true,
@@ -107,6 +114,58 @@ func (u *UpstreamIn) Validate() error {
 	if _, err := u.NormalizedRateLimit(); err != nil {
 		return err
 	}
+	if err := u.normalizeEffortMappings(); err != nil {
+		return err
+	}
+	return nil
+}
+
+const (
+	// EffortMappingMaxEntries bounds how many effort rewrites a channel stores.
+	// The set of efforts any provider accepts is small, so a larger table is a
+	// mistake rather than a configuration.
+	EffortMappingMaxEntries = 32
+	// EffortValueMaxChars bounds one side of an effort rewrite.
+	EffortValueMaxChars = 32
+)
+
+// normalizeEffortMappings trims the stored rewrites and lower-cases their keys,
+// so a request asking for "MAX" is matched by an entry written as "max".
+//
+// The value keeps the case it was written in: it goes upstream verbatim, and
+// providers do accept mixed-case effort names.
+func (u *UpstreamIn) normalizeEffortMappings() error {
+	if len(u.EffortMappings) == 0 {
+		return nil
+	}
+	if len(u.EffortMappings) > EffortMappingMaxEntries {
+		return ErrString("effort_mappings must have at most 32 entries")
+	}
+
+	normalized := make(map[string]string, len(u.EffortMappings))
+	for from, to := range u.EffortMappings {
+		key := strings.ToLower(strings.TrimSpace(from))
+		value := strings.TrimSpace(to)
+		// An empty side is dropped rather than refused: the console sends the
+		// whole table on every save, and a half-typed row should not block the
+		// rest of the form from being stored.
+		if key == "" || value == "" {
+			continue
+		}
+		if utf8.RuneCountInString(key) > EffortValueMaxChars ||
+			utf8.RuneCountInString(value) > EffortValueMaxChars {
+			return ErrString("effort_mappings values must be at most 32 characters")
+		}
+		if strings.ContainsFunc(key, unicode.IsControl) ||
+			strings.ContainsFunc(value, unicode.IsControl) {
+			return ErrString("effort_mappings must not contain control characters")
+		}
+		if existing, present := normalized[key]; present && existing != value {
+			return ErrString("effort_mappings has conflicting entries for " + key)
+		}
+		normalized[key] = value
+	}
+	u.EffortMappings = normalized
 	return nil
 }
 
@@ -168,6 +227,9 @@ func (u *UpstreamIn) Normalize() {
 	if u.ModelMappings == nil {
 		u.ModelMappings = map[string]string{}
 	}
+	if u.EffortMappings == nil {
+		u.EffortMappings = map[string]string{}
+	}
 	if u.ExtraHeaders == nil {
 		u.ExtraHeaders = map[string]string{}
 	}
@@ -224,6 +286,7 @@ type UpstreamOut struct {
 	ModelNames                     []string          `json:"model_names"`
 	ModelPrefixes                  []string          `json:"model_prefixes"`
 	ModelMappings                  map[string]string `json:"model_mappings"`
+	EffortMappings                 map[string]string `json:"effort_mappings"`
 	Priority                       int32             `json:"priority"`
 	Weight                         int64             `json:"weight"`
 	AutoWeightEnabled              bool              `json:"auto_weight_enabled"`
@@ -253,6 +316,7 @@ type ChannelExportItem struct {
 	ModelNames        []string          `json:"model_names"`
 	ModelPrefixes     []string          `json:"model_prefixes"`
 	ModelMappings     map[string]string `json:"model_mappings"`
+	EffortMappings    map[string]string `json:"effort_mappings,omitempty"`
 	Priority          int32             `json:"priority"`
 	Weight            int64             `json:"weight"`
 	AutoWeightEnabled bool              `json:"auto_weight_enabled"`
@@ -310,6 +374,7 @@ type UpstreamDetailOut struct {
 	ModelNames                     []string          `json:"model_names"`
 	ModelPrefixes                  []string          `json:"model_prefixes"`
 	ModelMappings                  map[string]string `json:"model_mappings"`
+	EffortMappings                 map[string]string `json:"effort_mappings"`
 	Priority                       int32             `json:"priority"`
 	Weight                         int64             `json:"weight"`
 	AutoWeightEnabled              bool              `json:"auto_weight_enabled"`

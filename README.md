@@ -31,7 +31,8 @@ an admin console for day-to-day operations.
   `x-api-key` and `anthropic-version` headers and forwards them to
   Anthropic-compatible upstreams.
 - 🛣️ **Multi-upstream aggregation:** configure channels with base URLs, provider API
-  keys, model names, model mappings, model prefixes, and per-channel headers.
+  keys, model names, model mappings, model prefixes, reasoning-effort mappings,
+  and per-channel headers.
 - 🧭 **Routing controls:** select by `X-WildToken-Upstream`, `?upstream=`, exact model
   mappings, model names, prefixes, priority layers, weighted random choice, and
   automatic health-based effective weight.
@@ -249,6 +250,29 @@ Filter models to one channel:
 curl 'http://127.0.0.1:3100/v1/models?upstream=openai' \
   -H 'Authorization: Bearer <DOWNSTREAM_TOKEN>'
 ```
+
+## 🧠 Reasoning Effort Mapping
+
+Providers do not agree on which reasoning efforts exist, so a channel can
+translate the effort a client asked for into one its upstream accepts. Configure
+it per channel under **Advanced settings**, one rewrite per line:
+
+```text
+max => xhigh
+```
+
+A request asking for `max` reaches that upstream asking for `xhigh`. An effort
+with no entry is forwarded unchanged, and the match ignores case.
+
+All three shapes a request can state its effort in are rewritten: the top-level
+`reasoning_effort`, the nested `reasoning.effort`, and the nested
+`output_config.effort`. Everything beside the effort — `thinking`, `verbosity`,
+`summary` — is left as the client sent it.
+
+Logs record all three stages: the effort the client asked for, the effort
+actually sent upstream, and the effort the response reported. Consecutive
+duplicates collapse, so a request that was not rewritten still shows a single
+value, while a rewritten one reads as `max ↳ xhigh`.
 
 ## 🧾 Header Overrides
 

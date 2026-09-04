@@ -103,6 +103,11 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// NULL means the channel is not rate-limited; the stored shape is the
 		// operator's expression ("100/m"), mirroring api_tokens.rate_limit.
 		{"rate_limit", "TEXT"},
+		// Reasoning-effort rewrites, as a JSON object keyed by the downstream
+		// value in lower case ({"max":"xhigh"}). The default is an empty object
+		// so a row created by an older schema reads as "forward unchanged"
+		// rather than as a JSON parse failure.
+		{"effort_mappings", "TEXT NOT NULL DEFAULT '{}'"},
 	} {
 		if err := ensureColumn(ctx, db, "upstreams", column.name, column.definition); err != nil {
 			return err
@@ -112,6 +117,10 @@ func Init(ctx context.Context, db *sql.DB) error {
 	for _, column := range []struct{ name, definition string }{
 		{"request_model", "TEXT"},
 		{"upstream_model", "TEXT"},
+		// The effort actually sent upstream, which differs from reasoning_effort
+		// only when the channel's effort mapping rewrote it. NULL means "the
+		// same as the request asked for".
+		{"upstream_reasoning_effort", "TEXT"},
 		{"prompt_cached_tokens", "INTEGER"},
 		{"cache_creation_tokens", "INTEGER"},
 		{"completion_reasoning_tokens", "INTEGER"},

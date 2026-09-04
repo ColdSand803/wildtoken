@@ -974,8 +974,9 @@ html[data-theme] .dashboard-date-field input[type="date"],
   text-align: center;
 }
 
+/* 只报高度就够：height 由 .ops-bar-track 从这个变量取，端头的地板宽也跟着走。 */
 .dashboard-chart .ops-bar-track {
-  height: 14px;
+  --wt-segbar-height: 14px;
 }
 
 .dashboard-chart .ops-chart-svg,

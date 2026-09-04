@@ -248,7 +248,9 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
    （.wt-segbar）的默认，这条只管皮肤——高度、圆角、底色。 */
 .ops-bar-track {
   display: flex;
-  height: 12px;
+  /* 高度经 --wt-segbar-height 报给公共组件，端头的圆角地板宽从它算。 */
+  --wt-segbar-height: 12px;
+  height: var(--wt-segbar-height);
   overflow: hidden;
   border-radius: 999px;
   background: var(--panel-muted);
@@ -515,14 +517,17 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 
 /* 瀑布条。悬浮时会纵向放大 1.25 倍（公共组件负责），6px 高的条放大后几乎看不出
    来，所以抬到 10px；overflow 也不能再裁，否则放大的部分被切掉。
-   圆角靠首尾两段的 border-radius: inherit 收边（见 components.css）。 */
+   圆角靠首尾两段的 border-radius: inherit 收边（见 components.css）。
+   这里不设 gap，与看板的 .ops-bar-track 一致：段间留缝时轨道底色会从缝里透出来，
+   看着像数据里多了一个极窄的分段，实际什么也不表示。无缝是公共分段条
+   （.wt-segbar）的默认，需要格子感的调用方才自己加 gap（见 .status-error-strip）。 */
 .log-detail-timing-bar {
   display: flex;
-  height: 10px;
+  --wt-segbar-height: 10px;
+  height: var(--wt-segbar-height);
   border-radius: 999px;
   background: var(--panel-muted);
   margin-top: 6px;
-  gap: 1px;
 }
 
 /* 撑满轨道是"瀑布条的段"才需要的几何，所以归到基类。

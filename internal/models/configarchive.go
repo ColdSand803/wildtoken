@@ -105,18 +105,24 @@ type ConfigArchiveChannel struct {
 	BaseURL string `json:"base_url"`
 	// APIKey is present only in an archive exported with secrets, which requires a
 	// password — so a key is never written to disk in the clear by this endpoint.
-	APIKey            *string           `json:"api_key,omitempty"`
-	ModelNames        []string          `json:"model_names"`
-	ModelPrefixes     []string          `json:"model_prefixes"`
-	ModelMappings     map[string]string `json:"model_mappings"`
-	Priority          int32             `json:"priority"`
-	Weight            int64             `json:"weight"`
-	AutoWeightEnabled bool              `json:"auto_weight_enabled"`
-	Enabled           bool              `json:"enabled"`
-	ExtraHeaders      map[string]string `json:"extra_headers"`
-	TimeoutSeconds    float64           `json:"timeout_seconds"`
-	RateLimit         *string           `json:"rate_limit,omitempty"`
-	GroupNames        []string          `json:"group_names"`
+	APIKey        *string           `json:"api_key,omitempty"`
+	ModelNames    []string          `json:"model_names"`
+	ModelPrefixes []string          `json:"model_prefixes"`
+	ModelMappings map[string]string `json:"model_mappings"`
+	// EffortMappings is a pointer so that an archive written before channels
+	// carried effort rewrites is distinguishable from one that carries none. A
+	// missing field leaves an existing channel's rewrites alone on import; an
+	// empty object clears them. Without that distinction, importing any older
+	// archive would silently wipe the rewrites off every channel it touched.
+	EffortMappings    *map[string]string `json:"effort_mappings,omitempty"`
+	Priority          int32              `json:"priority"`
+	Weight            int64              `json:"weight"`
+	AutoWeightEnabled bool               `json:"auto_weight_enabled"`
+	Enabled           bool               `json:"enabled"`
+	ExtraHeaders      map[string]string  `json:"extra_headers"`
+	TimeoutSeconds    float64            `json:"timeout_seconds"`
+	RateLimit         *string            `json:"rate_limit,omitempty"`
+	GroupNames        []string           `json:"group_names"`
 }
 
 // ConfigArchiveToken is one downstream credential's policy.

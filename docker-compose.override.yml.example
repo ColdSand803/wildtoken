@@ -1,0 +1,22 @@
+# 本机专用的 Compose 覆盖层，复制成 docker-compose.override.yml 后按需修改。
+# 该文件不进版本库，用来存放只对某一台机器有效、或不适合公开的配置
+# （内网 DNS、内网地址、本地端口等）。
+#
+# Compose 会自动加载 docker-compose.override.yml，所以照常执行即可：
+#
+#   docker compose up -d
+#
+# 想让它显式一些、不自动生效，可以改名为 docker-compose.local.yml，
+# 每次启动时手动指定（顺序不能反）：
+#
+#   docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
+#
+# 覆盖层缺失时容器只会用主文件里的公共 DNS：外网上游仍然正常，
+# 只是内网域名解析不到，属于静默降级，排查时留意这一点。
+
+services:
+  wildtoken:
+    # 主文件已配置 1.1.1.1 与 8.8.8.8；Compose 会把两边的列表拼接，
+    # 所以这里只需补充内网 DNS，它会排在公共解析器之后作为兜底。
+    dns:
+      - 10.0.0.1

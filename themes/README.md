@@ -99,6 +99,15 @@ html[data-theme="soul-society"] .topbar {
 颜色、让 `.log-rpm` 那颗药丸改用 `--accent-soft` 平铺。两个 `anthropic*` 多一条，把
 `.topbar-brand h1` 和 `.panel h2` 换成衬线字体，其余全交给基础样式。
 
+`co1dsand-light/`、`co1dsand-dark/`（凉砂·日／凉砂·夜，改编自 antfu.me，纸面留白与近黑
+纸面各一套；两套都没有品牌色，最深／最亮的那档墨就是强调色）走的也是这条路线：纯变量表
+加少量结构覆盖，全程 CSS-only。它们没跟着改左侧竖排导航，顶栏那排横向导航原样留着，只
+把胶囊圆角收成方角、把非当前项压到 `opacity: 0.6`——这套风格的层级基本全靠墨色深浅和不
+透明度拉开，不换色相。别的结构规则只有两类：`.aurora` 整块 `display: none`（比把颜色调
+成透明更省三层模糊的合成开销），以及品牌位——`.brand-mark` 里原来那个 SVG 藏掉，换成一
+枚 SVG `mask` 扫过式标记，一条渐变边沿在字形上来回擦过；默认态停在画完的位置，
+`prefers-reduced-motion` 和打印下动画整条关掉。
+
 想改得更彻底可以参考 `ark/`（工业信息风，青色只用来标选中、焦点、进度和主操作）、
 `endfield/`（工程现场风，浅工作面 + 信号黄）和 `gojo/`（角色主题，用
 `.view[data-view="…"]` 逐视图换一个 `--gojo-view-mark` 汉字水印，由

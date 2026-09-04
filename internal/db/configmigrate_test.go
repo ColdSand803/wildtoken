@@ -788,3 +788,132 @@ func TestAFullRoundTripReproducesTheSourcesConfiguration(t *testing.T) {
 		t.Errorf("limit_tokens = %v, want 10M", migrated.LimitTokens)
 	}
 }
+
+// TestEffortMappingsSurviveAMigration, because they are part of how a channel is
+// configured. The column was added after the migration format existed, so the
+// archive had to grow a field to carry it; without that, exporting and importing
+// a channel quietly dropped its rewrites.
+func TestEffortMappingsSurviveAMigration(t *testing.T) {
+	source := migrationDB(t, "source")
+	timeout := 300.0
+	key := "sk-primary"
+	if _, err := CreateUpstream(context.Background(), source, &models.UpstreamIn{
+		Name: "primary", BaseURL: "https://primary.example/v1", APIKey: &key,
+		ModelNames: []string{"gpt-4o"}, Priority: 100, Weight: 100, Enabled: true,
+		EffortMappings: map[string]string{"high": "medium", "medium": "low"},
+		TimeoutSeconds: &timeout, GroupIDs: []int64{models.DefaultGroupID},
+	}, 300); err != nil {
+		t.Fatalf("create channel: %v", err)
+	}
+
+	payload := mustExport(t, source, true)
+	if payload.Channels[0].EffortMappings == nil {
+		t.Fatal("the export carried no effort mappings at all")
+	}
+	if got := (*payload.Channels[0].EffortMappings)["high"]; got != "medium" {
+		t.Errorf("exported high -> %q, want medium", got)
+	}
+
+	target := migrationDB(t, "target")
+	if response := mustImport(t, target, payload, importOptions()); !response.Applied {
+		t.Fatalf("import failed: %+v", response)
+	}
+
+	rows, err := ListUpstreamRows(context.Background(), target)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("channels after import: %d", len(rows))
+	}
+	out, err := RowToUpstreamOut(&rows[0])
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.EffortMappings["high"] != "medium" || out.EffortMappings["medium"] != "low" {
+		t.Errorf("imported mappings = %v, want the source's two rewrites", out.EffortMappings)
+	}
+}
+
+// TestAnArchiveWithoutEffortMappingsLeavesTheTargetsAlone, so importing a config
+// exported by an older build does not wipe rewrites it never knew about. The
+// field is a pointer for exactly this: absent means "said nothing", an empty
+// object means "clear them".
+func TestAnArchiveWithoutEffortMappingsLeavesTheTargetsAlone(t *testing.T) {
+	source := migrationDB(t, "source")
+	createChannelIn(t, source, "openai", []int64{models.DefaultGroupID})
+	payload := mustExport(t, source, true)
+	// What an archive written before the column existed looks like.
+	payload.Channels[0].EffortMappings = nil
+
+	target := migrationDB(t, "target")
+	timeout := 300.0
+	key := "sk-openai"
+	if _, err := CreateUpstream(context.Background(), target, &models.UpstreamIn{
+		Name: "openai", BaseURL: "https://openai.example/v1", APIKey: &key,
+		ModelNames: []string{"gpt-4o"}, Priority: 100, Weight: 100, Enabled: true,
+		EffortMappings: map[string]string{"high": "low"},
+		TimeoutSeconds: &timeout, GroupIDs: []int64{models.DefaultGroupID},
+	}, 300); err != nil {
+		t.Fatalf("create target channel: %v", err)
+	}
+
+	options := importOptions()
+	options.OnConflict = models.ConfigConflictOverwrite
+	if response := mustImport(t, target, payload, options); !response.Applied {
+		t.Fatalf("import failed: %+v", response)
+	}
+
+	rows, err := ListUpstreamRows(context.Background(), target)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	out, err := RowToUpstreamOut(&rows[0])
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.EffortMappings["high"] != "low" {
+		t.Errorf("mappings = %v, want the target's own rewrite left in place",
+			out.EffortMappings)
+	}
+}
+
+// TestAnEmptyEffortMappingsObjectClearsTheTargets, the other half of the pointer:
+// an archive that explicitly carries none is an instruction, not silence.
+func TestAnEmptyEffortMappingsObjectClearsTheTargets(t *testing.T) {
+	source := migrationDB(t, "source")
+	createChannelIn(t, source, "openai", []int64{models.DefaultGroupID})
+	payload := mustExport(t, source, true)
+	empty := map[string]string{}
+	payload.Channels[0].EffortMappings = &empty
+
+	target := migrationDB(t, "target")
+	timeout := 300.0
+	key := "sk-openai"
+	if _, err := CreateUpstream(context.Background(), target, &models.UpstreamIn{
+		Name: "openai", BaseURL: "https://openai.example/v1", APIKey: &key,
+		ModelNames: []string{"gpt-4o"}, Priority: 100, Weight: 100, Enabled: true,
+		EffortMappings: map[string]string{"high": "low"},
+		TimeoutSeconds: &timeout, GroupIDs: []int64{models.DefaultGroupID},
+	}, 300); err != nil {
+		t.Fatalf("create target channel: %v", err)
+	}
+
+	options := importOptions()
+	options.OnConflict = models.ConfigConflictOverwrite
+	if response := mustImport(t, target, payload, options); !response.Applied {
+		t.Fatalf("import failed: %+v", response)
+	}
+
+	rows, err := ListUpstreamRows(context.Background(), target)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	out, err := RowToUpstreamOut(&rows[0])
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(out.EffortMappings) != 0 {
+		t.Errorf("mappings = %v, want cleared", out.EffortMappings)
+	}
+}

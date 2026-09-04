@@ -306,7 +306,6 @@ html[data-theme="ark"] .topbar-actions .live-indicator {
   align-items: center;
   border-bottom: 1px solid var(--ark-rule);
   border-radius: 0;
-  display: flex;
   justify-content: center;
   min-height: 28px;
   padding: 0 2px 6px;

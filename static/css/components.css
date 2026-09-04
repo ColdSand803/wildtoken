@@ -29,6 +29,10 @@
   gap: 0;
   min-width: 0;
   position: relative;
+  /* 端头收成半圆所需的最小段宽，见下面的 :first-child / :last-child。
+     药丸轨道只报自己的高度，半宽由这里算——高度改了圆角跟着改，不会漂。
+     方角轨道不报，cap 就是 0，什么也不变。 */
+  --wt-segbar-cap: calc(var(--wt-segbar-height, 0px) / 2);
 }
 
 .wt-segbar-seg {
@@ -65,6 +69,16 @@
 .wt-segbar-seg:last-child {
   border-end-end-radius: inherit;
   border-start-end-radius: inherit;
+}
+
+/* 收边靠 inherit 拿到轨道那个 999px，而浏览器会按每段自己的盒子把半径夹回去，
+   夹到的是 min(半高, 段宽)。宽段够高，收成半圆；末段只剩几个像素时就只能收成
+   一个小圆角——同一条的左右两头于是一边是圆的、一边是圆角矩形。
+   给端头一个等于半高的地板宽，夹紧就只由高度说话，两头必然一样。
+   顺带解决另一件事：0.9px 宽的段本来就点不中，它却是可点的。 */
+.wt-segbar-seg:first-child,
+.wt-segbar-seg:last-child {
+  min-width: var(--wt-segbar-cap);
 }
 
 /* ── 公共悬浮卡 ────────────────────────────────────────────
@@ -437,9 +451,11 @@ html[data-density="compact"] .wt-seg-btn {
   color: var(--text);
 }
 
+/* 墨色走 --accent-on，不写死白：主题的 --accent 不一定是深色。凉砂·夜的
+   accent 是近白的 #f0f0f0，白字压上去整个按钮就是一片白。 */
 .view-toggle-btn[aria-pressed="true"] {
   background: var(--accent);
-  color: white;
+  color: var(--accent-on);
 }
 
 /* ── Channel cards grid ─────────────────────────────────── */
@@ -783,9 +799,10 @@ html[data-density="compact"] .wt-seg-btn {
   margin-top: auto;
 }
 
+/* 同上：底色是 --accent，墨色就得是 --accent-on。 */
 .channel-card-action:hover {
   background: var(--accent);
-  color: white;
+  color: var(--accent-on);
   border-color: var(--accent);
 }
 
@@ -854,5 +871,197 @@ html[data-density="compact"] .wt-seg-btn {
 
   .channel-card:hover {
     transform: none;
+  }
+}
+
+/* 凉砂主题的品牌标记 —— 平时不显示。
+   这条不带主题前缀是刻意的：`.brand-mark svg` 在 base.css 里是 display: block，
+   两个标记会一起画出来。要在「其它主题下」藏住它，规则就必须活在主题作用域之外；
+   写进任一主题包只在那套主题激活时生效，等于没写。凉砂自己再把它显示回来。 */
+.brand-mark .co1dsand-logo {
+  display: none;
+}
+
+/* ── 凉砂标记的笔顺书写 ────────────────────────────────────────
+   同样不带主题前缀，理由同上：这套机制是标记自身的行为，与配色无关，两套凉砂
+   逐字相同。写进主题包就得复制两份、日夜各一，早晚漂移。这些选择器只存在于
+   .co1dsand-logo 内部，其它主题下整个 SVG 是 display: none，动画不会跑。
+   墨色由各主题包的 .co1dsand-logo-ink { fill } 决定。
+
+   静止值就是写完的样子：dashoffset 为 0、settle 全显、ink 不透明。动画一旦被
+   关掉（下面两条 @media），标记是完整的，不是缺一半。
+
+   每一笔的 dash 长度与它在周期里占的时间窗由 antfu 的 scripts/logo-skeleton.py
+   生成，逐字照搬。时间按弧长比例分配，笔速才是匀速；窗口之间的空档是提笔。 */
+.co1dsand-nib-0 {
+  stroke-dasharray: 176.8;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-0 13s linear infinite both;
+}
+
+.co1dsand-nib-1 {
+  stroke-dasharray: 109.3;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-1 13s linear infinite both;
+}
+
+.co1dsand-nib-2 {
+  stroke-dasharray: 183.67;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-2 13s linear infinite both;
+}
+
+.co1dsand-nib-3 {
+  stroke-dasharray: 81.63;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-3 13s linear infinite both;
+}
+
+.co1dsand-nib-4 {
+  stroke-dasharray: 112.54;
+  stroke-dashoffset: 0;
+  animation: co1dsand-nib-4 13s linear infinite both;
+}
+
+/* 中心线到不了的那约 1.5% 墨，末笔落定后补上。在不可见的窗口里复位，
+   下一轮才从白纸开始，而不是把自己「反着擦掉」。 */
+.co1dsand-logo-settle {
+  opacity: 1;
+  animation: co1dsand-logo-settle 13s linear infinite both;
+}
+
+/* 写完的标记停住，然后淡出；mask 趁不可见时回卷。 */
+.co1dsand-logo-ink {
+  animation: co1dsand-logo-cycle 13s linear infinite both;
+}
+
+/* 每一笔先按未写的状态等着，在自己的窗口里走完，然后一直保持写完，直到墨迹淡出。
+   刻意用 linear：节奏靠窗口间距表达，不靠缓动曲线。 */
+@keyframes co1dsand-nib-0 {
+  0%,
+  3% {
+    stroke-dashoffset: 176.8;
+  }
+  20.1%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 176.8;
+  }
+}
+
+@keyframes co1dsand-nib-1 {
+  0%,
+  21.3% {
+    stroke-dashoffset: 109.3;
+  }
+  31.87%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 109.3;
+  }
+}
+
+@keyframes co1dsand-nib-2 {
+  0%,
+  33.07% {
+    stroke-dashoffset: 183.67;
+  }
+  50.84%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 183.67;
+  }
+}
+
+@keyframes co1dsand-nib-3 {
+  0%,
+  52.04% {
+    stroke-dashoffset: 81.63;
+  }
+  59.92%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 81.63;
+  }
+}
+
+@keyframes co1dsand-nib-4 {
+  0%,
+  61.12% {
+    stroke-dashoffset: 112.54;
+  }
+  72%,
+  97.5% {
+    stroke-dashoffset: 0;
+  }
+  99.9%,
+  100% {
+    stroke-dashoffset: 112.54;
+  }
+}
+
+/* 末笔刚落就把中心线漏掉的墨补齐。 */
+@keyframes co1dsand-logo-settle {
+  0%,
+  72% {
+    opacity: 0;
+  }
+  76%,
+  97.5% {
+    opacity: 1;
+  }
+  99.9%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes co1dsand-logo-cycle {
+  0%,
+  94% {
+    opacity: 1;
+  }
+  97.5%,
+  99.9% {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .co1dsand-nib-0,
+  .co1dsand-nib-1,
+  .co1dsand-nib-2,
+  .co1dsand-nib-3,
+  .co1dsand-nib-4,
+  .co1dsand-logo-settle,
+  .co1dsand-logo-ink {
+    animation: none;
+  }
+}
+
+@media print {
+  .co1dsand-nib-0,
+  .co1dsand-nib-1,
+  .co1dsand-nib-2,
+  .co1dsand-nib-3,
+  .co1dsand-nib-4,
+  .co1dsand-logo-settle,
+  .co1dsand-logo-ink {
+    animation: none;
   }
 }

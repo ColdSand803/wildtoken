@@ -512,6 +512,11 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
+		effortMappings, err := parseJSONMap(row.EffortMappings, "effort_mappings")
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 
 		extraHeaders, err := parseExtraHeaders(row.ExtraHeaders)
 		if err != nil {
@@ -542,6 +547,7 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 			ModelNames:                     modelNames,
 			ModelPrefixes:                  modelPrefixes,
 			ModelMappings:                  modelMappings,
+			EffortMappings:                 effortMappings,
 			Priority:                       row.Priority,
 			Weight:                         row.Weight,
 			AutoWeightEnabled:              row.AutoWeightEnabled == 1,
@@ -1729,6 +1735,7 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 				ModelNames:        out.ModelNames,
 				ModelPrefixes:     out.ModelPrefixes,
 				ModelMappings:     out.ModelMappings,
+				EffortMappings:    out.EffortMappings,
 				Priority:          out.Priority,
 				Weight:            out.Weight,
 				AutoWeightEnabled: out.AutoWeightEnabled,
@@ -1790,6 +1797,7 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 				ModelNames:        item.ModelNames,
 				ModelPrefixes:     item.ModelPrefixes,
 				ModelMappings:     item.ModelMappings,
+				EffortMappings:    item.EffortMappings,
 				Priority:          item.Priority,
 				Weight:            item.Weight,
 				AutoWeightEnabled: item.AutoWeightEnabled,
