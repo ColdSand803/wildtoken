@@ -95,9 +95,18 @@ html[data-theme="co1dsand-light"] {
   --font-sans: "Inter", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", "Source Han Sans SC", system-ui, sans-serif;
 }
 
-/* 渐变色团整块拿掉，而不只是把颜色调成透明——省掉三个模糊层的合成开销。 */
+/* 渐变色团整块拿掉，而不只是把颜色调成透明——省掉三个模糊层的合成开销。
+   底改用梅枝：aurora 是三团模糊色斑，跟这个包的零光晕、纯灰阶对不上；梅枝是
+   线条，和标记的笔顺是同一种语言。 */
 html[data-theme="co1dsand-light"] .aurora {
   display: none;
+}
+
+/* 墨色两套凉砂共用一个值 —— 灰 136 配 15% 不透明度，就是 antfu 那边的
+   #88888825。日夜都用它：136 这档灰在近黑纸面和近白纸面上都不抢戏，翻色反而
+   会让其中一版发脏。骨架见 base.css 的 .plum，生长见 static/js/plum.js。 */
+html[data-theme="co1dsand-light"] {
+  --plum-ink: rgb(136 136 136 / 15%);
 }
 
 /* 选中态也用那个半透明灰。 */

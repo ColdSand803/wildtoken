@@ -77,6 +77,9 @@
       <span class="aurora-blob aurora-b"></span>
       <span class="aurora-blob aurora-c"></span>
     </div>
+    <!-- 梅枝背景层，与 aurora 并列的另一种装饰底。默认 hidden，由 plum.js 按主题
+         开关：只有凉砂两包用它。 -->
+    <div class="plum" aria-hidden="true" hidden><canvas></canvas></div>
     <div class="app-shell">
       <nav class="topbar">
         <div class="topbar-brand">
@@ -1600,6 +1603,8 @@
     <script src="/static/js/models.js"></script>
     <script src="/static/js/tokens.js"></script>
     <script src="/static/js/groups.js"></script>
+    <!-- events.js 的 applyTheme 会调 syncPlumLayer，得先定义。 -->
+    <script src="/static/js/plum.js"></script>
     <script src="/static/js/events.js"></script>
   </body>
 </html>

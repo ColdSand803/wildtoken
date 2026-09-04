@@ -254,6 +254,31 @@ body {
   will-change: transform;
 }
 
+/* ── 梅枝背景层 ──────────────────────────────────────────
+   与 aurora 同一层位（fixed 铺满、z-index 0，压在 .app-shell 的 z-index 1 之
+   下）。骨架和几何在这里，画不画由 plum.js 按主题决定，墨色由主题包给
+   --plum-ink。别的主题下它是 hidden，一行 CSS 之外不花任何代价。 */
+.plum {
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  z-index: 0;
+  /* 中心透明、边缘不透明 —— 遮罩是把中间擦掉，枝条只留在四周，正文区域干净。
+     方向容易看反：这里 transparent 那一端才是被抹掉的地方。 */
+  mask-image: radial-gradient(circle, transparent, black);
+  -webkit-mask-image: radial-gradient(circle, transparent, black);
+}
+
+.plum canvas {
+  display: block;
+}
+
+@media print {
+  .plum {
+    display: none;
+  }
+}
+
 .aurora-a {
   width: min(52vw, 560px);
   height: min(52vw, 560px);
