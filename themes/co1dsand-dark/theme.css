@@ -119,8 +119,9 @@ html[data-theme="co1dsand-dark"] .nav-link.active {
   opacity: 1;
 }
 
-/* 品牌位换成凉砂的标记，墨色由 --text 自己翻过来。
-   @keyframes 与日版同名同内容——两套主题永不同时激活，重复定义无副作用。 */
+/* 品牌位换成凉砂的标记。base.css 给 .brand-mark 挂了
+   `filter: drop-shadow(0 0 10px var(--accent-glow))`，--accent-glow 已经是
+   transparent，所以这里不必再处理光晕。 */
 html[data-theme="co1dsand-dark"] .brand-mark > svg:first-child {
   display: none;
 }
@@ -129,39 +130,574 @@ html[data-theme="co1dsand-dark"] .brand-mark .co1dsand-logo {
   display: block;
 }
 
+/* 只管墨色。笔顺书写的那套机制（中心线 dash、收笔淡入、13 秒周期）与配色无关，
+   放在 components.css 里和默认隐藏那条并列 —— 两套凉砂逐字相同的东西留一份，
+   免得日夜两版漂移。 */
 html[data-theme="co1dsand-dark"] .co1dsand-logo-ink {
   fill: var(--text);
   fill-rule: nonzero;
 }
 
-html[data-theme="co1dsand-dark"] .co1dsand-logo-sweep {
-  transform: translateX(70.7px);
-  animation: co1dsand-logo-draw 10s ease-in-out infinite both;
+/* 开关滑块：同凉砂·日，墨色由 token 自己翻过来。夜版白滑块在近黑轨道上
+   本来就够（19.56:1），但开启态落到 --ok 的亮绿上只剩 2.22:1 —— 两套用
+   同一组 token 才能保证日夜切换时开关的手感一致。关闭 7.48:1，开启 9.17:1。 */
+html[data-theme="co1dsand-dark"] .status-switch-thumb {
+  background: var(--muted-strong);
+  box-shadow: none;
 }
 
-@keyframes co1dsand-logo-draw {
-  0%,
-  4% {
-    transform: translateX(-58.3px);
-  }
-  42%,
-  86% {
-    transform: translateX(70.7px);
-  }
-  98%,
-  to {
-    transform: translateX(-58.3px);
+html[data-theme="co1dsand-dark"] .status-switch.on .status-switch-thumb {
+  background: var(--accent-on);
+}
+
+/* 配额徽章：同凉砂·日，收掉紫色相。夜版墨色 13.65:1。 */
+html[data-theme="co1dsand-dark"] .quota-period-badge {
+  background: var(--neutral-chip);
+  border-color: var(--line);
+  color: var(--text);
+}
+
+/* ── 侧边轨道 ──────────────────────────────────────────────
+   base.css 的 .topbar 是横排顶栏，这里翻成竖排左轨，骨架与几何全部对齐内置的
+   深色/浅色控制台：同样的 118px 宽、同样的「图标 + 标签」行、同样的竖排居中
+   品牌区。antfu.me 本身是顶部横排，但那是一个博客的五个链接；控制台有 6 个视图
+   加 3 个动作，竖排才放得下完整标签。轨道底色比纸面沉一档，靠一条发丝线收边
+   —— 不用毛玻璃，本包零模糊。
+
+   图标那 8 个 data URI 是从 console-rail.css 抄来的：那份文件把选择器写死在两个
+   内置主题上，主题包各自带自己的轨道，sakura-mist、anthropic 两套也都是这么抄的。
+
+   118px 装得下最宽的一行：14px 左缩进、16px 图标、9px 间距、13px 的两字标签、
+   10px 尾部留白，合计 75px，余量留给标签而不是把它顶到边上。这个宽度也够
+   「WildToken」在下面那档缩小后的品牌字号里排开。 */
+html[data-theme="co1dsand-dark"] {
+  --co1dsand-rail-width: 118px;
+  --rail-icon-dashboard: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3.5' y='3.5' width='7' height='7' rx='1.6'/%3E%3Crect x='13.5' y='3.5' width='7' height='7' rx='1.6'/%3E%3Crect x='3.5' y='13.5' width='7' height='7' rx='1.6'/%3E%3Crect x='13.5' y='13.5' width='7' height='7' rx='1.6'/%3E%3C/svg%3E");
+  --rail-icon-upstreams: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='5.5' cy='12' r='2.3'/%3E%3Ccircle cx='18.5' cy='6' r='2.3'/%3E%3Ccircle cx='18.5' cy='18' r='2.3'/%3E%3Cpath d='M7.6 11 16.4 6.9M7.6 13l8.8 4.1'/%3E%3C/svg%3E");
+  --rail-icon-logs: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 6.5h15M4.5 12h15M4.5 17.5h10'/%3E%3C/svg%3E");
+  --rail-icon-tokens: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='7' cy='12' r='3.4'/%3E%3Cpath d='M10.4 12h10.1M17.6 12v3.4M14.2 12v2.8'/%3E%3C/svg%3E");
+  --rail-icon-groups: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='8.4'/%3E%3Ccircle cx='9.2' cy='10.2' r='1.5'/%3E%3Ccircle cx='14.8' cy='10.2' r='1.5'/%3E%3Ccircle cx='12' cy='15.2' r='1.5'/%3E%3C/svg%3E");
+  --rail-icon-settings: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7.5h9M17.5 7.5h2.5M4 16.5h3.5M12 16.5h8'/%3E%3Ccircle cx='15.2' cy='7.5' r='2.2'/%3E%3Ccircle cx='9.7' cy='16.5' r='2.2'/%3E%3C/svg%3E");
+  --rail-icon-density: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12h16M8 4.6 12 8.6l4-4M8 19.4 12 15.4l4 4'/%3E%3C/svg%3E");
+  --rail-icon-logout: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23000' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9.5 20H5.6A1.6 1.6 0 0 1 4 18.4V5.6A1.6 1.6 0 0 1 5.6 4h3.9M14.8 8.2 18.6 12l-3.8 3.8M18.6 12H9.4'/%3E%3C/svg%3E");
+  --rail-icon-box: 16px;
+  --rail-icon-foot: 14px;
+  --rail-gap: 9px;
+}
+
+html[data-theme="co1dsand-dark"] .app-shell {
+  display: grid;
+  grid-template-columns: var(--co1dsand-rail-width) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow: hidden;
+}
+
+@media (min-width: 761px) {
+  html[data-theme="co1dsand-dark"],
+  html[data-theme="co1dsand-dark"] body {
+    height: 100%;
+    overflow: hidden;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  html[data-theme="co1dsand-dark"] .co1dsand-logo-sweep {
-    animation: none;
+html[data-theme="co1dsand-dark"] .topbar {
+  align-items: stretch;
+  background: var(--panel-subtle);
+  border: 0;
+  border-right: 1px solid var(--line);
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  grid-column: 1;
+  grid-row: 1;
+  height: 100dvh;
+  justify-content: flex-start;
+  min-height: 100dvh;
+  padding: 16px 10px;
+  position: sticky;
+  top: 0;
+  width: auto;
+  z-index: 30;
+  /* 移动端那段里 none 同样是承重的：非 none 的 backdrop-filter 会让顶栏成为
+     fixed 后代的包含块，底部 dock 就会锚到顶栏而不是视口。 */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* base.css 的顶栏发丝线横在底边，跟着轨道转到右侧。 */
+html[data-theme="co1dsand-dark"] .topbar::after {
+  background: var(--line);
+  bottom: 0;
+  height: auto;
+  left: auto;
+  opacity: 1;
+  right: -1px;
+  top: 0;
+  width: 1px;
+}
+
+/* 标记在上、字在下，整块居中 —— 与内置轨道同一种排法。横排时 118px 里
+   「WildToken」会被标记挤到换行，竖排才排得开。 */
+html[data-theme="co1dsand-dark"] .topbar-brand {
+  align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+  flex-direction: column;
+  gap: 7px;
+  padding: 2px 2px 13px;
+  width: 100%;
+}
+
+html[data-theme="co1dsand-dark"] .brand-text {
+  display: block;
+  min-width: 0;
+  text-align: center;
+  width: 100%;
+}
+
+html[data-theme="co1dsand-dark"] .topbar-brand h1 {
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+
+html[data-theme="co1dsand-dark"] .brand-label {
+  color: var(--muted);
+  display: block;
+  font-size: 9px;
+  margin-top: 3px;
+}
+
+/* 竖排不需要胶囊底槽，行直接落在轨道上。 */
+html[data-theme="co1dsand-dark"] .topbar-nav {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 2px;
+  overflow: visible;
+  padding: 0;
+  width: 100%;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* 导航仍走不透明度分层（见上文），这里只补轨道要的几何：撑满宽度、左对齐、
+   给图标留出间距，并开 position 供当前项的沟槽标记定位。 */
+html[data-theme="co1dsand-dark"] .nav-link {
+  align-items: center;
+  display: flex;
+  gap: var(--rail-gap);
+  justify-content: flex-start;
+  min-height: 34px;
+  min-width: 0;
+  padding: 6px 10px 6px 14px;
+  position: relative;
+  text-align: left;
+  white-space: nowrap;
+  width: 100%;
+}
+
+/* 图标是 mask 而不是背景图：颜色取 currentColor，于是一份资源就跟着标签走完
+   静止、hover、当前三态，不用每态再放一份。
+
+   这里刻意不给 ::before 设 opacity —— 行本身已经压到 0.6，再叠一层就是 0.36。
+   墨色跟着 currentColor 也就是 --accent，与标签同一档灰，这正是本包的分层方式：
+   只动不透明度，不换色相。 */
+html[data-theme="co1dsand-dark"] .nav-link::before {
+  background-color: currentColor;
+  content: "";
+  flex: 0 0 auto;
+  height: var(--rail-icon-box);
+  width: var(--rail-icon-box);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: contain;
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+}
+
+html[data-theme="co1dsand-dark"] .nav-link[data-view="dashboard"]::before {
+  mask-image: var(--rail-icon-dashboard);
+  -webkit-mask-image: var(--rail-icon-dashboard);
+}
+
+html[data-theme="co1dsand-dark"] .nav-link[data-view="upstreams"]::before {
+  mask-image: var(--rail-icon-upstreams);
+  -webkit-mask-image: var(--rail-icon-upstreams);
+}
+
+html[data-theme="co1dsand-dark"] .nav-link[data-view="logs"]::before {
+  mask-image: var(--rail-icon-logs);
+  -webkit-mask-image: var(--rail-icon-logs);
+}
+
+html[data-theme="co1dsand-dark"] .nav-link[data-view="tokens"]::before {
+  mask-image: var(--rail-icon-tokens);
+  -webkit-mask-image: var(--rail-icon-tokens);
+}
+
+html[data-theme="co1dsand-dark"] .nav-link[data-view="groups"]::before {
+  mask-image: var(--rail-icon-groups);
+  -webkit-mask-image: var(--rail-icon-groups);
+}
+
+html[data-theme="co1dsand-dark"] .nav-link[data-view="settings"]::before {
+  mask-image: var(--rail-icon-settings);
+  -webkit-mask-image: var(--rail-icon-settings);
+}
+
+/* 当前项的沟槽标记，与内置轨道同一处、同一尺寸。--accent-soft 那层底色只有
+   5% 的墨，在竖排里几乎看不出来，选中态实际靠这道实墨条说话。一道实心墨条
+   不是光晕，与本包「零光晕」不冲突。 */
+html[data-theme="co1dsand-dark"] .nav-link.active::after {
+  background: var(--accent);
+  border-radius: 0 3px 3px 0;
+  content: "";
+  height: 18px;
+  left: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+}
+
+/* base.css 把当前项从 500 提到 600。横排里那是轻轻一按，竖排里不是：标签每次
+   切换都要重排到新宽度，而中日韩字形密到那点额外字重会把字怀填平，行会明显变厚。
+   钉住不亏 —— 选中态已经由沟槽标记和底色各说了一遍。 */
+html[data-theme="co1dsand-dark"] .nav-link,
+html[data-theme="co1dsand-dark"] .nav-link.active,
+html[data-theme="co1dsand-dark"] .nav-link.active:hover {
+  font-weight: 500;
+}
+
+/* ── 轨道底部：状态、密度、主题，破坏性的那个放最后 ──
+   动作区沉到轨道底部，与导航之间留出全部余量。分隔线画在容器上而不是状态行上：
+   状态行在没开自动刷新时是 hidden 的，线跟着它一起消失会让底部忽然散开。 */
+html[data-theme="co1dsand-dark"] .topbar-actions {
+  align-items: stretch;
+  border-top: 1px solid var(--line-soft);
+  flex-direction: column;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 12px;
+  width: 100%;
+}
+
+html[data-theme="co1dsand-dark"] .topbar-actions > *,
+html[data-theme="co1dsand-dark"] .topbar-actions button {
+  width: 100%;
+}
+
+/* 状态行落在与导航同一条左边线上。 */
+html[data-theme="co1dsand-dark"] .topbar-actions .live-indicator {
+  align-items: center;
+  font-size: 10px;
+  gap: var(--rail-gap);
+  justify-content: flex-start;
+  min-height: 26px;
+  padding: 0 10px 0 14px;
+  white-space: nowrap;
+}
+
+/* 圆点仍是 7px，但居中放进一个 16px 的槽里，标签才和上面每个图标从同一条文字边
+   起排。把圆点本身撑到 16px 会把圈画大，所以补的是槽而不是点。(16 - 7) / 2 = 4.5。 */
+html[data-theme="co1dsand-dark"] .topbar-actions .live-dot {
+  flex: 0 0 auto;
+  margin-inline: 4.5px;
+}
+
+/* 轨道放得下这两个字，而一个光在那儿跳的圆点说不清它在报什么。 */
+html[data-theme="co1dsand-dark"] .topbar-actions .live-label {
+  display: inline;
+}
+
+/* base.css 给这三个的是描边填底的 ghost 按钮，在轨道里就是楔在导航下面的一叠
+   卡片——轨道里最重的东西，配的却是最不重要的控件。改成无边框的行，和上面的
+   导航排进同一列，只在指到时才浮出一层底。重量交给图标去担。
+
+   墨色与不透明度跟导航同一套：静止 0.6、hover 1。日版 --accent 合成到 #6f6f6f，
+   在 --panel-subtle 上 4.82:1；夜版合成到 #949494，6.53:1，都过 AA。 */
+html[data-theme="co1dsand-dark"] .topbar-actions .theme-toggle,
+html[data-theme="co1dsand-dark"] .topbar-actions .density-toggle,
+html[data-theme="co1dsand-dark"] .topbar-actions .nav-logout {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+  color: var(--accent);
+  display: flex;
+  font-size: 11px;
+  font-weight: 500;
+  gap: var(--rail-gap);
+  justify-content: flex-start;
+  min-height: 30px;
+  min-width: 0;
+  opacity: 0.6;
+  padding: 0 10px 0 14px;
+  text-align: left;
+  transition: opacity 0.2s ease-out;
+  white-space: nowrap;
+}
+
+html[data-theme="co1dsand-dark"] .topbar-actions .theme-toggle:hover,
+html[data-theme="co1dsand-dark"] .topbar-actions .density-toggle:hover {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  opacity: 1;
+}
+
+/* 退出是轨道里唯一破坏性的一行，所以它是唯一换色相的一行 —— 这是本包
+   「hover 只动不透明度」那条规矩里刻意留的例外。 */
+html[data-theme="co1dsand-dark"] .topbar-actions .nav-logout:hover {
+  background: var(--danger-soft);
+  border: 0;
+  box-shadow: none;
+  color: var(--danger-strong);
+  opacity: 1;
+}
+
+/* 底部的记号画在同一个 16px 槽里，但只有 14px 大，于是读起来比导航的图标更安静，
+   又不掉出共用的那条左边线。同样不设 opacity：行已经压过一层。 */
+html[data-theme="co1dsand-dark"] .topbar-actions .density-toggle::before,
+html[data-theme="co1dsand-dark"] .topbar-actions .nav-logout::before {
+  background-color: currentColor;
+  content: "";
+  flex: 0 0 auto;
+  height: var(--rail-icon-box);
+  width: var(--rail-icon-box);
+  mask-position: center;
+  mask-repeat: no-repeat;
+  mask-size: var(--rail-icon-foot) var(--rail-icon-foot);
+  -webkit-mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-size: var(--rail-icon-foot) var(--rail-icon-foot);
+}
+
+html[data-theme="co1dsand-dark"] .topbar-actions .density-toggle::before {
+  mask-image: var(--rail-icon-density);
+  -webkit-mask-image: var(--rail-icon-density);
+}
+
+html[data-theme="co1dsand-dark"] .topbar-actions .nav-logout::before {
+  mask-image: var(--rail-icon-logout);
+  -webkit-mask-image: var(--rail-icon-logout);
+}
+
+/* enhancements.css 为横排把它设到 600，那时它是按钮里唯一的内容。在轨道里它和
+   「主题」「退出」排成一列，600 就成了唯一无缘无故被强调的标签。 */
+html[data-theme="co1dsand-dark"] .topbar-actions .density-toggle-label {
+  font-weight: inherit;
+}
+
+/* base.css 把这个按钮做成只装色盘的 34px 方块，摊到轨道宽度上色盘就孤零零悬在
+   中间，所以补一个文字标签。按钮已经带 aria-label="选择主题"，这行字是装饰，
+   不会被读两遍。宽度也得重申：轨道里的 flex 子元素是外层 wrap 而不是按钮本身，
+   不写它就会塌回 0 宽的固有内容。 */
+html[data-theme="co1dsand-dark"] .topbar-actions .theme-toggle {
+  padding: 0 10px 0 14px;
+  width: 100%;
+}
+
+html[data-theme="co1dsand-dark"] .topbar-actions .theme-toggle::after {
+  content: "主题";
+}
+
+html[data-theme="co1dsand-dark"] .topbar-actions .theme-toggle-icon {
+  flex: 0 0 auto;
+  height: var(--rail-icon-box);
+  width: var(--rail-icon-box);
+}
+
+/* 内缩 1px，色盘就和底部其它记号一样是 14px，而它的盒子仍站在 16px 的格子上。 */
+html[data-theme="co1dsand-dark"] .topbar-actions .theme-toggle-icon::before {
+  inset: 1px;
+}
+
+/* 轨道比菜单窄，所以菜单从旁边推出来而不是往下掉。 */
+html[data-theme="co1dsand-dark"] .theme-menu {
+  bottom: 0;
+  left: calc(100% + 12px);
+  max-height: calc(100dvh - 28px);
+  overflow-y: auto;
+  right: auto;
+  top: auto;
+}
+
+/* 内容区接管滚动：轨道固定，只有舞台动。 */
+html[data-theme="co1dsand-dark"] .content {
+  grid-column: 2;
+  grid-row: 1;
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  width: 100%;
+}
+
+/* ── 矮桌面窗口：留住轨道，只收紧行高 ── */
+@media (min-width: 761px) and (max-height: 580px) {
+  html[data-theme="co1dsand-dark"] .topbar {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-brand {
+    gap: 3px;
+    padding: 0 2px 8px;
+  }
+
+  html[data-theme="co1dsand-dark"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="co1dsand-dark"] .nav-link {
+    min-height: 28px;
+    padding: 4px 10px 4px 14px;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-actions .live-indicator {
+    display: none;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-actions .theme-toggle,
+  html[data-theme="co1dsand-dark"] .topbar-actions .density-toggle,
+  html[data-theme="co1dsand-dark"] .topbar-actions .nav-logout {
+    min-height: 28px;
   }
 }
 
-@media print {
-  html[data-theme="co1dsand-dark"] .co1dsand-logo-sweep {
-    animation: none;
+/* ── 移动端：轨道摊平成视口底部的六格 dock，主题与密度改从设置里进 ── */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme="co1dsand-dark"] .app-shell {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom));
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar {
+    align-items: center;
+    border-bottom: 1px solid var(--line);
+    border-right: 0;
+    flex-direction: row;
+    gap: 8px;
+    height: auto;
+    justify-content: space-between;
+    min-height: 52px;
+    padding: 6px 12px;
+    width: 100%;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar::after {
+    bottom: -1px;
+    height: 1px;
+    left: 0;
+    right: 0;
+    top: auto;
+    width: auto;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-brand {
+    border-bottom: 0;
+    flex-direction: row;
+    gap: 10px;
+    padding: 4px 2px;
+    width: auto;
+  }
+
+  html[data-theme="co1dsand-dark"] .brand-text {
+    text-align: left;
+    width: auto;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-brand h1 {
+    font-size: 15px;
+  }
+
+  html[data-theme="co1dsand-dark"] .brand-label {
+    display: none;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-actions {
+    align-items: center;
+    border-top: 0;
+    flex-direction: row;
+    gap: 6px;
+    margin-top: 0;
+    padding-top: 0;
+    width: auto;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-actions > *,
+  html[data-theme="co1dsand-dark"] .topbar-actions button {
+    width: auto;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-actions .live-indicator,
+  html[data-theme="co1dsand-dark"] .topbar-actions .density-toggle,
+  html[data-theme="co1dsand-dark"] .topbar-actions .theme-menu-wrap,
+  html[data-theme="co1dsand-dark"] .topbar-actions .theme-toggle {
+    display: none;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-actions .nav-logout {
+    gap: 6px;
+    min-height: 30px;
+    padding: 0 10px;
+    width: auto;
+  }
+
+  html[data-theme="co1dsand-dark"] .topbar-nav {
+    background: var(--glass-strong);
+    border: 1px solid var(--line-strong);
+    bottom: max(8px, env(safe-area-inset-bottom));
+    box-shadow: var(--shadow-md);
+    display: grid;
+    gap: 3px;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    left: 10px;
+    padding: 4px;
+    position: fixed;
+    right: 10px;
+    width: auto;
+    z-index: 40;
+  }
+
+  /* 六分之一个手机宽放不下并排的图标和标签，图标改到标签上方 —— dock 也因此
+     更好读。 */
+  html[data-theme="co1dsand-dark"] .nav-link {
+    flex-direction: column;
+    font-size: var(--text-xs);
+    gap: 3px;
+    justify-content: center;
+    line-height: 1.2;
+    min-height: 38px;
+    padding: 5px 2px;
+    text-align: center;
+  }
+
+  /* 六格 dock 里没有沟槽可标，选中态交给底色和图标。 */
+  html[data-theme="co1dsand-dark"] .nav-link.active::after {
+    display: none;
+  }
+
+  html[data-theme="co1dsand-dark"] .content {
+    display: block;
+    grid-column: auto;
+    grid-row: auto;
+    height: auto;
+    overflow: visible;
+    width: 100%;
   }
 }

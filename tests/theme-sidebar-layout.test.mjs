@@ -10,6 +10,8 @@ const themeFiles = {
   anthropic: "themes/anthropic/theme.css",
   "anthropic-dark": "themes/anthropic-dark/theme.css",
   "sakura-mist": "themes/sakura-mist/theme.css",
+  "co1dsand-light": "themes/co1dsand-light/theme.css",
+  "co1dsand-dark": "themes/co1dsand-dark/theme.css",
 };
 
 function escapeRegExp(value) {
@@ -72,7 +74,7 @@ function assertSomeRule(rules, pattern, message) {
   assert.ok(rules.some((rule) => pattern.test(rule)), message);
 }
 
-test("A/ and Sakura Mist use the desktop left navigation rail", () => {
+test("rail themes use the desktop left navigation rail", () => {
   for (const theme of Object.keys(themeFiles)) {
     const shellRules = themedRules(allCss, theme, ".app-shell");
     assertSomeRule(shellRules, /display:\s*grid\s*;/, `${theme} shell must become a desktop grid`);
@@ -95,7 +97,7 @@ test("A/ and Sakura Mist use the desktop left navigation rail", () => {
   }
 });
 
-test("A/ and Sakura Mist retain the mobile bottom navigation dock", () => {
+test("rail themes retain the mobile bottom navigation dock", () => {
   const blocks = mobileCssBlocks(allCss);
   assert.ok(blocks.length > 0, "the shared mobile breakpoint must remain available");
 
