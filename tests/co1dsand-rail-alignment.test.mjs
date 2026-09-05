@@ -136,3 +136,39 @@ test("两套凉砂的主题菜单从轨道旁边推出", () => {
     assert.match(body, /right: auto;/, `${theme} 必须解掉 base 的 right: 0`);
   }
 });
+
+/* 轨道主题里滚的是舞台而不是整页，滚动条因此画在滚动容器的右边界上。base.css 把
+   .content 卡在 --content-max（1440px）并 margin-inline: auto 居中——内置深色为此
+   专门解掉这个上限，把它挪到里层的 .view 上，滚动条才落在舞台右缘。凉砂两包接管
+   了滚动却漏掉这一步，于是宽屏下滚动条缩进到 1440px 文本列的右侧，和内置的位置
+   差着一段。窗口窄于 1440px 时两者恰好重合，所以这个差只在宽屏上看得见。 */
+test("两套凉砂的舞台滚动条与内置一样贴在舞台右缘", () => {
+  assert.match(
+    ruleBody(darkTheme, 'html[data-theme="dark"] .content'),
+    /max-width: none;/,
+    "内置若不再解掉上限，这条测试的基准要跟着改",
+  );
+  assert.match(
+    ruleBody(darkTheme, 'html[data-theme="dark"] .content > .view'),
+    /max-width: var\(--content-max\);/,
+    "内置若不再把上限挪到 .view，这条测试的基准要跟着改",
+  );
+
+  for (const [theme, css] of Object.entries(packs)) {
+    const content = ruleBody(css, `html[data-theme="${theme}"] .content`);
+    assert.match(
+      content,
+      /max-width: none;/,
+      `${theme} 的 .content 必须解掉 base 的 --content-max，否则滚动条缩进到文本列右侧`,
+    );
+    assert.match(content, /overflow-x: hidden;/, `${theme} 的 .content 满幅后要挡住横向溢出`);
+
+    const view = ruleBody(css, `html[data-theme="${theme}"] .content > .view`);
+    assert.match(view, /margin-inline: auto;/, `${theme} 的视图必须自己居中`);
+    assert.match(
+      view,
+      /max-width: var\(--content-max\);/,
+      `${theme} 的 --content-max 上限要挪到视图上`,
+    );
+  }
+});
