@@ -571,10 +571,23 @@ html[data-theme="co1dsand-light"] .content {
   grid-column: 2;
   grid-row: 1;
   height: 100dvh;
+  margin: 0;
+  max-width: none;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: contain;
   scrollbar-gutter: stable;
+  width: 100%;
+}
+
+/* 滚动条画在滚动容器的右边界上，所以舞台必须满幅：base.css 那道 --content-max
+   （1440px）加 margin-inline: auto 若留在这里，滚动条就缩进到 1440px 文本列的右
+   侧，而不是贴着舞台右缘 —— 宽屏下和内置深色差着一段。上限挪到里层视图上，每个
+   视图仍量到同一宽度，并在余下的空间里居中。与内置深色同一做法。 */
+html[data-theme="co1dsand-light"] .content > .view {
+  margin-inline: auto;
+  max-width: var(--content-max);
   width: 100%;
 }
 
