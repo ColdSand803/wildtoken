@@ -1,6 +1,6 @@
-/* 凉砂·夜：近黑纸面，灰阶墨梯，半透明分隔线。改编自 antfu.me。
+/* 松烟：近黑纸面，灰阶墨梯，半透明分隔线。改编自 antfu.me。
    底色 #050505 比代码框还深一档——这是原作的选择，让代码块自然浮起。
-   分隔线与凉砂·日逐字相同：#888 加 alpha 在两套底色上都成立。 */
+   分隔线与素宣逐字相同：#888 加 alpha 在两套底色上都成立。 */
 
 html[data-theme="co1dsand-dark"] {
   color-scheme: dark;
@@ -22,7 +22,7 @@ html[data-theme="co1dsand-dark"] {
   --muted-strong: #a0a0a0;
   --muted: #888888;
 
-  /* 分隔线 —— 与凉砂·日逐字相同 */
+  /* 分隔线 —— 与素宣逐字相同 */
   --line: rgb(136 136 136 / 27%);
   --line-strong: rgb(136 136 136 / 47%);
   --line-soft: rgb(136 136 136 / 15%);
@@ -107,7 +107,7 @@ html[data-theme="co1dsand-dark"] ::selection {
   background: rgb(136 136 136 / 27%);
 }
 
-/* 导航：同凉砂·日，只是墨色由 token 自己翻过来。墨色同样取 --accent
+/* 导航：同素宣，只是墨色由 token 自己翻过来。墨色同样取 --accent
    （#f0f0f0），日夜两套的手感因此一致；0.6 合成到轨道底色 --panel-muted
    （#0c0c0c）后是 6.51:1。 */
 html[data-theme="co1dsand-dark"] .nav-link {
@@ -122,7 +122,7 @@ html[data-theme="co1dsand-dark"] .nav-link:hover {
   opacity: 1;
 }
 
-/* 同凉砂·日：关掉 base.css 给当前项叠的那层光环。 */
+/* 同素宣：关掉 base.css 给当前项叠的那层光环。 */
 html[data-theme="co1dsand-dark"] .nav-link.active {
   background: var(--accent-soft);
   box-shadow: none;
@@ -148,7 +148,7 @@ html[data-theme="co1dsand-dark"] .co1dsand-logo-ink {
   fill-rule: nonzero;
 }
 
-/* 开关滑块：同凉砂·日，墨色由 token 自己翻过来。夜版白滑块在近黑轨道上
+/* 开关滑块：同素宣，墨色由 token 自己翻过来。夜版白滑块在近黑轨道上
    本来就够（19.56:1），但开启态落到 --ok 的亮绿上只剩 2.22:1 —— 两套用
    同一组 token 才能保证日夜切换时开关的手感一致。关闭 7.48:1，开启 9.17:1。 */
 html[data-theme="co1dsand-dark"] .status-switch-thumb {
@@ -160,7 +160,7 @@ html[data-theme="co1dsand-dark"] .status-switch.on .status-switch-thumb {
   background: var(--accent-on);
 }
 
-/* 配额徽章：同凉砂·日，收掉紫色相。夜版墨色 13.65:1。 */
+/* 配额徽章：同素宣，收掉紫色相。夜版墨色 13.65:1。 */
 html[data-theme="co1dsand-dark"] .quota-period-badge {
   background: var(--neutral-chip);
   border-color: var(--line);

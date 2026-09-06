@@ -451,7 +451,7 @@ html[data-density="compact"] .wt-seg-btn {
   color: var(--text);
 }
 
-/* 墨色走 --accent-on，不写死白：主题的 --accent 不一定是深色。凉砂·夜的
+/* 墨色走 --accent-on，不写死白：主题的 --accent 不一定是深色。松烟的
    accent 是近白的 #f0f0f0，白字压上去整个按钮就是一片白。 */
 .view-toggle-btn[aria-pressed="true"] {
   background: var(--accent);
