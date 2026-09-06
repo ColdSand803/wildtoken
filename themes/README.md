@@ -99,7 +99,7 @@ html[data-theme="soul-society"] .topbar {
 颜色、让 `.log-rpm` 那颗药丸改用 `--accent-soft` 平铺。两个 `anthropic*` 多一条，把
 `.topbar-brand h1` 和 `.panel h2` 换成衬线字体，其余全交给基础样式。
 
-`co1dsand-light/`、`co1dsand-dark/`（凉砂·日／凉砂·夜，改编自 antfu.me，纸面留白与近黑
+`co1dsand-light/`、`co1dsand-dark/`（素宣／松烟，改编自 antfu.me，纸面留白与近黑
 纸面各一套；两套都没有品牌色，最深／最亮的那档墨就是强调色）走的也是这条路线：纯变量表
 加少量结构覆盖，全程 CSS-only。它们没跟着改左侧竖排导航，顶栏那排横向导航原样留着，只
 把胶囊圆角收成方角、把非当前项压到 `opacity: 0.6`——这套风格的层级基本全靠墨色深浅和不
