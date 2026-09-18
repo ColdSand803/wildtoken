@@ -413,6 +413,8 @@ func DetectClientType(r *http.Request, anthropic bool) string {
 		return "codex-tui"
 	case strings.Contains(userAgent, "opencode"):
 		return "opencode"
+	case isPiClient(originator, userAgent):
+		return "pi"
 	case strings.Contains(originator, "codex") || strings.Contains(userAgent, "codex"):
 		return "codex"
 	case anthropic || strings.Contains(userAgent, "claude") || r.Header.Get("anthropic-version") != "":
@@ -420,6 +422,15 @@ func DetectClientType(r *http.Request, anthropic bool) string {
 	default:
 		return "unknown"
 	}
+}
+
+func isPiClient(originator, userAgent string) bool {
+	for _, value := range []string{originator, userAgent} {
+		if value == "pi" || strings.HasPrefix(value, "pi ") || strings.HasPrefix(value, "pi/") || strings.HasPrefix(value, "pi-") {
+			return true
+		}
+	}
+	return false
 }
 
 // extractDownstreamToken reads a bearer token, falling back to x-api-key for

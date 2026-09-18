@@ -45,8 +45,14 @@ func TestFallsBackToUserAgentAndPreservesOtherClientTypes(t *testing.T) {
 		"codex-tui/0.144.3":     "codex-tui",
 		"Codex Desktop/0.144.2": "codex-desktop",
 		"codex-cli/0.1":         "codex",
-		"opencode/1.0":          "opencode",
-		"claude-cli/1.0":        "claude",
+		"opencode/1.0":               "opencode",
+		"claude-cli/1.0":             "claude",
+		"pi (win32 10.0.19045; x64)": "pi",
+		"pi/0.1.0":                   "pi",
+		"pi":                         "pi",
+		"pi-desktop/1.0":             "pi",
+		"pip/23.0":                   "unknown",
+		"api-client/1.0":             "unknown",
 	} {
 		request := requestWithHeaders(map[string]string{"user-agent": userAgent})
 		if got := DetectClientType(request, false); got != want {
