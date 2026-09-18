@@ -1,0 +1,8 @@
+{
+  "id": "minegrub",
+  "label": "Minegrub (我的世界)",
+  "css": "theme.css",
+  "swatch": ["#251c17", "#55ff55"],
+  "version": "1.0.0",
+  "description": "经典 Minecraft 泥土背景、灰石像素按钮与原版字体，源自 Minegrub。"
+}

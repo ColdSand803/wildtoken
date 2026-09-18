@@ -1,0 +1,330 @@
+/*
+ * Minegrub Theme for WildToken
+ * Based on Minecraft Main Menu & World Selection UI from Lxtharia/minegrub-theme
+ * Features authentic dirt background, stone button bevels, pixel typography, and classic green/gold accents.
+ */
+
+@font-face {
+  font-family: 'Minecraft';
+  src: url('Minecraft.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+html[data-theme="minegrub"] {
+  color-scheme: dark;
+
+  /* Minecraft Typography */
+  --font-sans: 'Minecraft', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'Minecraft', 'Courier New', monospace;
+
+  /* Zero corner radius - True Pixel Vibe */
+  --radius-xs: 0px;
+  --radius-sm: 0px;
+  --radius: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-full: 0px;
+
+  /* Surfaces & Canvas */
+  --bg: #140d09;
+  --bg-elevated: #1e140e;
+  --panel: rgb(28 20 15 / 94%);
+  --panel-solid: #201712;
+  --panel-subtle: #19120e;
+  --panel-muted: #291e17;
+  --panel-elevated: #33251c;
+  --glass: rgb(24 17 12 / 88%);
+  --glass-strong: rgb(24 17 12 / 97%);
+
+  /* Text colors */
+  --text: #ffffff;
+  --text-secondary: #e0d8d0;
+  --muted: #a89f96;
+  --muted-strong: #c8c0b8;
+
+  /* Grid & Rule lines */
+  --line: #3d2f25;
+  --line-strong: #5c4839;
+  --line-soft: #2a1f18;
+
+  /* Accents - Classic Minecraft Experience Orb Green & Yellow */
+  --accent: #55ff55;
+  --accent-strong: #77ff77;
+  --accent-soft: rgb(85 255 85 / 14%);
+  --accent-border: rgb(85 255 85 / 48%);
+  --accent-glow: rgb(85 255 85 / 25%);
+  --accent-on: #000000;
+  --brand-ink: #000000;
+
+  /* Semantic status colors */
+  --danger: #ff5555;
+  --danger-soft: rgb(255 85 85 / 16%);
+  --danger-border: rgb(255 85 85 / 55%);
+  --danger-strong: #ff7777;
+
+  --ok: #55ff55;
+  --ok-soft: rgb(85 255 85 / 16%);
+  --ok-border: rgb(85 255 85 / 55%);
+  --ok-strong: #77ff77;
+
+  --warning: #ffff55;
+  --warning-soft: rgb(255 255 85 / 16%);
+  --warning-border: rgb(255 255 85 / 55%);
+  --warning-strong: #ffff77;
+
+  --focus: #55ff55;
+  --focus-ring: 0 0 0 2px #55ff55;
+
+  /* Code block */
+  --code-bg: #0d0906;
+  --code-frame-bg: #140e0a;
+  --code-text: #55ff55;
+  --code-muted: #887a70;
+  --code-border: #3d2f25;
+}
+
+/* Hide smooth aurora glows */
+html[data-theme="minegrub"] .aurora {
+  display: none !important;
+}
+
+/* Background wallpaper */
+html[data-theme="minegrub"] body {
+  background-color: #140d09;
+  background-image: url('background.png');
+  background-repeat: no-repeat;
+  background-size: cover;
+  background-attachment: fixed;
+  background-position: center;
+  image-rendering: pixelated;
+}
+
+/* Topbar header */
+html[data-theme="minegrub"] .topbar {
+  background: rgb(24 17 12 / 96%);
+  border-bottom: 3px solid #000;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.4);
+}
+
+html[data-theme="minegrub"] .topbar-brand h1 {
+  font-family: var(--font-sans);
+  color: #ffff55;
+  text-shadow: 2px 2px 0 #3f3f00;
+  letter-spacing: 1px;
+}
+
+/* Panels & Cards with Minecraft pixel bevels */
+html[data-theme="minegrub"] .panel,
+html[data-theme="minegrub"] .dashboard-card,
+html[data-theme="minegrub"] .card {
+  border: 2px solid #000;
+  box-shadow: inset 2px 2px 0 #3a2b22, inset -2px -2px 0 #100b08, 3px 3px 0 rgba(0, 0, 0, 0.4);
+  border-radius: 0;
+}
+
+html[data-theme="minegrub"] .panel-header h2,
+html[data-theme="minegrub"] .panel h2 {
+  font-family: var(--font-sans);
+  text-shadow: 2px 2px 0 #000;
+  color: #ffffff;
+}
+
+/* Tables */
+html[data-theme="minegrub"] table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+html[data-theme="minegrub"] th {
+  background: #19120e;
+  border-bottom: 2px solid #3d2f25;
+  color: #ffff55;
+  font-family: var(--font-sans);
+  text-shadow: 1px 1px 0 #222;
+}
+
+html[data-theme="minegrub"] tr:hover td {
+  background: rgb(85 255 85 / 8%);
+}
+
+/* Minecraft Classic Stone Buttons */
+html[data-theme="minegrub"] button {
+  border-radius: 0;
+  font-family: var(--font-sans);
+}
+
+html[data-theme="minegrub"] button:not(:where(
+  .secondary,
+  .danger,
+  .ghost,
+  .nav-link,
+  .table-sort-button,
+  .status-switch,
+  .priority-value,
+  .token-preview-button,
+  .toast-close,
+  .url-action,
+  .icon-close,
+  .icon-maximize,
+  .icon-refresh,
+  .segmented-control > button,
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemradio"]
+)) {
+  background: #727272;
+  border: 2px solid #000000;
+  box-shadow: inset 2px 2px 0 #a8a8a8, inset -2px -2px 0 #3a3a3a, 2px 2px 0 rgba(0, 0, 0, 0.3);
+  color: #ffffff;
+  text-shadow: 2px 2px 0 #222222;
+  padding: 6px 16px;
+  cursor: pointer;
+}
+
+html[data-theme="minegrub"] button:not(:where(
+  .secondary,
+  .danger,
+  .ghost,
+  .nav-link,
+  .table-sort-button,
+  .status-switch,
+  .priority-value,
+  .token-preview-button,
+  .toast-close,
+  .url-action,
+  .icon-close,
+  .icon-maximize,
+  .icon-refresh,
+  .segmented-control > button,
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemradio"]
+)):hover {
+  background: #8b8b8b;
+  box-shadow: inset 2px 2px 0 #ffffff, inset -2px -2px 0 #4a4a4a, 2px 2px 0 rgba(0, 0, 0, 0.4);
+  color: #ffffa0;
+}
+
+html[data-theme="minegrub"] button:not(:where(
+  .secondary,
+  .danger,
+  .ghost,
+  .nav-link,
+  .table-sort-button,
+  .status-switch,
+  .priority-value,
+  .token-preview-button,
+  .toast-close,
+  .url-action,
+  .icon-close,
+  .icon-maximize,
+  .icon-refresh,
+  .segmented-control > button,
+  [role="option"],
+  [role="menuitem"],
+  [role="menuitemradio"]
+)):active {
+  background: #555555;
+  box-shadow: inset 2px 2px 0 #222222, inset -2px -2px 0 #777777;
+}
+
+/* Secondary Stone Button */
+html[data-theme="minegrub"] button.secondary {
+  background: #4d4036;
+  border: 2px solid #000000;
+  box-shadow: inset 2px 2px 0 #736152, inset -2px -2px 0 #2b221c;
+  color: #e0d8d0;
+  text-shadow: 2px 2px 0 #1b1b1b;
+  border-radius: 0;
+}
+
+html[data-theme="minegrub"] button.secondary:hover {
+  background: #5e4f43;
+  box-shadow: inset 2px 2px 0 #8c7765, inset -2px -2px 0 #382d25;
+  color: #ffffff;
+}
+
+/* Danger Button (Red Wool / TNT look) */
+html[data-theme="minegrub"] button.danger {
+  background: #962626;
+  border: 2px solid #000000;
+  box-shadow: inset 2px 2px 0 #d94141, inset -2px -2px 0 #541111;
+  color: #ffffff;
+  text-shadow: 2px 2px 0 #3b0909;
+  border-radius: 0;
+}
+
+html[data-theme="minegrub"] button.danger:hover {
+  background: #b82e2e;
+  box-shadow: inset 2px 2px 0 #ff5959, inset -2px -2px 0 #731717;
+  color: #ffffff;
+}
+
+/* Navigation links */
+html[data-theme="minegrub"] .nav-link {
+  border-radius: 0;
+  color: #c8c0b8;
+  font-family: var(--font-sans);
+}
+
+html[data-theme="minegrub"] .nav-link:hover {
+  background: #2a1f18;
+  color: #ffffff;
+}
+
+html[data-theme="minegrub"] .nav-link.is-active,
+html[data-theme="minegrub"] .nav-link[aria-current="page"] {
+  background: #33251c;
+  color: #55ff55;
+  border-left: 3px solid #55ff55;
+  box-shadow: inset 2px 2px 0 #4a3729;
+  text-shadow: 1px 1px 0 #111;
+}
+
+/* Text Inputs - Chat Box style */
+html[data-theme="minegrub"] input:not([type="checkbox"]):not([type="radio"]),
+html[data-theme="minegrub"] select,
+html[data-theme="minegrub"] textarea {
+  background: #000000 !important;
+  border: 2px solid #a0a0a0 !important;
+  border-radius: 0 !important;
+  color: #ffffff !important;
+  font-family: var(--font-sans);
+  box-shadow: inset 2px 2px 0 #1a1a1a;
+}
+
+html[data-theme="minegrub"] input:focus,
+html[data-theme="minegrub"] select:focus,
+html[data-theme="minegrub"] textarea:focus {
+  border-color: #ffffff !important;
+  box-shadow: 0 0 0 2px #55ff55, inset 2px 2px 0 #1a1a1a !important;
+}
+
+/* Segmented controls & select panels */
+html[data-theme="minegrub"] .segmented-control {
+  border-radius: 0;
+  background: #140d09;
+  border: 2px solid #3d2f25;
+}
+
+html[data-theme="minegrub"] .segmented-control > button {
+  border-radius: 0;
+  color: #a89f96;
+}
+
+html[data-theme="minegrub"] .segmented-control > button.is-selected {
+  background: #33251c;
+  color: #55ff55;
+  box-shadow: inset 2px 2px 0 #4a3729;
+}
+
+/* Dialogs and modals */
+html[data-theme="minegrub"] dialog,
+html[data-theme="minegrub"] .dialog-surface {
+  border: 3px solid #000000;
+  border-radius: 0;
+  background: #201712;
+  box-shadow: inset 3px 3px 0 #3a2b22, inset -3px -3px 0 #100b08, 6px 6px 0 rgba(0, 0, 0, 0.6);
+}
