@@ -28,8 +28,8 @@ type UpstreamRow struct {
 	// Unarchiving restores this, so a channel that was already off does not
 	// come back routing.
 	ArchivedPrevEnabled *int64
-	ExtraHeaders      string
-	TimeoutSeconds    float64
+	ExtraHeaders        string
+	TimeoutSeconds      float64
 	// RateLimit is the stored rate expression ("100/m"), nil when unlimited.
 	RateLimit *string
 	CreatedAt string
@@ -302,22 +302,22 @@ func (u *UpstreamPriorityIn) Value() (int32, error) {
 
 // UpstreamOut is the list representation; the API key is never included.
 type UpstreamOut struct {
-	ID                             int64             `json:"id"`
-	Name                           string            `json:"name"`
-	BaseURL                        string            `json:"base_url"`
-	APIKeySet                      bool              `json:"api_key_set"`
-	ModelNames                     []string          `json:"model_names"`
-	ModelPrefixes                  []string          `json:"model_prefixes"`
-	ModelMappings                  map[string]string `json:"model_mappings"`
-	EffortMappings                 map[string]string `json:"effort_mappings"`
-	Priority                       int32             `json:"priority"`
-	Weight                         int64             `json:"weight"`
-	AutoWeightEnabled              bool              `json:"auto_weight_enabled"`
-	Enabled                        bool              `json:"enabled"`
+	ID                int64             `json:"id"`
+	Name              string            `json:"name"`
+	BaseURL           string            `json:"base_url"`
+	APIKeySet         bool              `json:"api_key_set"`
+	ModelNames        []string          `json:"model_names"`
+	ModelPrefixes     []string          `json:"model_prefixes"`
+	ModelMappings     map[string]string `json:"model_mappings"`
+	EffortMappings    map[string]string `json:"effort_mappings"`
+	Priority          int32             `json:"priority"`
+	Weight            int64             `json:"weight"`
+	AutoWeightEnabled bool              `json:"auto_weight_enabled"`
+	Enabled           bool              `json:"enabled"`
 	// Archived is why an archived channel also reads as disabled: parking one
 	// out of routing turns it off.
-	Archived    bool `json:"archived"`
-	ExtraHeaders map[string]string `json:"extra_headers"`
+	Archived                       bool              `json:"archived"`
+	ExtraHeaders                   map[string]string `json:"extra_headers"`
 	TimeoutSeconds                 float64           `json:"timeout_seconds"`
 	RateLimit                      *string           `json:"rate_limit"`
 	CreatedAt                      string            `json:"created_at"`

@@ -73,8 +73,8 @@ func TestArchiveSemantics(t *testing.T) {
 	}
 	t.Run("an archived channel that is switched back on still does not route", func(t *testing.T) {
 		/* 归档只把 enabled 置 0，而编辑表单会把 enabled 原样写回。所以
-	   "WHERE enabled = 1" 这一个条件挡不住归档渠道——真正的兜底是
-	   查询里的 archived = 0。这里把 enabled 强行改回 1，模拟那条泄漏。 */
+		   "WHERE enabled = 1" 这一个条件挡不住归档渠道——真正的兜底是
+		   查询里的 archived = 0。这里把 enabled 强行改回 1，模拟那条泄漏。 */
 		if _, err := db.ExecContext(ctx,
 			"UPDATE upstreams SET enabled = 1 WHERE name = ?", leaked.Name); err != nil {
 			t.Fatal(err)
@@ -171,4 +171,78 @@ func byName(t *testing.T, ctx context.Context, db *sql.DB, name string) models.U
 		t.Fatalf("channel %s not found", name)
 	}
 	return row
+}
+
+// AnUpgradedDatabaseGainsTheArchiveColumns covers the path production actually
+// takes: the database already exists, so the columns arrive through
+// ensureColumn rather than through CREATE TABLE. Both new columns have to be
+// added, and rows written before the upgrade have to read as "not archived"
+// rather than as a NULL that breaks a scan.
+func TestAnUpgradedDatabaseGainsTheArchiveColumns(t *testing.T) {
+	db := memoryDB(t)
+	ctx := context.Background()
+
+	input := models.DefaultUpstreamIn()
+	input.Name = "pre-upgrade"
+	input.BaseURL = "https://api.example.com"
+	created, err := CreateUpstream(ctx, db, &input, 300)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	for _, column := range []string{"archived", "archived_prev_enabled"} {
+		if _, err := db.Exec("ALTER TABLE upstreams DROP COLUMN " + column); err != nil {
+			t.Fatalf("simulate the older schema (%s): %v", column, err)
+		}
+	}
+
+	// Init is what the service runs on every start, so that is what has to add
+	// the columns back.
+	if err := Init(ctx, db); err != nil {
+		t.Fatalf("init after upgrade: %v", err)
+	}
+
+	for _, column := range []string{"archived", "archived_prev_enabled"} {
+		var count int64
+		if err := db.QueryRow(
+			"SELECT COUNT(*) FROM pragma_table_info('upstreams') WHERE name = ?", column).
+			Scan(&count); err != nil {
+			t.Fatalf("inspect %s: %v", column, err)
+		}
+		if count != 1 {
+			t.Errorf("%s was not added to the upgraded table", column)
+		}
+	}
+
+	// A row written before the columns existed must read as a plain active
+	// channel, not as a NULL that fails the scan or as an archived one.
+	row, found, err := GetUpstream(ctx, db, created.ID)
+	if err != nil {
+		t.Fatalf("get after upgrade: %v", err)
+	}
+	if !found {
+		t.Fatal("the pre-upgrade row disappeared")
+	}
+	if row.Archived != 0 || row.ArchivedPrevEnabled != nil {
+		t.Errorf("pre-upgrade row reads as archived=%d prev=%v, want 0 and NULL",
+			row.Archived, row.ArchivedPrevEnabled)
+	}
+	if row.Enabled == 0 {
+		t.Error("the pre-upgrade row stopped reading as enabled")
+	}
+
+	// And it must still route: an upgrade is not supposed to change behaviour.
+	rows, err := ListEnabledUpstreams(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundInRouting := false
+	for _, candidate := range rows {
+		if candidate.ID == created.ID {
+			foundInRouting = true
+		}
+	}
+	if !foundInRouting {
+		t.Error("the pre-upgrade row no longer routes after the upgrade")
+	}
 }
