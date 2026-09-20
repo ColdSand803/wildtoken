@@ -81,6 +81,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			upstreams.Put("/{id}", handlers.AdminUpdateUpstream(state))
 			upstreams.Delete("/{id}", handlers.AdminDeleteUpstream(state))
 			upstreams.Patch("/{id}/enabled", handlers.AdminSetUpstreamEnabled(state))
+			upstreams.Patch("/{id}/archived", handlers.AdminSetUpstreamArchived(state))
 			upstreams.Patch("/{id}/priority", handlers.AdminSetUpstreamPriority(state))
 			upstreams.Post("/{id}/test", handlers.AdminTestUpstream(state))
 			upstreams.Post("/{id}/test-model", handlers.AdminTestUpstreamModel(state))

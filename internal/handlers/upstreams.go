@@ -669,6 +669,51 @@ func AdminSetUpstreamEnabled(state *appstate.State) http.HandlerFunc {
 	}
 }
 
+// AdminSetUpstreamArchived parks a channel out of routing, or restores it.
+//
+// It shares SetUpstreamEnabled's invalidation work because it changes who can
+// route. The health reset is unconditional: a channel parked for a week should
+// not come back carrying the failures it accumulated before it went away.
+func AdminSetUpstreamArchived(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathID(r)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		var input models.UpstreamArchivedIn
+		if err := decodeStrictJSON(w, r, &input); err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		archived, err := input.Value()
+		if err != nil {
+			apperr.WriteError(w, apperr.BadRequest(err.Error()))
+			return
+		}
+
+		if _, found, err := db.GetUpstream(r.Context(), state.DB, id); err != nil {
+			apperr.WriteError(w, err)
+			return
+		} else if !found {
+			apperr.WriteError(w, apperr.NotFound("upstream not found"))
+			return
+		}
+
+		updated, err := db.SetUpstreamArchived(r.Context(), state.DB, id, archived)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+
+		state.ModelsCache.Invalidate()
+		state.Routing.Invalidate()
+		state.AutoWeight.Reset(id)
+		applyRuntimeHealth(state, state.AutoWeightPolicy(), &updated)
+		apperr.WriteJSON(w, http.StatusOK, updated)
+	}
+}
+
 // AdminSetUpstreamPriority changes a channel's routing priority.
 func AdminSetUpstreamPriority(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

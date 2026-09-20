@@ -21,6 +21,13 @@ type UpstreamRow struct {
 	Weight            int64
 	AutoWeightEnabled int64 // 0 or 1
 	Enabled           int64 // 0 or 1
+	// Archived parks a channel out of routing without deleting it, and is why
+	// enabled is forced to 0 while it is set.
+	Archived int64 // 0 or 1
+	// What enabled was when the channel was archived, or NULL when it is not.
+	// Unarchiving restores this, so a channel that was already off does not
+	// come back routing.
+	ArchivedPrevEnabled *int64
 	ExtraHeaders      string
 	TimeoutSeconds    float64
 	// RateLimit is the stored rate expression ("100/m"), nil when unlimited.
@@ -255,6 +262,22 @@ type UpstreamEnabledIn struct {
 	Enabled *bool `json:"enabled"`
 }
 
+// UpstreamArchivedIn parks a channel out of routing, or puts it back.
+//
+// The field is a pointer for the same reason UpstreamEnabledIn's is: a body
+// that names nothing would otherwise archive the channel by accident.
+type UpstreamArchivedIn struct {
+	Archived *bool `json:"archived"`
+}
+
+// Value returns the requested state, or an error when the body named none.
+func (u *UpstreamArchivedIn) Value() (bool, error) {
+	if u.Archived == nil {
+		return false, ErrString("archived is required")
+	}
+	return *u.Archived, nil
+}
+
 // Value returns the requested state, or an error when the body named none.
 func (u *UpstreamEnabledIn) Value() (bool, error) {
 	if u.Enabled == nil {
@@ -291,7 +314,10 @@ type UpstreamOut struct {
 	Weight                         int64             `json:"weight"`
 	AutoWeightEnabled              bool              `json:"auto_weight_enabled"`
 	Enabled                        bool              `json:"enabled"`
-	ExtraHeaders                   map[string]string `json:"extra_headers"`
+	// Archived is why an archived channel also reads as disabled: parking one
+	// out of routing turns it off.
+	Archived    bool `json:"archived"`
+	ExtraHeaders map[string]string `json:"extra_headers"`
 	TimeoutSeconds                 float64           `json:"timeout_seconds"`
 	RateLimit                      *string           `json:"rate_limit"`
 	CreatedAt                      string            `json:"created_at"`

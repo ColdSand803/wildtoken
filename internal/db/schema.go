@@ -104,6 +104,12 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// so a row created by an older schema reads as "forward unchanged"
 		// rather than as a JSON parse failure.
 		{"effort_mappings", "TEXT NOT NULL DEFAULT '{}'"},
+		// A channel taken out of routing without being deleted. Archiving sets
+		// enabled = 0 and stashes what it was here, so unarchiving restores that
+		// instead of assuming the channel used to route. NULL means "not
+		// archived", which is also what a fresh column reads as.
+		{"archived", "INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))"},
+		{"archived_prev_enabled", "INTEGER"},
 	} {
 		if err := ensureColumn(ctx, db, "upstreams", column.name, column.definition); err != nil {
 			return err
