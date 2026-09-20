@@ -148,14 +148,16 @@ function stopTokenRefresh() {
 let tokenCopyConfirmedId = null;
 let tokenCopyConfirmedTimer = null;
 
-const TOKEN_COPY_GLYPH =
-  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">`
-  + `<rect x="9" y="9" width="10" height="10" rx="2"></rect>`
-  + `<path d="M5 15V7a2 2 0 0 1 2-2h8"></path></svg>`;
-const TOKEN_SEALED_GLYPH =
-  `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">`
-  + `<rect x="5" y="11" width="14" height="9" rx="2"></rect>`
-  + `<path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>`;
+/* 复制/封存图标。必须是函数：每次调用产新节点，常量节点复用会被前一行
+   偷走。曾经是 SVG 字符串，DOM 重构后字符串子节点按安全设计降级成纯
+   文本，图标就没了。SVG 必须走 svg()（createElementNS），否则得到的是
+   HTML 未知元素，属性都在就是不画。 */
+const tokenCopyGlyph = () => svg("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" },
+  svg("rect", { x: 9, y: 9, width: 10, height: 10, rx: 2 }),
+  svg("path", { d: "M5 15V7a2 2 0 0 1 2-2h8" }));
+const tokenSealedGlyph = () => svg("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" },
+  svg("rect", { x: 5, y: 11, width: 14, height: 9, rx: 2 }),
+  svg("path", { d: "M8 11V8a4 4 0 0 1 8 0v3" }));
 
 const TOKEN_SEALED_TITLE =
   "这个令牌创建于明文保存启用之前，完整值已经无法恢复。需要完整令牌只能删除后重建。";
@@ -178,7 +180,7 @@ function tokenPreviewCell(token) {
   },
     el("code", { class: "token-preview-code" }, token.token_preview || ""),
     el("span", { class: "token-preview-icon", "aria-hidden": "true" },
-      sealed ? TOKEN_SEALED_GLYPH : TOKEN_COPY_GLYPH));
+      sealed ? tokenSealedGlyph() : tokenCopyGlyph()));
 }
 
 function renderTokenRows() {
