@@ -4,6 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 import vm from "node:vm";
 
+import { createDomContext } from "./dom-stub.mjs";
+
 const root = path.resolve(import.meta.dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
 
@@ -151,25 +153,28 @@ test("渠道表的分组列在表头、列菜单与行渲染里三处齐全", ()
 
   // 空状态和骨架屏的 colspan 跟着表头走，少一列表格就会错位。
   assert.match(read("static/js/upstreams.js"), /const colCount = 9;/);
-  assert.match(read("static/js/upstreams.js"), /data-col="groups">\$\{renderUpstreamGroups\(upstream\)\}/);
+  assert.match(
+    read("static/js/upstreams.js"),
+    /dataset: \{ col: "groups" \} \}, renderUpstreamGroups\(upstream\)\)/,
+  );
   // 列菜单靠这两张表驱动，缺一处这列就不能隐藏或没有名字。
   assert.match(read("static/js/bootstrap.js"), /^\s*groups: true,$/m);
   assert.match(read("static/js/bootstrap.js"), /groups: "分组",/);
 });
 
-test("分组名未加载时退化成 id，不至于渲染出 undefined", () => {
+/** 分组列的渲染靠 modelChipList，两个都要放进沙箱。 */
+function groupCellContext() {
   const source = read("static/js/bootstrap.js");
-  const context = vm.createContext({
-    MAX_MODEL_CHIPS: 3,
-    escapeHtml: (value) => String(value),
-    groupById: () => null,
-    Array,
-  });
+  const context = createDomContext({ MAX_MODEL_CHIPS: 3, groupById: () => null });
+  vm.runInContext(extractFunction(source, "modelChipList"), context);
   vm.runInContext(extractFunction(source, "renderUpstreamGroups"), context);
+  return context;
+}
 
+test("分组名未加载时退化成 id，不至于渲染出 undefined", () => {
   const html = vm.runInContext(
-    "renderUpstreamGroups({ group_ids: [2, 5] })",
-    context,
+    "renderUpstreamGroups({ group_ids: [2, 5] }).outerHTML",
+    groupCellContext(),
   );
   assert.match(html, /#2/);
   assert.match(html, /#5/);
@@ -177,16 +182,8 @@ test("分组名未加载时退化成 id，不至于渲染出 undefined", () => {
 });
 
 test("渠道不属任何分组时显示占位而不是空白单元格", () => {
-  const source = read("static/js/bootstrap.js");
-  const context = vm.createContext({
-    MAX_MODEL_CHIPS: 3,
-    escapeHtml: (value) => String(value),
-    groupById: () => null,
-    Array,
-  });
-  vm.runInContext(extractFunction(source, "renderUpstreamGroups"), context);
   assert.match(
-    vm.runInContext("renderUpstreamGroups({ group_ids: [] })", context),
+    vm.runInContext("renderUpstreamGroups({ group_ids: [] }).outerHTML", groupCellContext()),
     /—/,
   );
 });

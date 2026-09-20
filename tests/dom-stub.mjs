@@ -73,14 +73,14 @@ function domClasses() {
       this.attributes = {};
       this.dataset = {};
       this.style = {};
-      this.className = "";
     }
+    // class 走 attributes，和 el() 一致：真实的 SVG 元素也只能这么设。
     setAttribute(key, value) { this.attributes[key] = String(value); }
     getAttribute(key) { return this.attributes[key] ?? null; }
+    get className() { return this.attributes.class ?? ""; }
     addEventListener() { /* 构建期不触发，忽略 */ }
     get outerHTML() {
       const parts = [];
-      if (this.className) parts.push(`class="${escapeAttr(this.className)}"`);
       for (const [key, value] of Object.entries(this.attributes)) {
         parts.push(`${key}="${escapeAttr(value)}"`);
       }
@@ -104,6 +104,8 @@ export function createDomContext(extra = {}) {
   const { Node, TextNode, Fragment, Element } = domClasses();
   const document = {
     createElement: (tag) => new Element(tag),
+    // 命名空间在这里不影响序列化，只要 svg() 能跑通。
+    createElementNS: (_ns, tag) => new Element(tag),
     createTextNode: (text) => new TextNode(text),
     createDocumentFragment: () => new Fragment(),
   };
@@ -114,9 +116,11 @@ export function createDomContext(extra = {}) {
   });
 
   const bootstrap = read("static/js/bootstrap.js");
-  for (const name of ["appendChildren", "el", "frag", "replaceChildren"]) {
+  for (const name of ["appendChildren", "applyProps", "el", "svg", "frag", "replaceChildren"]) {
     vm.runInContext(extractFunction(bootstrap, name), context);
   }
+  // svg() 要用到的命名空间常量。
+  vm.runInContext('const SVG_NS = "http://www.w3.org/2000/svg";', context);
   return context;
 }
 

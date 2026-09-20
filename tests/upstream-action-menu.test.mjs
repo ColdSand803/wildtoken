@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
 
+import { createDomContext } from "./dom-stub.mjs";
+
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 
 function extractFunction(source, name) {
@@ -31,11 +33,14 @@ function extractFunction(source, name) {
 }
 
 test("upstream action menu distinguishes channel clone and credential copy actions", () => {
-  const source = read("static/js/upstreams.js");
+  // 菜单真跑一次：两个动作名字相近，弄反了会把“复制凭据”变成“新建渠道”。
+  const context = createDomContext();
+  vm.runInContext(extractFunction(read("static/js/upstreams.js"), "actionMenuItems"), context);
+  const html = vm.runInContext("actionMenuItems(7).outerHTML", context);
 
-  assert.match(source, /data-action="duplicate" data-id="\$\{upstreamId\}">复制渠道<\/button>/);
-  assert.match(source, /data-action="copy-info" data-id="\$\{upstreamId\}">复制渠道信息<\/button>/);
-  assert.doesNotMatch(source, /data-action="duplicate" data-id="\$\{upstreamId\}">复制<\/button>/);
+  assert.match(html, /data-action="duplicate" data-id="7">复制渠道<\/button>/);
+  assert.match(html, /data-action="copy-info" data-id="7">复制渠道信息<\/button>/);
+  assert.doesNotMatch(html, /data-action="duplicate"[^>]*>复制<\/button>/);
 });
 
 test("upstream credential clipboard text keeps the requested two-line shape", () => {
@@ -85,23 +90,21 @@ test("fixed weight checkbox maps to the existing dynamic-weight API field", () =
 
 test("upstream weight cell uses fixed and effective weight wording", () => {
   const source = read("static/js/upstreams.js");
-  const context = vm.createContext({});
-  vm.runInContext(extractFunction(source, "formatEffectiveWeight"), context);
-  vm.runInContext(extractFunction(source, "isFixedWeight"), context);
-  vm.runInContext(extractFunction(source, "weightCellMarkup"), context);
+  const context = createDomContext();
+  for (const name of ["formatEffectiveWeight", "isFixedWeight", "weightCell"]) {
+    vm.runInContext(extractFunction(source, name), context);
+  }
+  const render = (upstream) => {
+    context.candidate = upstream;
+    return vm.runInContext("weightCell(candidate).outerHTML", context);
+  };
 
-  const fixedMarkup = vm.runInContext(
-    "weightCellMarkup({ weight: 80, effective_weight: 12, auto_weight_enabled: false })",
-    context,
-  );
+  const fixedMarkup = render({ weight: 80, effective_weight: 12, auto_weight_enabled: false });
   assert.match(fixedMarkup, /<strong>80<\/strong>/);
   assert.match(fixedMarkup, /固定权重/);
   assert.doesNotMatch(fixedMarkup, /有效权重 \/ 基础权重/);
 
-  const dynamicMarkup = vm.runInContext(
-    "weightCellMarkup({ weight: 80, effective_weight: 0, auto_weight_enabled: true })",
-    context,
-  );
+  const dynamicMarkup = render({ weight: 80, effective_weight: 0, auto_weight_enabled: true });
   assert.match(dynamicMarkup, /<strong>0 \/ 80<\/strong>/);
   assert.match(dynamicMarkup, /有效权重 \/ 基础权重/);
 });
@@ -162,9 +165,10 @@ test("a superseded balance query cannot overwrite the newer result", async () =>
     balanceQueryToken: 0,
     balanceRefresh: { disabled: false, classList: { toggle() {} } },
     balanceSummary: { textContent: "" },
-    balanceBody: { innerHTML: "" },
+    // 渲染改成了 replaceChildren(node)，这里只需要记下最后写进去的是谁。
+    balanceBody: { replaceChildren(value) { this.received = value; } },
+    replaceChildren: (parent, value) => parent.replaceChildren(value),
     api: () => responses.shift(),
-    escapeHtml: (value) => value,
     renderBalanceResult: (result) => `remaining:${result.remaining_usd}`,
   });
   vm.runInContext(extractFunction(source, "setBalanceRefreshBusy"), context);
@@ -176,7 +180,7 @@ test("a superseded balance query cannot overwrite the newer result", async () =>
   releaseStale();
   await stale;
 
-  assert.equal(context.balanceBody.innerHTML, "remaining:2");
+  assert.equal(context.balanceBody.received, "remaining:2");
   assert.equal(context.balanceSummary.textContent, "查询成功");
   assert.equal(context.balanceRefresh.disabled, false);
 });

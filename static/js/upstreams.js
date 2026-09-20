@@ -358,7 +358,9 @@ function formatBalanceAmount(value, unit = "USD") {
 }
 
 function renderBalanceRow(label, value) {
-  return `<div class="balance-row"><span class="label">${escapeHtml(label)}</span><span class="value">${escapeHtml(value)}</span></div>`;
+  return el("div", { class: "balance-row" },
+    el("span", { class: "label" }, label),
+    el("span", { class: "value" }, value));
 }
 
 function renderBalanceResult(result, provider) {
@@ -371,13 +373,12 @@ function renderBalanceResult(result, provider) {
     if (result.plan_name) rows.push(renderBalanceRow("计划", result.plan_name));
     if (typeof result.is_valid === "boolean") rows.push(renderBalanceRow("状态", result.is_valid ? "有效" : "无效"));
     if (result.mode) rows.push(renderBalanceRow("模式", result.mode));
-    return rows.join("");
+    return frag(rows);
   }
-  return [
+  return frag(
     renderBalanceRow("总额", formatBalanceAmount(result.total_usd, unit)),
     renderBalanceRow("已用", formatBalanceAmount(result.used_usd, unit)),
-    renderBalanceRow("剩余", formatBalanceAmount(result.remaining_usd, unit)),
-  ].join("");
+    renderBalanceRow("剩余", formatBalanceAmount(result.remaining_usd, unit)));
 }
 
 function setBalanceRefreshBusy(busy) {
@@ -393,7 +394,7 @@ async function refreshBalance() {
   // a stale response must not overwrite the newer one it loses the race to.
   const token = ++balanceQueryToken;
   balanceSummary.textContent = "正在查询...";
-  balanceBody.innerHTML = "";
+  balanceBody.replaceChildren();
   setBalanceRefreshBusy(true);
 
   try {
@@ -401,15 +402,15 @@ async function refreshBalance() {
     if (token !== balanceQueryToken) return;
     if (result.ok) {
       balanceSummary.textContent = "查询成功";
-      balanceBody.innerHTML = renderBalanceResult(result, provider);
+      replaceChildren(balanceBody, renderBalanceResult(result, provider));
     } else {
       balanceSummary.textContent = "查询失败";
-      balanceBody.innerHTML = `<p class="muted">${escapeHtml(result.message || "未知错误")}</p>`;
+      replaceChildren(balanceBody, el("p", { class: "muted" }, result.message || "未知错误"));
     }
   } catch (error) {
     if (token !== balanceQueryToken) return;
     balanceSummary.textContent = "查询失败";
-    balanceBody.innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`;
+    replaceChildren(balanceBody, el("p", { class: "muted" }, error.message));
   } finally {
     if (token === balanceQueryToken) {
       setBalanceRefreshBusy(false);
@@ -462,12 +463,14 @@ function isFixedWeight(upstream) {
   return !upstream.auto_weight_enabled;
 }
 
-function weightCellMarkup(upstream) {
+function weightCell(upstream) {
   const baseWeight = formatEffectiveWeight(upstream.weight);
   if (isFixedWeight(upstream)) {
-    return `<strong>${baseWeight}</strong><span>固定权重</span>`;
+    return frag(el("strong", {}, baseWeight), el("span", {}, "固定权重"));
   }
-  return `<strong>${formatEffectiveWeight(upstream.effective_weight)} / ${baseWeight}</strong><span>有效权重 / 基础权重</span>`;
+  return frag(
+    el("strong", {}, `${formatEffectiveWeight(upstream.effective_weight)} / ${baseWeight}`),
+    el("span", {}, "有效权重 / 基础权重"));
 }
 
 function formatZeroWeightNote(upstream, remainingRecovery) {
@@ -562,86 +565,64 @@ function renderRows() {
     row.className = upstream.enabled ? "" : "row-disabled";
     row.dataset.upstreamId = String(upstream.id);
     const remainingRecovery = liveEffectiveRecoverySeconds(upstream);
-    const checked = selectedUpstreamIds.has(upstream.id) ? "checked" : "";
-    row.innerHTML = `
-      <td class="col-check" data-col="check">
-        <input
-          type="checkbox"
-          class="upstream-row-check"
-          data-upstream-check="${upstream.id}"
-          aria-label="选择渠道 ${escapeHtml(upstream.name)}"
-          ${checked}
-        />
-      </td>
-      <td class="col-id" data-col="id">${upstream.id}</td>
-      <td class="name-cell" data-col="name">
-        <div class="name-stack">
-          <strong title="${escapeHtml(upstream.name)}">${escapeHtml(upstream.name)}</strong>
-          ${renderBaseUrlCell(upstream)}
-        </div>
-      </td>
-      <td class="match-cell" data-col="models">${renderModelMatches(upstream)}</td>
-      <td class="match-cell" data-col="groups">${renderUpstreamGroups(upstream)}</td>
-      <td class="col-priority" data-col="priority">
-        <button
-          type="button"
-          class="priority-value"
-          data-priority-edit="${upstream.id}"
-          aria-label="修改渠道 ${escapeHtml(upstream.name)} 的优先级"
-          title="点击修改优先级"
-        >${upstream.priority}</button>
-        <input
-          type="number"
-          class="priority-input"
-          data-priority-input="${upstream.id}"
-          min="0"
-          max="100000"
-          step="1"
-          value="${upstream.priority}"
-          aria-label="渠道 ${escapeHtml(upstream.name)} 的优先级"
-          hidden
-        />
-      </td>
-      <td class="col-weight" data-col="weight">
-        <div class="weight-stack">
-          ${weightCellMarkup(upstream)}
-        </div>
-      </td>
-      <td class="col-status" data-col="status">
-        <div class="status-stack">
-          <button
-            type="button"
-            class="status-switch ${upstream.enabled ? "on" : "off"}"
-            data-action="toggle-enabled"
-            data-id="${upstream.id}"
-            role="switch"
-            aria-checked="${upstream.enabled ? "true" : "false"}"
-            aria-label="${upstream.enabled ? "停用" : "启用"}渠道 ${escapeHtml(upstream.name)}"
-            title="${upstream.enabled ? "点击停用" : "点击启用"}"
-          >
-            <span class="status-switch-track" aria-hidden="true">
-              <span class="status-switch-thumb"></span>
-            </span>
-          </button>
-        </div>
-        <span
-          class="effective-zero-note"
-          data-effective-zero-id="${upstream.id}"
-          ${Number(upstream.effective_weight) <= 0 ? "" : "hidden"}
-        >${Number(upstream.effective_weight) <= 0 ? formatZeroWeightNote(upstream, remainingRecovery) : ""}</span>
-      </td>
-      <td class="row-actions col-actions" data-col="actions">
-        <button
-          type="button"
-          class="secondary action-menu-trigger"
-          data-menu-id="${upstream.id}"
-          aria-haspopup="menu"
-          aria-expanded="false"
-          aria-label="打开 ${escapeHtml(upstream.name)} 的操作菜单"
-          title="操作"
-        ><span aria-hidden="true">⋮</span></button>
-      </td>
-    `;
+    const zeroWeight = Number(upstream.effective_weight) <= 0;
+    row.append(
+      el("td", { class: "col-check", dataset: { col: "check" } },
+        el("input", {
+          type: "checkbox", class: "upstream-row-check",
+          dataset: { upstreamCheck: upstream.id },
+          "aria-label": `选择渠道 ${upstream.name}`,
+          checked: selectedUpstreamIds.has(upstream.id),
+        })),
+      el("td", { class: "col-id", dataset: { col: "id" } }, upstream.id),
+      el("td", { class: "name-cell", dataset: { col: "name" } },
+        el("div", { class: "name-stack" },
+          el("strong", { title: upstream.name }, upstream.name),
+          renderBaseUrlCell(upstream))),
+      el("td", { class: "match-cell", dataset: { col: "models" } }, renderModelMatches(upstream)),
+      el("td", { class: "match-cell", dataset: { col: "groups" } }, renderUpstreamGroups(upstream)),
+      el("td", { class: "col-priority", dataset: { col: "priority" } },
+        el("button", {
+          type: "button", class: "priority-value",
+          dataset: { priorityEdit: upstream.id },
+          "aria-label": `修改渠道 ${upstream.name} 的优先级`,
+          title: "点击修改优先级",
+        }, upstream.priority),
+        el("input", {
+          type: "number", class: "priority-input",
+          dataset: { priorityInput: upstream.id },
+          min: 0, max: 100000, step: 1, value: upstream.priority,
+          "aria-label": `渠道 ${upstream.name} 的优先级`,
+          hidden: true,
+        })),
+      el("td", { class: "col-weight", dataset: { col: "weight" } },
+        el("div", { class: "weight-stack" }, weightCell(upstream))),
+      el("td", { class: "col-status", dataset: { col: "status" } },
+        el("div", { class: "status-stack" },
+          el("button", {
+            type: "button",
+            class: `status-switch ${upstream.enabled ? "on" : "off"}`,
+            dataset: { action: "toggle-enabled", id: upstream.id },
+            role: "switch",
+            "aria-checked": upstream.enabled ? "true" : "false",
+            "aria-label": `${upstream.enabled ? "停用" : "启用"}渠道 ${upstream.name}`,
+            title: upstream.enabled ? "点击停用" : "点击启用",
+          },
+            el("span", { class: "status-switch-track", "aria-hidden": "true" },
+              el("span", { class: "status-switch-thumb" })))),
+        el("span", {
+          class: "effective-zero-note",
+          dataset: { effectiveZeroId: upstream.id },
+          hidden: !zeroWeight,
+        }, zeroWeight ? formatZeroWeightNote(upstream, remainingRecovery) : "")),
+      el("td", { class: "row-actions col-actions", dataset: { col: "actions" } },
+        el("button", {
+          type: "button", class: "secondary action-menu-trigger",
+          dataset: { menuId: upstream.id },
+          "aria-haspopup": "menu", "aria-expanded": "false",
+          "aria-label": `打开 ${upstream.name} 的操作菜单`,
+          title: "操作",
+        }, el("span", { "aria-hidden": "true" }, "⋮"))));
     fragment.append(row);
   }
 
@@ -695,13 +676,14 @@ function renderSparkline(points) {
     /* preserveAspectRatio="none" 让 100 单位的横线拉满整个容器——等比缩放时
        viewBox 只占容器中间一段，虚线看起来就短了一截。虚线段长会随横向拉伸
        放大（约 3~4.5 倍），所以这里用小间距，拉开后正好是普通虚线的密度。 */
-    return `
-      <svg class="sparkline-svg" viewBox="0 0 100 40" preserveAspectRatio="none"
-           role="img" aria-label="近 6 小时无请求">
-        <line x1="0" y1="38" x2="100" y2="38" stroke="currentColor" stroke-width="1"
-              stroke-dasharray="1.5 1.5" opacity="0.35" vector-effect="non-scaling-stroke"/>
-      </svg>
-    `;
+    return svg("svg", {
+      class: "sparkline-svg", viewBox: "0 0 100 40", preserveAspectRatio: "none",
+      role: "img", "aria-label": "近 6 小时无请求",
+    },
+      svg("line", {
+        x1: 0, y1: 38, x2: 100, y2: 38, stroke: "currentColor", "stroke-width": 1,
+        "stroke-dasharray": "1.5 1.5", opacity: 0.35, "vector-effect": "non-scaling-stroke",
+      }));
   }
 
   const max = Math.max(...points);
@@ -724,24 +706,27 @@ function renderSparkline(points) {
   // make every later chart reuse the first card's gradient.
   const gradientId = `sparkline-gradient-${++sparklineGradientSeq}`;
 
-  return `
-    <svg class="sparkline-svg" viewBox="0 0 100 40" preserveAspectRatio="none"
-         role="img" aria-label="近 6 小时请求量趋势">
-      <defs>
-        <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="currentColor" stop-opacity="0.25" />
-          <stop offset="100%" stop-color="currentColor" stop-opacity="0.04" />
-        </linearGradient>
-      </defs>
-      <path d="${area}" fill="url(#${gradientId})" />
-      <path d="${line}" fill="none" stroke="currentColor" stroke-width="1.5"
-            vector-effect="non-scaling-stroke"/>
-      <line class="channel-spark-hover-guide" x1="0" y1="0" x2="0" y2="40" vector-effect="non-scaling-stroke" />
-      <circle class="channel-spark-hover-dot" r="2.5" cx="0" cy="0" />
-      <rect class="channel-spark-hit-area" x="0" y="0" width="100" height="40" />
-    </svg>
-    <div class="channel-spark-tooltip" role="status" hidden></div>
-  `;
+  return frag(
+    svg("svg", {
+      class: "sparkline-svg", viewBox: "0 0 100 40", preserveAspectRatio: "none",
+      role: "img", "aria-label": "近 6 小时请求量趋势",
+    },
+      svg("defs", {},
+        svg("linearGradient", { id: gradientId, x1: "0%", y1: "0%", x2: "0%", y2: "100%" },
+          svg("stop", { offset: "0%", "stop-color": "currentColor", "stop-opacity": 0.25 }),
+          svg("stop", { offset: "100%", "stop-color": "currentColor", "stop-opacity": 0.04 }))),
+      svg("path", { d: area, fill: `url(#${gradientId})` }),
+      svg("path", {
+        d: line, fill: "none", stroke: "currentColor", "stroke-width": 1.5,
+        "vector-effect": "non-scaling-stroke",
+      }),
+      svg("line", {
+        class: "channel-spark-hover-guide", x1: 0, y1: 0, x2: 0, y2: 40,
+        "vector-effect": "non-scaling-stroke",
+      }),
+      svg("circle", { class: "channel-spark-hover-dot", r: 2.5, cx: 0, cy: 0 }),
+      svg("rect", { class: "channel-spark-hit-area", x: 0, y: 0, width: 100, height: 40 })),
+    el("div", { class: "channel-spark-tooltip", role: "status", hidden: true }));
 }
 
 function bindChannelSparklineInteraction(container, values) {
@@ -780,7 +765,9 @@ function bindChannelSparklineInteraction(container, values) {
       dot.setAttribute("transform", `scale(${dotScaleX} 1)`);
       dot.setAttribute("cx", x / dotScaleX);
       dot.setAttribute("cy", y);
-      tooltip.innerHTML = `<strong>请求量 (6h)</strong><span>${formatMetric(Math.round(value))}</span>`;
+      replaceChildren(tooltip,
+        el("strong", {}, "请求量 (6h)"),
+        el("span", {}, formatMetric(Math.round(value))));
       tooltip.hidden = false;
       tooltip.style.left = `${Math.min(Math.max(6, x * bounds.width / width + 8), container.clientWidth - tooltip.offsetWidth - 6)}px`;
       tooltip.style.top = `${Math.max(6, y * bounds.height / height - 32)}px`;
@@ -893,10 +880,13 @@ async function fetchAllUpstreamStats() {
 function renderHealthBars(health) {
   const buckets = Array.isArray(health?.buckets) ? health.buckets : [];
   if (!buckets.length) {
-    return '<div class="health-bars-empty">24h 无请求</div>';
+    return el("div", { class: "health-bars-empty" }, "24h 无请求");
   }
   const maxTotal = Math.max(...buckets.map((bucket) => Number(bucket.total) || 0), 1);
-  const bars = buckets.map((bucket) => {
+  return el("div", {
+    class: "health-bars", role: "img",
+    "aria-label": `24 小时逐小时健康，共 ${health.total} 请求，失败 ${health.errors}`,
+  }, buckets.map((bucket) => {
     const total = Number(bucket.total) || 0;
     const errors = Number(bucket.errors) || 0;
     const height = Math.max(12, Math.round((total / maxTotal) * 100));
@@ -905,9 +895,12 @@ function renderHealthBars(health) {
     const hour = new Date(Number(bucket.bucket_epoch) * 1000);
     const label = `${String(hour.getHours()).padStart(2, "0")}:00 · ${total} 请求`
       + (errors > 0 ? ` · 失败 ${errors}` : "");
-    return `<span class="health-bar health-bar--${tone}" style="height:${height}%" title="${escapeHtml(label)}"></span>`;
-  }).join("");
-  return `<div class="health-bars" role="img" aria-label="24 小时逐小时健康，共 ${health.total} 请求，失败 ${health.errors}">${bars}</div>`;
+    return el("span", {
+      class: `health-bar health-bar--${tone}`,
+      style: { height: `${height}%` },
+      title: label,
+    });
+  }));
 }
 
 /* 同步渲染：统计只从缓存读。缓存是空的就先出骨架，等后台补齐后单独替换这张卡，
@@ -947,74 +940,61 @@ function createChannelCard(upstream) {
     ? "—"
     : formatSeconds(health.avgMs);
 
-  card.innerHTML = `
-    <div class="channel-card-header">
-      <div class="channel-card-title">
-        <span class="status-dot status-dot--${statusClass}"></span>
-        <h3 title="${escapeHtml(upstream.name)}">${escapeHtml(upstream.name)}</h3>
-      </div>
-      <div class="channel-card-header-actions">
-        <span class="channel-card-badge">优先级 ${upstream.priority}</span>
-        <button
-          type="button"
-          class="status-switch ${upstream.enabled ? "on" : "off"}"
-          data-action="toggle-enabled"
-          data-id="${upstream.id}"
-          role="switch"
-          aria-checked="${upstream.enabled ? "true" : "false"}"
-          aria-label="${upstream.enabled ? "停用" : "启用"}渠道 ${escapeHtml(upstream.name)}"
-          title="${upstream.enabled ? "点击停用" : "点击启用"}"
-        >
-          <span class="status-switch-track" aria-hidden="true">
-            <span class="status-switch-thumb"></span>
-          </span>
-        </button>
-        <button
-          type="button"
-          class="secondary action-menu-trigger"
-          data-menu-id="${upstream.id}"
-          aria-haspopup="menu"
-          aria-expanded="false"
-          aria-label="打开 ${escapeHtml(upstream.name)} 的操作菜单"
-          title="操作"
-        ><span aria-hidden="true">⋮</span></button>
-      </div>
-    </div>
-    <div class="channel-card-sparkline">
-      <div class="sparkline-header">
-        <span class="sparkline-label">请求量 (6h)</span>
-        <span class="sparkline-value">${sixHourTotal}</span>
-      </div>
-      ${renderSparkline(sparklineData)}
-    </div>
-    <div class="channel-card-health">
-      <div class="sparkline-header">
-        <span class="sparkline-label">24h 健康</span>
-        <span class="health-summary">
-          <span class="health-stat${successTone}" title="24 小时成功率">在线率 ${successLabel}</span>
-          <span class="health-stat" title="24 小时平均耗时">均延迟 ${healthLatency}</span>
-        </span>
-      </div>
-      ${renderHealthBars(healthPending ? null : health)}
-    </div>
-    <div class="channel-card-metrics">
-      <div class="metric-tile">
-        <span class="metric-label">总请求</span>
-        <span class="metric-value">${totalRequests}</span>
-      </div>
-      <div class="metric-tile">
-        <span class="metric-label">缓存命中</span>
-        <span class="metric-value">${cacheHit}</span>
-      </div>
-      <div class="metric-tile metric-tile--wide" title="项目未存储价格数据，此处为每千次请求的平均 Token 消耗">
-        <span class="metric-label">平均 Token / 千次请求</span>
-        <span class="metric-value">${avgTokens}</span>
-      </div>
-    </div>
-    <button type="button" class="channel-card-action" data-card-detail="${upstream.id}">
-      查看详情 →
-    </button>
-  `;
+  const metricTile = (label, value, options) =>
+    el("div", { class: `metric-tile${options?.wide ? " metric-tile--wide" : ""}`, title: options?.title },
+      el("span", { class: "metric-label" }, label),
+      el("span", { class: "metric-value" }, value));
+
+  card.append(
+    el("div", { class: "channel-card-header" },
+      el("div", { class: "channel-card-title" },
+        el("span", { class: `status-dot status-dot--${statusClass}` }),
+        el("h3", { title: upstream.name }, upstream.name)),
+      el("div", { class: "channel-card-header-actions" },
+        el("span", { class: "channel-card-badge" }, `优先级 ${upstream.priority}`),
+        el("button", {
+          type: "button",
+          class: `status-switch ${upstream.enabled ? "on" : "off"}`,
+          dataset: { action: "toggle-enabled", id: upstream.id },
+          role: "switch",
+          "aria-checked": upstream.enabled ? "true" : "false",
+          "aria-label": `${upstream.enabled ? "停用" : "启用"}渠道 ${upstream.name}`,
+          title: upstream.enabled ? "点击停用" : "点击启用",
+        },
+          el("span", { class: "status-switch-track", "aria-hidden": "true" },
+            el("span", { class: "status-switch-thumb" }))),
+        el("button", {
+          type: "button", class: "secondary action-menu-trigger",
+          dataset: { menuId: upstream.id },
+          "aria-haspopup": "menu", "aria-expanded": "false",
+          "aria-label": `打开 ${upstream.name} 的操作菜单`,
+          title: "操作",
+        }, el("span", { "aria-hidden": "true" }, "⋮")))),
+    el("div", { class: "channel-card-sparkline" },
+      el("div", { class: "sparkline-header" },
+        el("span", { class: "sparkline-label" }, "请求量 (6h)"),
+        el("span", { class: "sparkline-value" }, sixHourTotal)),
+      renderSparkline(sparklineData)),
+    el("div", { class: "channel-card-health" },
+      el("div", { class: "sparkline-header" },
+        el("span", { class: "sparkline-label" }, "24h 健康"),
+        el("span", { class: "health-summary" },
+          el("span", { class: `health-stat${successTone}`, title: "24 小时成功率" },
+            `在线率 ${successLabel}`),
+          el("span", { class: "health-stat", title: "24 小时平均耗时" },
+            `均延迟 ${healthLatency}`))),
+      renderHealthBars(healthPending ? null : health)),
+    el("div", { class: "channel-card-metrics" },
+      metricTile("总请求", totalRequests),
+      metricTile("缓存命中", cacheHit),
+      metricTile("平均 Token / 千次请求", avgTokens, {
+        wide: true,
+        title: "项目未存储价格数据，此处为每千次请求的平均 Token 消耗",
+      })),
+    el("button", {
+      type: "button", class: "channel-card-action",
+      dataset: { cardDetail: upstream.id },
+    }, "查看详情 →"));
   bindChannelSparklineInteraction(card.querySelector(".channel-card-sparkline"), sparklineData);
 
   return card;
@@ -1055,35 +1035,41 @@ function renderCards() {
   const filtered = getFilteredUpstreams();
 
   if (upstreamsLoading && !upstreamsLoadedOnce) {
-    upstreamCardsContainer.innerHTML = '<div class="cards-loading">加载中…</div>';
+    replaceChildren(upstreamCardsContainer, el("div", { class: "cards-loading" }, "加载中…"));
     return;
   }
 
+  /* 卡片视图的空态，与表格视图的 emptyStateRow 平行——那边要的是 <tr>，
+     这边是一个块。 */
+  const cardsEmpty = (title, detail, actionLabel, actionId) =>
+    el("div", { class: "cards-empty" },
+      el("p", {}, title),
+      el("p", { class: "cards-empty-sub" }, detail),
+      el("button", {
+        type: "button", class: "secondary",
+        dataset: { emptyAction: actionId },
+      }, actionLabel));
+
   if (upstreamsLoadedOnce && upstreams.length === 0 && !upstreamFiltersActive()) {
-    upstreamCardsContainer.innerHTML = `
-      <div class="cards-empty">
-        <p>暂无渠道</p>
-        <p class="cards-empty-sub">还没有配置上游渠道。创建后即可按优先级与模型规则路由请求。</p>
-        <button type="button" class="secondary" data-empty-action="new-upstream">新增渠道</button>
-      </div>
-    `;
+    replaceChildren(upstreamCardsContainer, cardsEmpty(
+      "暂无渠道",
+      "还没有配置上游渠道。创建后即可按优先级与模型规则路由请求。",
+      "新增渠道", "new-upstream"));
     return;
   }
 
   if (upstreamsLoadedOnce && filtered.length === 0) {
-    upstreamCardsContainer.innerHTML = `
-      <div class="cards-empty">
-        <p>无匹配渠道</p>
-        <p class="cards-empty-sub">当前筛选条件下没有结果。可调整搜索词或状态筛选。</p>
-        <button type="button" class="secondary" data-empty-action="clear-upstream-filters">清除筛选</button>
-      </div>
-    `;
+    replaceChildren(upstreamCardsContainer, cardsEmpty(
+      "无匹配渠道",
+      "当前筛选条件下没有结果。可调整搜索词或状态筛选。",
+      "清除筛选", "clear-upstream-filters"));
     return;
   }
 
   // 上一次留下的加载中/空状态占位要先清掉。
-  const placeholder = upstreamCardsContainer.querySelector(".cards-loading, .cards-empty");
-  if (placeholder) upstreamCardsContainer.innerHTML = "";
+  if (upstreamCardsContainer.querySelector(".cards-loading, .cards-empty")) {
+    upstreamCardsContainer.replaceChildren();
+  }
 
   const existingCards = new Map();
   for (const card of upstreamCardsContainer.querySelectorAll("[data-card-upstream-id]")) {
@@ -1182,20 +1168,25 @@ function updateEffectiveWeightNotes() {
   scheduleRenderUpstreamSummary();
 }
 
-function actionMenuMarkup(upstreamId) {
-  return `
-    <button type="button" role="menuitem" data-action="test-model" data-id="${upstreamId}">测试模型</button>
-    <button type="button" role="menuitem" data-action="test" data-id="${upstreamId}">测试连接</button>
-    <button type="button" role="menuitem" data-action="balance" data-id="${upstreamId}">查询 new-api 余额</button>
-    <button type="button" role="menuitem" data-action="balance-sub2api" data-id="${upstreamId}">查询 sub2api 余额</button>
-    <button type="button" role="menuitem" data-action="models" data-id="${upstreamId}">拉取模型</button>
-    <div class="action-menu-separator" role="separator"></div>
-    <button type="button" role="menuitem" data-action="edit" data-id="${upstreamId}">编辑</button>
-    <button type="button" role="menuitem" data-action="duplicate" data-id="${upstreamId}">复制渠道</button>
-    <button type="button" role="menuitem" data-action="copy-info" data-id="${upstreamId}">复制渠道信息</button>
-    <div class="action-menu-separator" role="separator"></div>
-    <button type="button" role="menuitem" data-action="delete" data-id="${upstreamId}" class="danger">删除</button>
-  `;
+function actionMenuItems(upstreamId) {
+  const item = (action, label, extraClass) => el("button", {
+    type: "button", role: "menuitem", class: extraClass || null,
+    dataset: { action, id: upstreamId },
+  }, label);
+  const separator = () => el("div", { class: "action-menu-separator", role: "separator" });
+
+  return frag(
+    item("test-model", "测试模型"),
+    item("test", "测试连接"),
+    item("balance", "查询 new-api 余额"),
+    item("balance-sub2api", "查询 sub2api 余额"),
+    item("models", "拉取模型"),
+    separator(),
+    item("edit", "编辑"),
+    item("duplicate", "复制渠道"),
+    item("copy-info", "复制渠道信息"),
+    separator(),
+    item("delete", "删除", "danger"));
 }
 
 function openUpstreamActionMenu(button) {
@@ -1208,7 +1199,7 @@ function openUpstreamActionMenu(button) {
   activeActionMenuButton = button;
   openActionMenuUpstreamId = Number(button.dataset.menuId);
   button.setAttribute("aria-expanded", "true");
-  upstreamActionMenu.innerHTML = actionMenuMarkup(Number(button.dataset.menuId));
+  replaceChildren(upstreamActionMenu, actionMenuItems(Number(button.dataset.menuId)));
   upstreamActionMenu.style.visibility = "hidden";
   showPopoverLayer(upstreamActionMenu, true);
   window.requestAnimationFrame(() => {

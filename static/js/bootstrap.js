@@ -1196,19 +1196,17 @@ function appendChildren(parent, children) {
 }
 
 /**
- * 造一个元素。
+ * 把 props 应用到节点。
  *
- * props 里：class 走 className，dataset 整个合并，style 接对象或字符串，
- * on* 挂事件，其余当属性写。值为 null/undefined/false 的属性直接不写，
- * 省掉调用方到处写三元表达式。
+ * class 走 setAttribute 而不是 className：SVG 元素的 className 是只读的
+ * SVGAnimatedString，直接赋值不生效。dataset 整个合并，style 接对象或
+ * 字符串，on* 挂事件，其余当属性写。值为 null/undefined/false 的属性直接
+ * 不写，省掉调用方到处写三元表达式。
  */
-function el(tag, props, ...children) {
-  const node = document.createElement(tag);
+function applyProps(node, props) {
   for (const [key, value] of Object.entries(props || {})) {
     if (value === null || value === undefined || value === false) continue;
-    if (key === "class") {
-      node.className = value;
-    } else if (key === "dataset") {
+    if (key === "dataset") {
       Object.assign(node.dataset, value);
     } else if (key === "style") {
       if (typeof value === "string") node.style.cssText = value;
@@ -1221,6 +1219,27 @@ function el(tag, props, ...children) {
       node.setAttribute(key, String(value));
     }
   }
+}
+
+/** 造一个 HTML 元素。 */
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  applyProps(node, props);
+  appendChildren(node, children);
+  return node;
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/**
+ * 造一个 SVG 元素。
+ *
+ * 必须走 createElementNS：用 createElement("path") 得到的是一个 HTML 未知元素，
+ * 属性都在、在 DOM 树里也看得见，就是不画出来。
+ */
+function svg(tag, props, ...children) {
+  const node = document.createElementNS(SVG_NS, tag);
+  applyProps(node, props);
   appendChildren(node, children);
   return node;
 }
@@ -1295,52 +1314,36 @@ function buildSmoothSparkPaths(coords, { baselineY, minY = -Infinity, maxY = Inf
 }
 
 function renderIcon(name) {
+  const icon = (...shapes) =>
+    svg("svg", { viewBox: "0 0 24 24", "aria-hidden": "true", focusable: "false" }, shapes);
   if (name === "copy") {
-    return `
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <rect x="9" y="9" width="10" height="10" rx="2"></rect>
-        <path d="M5 15V7a2 2 0 0 1 2-2h8"></path>
-      </svg>
-    `;
+    return icon(
+      svg("rect", { x: 9, y: 9, width: 10, height: 10, rx: 2 }),
+      svg("path", { d: "M5 15V7a2 2 0 0 1 2-2h8" }));
   }
   if (name === "open") {
-    return `
-      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path d="M14 5h5v5"></path>
-        <path d="M10 14 19 5"></path>
-        <path d="M19 14v3a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3"></path>
-      </svg>
-    `;
+    return icon(
+      svg("path", { d: "M14 5h5v5" }),
+      svg("path", { d: "M10 14 19 5" }),
+      svg("path", { d: "M19 14v3a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3" }));
   }
-  return "";
+  return null;
 }
 
 function renderBaseUrlCell(upstream) {
-  const baseUrl = escapeHtml(upstream.base_url);
-  const name = escapeHtml(upstream.name);
-  return `
-    <div class="url-cell-inner">
-      <code title="${baseUrl}">${baseUrl}</code>
-      <span class="url-cell-actions" aria-label="Base URL 操作">
-        <button
-          type="button"
-          class="secondary ghost url-action"
-          data-url-action="copy"
-          data-base-url="${baseUrl}"
-          aria-label="复制 ${name} 的 Base URL"
-          title="复制 Base URL"
-        >${renderIcon("copy")}</button>
-        <button
-          type="button"
-          class="secondary ghost url-action"
-          data-url-action="open"
-          data-base-url="${baseUrl}"
-          aria-label="打开 ${name} 的 Base URL"
-          title="打开 Base URL"
-        >${renderIcon("open")}</button>
-      </span>
-    </div>
-  `;
+  const urlButton = (action, label, title) => el("button", {
+    type: "button",
+    class: "secondary ghost url-action",
+    dataset: { urlAction: action, baseUrl: upstream.base_url },
+    "aria-label": `${label} ${upstream.name} 的 Base URL`,
+    title,
+  }, renderIcon(action === "copy" ? "copy" : "open"));
+
+  return el("div", { class: "url-cell-inner" },
+    el("code", { title: upstream.base_url }, upstream.base_url),
+    el("span", { class: "url-cell-actions", "aria-label": "Base URL 操作" },
+      urlButton("copy", "复制", "复制 Base URL"),
+      urlButton("open", "打开", "打开 Base URL")));
 }
 
 function normalizeHttpUrl(value) {
@@ -1366,21 +1369,24 @@ function modelMatchItems(upstream) {
   ];
 }
 
+/** 芯片列表：只显示前几个，剩下的折成 +N，全量放在 title 里。 */
+function modelChipList(items) {
+  const visible = items.slice(0, MAX_MODEL_CHIPS);
+  const hiddenCount = items.length - visible.length;
+  return el("div", {
+    class: "model-chip-list",
+    title: items.map((item) => item.label).join(", "),
+  },
+    visible.map((item) => el("span", { class: `model-chip ${item.type}` }, item.label)),
+    hiddenCount > 0 ? el("span", { class: "model-chip more" }, `+${hiddenCount}`) : null);
+}
+
 function renderModelMatches(upstream) {
   const items = modelMatchItems(upstream);
   if (items.length === 0) {
-    return '<span class="muted">默认候选</span>';
+    return el("span", { class: "muted" }, "默认候选");
   }
-  const visible = items.slice(0, MAX_MODEL_CHIPS);
-  const hiddenCount = items.length - visible.length;
-  const title = items.map((item) => item.label).join(", ");
-  const chips = visible
-    .map((item) => (
-      `<span class="model-chip ${escapeHtml(item.type)}">${escapeHtml(item.label)}</span>`
-    ))
-    .join("");
-  const more = hiddenCount > 0 ? `<span class="model-chip more">+${hiddenCount}</span>` : "";
-  return `<div class="model-chip-list" title="${escapeHtml(title)}">${chips}${more}</div>`;
+  return modelChipList(items);
 }
 
 /* 渠道所属分组。分组名要靠 groupCache 翻译，那份缓存由 groups.js 维护——列表
@@ -1388,19 +1394,12 @@ function renderModelMatches(upstream) {
 function renderUpstreamGroups(upstream) {
   const ids = Array.isArray(upstream.group_ids) ? upstream.group_ids : [];
   if (ids.length === 0) {
-    return '<span class="muted">—</span>';
+    return el("span", { class: "muted" }, "—");
   }
-  const labels = ids.map((id) => {
+  return modelChipList(ids.map((id) => {
     const group = typeof groupById === "function" ? groupById(id) : null;
-    return group ? group.name : `#${id}`;
-  });
-  const visible = labels.slice(0, MAX_MODEL_CHIPS);
-  const hiddenCount = labels.length - visible.length;
-  const chips = visible
-    .map((label) => `<span class="model-chip group">${escapeHtml(label)}</span>`)
-    .join("");
-  const more = hiddenCount > 0 ? `<span class="model-chip more">+${hiddenCount}</span>` : "";
-  return `<div class="model-chip-list" title="${escapeHtml(labels.join(", "))}">${chips}${more}</div>`;
+    return { label: group ? group.name : `#${id}`, type: "group" };
+  }));
 }
 
 /* 分组表和令牌表的描述列共用这一个渲染。`.muted` 必须挂在内层 span 上：
@@ -1434,16 +1433,19 @@ function renderUpstreamSummaryCore() {
   }
   lastSummarySignature = signature;
 
-  const effectiveWeightHint = zeroEffectiveWeight > 0
-    ? `<span class="summary-hint">有效权重为 0 的动态渠道会按恢复周期重新加入</span>`
-    : "";
+  const stat = (value, label, extra) =>
+    el("span", { class: extra?.class || null }, el("strong", {}, value), label, extra?.hint);
 
-  upstreamSummary.innerHTML = `
-    <span><strong>${total}</strong>渠道总数</span>
-    <span><strong>${enabled}</strong>启用</span>
-    <span><strong>${disabled}</strong>停用</span>
-    <span class="${zeroEffectiveWeight ? "summary-warn" : ""}"><strong>${zeroEffectiveWeight}</strong>有效权重为 0${effectiveWeightHint}</span>
-  `;
+  replaceChildren(upstreamSummary,
+    stat(total, "渠道总数"),
+    stat(enabled, "启用"),
+    stat(disabled, "停用"),
+    stat(zeroEffectiveWeight, "有效权重为 0", {
+      class: zeroEffectiveWeight ? "summary-warn" : null,
+      hint: zeroEffectiveWeight > 0
+        ? el("span", { class: "summary-hint" }, "有效权重为 0 的动态渠道会按恢复周期重新加入")
+        : null,
+    }));
 }
 
 function debounce(fn, wait = 150) {
