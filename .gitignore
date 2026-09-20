@@ -18,6 +18,7 @@ docker-compose.override.yml
 .agents/
 .codex/
 .claude/
+.pi/
 
 # Runtime data and logs
 *.log
