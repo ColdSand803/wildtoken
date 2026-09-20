@@ -1,11 +1,3 @@
-import { provide } from "./registry.js";
-import {
-  el, replaceChildren, setStatus,
-} from "./bootstrap.js";
-import {
-  api,
-} from "./shell.js";
-
 /* 分组把令牌能访问的渠道范围隔离开：一个令牌属于一个分组，一个渠道可以同时
    服务多个分组。这里只管分组自身的增删改查，以及把可选分组喂给渠道表单和令牌
    表单——真正的路由约束在服务端，前端拿到的列表只是给操作者看的。 */
@@ -204,13 +196,3 @@ groupTableBody?.addEventListener("click", (event) => {
     deleteGroup(deleteId);
   }
 });
-/* 注册给 bootstrap 的跨层回调：它是底层，不能反过来 import 这里。 */
-provide("groupById", groupById);
-
-export {
-  DEFAULT_GROUP_ID, deleteGroup, fillTokenGroupOptions, fillUpstreamGroupOptions, groupById,
-  groupCache, groupCancelButton, groupCreateButton, groupDescriptionInput, groupDialog,
-  groupDialogCloseButton, groupDialogTitle, groupForm, groupIdInput, groupNameInput,
-  groupTableBody, loadGroups, openGroupDialog, readUpstreamGroupSelection, renderGroups,
-  submitGroup, tokenGroupSelect, upstreamGroupList,
-};

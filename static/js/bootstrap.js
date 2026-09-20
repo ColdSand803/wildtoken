@@ -1,8 +1,3 @@
-/* bootstrap 是所有模块的基础，只能依赖 registry.js（它自己没有任何依赖）。
-   需要反过来调上层的地方一律走 invoke：直接 import 会把依赖图变成环，
-   而环里先执行的模块在顶层读对方的 const/let 就会撞上 TDZ。 */
-import { hasHook, invoke } from "./registry.js";
-
 // Shared DOM references, mutable view state, and cross-view utilities.
 const ADMIN_TOKEN_KEY = "wildtoken_admin_token";
 const adminTokenDialog = document.querySelector("#admin-token-dialog");
@@ -682,8 +677,8 @@ function requestConfirm({
       confirmDialog.removeEventListener("pointerdown", onPointerDown);
       confirmDialog.removeEventListener("pointercancel", onPointerCancel);
       confirmDialog.removeEventListener("click", onBackdrop);
-      if (hasHook("clearDialogMaximized")) {
-        invoke("clearDialogMaximized", confirmDialog);
+      if (typeof clearDialogMaximized === "function") {
+        clearDialogMaximized(confirmDialog);
       } else {
         confirmDialog.classList.remove("is-maximized");
       }
@@ -916,10 +911,9 @@ function openCustomSelect(select) {
     return;
   }
 
-  // 打开一个浮层就关掉其他的。closeColMenus 就在本文件，另两个在上层。
-  invoke("closeUpstreamActionMenu");
-  closeColMenus();
-  invoke("setThemeMenuOpen", false);
+  if (typeof closeUpstreamActionMenu === "function") closeUpstreamActionMenu();
+  if (typeof closeColMenus === "function") closeColMenus();
+  if (typeof setThemeMenuOpen === "function") setThemeMenuOpen(false);
 
   closeCustomSelect();
   activeSelect = select;
@@ -1410,7 +1404,7 @@ function renderUpstreamGroups(upstream) {
     return el("span", { class: "muted" }, "—");
   }
   return modelChipList(ids.map((id) => {
-    const group = invoke("groupById", id);
+    const group = typeof groupById === "function" ? groupById(id) : null;
     return { label: group ? group.name : `#${id}`, type: "group" };
   }));
 }
@@ -1570,7 +1564,7 @@ function applyDensity(density) {
     const label = densityToggle.querySelector(".density-toggle-label");
     if (label) label.textContent = next === "compact" ? "紧凑" : "舒适";
   }
-  invoke("updatePreferenceControls");
+  if (typeof updatePreferenceControls === "function") updatePreferenceControls();
 }
 
 function cycleDensity() {
@@ -1698,110 +1692,3 @@ function storeUpstreamStatusFilterValue(value) { upstreamStatusFilterValue = val
 function storeUpstreams(value) { upstreams = value; }
 function storeUpstreamsLoadedOnce(value) { upstreamsLoadedOnce = value; }
 function storeUpstreamsLoading(value) { upstreamsLoading = value; }
-
-export {
-  ADMIN_TOKEN_KEY, CHANNEL_DOCUMENT_KIND, CHANNEL_DOCUMENT_VERSION,
-  CHANNEL_IMPORT_MAX_BYTES, CHANNEL_IMPORT_MAX_ENTRIES, DASHBOARD_CHANNEL_NAME_HIDDEN_KEY,
-  DASHBOARD_CUSTOM_RANGE_KEY, DASHBOARD_DEFAULT_RANGE, DASHBOARD_LOG_LIMIT,
-  DASHBOARD_MAX_CUSTOM_RANGE_DAYS, DASHBOARD_RANGE_KEY, DASHBOARD_RANGE_VALUES,
-  DASHBOARD_REFRESH_MS, DASHBOARD_TOP_LIMIT, DASHBOARD_TOP_WINDOW_KEY, DEFAULT_HOME_KEY,
-  DEFAULT_LOG_COLUMNS, DEFAULT_REFRESH_MS, DEFAULT_UPSTREAM_COLUMNS, DENSITY_KEY,
-  EFFECTIVE_WEIGHT_TICK_MS, FALLBACK_VIEW, LOG_COLUMNS_KEY, LOG_COL_LABELS, LOG_LOCKED_COLS,
-  LOG_PAGE_SIZE_KEY, LOG_PAGE_SIZE_VALUES, LOG_REFRESH_KEY, LOG_SENSITIVE_HIDDEN_KEY,
-  LOG_TIME_ZONE, MAX_MODEL_CHIPS, QUICK_IMPORT_DEFAULT_PRIORITY, QUICK_IMPORT_FILL_LABEL,
-  SVG_NS, UPSTREAM_COLUMNS_KEY, UPSTREAM_COL_LABELS, UPSTREAM_LOCKED_COLS,
-  activeActionMenuButton, activeBalanceQuery, activeSelect, adminLogoutButton,
-  adminTokenDialog, adminTokenError, adminTokenForm, adminTokenInput, advancedSettings,
-  appendChildren, applyAllColumnVisibility, applyColumnVisibility, applyDensity, applyProps,
-  balanceBody, balanceClose, balanceDialog, balanceQueryToken, balanceRefresh,
-  balanceSummary, balanceTitle, batchActionsEl, batchDisableBtn, batchEnableBtn,
-  buildSmoothSparkPaths, channelExportButton, channelExportCancel, channelExportClose,
-  channelExportConfirm, channelExportDialog, channelExportIncludeKeys, channelExportScopeEl,
-  channelImportButton, channelImportCancel, channelImportClose, channelImportConfirm,
-  channelImportDialog, channelImportFile, channelImportParsed, channelImportPreview,
-  channelImportText, chooseCustomSelectOption, clipboardScratchHost, closeColMenus,
-  closeCustomSelect, commandPalette, commandPaletteInput, commandPaletteList, confirmCancel,
-  confirmClose, confirmDialog, confirmMessage, confirmOk, confirmTitle,
-  consoleWallClockToTimestamp, consoleZoneFields, copyTextToClipboard, currentLogDetail,
-  cycleDensity, dashboardApplyCustom, dashboardChannelNameHidden,
-  dashboardChannelNameToggle, dashboardChannelTokensMeta, dashboardChannelsMeta,
-  dashboardCustomEndDate, dashboardCustomRange, dashboardCustomStartDate, dashboardEndDate,
-  dashboardErrorRows, dashboardKpis, dashboardLatencyChart, dashboardLatencyMeta,
-  dashboardLoading, dashboardLogItems, dashboardModelTokensMeta, dashboardModelsMeta,
-  dashboardOverview, dashboardPanel, dashboardRefreshTimer, dashboardRequestKpis,
-  dashboardRuntimeKpis, dashboardRuntimeMetrics, dashboardScope, dashboardSelectedRangeMeta,
-  dashboardStartDate, dashboardStatusChart, dashboardStatusMeta, dashboardTimePreset,
-  dashboardTimeRange, dashboardTokenKpis, dashboardTokenRangeMeta, dashboardTokenUsage,
-  dashboardTopChannelTokens, dashboardTopChannels, dashboardTopModelTokens,
-  dashboardTopModels, dashboardTopStats, debounce, densityToggle, descriptionCell,
-  dismissOnBackdropClick, dismissToast, effectiveWeightTickTimer, el, escapeHtml,
-  fetchModelsButton, fields, form, formModelAddManualButton, formModelManualInput,
-  formTitle, formatEffectiveZeroNote, formatLogTimestamp, frag, getDensity,
-  handleSelectKeydown, hidePopoverLayer, isDashboardDateValue, isNativeSelect, joinList,
-  joinMappingLines, joinModelMappings, lastDashboardLoadError, lastSummarySignature,
-  lastUpstreamLoadError, liveIndicator, logClientFilter, logColMenu, logColMenuBtn,
-  logColumns, logCurrentCursor, logCursorStack, logDetailClose, logDetailDialog,
-  logDetailMeta, logDetailSections, logDetailSummary, logDetailTitle, logFirstButton,
-  logHasMore, logNewEntriesButton, logNewEntriesNotice, logNextButton, logNextCursor,
-  logOffset, logPageMeta, logPageSize, logPageSizeSelect, logPrevButton, logRatePills,
-  logRefreshButton, logRefreshTimer, logRows, logSearchInput, logSensitiveHidden,
-  logSensitiveToggle, logStatusFilter, logTable, logTimeFormatter, logUpstreamFilter,
-  logsLoadedOnce, logsLoading, manageModelsButton, modalDialogForSelect,
-  modelAddManualButton, modelCancelSelectionButton, modelChipList, modelClearAllButton,
-  modelDialog, modelDialogClose, modelDialogState, modelDialogSummary, modelDialogTitle,
-  modelFilter, modelManualInput, modelMatchItems, modelOptions,
-  modelRemoveUnavailableButton, modelSaveSelectionButton, modelSelectAllButton,
-  modelSelectedOnly, modelSelectionCount, modelSelectionPreview, modelTestClose,
-  modelTestDialog, modelTestForm, modelTestModel, modelTestPrompt, modelTestPromptCancel,
-  modelTestPromptClose, modelTestPromptContent, modelTestPromptDialog, modelTestPromptForm,
-  modelTestPromptId, modelTestPromptList, modelTestPromptName, modelTestPromptTemplate,
-  modelTestPromptTemplates, modelTestProtocol, modelTestRefreshModels, modelTestRequestBody,
-  modelTestResponseBody, modelTestResult, modelTestResultBody, modelTestResultMeta,
-  modelTestResultStatus, modelTestSubmit, modelTestSummary, modelTestTitle,
-  modelTestUpstream, navLinks, newButton, newModelTestPromptButton, newTokenButton,
-  normalizeHttpUrl, openActionMenuUpstreamId, openCustomSelect, pageVisible,
-  parseEffortMappings, parseLogTimestamp, parseManualModelEntry, parseMappingLines,
-  parseModelMappings, persistedFormApiKey, placeSelectPanelFor, popoverIsOpen,
-  positionCustomSelect, proxySettingsForm, proxySettingsStatus, quickImportApiKeyInput,
-  quickImportBaseUrlInput, quickImportButton, quickImportCancel, quickImportClose,
-  quickImportDialog, quickImportFetchController, quickImportFillButton, quickImportText,
-  readJsonStorage, readModelMappingsLenient, readStoredLogPageSize, renderBaseUrlCell,
-  renderColumnMenu, renderIcon, renderModelMatches, renderUpstreamGroups,
-  renderUpstreamSummary, renderUpstreamSummaryCore, replaceChildren, requestConfirm,
-  requestDetailGrid, resetButton, restoreSelectPanelHost, rotateAdminTokenButton,
-  rotateAdminTokenForm, rotateAdminTokenInput, rotateConfirmCancel, rotateConfirmCheck,
-  rotateConfirmDialog, rotateConfirmSubmit, routingSettingsForm, routingSettingsStatus,
-  rows, selectActiveIndex, selectOptionButtons, selectOptionEntries, selectPanel,
-  selectPanelHome, selectedUpstreamIds, serverSettingsForm, serverSettingsStatus,
-  setSelectActiveIndex, setStatus, settingsBodyKeepCount, settingsBodyMaxBytes,
-  settingsDefaultHome, settingsDensity, settingsFailurePenalty, settingsLogRefresh,
-  settingsMaxRetries, settingsProxyEnabled, settingsProxyUrl, settingsRecoveryIncrement,
-  settingsRecoveryInterval, settingsRetentionDays, settingsRevision,
-  settingsSameUpstreamRetryMs, settingsSuccessIncrement, settingsTheme, showPopoverLayer,
-  sparkDotScaleX, splitList, storeActiveActionMenuButton, storeChannelImportParsed,
-  storeCurrentLogDetail, storeDashboardChannelNameHidden, storeDashboardCustomEndDate,
-  storeDashboardCustomStartDate, storeDashboardLoading, storeDashboardLogItems,
-  storeDashboardOverview, storeDashboardRefreshTimer, storeDashboardRuntimeMetrics,
-  storeDashboardTimeRange, storeDashboardTokenUsage, storeDashboardTopStats,
-  storeEffectiveWeightTickTimer, storeLastDashboardLoadError, storeLastUpstreamLoadError,
-  storeLogCurrentCursor, storeLogCursorStack, storeLogHasMore, storeLogNextCursor,
-  storeLogOffset, storeLogPageSize, storeLogRefreshTimer, storeLogSensitiveHidden,
-  storeLogsLoadedOnce, storeLogsLoading, storeModelTestPromptTemplates,
-  storeModelTestUpstream, storeOpenActionMenuUpstreamId, storePageVisible,
-  storeQuickImportFetchController, storeTokenRefreshTimer, storeTokenSearchQuery,
-  storeTokens, storeTokensLoadedOnce, storeTokensLoading, storeUpstreamRefreshTimer,
-  storeUpstreamSearchQuery, storeUpstreamStatusFilterValue, storeUpstreams,
-  storeUpstreamsLoadedOnce, storeUpstreamsLoading, svg, systemInfoGrid, systemRefreshButton,
-  toStoredTimestamp, toastRegion, toggleColMenu, tokenCustomCopy, tokenCustomHint,
-  tokenCustomInput, tokenCustomLabel, tokenDescriptionInput, tokenDialog, tokenDialogClose,
-  tokenEnabledCheckbox, tokenExpiresInput, tokenExpiresPresets, tokenExpiresPreview,
-  tokenForm, tokenFormTitle, tokenIdInput, tokenLimitInput, tokenNameInput,
-  tokenRateLimitInput, tokenRefreshTimer, tokenResetButton, tokenRows, tokenSearchInput,
-  tokenSearchQuery, tokenSearchTimer, tokens, tokensLoadedOnce, tokensLoading, uniqueList,
-  upstreamActionMenu, upstreamCardsContainer, upstreamColMenu, upstreamColMenuBtn,
-  upstreamColumns, upstreamDialog, upstreamDialogClose, upstreamRefreshTimer,
-  upstreamSearchInput, upstreamSearchQuery, upstreamSearchTimer, upstreamSelectAll,
-  upstreamSort, upstreamStatusFilter, upstreamStatusFilterValue, upstreamSummary,
-  upstreamTable, upstreamTableWrap, upstreams, upstreamsLoadedOnce, upstreamsLoading,
-  viewGridBtn, viewListBtn, views, writeJsonStorage,
-};

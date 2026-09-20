@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import vm from "node:vm";
-import { readScript } from "./dom-stub.mjs";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const ARK_CSS = "themes/ark/theme.css";
@@ -49,9 +48,7 @@ function createThemeContext(storedTheme) {
   return {
     attributes,
     storedValues,
-    /* applyTheme 末尾会通知设置页同步控件。那个实现在 shell.js，这里只跑主题
-       这一段，给个空实现即可——测的是根元素上的契约属性，不是控件状态。 */
-    context: vm.createContext({ document, localStorage, updatePreferenceControls() {} }),
+    context: vm.createContext({ document, localStorage }),
   };
 }
 
@@ -70,7 +67,7 @@ test("pre-paint boot preserves a stored Ark selection", () => {
 
 test("runtime selection persists Ark's complex root contract", () => {
   const { attributes, storedValues, context } = createThemeContext("dark");
-  const source = readScript("static/js/events.js");
+  const source = read("static/js/events.js");
   const definitionsEnd = source.indexOf("\ninitializeThemes();");
 
   assert.notEqual(definitionsEnd, -1, "events.js must retain its theme initialization marker");
@@ -85,7 +82,7 @@ test("runtime selection persists Ark's complex root contract", () => {
 
 test("Endfield selection retains its existing complex family contract", () => {
   const { attributes, context } = createThemeContext("dark");
-  const source = readScript("static/js/events.js");
+  const source = read("static/js/events.js");
   const definitionsEnd = source.indexOf("\ninitializeThemes();");
 
   vm.runInContext(source.slice(0, definitionsEnd), context, { filename: "events-theme-definitions.js" });
@@ -98,7 +95,7 @@ test("Endfield selection retains its existing complex family contract", () => {
 
 test("selecting a non-Ark theme clears the Ark root contract", () => {
   const { attributes, context } = createThemeContext("dark");
-  const source = readScript("static/js/events.js");
+  const source = read("static/js/events.js");
   const definitionsEnd = source.indexOf("\ninitializeThemes();");
 
   vm.runInContext(source.slice(0, definitionsEnd), context, { filename: "events-theme-definitions.js" });

@@ -1,26 +1,3 @@
-import { provide } from "./registry.js";
-import {
-  applyAllColumnVisibility, applyDensity, batchDisableBtn, batchEnableBtn, commandPalette,
-  commandPaletteInput, commandPaletteList, cycleDensity, dashboardApplyCustom,
-  dashboardChannelNameToggle, dashboardEndDate, dashboardErrorRows, dashboardStartDate,
-  dashboardTimePreset, debounce, densityToggle, dismissOnBackdropClick, getDensity,
-  logColMenuBtn, modelTestClose, modelTestForm, modelTestPromptCancel, modelTestPromptClose,
-  modelTestPromptDialog, modelTestPromptForm, modelTestPromptList, modelTestPromptTemplate,
-  modelTestRefreshModels, newModelTestPromptButton, proxySettingsForm,
-  rotateAdminTokenButton, routingSettingsForm, serverSettingsForm, settingsDefaultHome,
-  settingsDensity, settingsLogRefresh, settingsTheme, systemRefreshButton, tokenSearchInput,
-  upstreamColMenuBtn, upstreamSearchInput, upstreamSelectAll, upstreamStatusFilter,
-  upstreamTable,
-} from "./bootstrap.js";
-import {
-  closeModelTestDialog, closeModelTestPromptDialog, getAdminToken, openAdminTokenDialog,
-  refreshModelTestModels, rotateAdminToken, saveProxySettings, saveRoutingSettings,
-  saveServerSettings, syncModelTestPrompt, updatePreferenceControls,
-  updateUpstreamSortControls,
-} from "./shell.js";
-import {
-  syncDashboardDateMirrors, updateDashboardChannelNameToggle,
-} from "./dashboard.js";
 // ── Themes (registry-driven; switching saves immediately) ──
 const THEME_KEY = "wildtoken_theme";
 const THEME_CSS_KEY = "wildtoken_theme_css";
@@ -173,7 +150,7 @@ function applyTheme(theme) {
     button.tabIndex = selected ? 0 : -1;
   });
   updateThemeHint(next);
-  updatePreferenceControls();
+  if (typeof updatePreferenceControls === "function") updatePreferenceControls();
 }
 
 function cycleTheme() {
@@ -521,7 +498,7 @@ if (dashboardTimePreset) {
       if (dashboardEndDate && !dashboardEndDate.value && dashboardCustomEndDate) {
         dashboardEndDate.value = dashboardCustomEndDate;
       }
-      {
+      if (typeof syncDashboardDateMirrors === "function") {
         syncDashboardDateMirrors();
       }
       dashboardStartDate?.focus();
@@ -1082,19 +1059,3 @@ if (getAdminToken()) {
 } else {
   openAdminTokenDialog();
 }
-/* 注册给 bootstrap 的跨层回调：它是底层，不能反过来 import 这里。 */
-provide("setThemeMenuOpen", setThemeMenuOpen);
-
-
-export {
-  ARK_THEME_CONFIG, BUILT_IN_THEMES, BUNDLED_THEME_PACKS, THEMES, THEME_CSS_ID_KEY,
-  THEME_CSS_KEY, THEME_KEY, THEME_PACK_LINK_ID, applyTheme, closeCommandPalette,
-  commandDefinitions, commandPaletteActiveIndex, commandPaletteVisible, cycleTheme,
-  dashboardTimeChips, findTheme, focusThemeMenuChoice, getStoredTheme, initializeThemes,
-  isKnownTheme, isSafeThemeCssHref, isSafeThemeId, loadExternalThemes, mergeThemePacks,
-  normalizeExternalTheme, normalizeHexColor, normalizeThemeDescription, openCommandPalette,
-  persistDashboardRange, refreshThemeCommandSubtitle, rememberTheme,
-  renderCommandPaletteList, renderThemeChoices, runActiveCommand, runCommandById,
-  setThemeMenuOpen, setThemePackStylesheet, settingsThemeHint, themeDescription, themeLabel,
-  themeMenu, themeMenuChoices, themeToggle, updateThemeHint,
-};
