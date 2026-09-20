@@ -236,6 +236,21 @@ body {
   position: relative;
 }
 
+/* ── Typography hierarchy ────────────────────────────────── */
+
+h1, h2, h3, h4, h5, h6 {
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+  margin: 0;
+}
+
+h1 { font-size: 24px; }
+h2 { font-size: 19px; }
+h3 { font-size: 15px; }
+h4 { font-size: 13px; }
+
 /* ── Aurora mesh background ─────────────────────────────── */
 
 .aurora {

@@ -278,8 +278,7 @@ html[data-theme="minegrub"] .nav-link.is-active,
 html[data-theme="minegrub"] .nav-link[aria-current="page"] {
   background: #33251c;
   color: #55ff55;
-  border-left: 3px solid #55ff55;
-  box-shadow: inset 2px 2px 0 #4a3729;
+  box-shadow: inset 3px 0 0 #55ff55, inset 2px 2px 0 #4a3729;
   text-shadow: 1px 1px 0 #111;
 }
 

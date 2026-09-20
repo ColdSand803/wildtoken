@@ -44,7 +44,7 @@
   }
 
   .nav-link {
-    min-height: 26px;
+    min-height: 38px;
     min-width: 48px;
     padding: 0 10px;
   }
@@ -54,15 +54,15 @@
   }
 
   .nav-logout {
-    min-height: 28px;
+    min-height: 38px;
     min-width: max-content;
-    padding: 0 8px;
+    padding: 0 10px;
   }
 
   .theme-toggle {
-    min-height: 30px;
-    min-width: 30px;
-    width: 30px;
+    min-height: 38px;
+    min-width: 38px;
+    width: 38px;
   }
 
   .content {

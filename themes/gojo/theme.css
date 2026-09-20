@@ -432,7 +432,7 @@ html[data-theme="gojo"] .nav-link::before {
   margin: auto 0;
   position: absolute;
   top: 0;
-  transition: background var(--transition), height var(--transition);
+  transition: background var(--transition), transform var(--transition);
   width: 3px;
 }
 

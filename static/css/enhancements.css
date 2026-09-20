@@ -1067,11 +1067,11 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
    note text because it describes a configuration publishing traffic volumes and
    channel health to anything able to reach the port. */
 .metrics-endpoint-warn {
-  border-left: 3px solid var(--warning-border);
+  border: 1px solid var(--warning-border);
   background: var(--warning-soft);
   color: var(--warning-text);
   padding: 6px 10px;
-  border-radius: 4px;
+  border-radius: var(--radius-sm, 4px);
 }
 
 /* P3-2: the configuration migration card. Two panes rather than a single column,
@@ -1123,7 +1123,7 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 
 /* Marked, because this is the checkbox that puts credentials in a file. */
 .config-secret-row {
-  border-left: 3px solid var(--warning-border);
+  border: 1px solid var(--warning-border);
   background: var(--warning-soft);
   padding: 8px 10px;
   border-radius: var(--radius-sm, 6px);
@@ -1167,7 +1167,7 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 }
 
 .config-import-errors {
-  border-left: 3px solid var(--danger-border);
+  border: 1px solid var(--danger-border);
   background: var(--danger-soft);
   color: var(--danger-strong);
   padding: 8px 10px;
@@ -1282,8 +1282,9 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 .restore-staged {
   margin: 8px 0;
   padding: 8px 10px;
-  border-left: 3px solid var(--danger);
-  background: var(--surface-soft, transparent);
+  border: 1px solid var(--danger-border, var(--danger));
+  background: var(--danger-soft, var(--surface-soft, transparent));
+  border-radius: var(--radius-sm, 6px);
   font-size: 12px;
 }
 

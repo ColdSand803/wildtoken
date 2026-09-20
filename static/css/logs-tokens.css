@@ -293,13 +293,13 @@
 
 .log-detail-status-error {
   background: var(--warning-soft);
-  border-left: 2px solid var(--warning);
-  border-radius: 3px;
+  border: 1px solid var(--warning-border, var(--warning));
+  border-radius: var(--radius-sm, 4px);
   color: var(--warning-text) !important;
   display: block;
   margin-top: 4px;
   overflow: hidden;
-  padding: 4px 6px;
+  padding: 4px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -695,8 +695,8 @@
 
 /* 角色在左侧窄栏，与内容并排——单独占一行会把短消息的高度翻倍。 */
 .conv-msg {
-  border: 1px solid var(--line-soft);
-  border-left: 3px solid var(--line-strong);
+  border: 1px solid var(--line-strong, var(--line));
+  background: var(--panel-subtle, transparent);
   border-radius: var(--radius);
   display: grid;
   gap: 0 10px;

@@ -991,7 +991,7 @@ html[data-theme] .dashboard-date-field input[type="date"],
 
 .dashboard-spark .spark-morph-line,
 .dashboard-spark .spark-morph-p95 {
-  transition: opacity 160ms ease, stroke-width 160ms ease, filter 160ms ease;
+  transition: opacity 160ms ease, filter 160ms ease;
 }
 
 .dashboard-spark .spark-hit-area {
@@ -1186,7 +1186,6 @@ html[data-theme] .dashboard-date-field input[type="date"],
   height: 100%;
   max-width: 100%;
   min-width: 2px;
-  transition: width 240ms ease;
 }
 
 .dashboard-rank-count {
