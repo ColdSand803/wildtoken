@@ -1386,7 +1386,7 @@ function createLogRow(log, options = {}) {
         el("span", { class: "latency-metric" },
           el("small", {}, "首字"), formatFirstTokenTime(log.first_token_ms)),
         el("span", { class: "latency-metric" },
-          el("small", {}, "总耗时"), formatTotalDurationTime(log)))),
+          el("small", {}, "耗时"), formatTotalDurationTime(log)))),
     el("td", { class: "tokens-cell", dataset: { col: "tokens" } }, formatTokens(log)),
     el("td", { class: "detail-cell", dataset: { col: "detail" } }, renderLogErrorDetail(log)));
   return row;

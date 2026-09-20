@@ -68,7 +68,9 @@ test("响应性能列只有首字和总耗时两行", () => {
     source.indexOf('class: "tokens-cell"', rowStart),
   );
   const labels = [...cell.matchAll(/el\("small", \{\}, "([^"]+)"\)/g)].map((m) => m[1]);
-  assert.deepEqual(labels, ["首字", "总耗时"]);
+  // 两个标签等宽，两行的数值才对得齐（“总耗时”三字会把第二行推出去）。
+  assert.deepEqual(labels, ["首字", "耗时"]);
+  assert.equal(new Set(labels.map((l) => l.length)).size, 1, "两个标签应等长");
 
   // 流式标签和 TPS 已移除，否则这一列又会回到三行。
   assert.doesNotMatch(source, /formatThroughput/);
