@@ -42,6 +42,27 @@ function extractFunction(source, name) {
   throw new Error(name + " 的函数体没有闭合");
 }
 
+/* renderProbeSummary 与 runBatchProbe 用 motion.js 的 wtReveal 显示测活摘要。
+   照同一套"从源码里抽"的规矩把它们搬进用例上下文：模块级的时长与状态直接取
+   源码，不在用例里另抄一份。摘要元素没有 .animate，走的是"直接落最终态"那条
+   路，断言看到的仍是同步显隐。 */
+function motionHelpers() {
+  const source = read("static/js/motion.js");
+  const declarations = [...source.matchAll(/^(?:const|let) [A-Za-z_]+ = [^\n]+;$/gm)]
+    .map((match) => match[0]);
+  const names = ["wtMotionReduced", "wtMotionEnabled", "wtMotionTakeOver", "wtReveal", "wtHide"];
+  const context = vm.createContext({});
+  vm.runInContext(
+    [
+      declarations.join("\n"),
+      ...names.map((name) => extractFunction(source, name)),
+      ...names.map((name) => `this.${name} = ${name};`),
+    ].join("\n"),
+    context,
+  );
+  return { wtReveal: context.wtReveal, wtHide: context.wtHide };
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => {
     const entities = {
@@ -166,6 +187,7 @@ test("renderProbeSummary renders running state and stats accurately", () => {
 
   const context = vm.createContext({
     escapeHtml,
+    ...motionHelpers(),
     upstreamProbeSummary: summaryEl,
     batchProbeBtn,
     probeRunning: false,
@@ -273,6 +295,7 @@ test("fetchLatestProbeResults uses GET only and populates probe results map", as
 
   const context = vm.createContext({
     escapeHtml,
+    ...motionHelpers(),
     upstreamProbeResults,
     latestProbeCheckedAt: null,
     probeRunning: false,
@@ -323,6 +346,7 @@ test("runBatchProbe triggers POST, handles 409 conflict by polling GET, and prev
 
   const context = vm.createContext({
     escapeHtml,
+    ...motionHelpers(),
     upstreamProbeResults,
     latestProbeCheckedAt: null,
     probeRunning: false,

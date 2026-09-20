@@ -1594,6 +1594,9 @@
       hidden
       popover="manual"
     ></div>
+    <!-- 显隐过渡：wtReveal / wtHide。必须排在所有调用它的模块之前，
+         bootstrap.js 的列菜单就用它。 -->
+    <script src="/static/js/motion.js"></script>
     <script src="/static/js/bootstrap.js"></script>
     <script src="/static/js/components.js"></script>
     <script src="/static/js/dashboard.js"></script>

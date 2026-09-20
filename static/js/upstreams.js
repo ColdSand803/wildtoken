@@ -966,7 +966,6 @@ function renderProbeSummary(data) {
   if (!summaryEl) return;
 
   if (probeRunning) {
-    summaryEl.hidden = false;
     /* 跑着的时候标签换成"测活中"、圆点开始呼吸，数字位先占一个破折号。这一格和
        左边四格共用同一套标签/数字排版，整条的高度不该因为测活跑起来跳一下。 */
     summaryEl.setAttribute?.("title", "正在批量测活渠道...");
@@ -974,13 +973,17 @@ function renderProbeSummary(data) {
       <span class="summary-strip-label"><span class="probe-summary-dot is-running" aria-hidden="true"></span>测活中</span>
       <strong class="summary-strip-value is-pending">—</strong>
     `;
+    wtReveal(summaryEl);
     return;
   }
 
   if (!data || (!data.results?.length && !data.total && !data.checked_at)) {
-    summaryEl.hidden = true;
-    summaryEl.removeAttribute?.("title");
-    summaryEl.innerHTML = "";
+    wtHide(summaryEl, {
+      onSettled: () => {
+        summaryEl.removeAttribute?.("title");
+        summaryEl.innerHTML = "";
+      },
+    });
     return;
   }
 
@@ -1009,12 +1012,12 @@ function renderProbeSummary(data) {
      其次是超时导致的不完整，都没有才是绿的。 */
   const dotTone = failed > 0 ? " is-failed" : (partial ? " is-partial" : "");
 
-  summaryEl.hidden = false;
   summaryEl.setAttribute?.("title", title);
   summaryEl.innerHTML = `
     <span class="summary-strip-label"><span class="probe-summary-dot${dotTone}" aria-hidden="true"></span>最近测活</span>
     <strong class="summary-strip-value">${succeeded}<span class="summary-strip-denominator">/${total}</span></strong>
   `;
+  wtReveal(summaryEl);
 }
 
 async function fetchLatestProbeResults() {

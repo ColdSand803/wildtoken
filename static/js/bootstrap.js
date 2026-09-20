@@ -241,14 +241,14 @@ let logRangeLabel = "";
 function updateLogFilterChips() {
   if (logTokenFilterBadge) {
     if (logDownstreamTokenId != null) {
-      logTokenFilterBadge.hidden = false;
+      wtReveal(logTokenFilterBadge);
       if (logTokenFilterName) {
         logTokenFilterName.textContent = logDownstreamTokenName
           ? logDownstreamTokenName + " (#" + logDownstreamTokenId + ")"
           : "#" + logDownstreamTokenId;
       }
     } else {
-      logTokenFilterBadge.hidden = true;
+      wtHide(logTokenFilterBadge);
       if (logTokenFilterName) {
         logTokenFilterName.textContent = "";
       }
@@ -256,12 +256,12 @@ function updateLogFilterChips() {
   }
   if (logRangeFilterBadge) {
     if (logRangeStart && logRangeEnd) {
-      logRangeFilterBadge.hidden = false;
+      wtReveal(logRangeFilterBadge);
       if (logRangeFilterName) {
         logRangeFilterName.textContent = logRangeLabel || `${logRangeStart} 至 ${logRangeEnd}`;
       }
     } else {
-      logRangeFilterBadge.hidden = true;
+      wtHide(logRangeFilterBadge);
       if (logRangeFilterName) {
         logRangeFilterName.textContent = "";
       }
@@ -1708,26 +1708,38 @@ function renderColumnMenu(menu, columns, labels, locked, storageKey, table) {
 }
 
 function closeColMenus() {
+  /* 收起走 wtHide 而不是直接 hidden = true：列菜单是点开点关的高频面，
+     瞬间消失读起来像"点丢了"。左/右内联位要等淡出走完再清——清早了菜单
+     会在淡出途中先跳回 CSS 默认位。 */
   if (upstreamColMenu) {
-    upstreamColMenu.hidden = true;
-    upstreamColMenu.style.left = "";
-    upstreamColMenu.style.right = "";
+    wtHide(upstreamColMenu, {
+      onSettled: () => {
+        upstreamColMenu.style.left = "";
+        upstreamColMenu.style.right = "";
+      },
+    });
     upstreamColMenuBtn?.setAttribute("aria-expanded", "false");
   }
   if (logColMenu) {
-    logColMenu.hidden = true;
-    logColMenu.style.left = "";
-    logColMenu.style.right = "";
+    wtHide(logColMenu, {
+      onSettled: () => {
+        logColMenu.style.left = "";
+        logColMenu.style.right = "";
+      },
+    });
     logColMenuBtn?.setAttribute("aria-expanded", "false");
   }
 }
 
 function toggleColMenu(menu, button) {
   if (!menu || !button) return;
-  const open = menu.hidden;
+  /* 不能用 menu.hidden：淡出期间 hidden 还是 false，再点一次会被当成"已经开着"而
+     直接关掉，120ms 内点不开。aria-expanded 是同步翻的，才是开合的真相。 */
+  const open = button.getAttribute("aria-expanded") !== "true";
   closeColMenus();
   if (open) {
-    menu.hidden = false;
+    /* wtReveal 同步落 hidden = false，下面的落位才量得到宽度。 */
+    wtReveal(menu);
     button.setAttribute("aria-expanded", "true");
     /* 落位必须在 unhide 之后：菜单收起时是 display: none，量不到宽度。
        锚点取 .col-menu-wrap（定位父级）而非按钮，菜单的 left/right 是

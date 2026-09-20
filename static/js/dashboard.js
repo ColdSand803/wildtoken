@@ -469,6 +469,8 @@ function animateKpiNumbers(container) {
    对任意桶数的数据都适用（今天 48 桶、30 天可能只有 30 桶）。 */
 const SPARK_MORPH_SAMPLES = 72;
 const SPARK_MORPH_MS = 420;
+/* 只记最后一次排的帧，供 animateSparkMorph 打断上一段插值用。 */
+let sparkMorphFrame = 0;
 
 function resampleSeries(values, samples) {
   if (!values.length) return new Array(samples).fill(0);
@@ -521,6 +523,13 @@ function smoothSeries(values, passes = 2) {
 /// 进来；数据没变（实时刷新）时插值结果相同，直接落位。
 function animateSparkMorph(svg, previousRecords, nextRecords, keys, pathsForRecords) {
   if (!svg) return;
+  /* 上一段插值还没跑完就来了新形态（快速连切时间范围）：先撤掉它，否则两个
+     rAF 循环会同时往同一条 d 上写，最终形态取决于谁后收尾。同文件的 KPI 数字
+     滚动和 logs.js 的速率强调都做了这一步，这里原先漏了。 */
+  if (sparkMorphFrame) {
+    window.cancelAnimationFrame(sparkMorphFrame);
+    sparkMorphFrame = 0;
+  }
   const paths = {};
   for (const name of ["area", "line", "p95"]) {
     const element = svg.querySelector(`.spark-morph-${name}`);
@@ -557,9 +566,9 @@ function animateSparkMorph(svg, previousRecords, nextRecords, keys, pathsForReco
   const tick = (now) => {
     const t = Math.min(1, (now - start) / SPARK_MORPH_MS);
     apply(easeInOutCubic(t));
-    if (t < 1) window.requestAnimationFrame(tick);
+    sparkMorphFrame = t < 1 ? window.requestAnimationFrame(tick) : 0;
   };
-  window.requestAnimationFrame(tick);
+  sparkMorphFrame = window.requestAnimationFrame(tick);
 }
 
 let dashboardSparkGradientSeq = 0;

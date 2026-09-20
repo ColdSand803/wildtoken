@@ -1513,7 +1513,7 @@ async function openModelTestDialog(upstream) {
   modelTestUpstream = upstream;
   modelTestTitle.textContent = `测试模型：${upstream.name}`;
   modelTestSummary.textContent = "向当前渠道发送一次实际模型请求。";
-  modelTestResult.hidden = true;
+  wtHide(modelTestResult);
   modelTestResultBody.textContent = "";
   modelTestRequestBody.textContent = "";
   modelTestResponseBody.textContent = "";
