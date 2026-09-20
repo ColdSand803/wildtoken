@@ -62,7 +62,7 @@ function formatLogUpstreamFilterLabel(upstream) {
 
 function renderLogFilterOptions() {
   const selected = logUpstreamFilter.value;
-  logUpstreamFilter.innerHTML = '<option value="">全部渠道</option>';
+  replaceChildren(logUpstreamFilter, el("option", { value: "" }, "全部渠道"));
   for (const upstream of upstreams) {
     const option = document.createElement("option");
     option.value = upstream.id;
@@ -96,36 +96,34 @@ function formatLogChannelStack(log) {
   const displayName = nameHidden ? LOG_SENSITIVE_MASK : name;
   if (id === null || id === undefined) {
     if (name) {
-      return `
-        <div class="channel-stack">
-          <strong${nameHidden ? " class=\"log-sensitive-value\"" : ` title="${escapeHtml(name)}"`}>${escapeHtml(nameHidden ? LOG_SENSITIVE_MASK : name)}</strong>
-          <span class="muted">无 ID</span>
-        </div>
-      `;
+      return el("div", { class: "channel-stack" },
+        el("strong", {
+          class: nameHidden ? "log-sensitive-value" : null,
+          title: nameHidden ? null : name,
+        }, displayName),
+        el("span", { class: "muted" }, "无 ID"));
     }
-    return "<span class=\"muted\">无（未匹配到渠道）</span>";
+    return el("span", { class: "muted" }, "无（未匹配到渠道）");
   }
-  const title = name ? `#${id} · ${displayName}` : `#${id}`;
-  const nameLine = name
-    ? `<span class="muted${nameHidden ? " log-sensitive-value" : ""}"${nameHidden ? "" : ` title="${escapeHtml(name)}"`}>${escapeHtml(displayName)}</span>`
-    : "<span class=\"muted\">无名称</span>";
-  return `
-    <div class="channel-stack">
-      <strong title="${escapeHtml(title)}">#${id}</strong>
-      ${nameLine}
-    </div>
-  `;
+  return el("div", { class: "channel-stack" },
+    el("strong", { title: name ? `#${id} · ${displayName}` : `#${id}` }, `#${id}`),
+    name
+      ? el("span", {
+        class: `muted${nameHidden ? " log-sensitive-value" : ""}`,
+        title: nameHidden ? null : name,
+      }, displayName)
+      : el("span", { class: "muted" }, "无名称"));
 }
 
 function formatLogToken(log) {
   const name = String(log?.downstream_token_name || "").trim();
   if (!name) {
-    return '<span class="muted">-</span>';
+    return el("span", { class: "muted" }, "-");
   }
   if (logSensitiveHidden) {
-    return `<span class="log-sensitive-value">${LOG_SENSITIVE_MASK}</span>`;
+    return el("span", { class: "log-sensitive-value" }, LOG_SENSITIVE_MASK);
   }
-  return `<span title="#${log.downstream_token_id ?? "-"}">${escapeHtml(name)}</span>`;
+  return el("span", { title: `#${log.downstream_token_id ?? "-"}` }, name);
 }
 
 function getLogModelRoute(log) {
@@ -146,27 +144,29 @@ function formatLogModelText(log) {
   return route.request || route.upstream || "-";
 }
 
+/** 路由链的后续一行：↳ 加一个值。模型和思考强度共用这个形状。 */
+function routeFollowerLine(value) {
+  return el("span", { class: "model-route-line model-route-target" },
+    el("span", { class: "model-route-icon", "aria-hidden": "true" }, "↳"),
+    el("span", { class: "model-text model-upstream" }, value));
+}
+
 function renderLogModel(log) {
   const route = getLogModelRoute(log);
   if (!route.request && !route.upstream) {
-    return '<span class="muted">-</span>';
+    return el("span", { class: "muted" }, "-");
   }
   if (!route.mapped) {
     const value = route.request || route.upstream;
-    return `<span class="model-text model-single" title="${escapeHtml(value)}">${escapeHtml(value)}</span>`;
+    return el("span", { class: "model-text model-single", title: value }, value);
   }
-  const title = `请求模型：${route.request}；上游模型：${route.upstream}`;
-  return `
-    <span class="model-route" title="${escapeHtml(title)}">
-      <span class="model-route-line">
-        <span class="model-text model-request">${escapeHtml(route.request)}</span>
-      </span>
-      <span class="model-route-line model-route-target">
-        <span class="model-route-icon" aria-hidden="true">↳</span>
-        <span class="model-text model-upstream">${escapeHtml(route.upstream)}</span>
-      </span>
-    </span>
-  `;
+  return el("span", {
+    class: "model-route",
+    title: `请求模型：${route.request}；上游模型：${route.upstream}`,
+  },
+    el("span", { class: "model-route-line" },
+      el("span", { class: "model-text model-request" }, route.request)),
+    routeFollowerLine(route.upstream));
 }
 
 /* 思考强度有三个环节：下游请求的、实际发往上游的（渠道强度映射改写后）、
@@ -196,29 +196,18 @@ function reasoningEffortTitle(chain) {
 function renderLogReasoningEffort(log) {
   const { chain } = getReasoningEffortRoute(log);
   if (chain.length === 0) {
-    return '<span class="muted">-</span>';
+    return el("span", { class: "muted" }, "-");
   }
   if (chain.length === 1) {
     const value = chain[0].value;
-    return `<span class="model-text model-single" title="${escapeHtml(value)}">${escapeHtml(value)}</span>`;
+    return el("span", { class: "model-text model-single", title: value }, value);
   }
   const [first, ...rest] = chain;
-  const followers = rest
-    .map((step) => `
-      <span class="model-route-line model-route-target">
-        <span class="model-route-icon" aria-hidden="true">↳</span>
-        <span class="model-text model-upstream">${escapeHtml(step.value)}</span>
-      </span>
-    `)
-    .join("");
-  return `
-    <span class="model-route" title="${escapeHtml(reasoningEffortTitle(chain))}">
-      <span class="model-route-line">
-        <span class="model-text model-request">${escapeHtml(first.value)}</span>
-      </span>
-      ${followers}
-    </span>
-  `;
+  const followers = rest.map((step) => routeFollowerLine(step.value));
+  return el("span", { class: "model-route", title: reasoningEffortTitle(chain) },
+    el("span", { class: "model-route-line" },
+      el("span", { class: "model-text model-request" }, first.value)),
+    followers);
 }
 
 /* 列表里只留输入和输出两行。总计是两者相加，缓存和思考在扫列表时用不上——
@@ -232,10 +221,10 @@ function renderLogReasoningEffort(log) {
 function renderLogErrorDetail(log) {
   const message = String(log?.error || "").trim();
   if (!message) {
-    return '<span class="muted">-</span>';
+    return el("span", { class: "muted" }, "-");
   }
-  const preview = compactText(message, LOG_ERROR_PREVIEW_CHARS);
-  return `<span class="log-error-detail" title="${escapeHtml(message)}">${escapeHtml(preview)}</span>`;
+  return el("span", { class: "log-error-detail", title: message },
+    compactText(message, LOG_ERROR_PREVIEW_CHARS));
 }
 
 function formatTokens(log) {
@@ -244,19 +233,16 @@ function formatTokens(log) {
     ["↑", "输入", log.prompt_tokens, "in"],
     ["↓", "输出", log.completion_tokens, "out"],
   ];
-  const label = lines
-    .map(([, name, value]) => `${name} ${part(value)} tokens`)
-    .join("，");
-  return `
-    <span class="token-io" aria-label="${escapeHtml(label)}">
-      ${lines.map(([arrow, name, value, tone]) => `
-        <span class="token-io-line token-io-${tone}" title="${escapeHtml(`${name} ${part(value)} tokens`)}">
-          <span class="token-io-arrow" aria-hidden="true">${arrow}</span>
-          <b>${escapeHtml(String(part(value)))}</b>
-        </span>
-      `).join("")}
-    </span>
-  `;
+  const describe = ([, name, value]) => `${name} ${part(value)} tokens`;
+  return el("span", {
+    class: "token-io",
+    "aria-label": lines.map(describe).join("，"),
+  }, lines.map((line) => {
+    const [arrow, , value, tone] = line;
+    return el("span", { class: `token-io-line token-io-${tone}`, title: describe(line) },
+      el("span", { class: "token-io-arrow", "aria-hidden": "true" }, arrow),
+      el("b", {}, String(part(value))));
+  }));
 }
 
 function formatCacheHitRate(log) {
@@ -282,21 +268,17 @@ function formatCacheHitRate(log) {
 function formatTokensPerSecondLine(log) {
   const rate = outputTokensPerSecond(log);
   if (rate === null) {
-    return "";
+    return null;
   }
   const label = rate >= 100 ? String(Math.round(rate)) : rate.toFixed(1);
   const tone = rate >= 20 ? "ok" : rate >= 8 ? "warn" : "danger";
-  return `<small><span class="duration-time ${tone}" title="输出吞吐 ${escapeHtml(label)} tokens/s">${escapeHtml(label)}</span> tokens/s</small>`;
+  return el("small", {},
+    el("span", { class: `duration-time ${tone}`, title: `输出吞吐 ${label} tokens/s` }, label),
+    " tokens/s");
 }
 
 function formatTokenDetailPanel(log) {
   const part = (value) => (value === null || value === undefined ? "-" : value);
-  const metric = ([label, value, tone]) => `
-    <span class="log-detail-token-metric ${escapeHtml(tone)}">
-      <small>${escapeHtml(label)}</small>
-      <b>${escapeHtml(String(part(value)))}</b>
-    </span>
-  `;
   const metrics = [
     ["输入", log.prompt_tokens, "input"],
     ["输出", log.completion_tokens, "output"],
@@ -305,11 +287,13 @@ function formatTokenDetailPanel(log) {
     ["缓存率", formatCacheHitRate(log), "cache-rate"],
     ["思考", log.completion_reasoning_tokens, "reasoning"],
   ];
-  return `
-    <div class="log-detail-token-panel" aria-label="输入 输出 总计 缓存命中 缓存率 思考 tokens">
-      ${metrics.map(metric).join("")}
-    </div>
-  `;
+  return el("div", {
+    class: "log-detail-token-panel",
+    "aria-label": "输入 输出 总计 缓存命中 缓存率 思考 tokens",
+  }, metrics.map(([label, value, tone]) =>
+    el("span", { class: `log-detail-token-metric ${tone}` },
+      el("small", {}, label),
+      el("b", {}, String(part(value))))));
 }
 
 function formatSeconds(ms) {
@@ -335,8 +319,10 @@ function firstTokenTone(ms) {
 
 function formatFirstTokenTime(ms) {
   const label = formatSeconds(ms);
-  const tone = firstTokenTone(ms);
-  return `<span class="first-token-time ${tone}" title="首字耗时 ${escapeHtml(label)}">${escapeHtml(label)}</span>`;
+  return el("span", {
+    class: `first-token-time ${firstTokenTone(ms)}`,
+    title: `首字耗时 ${label}`,
+  }, label);
 }
 
 function outputTokensPerSecond(log) {
@@ -395,22 +381,30 @@ function totalDurationRating(log) {
 function formatTotalDurationTime(log) {
   const label = formatSeconds(log.duration_ms);
   const rating = totalDurationRating(log);
-  return `<span class="duration-time ${rating.tone}" title="总耗时 ${escapeHtml(label)} · ${escapeHtml(rating.basis)}">${escapeHtml(label)}</span>`;
+  return el("span", {
+    class: `duration-time ${rating.tone}`,
+    title: `总耗时 ${label} · ${rating.basis}`,
+  }, label);
 }
 
 function formatThroughput(log) {
   if (!log.stream) {
-    return "";
+    return null;
   }
   const rate = outputTokensPerSecond(log);
   const displayRate = rate === null ? "—" : rate.toFixed(1).replace(/\.0$/, "");
   const rateTitle = rate === null ? "暂无输出吞吐数据" : `输出吞吐 ${displayRate} tokens/s`;
-  return `
-    <span class="stream-throughput" title="${escapeHtml(rateTitle)}" aria-label="流式响应，${escapeHtml(rateTitle)}">
-      <span class="stream-state"><span class="stream-state-dot" aria-hidden="true"></span>流式</span>
-      <span class="throughput-stat"><small>TPS</small><strong>${escapeHtml(displayRate)}</strong></span>
-    </span>
-  `;
+  return el("span", {
+    class: "stream-throughput",
+    title: rateTitle,
+    "aria-label": `流式响应，${rateTitle}`,
+  },
+    el("span", { class: "stream-state" },
+      el("span", { class: "stream-state-dot", "aria-hidden": "true" }),
+      "流式"),
+    el("span", { class: "throughput-stat" },
+      el("small", {}, "TPS"),
+      el("strong", {}, displayRate)));
 }
 
 function normalizeLogRate(value) {
@@ -834,7 +828,7 @@ function formatActiveElapsed(ms) {
 /* 路由还没选完时没有渠道，这和日志里的“未匹配到渠道”不是一回事。 */
 function formatActiveChannel(request) {
   if (request.upstream_id === null || request.upstream_id === undefined) {
-    return '<span class="muted">路由中…</span>';
+    return el("span", { class: "muted" }, "路由中…");
   }
   return formatLogChannelStack(request);
 }
@@ -845,36 +839,37 @@ function createActiveLogRow(request) {
   row.dataset.activeId = String(request.id);
   row.title = "请求进行中，完成后才会写入日志";
   const attempt = Number(request.attempt);
-  const attemptBadge = Number.isFinite(attempt) && attempt > 1
-    ? `<span class="badge warn active-attempt" title="已换过 ${attempt} 个渠道">第 ${attempt} 次</span>`
-    : "";
-  row.innerHTML = `
-    <td class="time-cell" data-col="time">
-      <span>${escapeHtml(formatLogTimestamp(request.started_at))}</span>
-      <span class="muted">进行中</span>
-    </td>
-    <td class="channel-cell" data-col="channel">${formatActiveChannel(request)}</td>
-    <td class="token-cell" data-col="token">${formatLogToken(request)}</td>
-    <td data-col="client"><span class="badge neutral">${escapeHtml(request.client_type || "unknown")}</span></td>
-    <td class="model-cell" data-col="model">${renderLogModel(request)}</td>
-    <td class="col-reasoning" data-col="reasoning">${renderLogReasoningEffort(request)}</td>
-    <td data-col="status">
-      <span class="badge neutral status-active">
-        <span class="status-active-dot" aria-hidden="true"></span>进行中
-      </span>
-      ${attemptBadge}
-    </td>
-    <td class="duration-cell" data-col="duration">
-      <span class="latency-metrics">
-        <span class="latency-metric">
-          <small>已用时</small>
-          <span class="duration-time neutral" data-active-elapsed>${escapeHtml(formatActiveElapsed(activeElapsedMs(request)))}</span>
-        </span>
-      </span>
-    </td>
-    <td class="tokens-cell" data-col="tokens"><span class="muted">-</span></td>
-    <td class="detail-cell" data-col="detail"><span class="muted">-</span></td>
-  `;
+  row.append(
+    el("td", { class: "time-cell", dataset: { col: "time" } },
+      el("span", {}, formatLogTimestamp(request.started_at)),
+      el("span", { class: "muted" }, "进行中")),
+    el("td", { class: "channel-cell", dataset: { col: "channel" } }, formatActiveChannel(request)),
+    el("td", { class: "token-cell", dataset: { col: "token" } }, formatLogToken(request)),
+    el("td", { dataset: { col: "client" } },
+      el("span", { class: "badge neutral" }, request.client_type || "unknown")),
+    el("td", { class: "model-cell", dataset: { col: "model" } }, renderLogModel(request)),
+    el("td", { class: "col-reasoning", dataset: { col: "reasoning" } },
+      renderLogReasoningEffort(request)),
+    el("td", { dataset: { col: "status" } },
+      el("span", { class: "badge neutral status-active" },
+        el("span", { class: "status-active-dot", "aria-hidden": "true" }),
+        "进行中"),
+      Number.isFinite(attempt) && attempt > 1
+        ? el("span", { class: "badge warn active-attempt", title: `已换过 ${attempt} 个渠道` },
+          `第 ${attempt} 次`)
+        : null),
+    el("td", { class: "duration-cell", dataset: { col: "duration" } },
+      el("span", { class: "latency-metrics" },
+        el("span", { class: "latency-metric" },
+          el("small", {}, "已用时"),
+          el("span", {
+            class: "duration-time neutral",
+            "data-active-elapsed": "",
+          }, formatActiveElapsed(activeElapsedMs(request)))))),
+    el("td", { class: "tokens-cell", dataset: { col: "tokens" } },
+      el("span", { class: "muted" }, "-")),
+    el("td", { class: "detail-cell", dataset: { col: "detail" } },
+      el("span", { class: "muted" }, "-")));
   return row;
 }
 
@@ -1312,9 +1307,7 @@ function updateLogSensitiveToggle() {
 function refreshOpenLogDetail() {
   if (!currentLogDetail || !logDetailDialog?.open) return;
   logDetailSummary.textContent = formatLogDetailSummary(currentLogDetail);
-  if (logDetailMeta) {
-    logDetailMeta.innerHTML = formatLogDetailMeta(currentLogDetail);
-  }
+  replaceChildren(logDetailMeta, formatLogDetailMeta(currentLogDetail));
 }
 
 function setLogSensitiveHidden(hidden) {
@@ -1342,21 +1335,15 @@ function appendLogPaginationParams(params) {
 
 function formatStatusBadge(statusCode) {
   if (statusCode === null || statusCode === undefined) {
-    return '<span class="muted">无响应</span>';
+    return el("span", { class: "muted" }, "无响应");
   }
-  if (statusCode >= 200 && statusCode < 300) {
-    return `<span class="badge on status-2xx">${statusCode}</span>`;
-  }
-  if (statusCode >= 300 && statusCode < 400) {
-    return `<span class="badge neutral status-3xx">${statusCode}</span>`;
-  }
-  if (statusCode >= 400 && statusCode < 500) {
-    return `<span class="badge danger status-4xx">${statusCode}</span>`;
-  }
-  if (statusCode >= 500) {
-    return `<span class="badge danger status-5xx">${statusCode}</span>`;
-  }
-  return `<span class="badge neutral status-other">${statusCode}</span>`;
+  const badge = (tone, bucket) =>
+    el("span", { class: `badge ${tone} status-${bucket}` }, statusCode);
+  if (statusCode >= 200 && statusCode < 300) return badge("on", "2xx");
+  if (statusCode >= 300 && statusCode < 400) return badge("neutral", "3xx");
+  if (statusCode >= 400 && statusCode < 500) return badge("danger", "4xx");
+  if (statusCode >= 500) return badge("danger", "5xx");
+  return badge("neutral", "other");
 }
 
 // 详情页的单行写法，环节的取值和合并规则与列表里的 getReasoningEffortRoute 一致。
@@ -1381,33 +1368,27 @@ function createLogRow(log, options = {}) {
   row.dataset.logId = log.id;
   row.tabIndex = 0;
   row.title = log.error || "点击查看请求详情";
-  const time = formatLogTimestamp(log.created_at);
-  const channel = formatLogChannelStack(log);
-  const status = formatStatusBadge(log.status_code);
-  const throughput = formatThroughput(log);
-  row.innerHTML = `
-    <td class="time-cell" data-col="time">
-      <span>${escapeHtml(time)}</span>
-      <span class="muted">#${log.id}</span>
-    </td>
-    <td class="channel-cell" data-col="channel">${channel}</td>
-    <td class="token-cell" data-col="token">${formatLogToken(log)}</td>
-    <td data-col="client"><span class="badge neutral">${escapeHtml(log.client_type || "unknown")}</span></td>
-    <td class="model-cell" data-col="model">${renderLogModel(log)}</td>
-    <td class="col-reasoning" data-col="reasoning">
-      ${renderLogReasoningEffort(log)}
-    </td>
-    <td data-col="status">${status}</td>
-    <td class="duration-cell" data-col="duration">
-      <span class="latency-metrics">
-        <span class="latency-metric"><small>首字</small>${formatFirstTokenTime(log.first_token_ms)}</span>
-        <span class="latency-metric"><small>总耗时</small>${formatTotalDurationTime(log)}</span>
-      </span>
-      ${throughput}
-    </td>
-    <td class="tokens-cell" data-col="tokens">${formatTokens(log)}</td>
-    <td class="detail-cell" data-col="detail">${renderLogErrorDetail(log)}</td>
-  `;
+  row.append(
+    el("td", { class: "time-cell", dataset: { col: "time" } },
+      el("span", {}, formatLogTimestamp(log.created_at)),
+      el("span", { class: "muted" }, `#${log.id}`)),
+    el("td", { class: "channel-cell", dataset: { col: "channel" } }, formatLogChannelStack(log)),
+    el("td", { class: "token-cell", dataset: { col: "token" } }, formatLogToken(log)),
+    el("td", { dataset: { col: "client" } },
+      el("span", { class: "badge neutral" }, log.client_type || "unknown")),
+    el("td", { class: "model-cell", dataset: { col: "model" } }, renderLogModel(log)),
+    el("td", { class: "col-reasoning", dataset: { col: "reasoning" } },
+      renderLogReasoningEffort(log)),
+    el("td", { dataset: { col: "status" } }, formatStatusBadge(log.status_code)),
+    el("td", { class: "duration-cell", dataset: { col: "duration" } },
+      el("span", { class: "latency-metrics" },
+        el("span", { class: "latency-metric" },
+          el("small", {}, "首字"), formatFirstTokenTime(log.first_token_ms)),
+        el("span", { class: "latency-metric" },
+          el("small", {}, "总耗时"), formatTotalDurationTime(log))),
+      formatThroughput(log)),
+    el("td", { class: "tokens-cell", dataset: { col: "tokens" } }, formatTokens(log)),
+    el("td", { class: "detail-cell", dataset: { col: "detail" } }, renderLogErrorDetail(log)));
   return row;
 }
 
@@ -1648,44 +1629,36 @@ function formatLogDetailMeta(detail) {
         ? "ok"
         : "neutral";
   const reasoning = formatReasoningEffort(detail, { badge: false, fallback: "" });
-  const modelText = formatLogModelText(detail);
-  const modelLine = [escapeHtml(modelText), reasoning].filter(Boolean).join(" · ");
+  const modelLine = [formatLogModelText(detail), reasoning].filter(Boolean).join(" · ");
   const streamLabel = detail.stream ? "流式" : "非流式";
+  const requestLine = `${detail.method} /${detail.path} · ${streamLabel}`;
   const extractedError = extractLogDetailError(detail);
-  const statusErrorLine = extractedError
-    ? `<small class="log-detail-status-error" title="${escapeHtml(extractedError)}">错误：${escapeHtml(extractedError)}</small>`
-    : "";
-  const errorCard = extractedError
-    ? `
-      <div class="log-detail-meta-card log-detail-error-card">
-        <span class="log-detail-meta-label">错误详情</span>
-        <strong>${escapeHtml(extractedError)}</strong>
-      </div>
-    `
-    : "";
 
-  return `
-    <div class="log-detail-meta-card log-detail-route-card">
-      <span class="log-detail-meta-label">请求路由</span>
-      <strong title="${escapeHtml(channel)}">${escapeHtml(channel)}</strong>
-      <small title="${modelLine}">${modelLine}</small>
-      <small class="log-detail-route-request" title="${escapeHtml(detail.method)} /${escapeHtml(detail.path)} · ${escapeHtml(streamLabel)}">
-        ${escapeHtml(detail.method)} /${escapeHtml(detail.path)} · ${escapeHtml(streamLabel)}
-      </small>
-    </div>
-    <div class="log-detail-meta-card">
-      <span class="log-detail-meta-label">状态与耗时</span>
-      <strong><span class="log-detail-status ${statusTone}">${escapeHtml(statusText)}</span></strong>
-      <small>首字 ${formatFirstTokenTime(detail.first_token_ms)} · 总耗时 ${formatTotalDurationTime(detail)}</small>
-      ${formatTokensPerSecondLine(detail)}
-      ${statusErrorLine}
-    </div>
-    <div class="log-detail-meta-card log-detail-token-card">
-      <span class="log-detail-meta-label">Tokens</span>
-      ${formatTokenDetailPanel(detail)}
-    </div>
-    ${errorCard}
-  `;
+  return frag(
+    el("div", { class: "log-detail-meta-card log-detail-route-card" },
+      el("span", { class: "log-detail-meta-label" }, "请求路由"),
+      el("strong", { title: channel }, channel),
+      el("small", { title: modelLine }, modelLine),
+      el("small", { class: "log-detail-route-request", title: requestLine }, requestLine)),
+    el("div", { class: "log-detail-meta-card" },
+      el("span", { class: "log-detail-meta-label" }, "状态与耗时"),
+      el("strong", {}, el("span", { class: `log-detail-status ${statusTone}` }, statusText)),
+      el("small", {},
+        "首字 ", formatFirstTokenTime(detail.first_token_ms),
+        " · 总耗时 ", formatTotalDurationTime(detail)),
+      formatTokensPerSecondLine(detail),
+      extractedError
+        ? el("small", { class: "log-detail-status-error", title: extractedError },
+          `错误：${extractedError}`)
+        : null),
+    el("div", { class: "log-detail-meta-card log-detail-token-card" },
+      el("span", { class: "log-detail-meta-label" }, "Tokens"),
+      formatTokenDetailPanel(detail)),
+    extractedError
+      ? el("div", { class: "log-detail-meta-card log-detail-error-card" },
+        el("span", { class: "log-detail-meta-label" }, "错误详情"),
+        el("strong", {}, extractedError))
+      : null);
 }
 
 function formatHttpSnapshot(snapshot) {
@@ -1820,18 +1793,15 @@ function snapshotBodyForConversation(snapshot) {
 function renderLogConversation(container, field, snapshot) {
   const body = snapshotBodyForConversation(snapshot);
   if (!body) {
-    container.innerHTML = `
-      <div class="conv-empty">
-        <strong>没有可解析的正文</strong>
-        <span>这条记录没有保存正文，或正文已按保留策略清理。</span>
-      </div>
-    `;
+    replaceChildren(container, el("div", { class: "conv-empty" },
+      el("strong", {}, "没有可解析的正文"),
+      el("span", {}, "这条记录没有保存正文，或正文已按保留策略清理。")));
     return;
   }
   const parsed = field.endsWith("_response")
     ? parseConversationResponse(body.text)
     : parseConversationRequest(body.text);
-  container.innerHTML = renderConversationHtml(parsed, body.meta);
+  replaceChildren(container, renderConversation(parsed, body.meta));
 }
 
 function renderLogDetailSection(details) {
@@ -1846,7 +1816,7 @@ function renderLogDetailSection(details) {
 
   if (!currentLogDetail) {
     pre.textContent = "";
-    if (conversation) conversation.innerHTML = "";
+    conversation?.replaceChildren();
     return;
   }
   if (showConversation && conversation) {
@@ -1876,20 +1846,15 @@ async function showLogDetail(logId) {
   currentLogDetail = null;
   logDetailTitle.textContent = "请求详情";
   logDetailSummary.textContent = "正在加载...";
-  if (logDetailMeta) {
-    logDetailMeta.innerHTML = `
-      <div class="log-detail-meta-card log-detail-loading-card">
-        <span class="log-detail-meta-label">加载中</span>
-        <strong>正在读取日志详情</strong>
-        <small>请求 / 响应快照会在展开卡片时渲染。</small>
-      </div>
-    `;
-  }
+  replaceChildren(logDetailMeta,
+    el("div", { class: "log-detail-meta-card log-detail-loading-card" },
+      el("span", { class: "log-detail-meta-label" }, "加载中"),
+      el("strong", {}, "正在读取日志详情"),
+      el("small", {}, "请求 / 响应快照会在展开卡片时渲染。")));
   for (const details of logDetailSections) {
     details.open = false;
     details.querySelector("pre").textContent = "";
-    const conversation = details.querySelector(".log-conversation");
-    if (conversation) conversation.innerHTML = "";
+    details.querySelector(".log-conversation")?.replaceChildren();
   }
   requestDetailGrid?.classList.remove("is-focused");
   for (const button of document.querySelectorAll(".log-detail-expand")) {
@@ -1903,9 +1868,7 @@ async function showLogDetail(logId) {
     currentLogDetail = detail;
     logDetailTitle.textContent = "请求详情";
     logDetailSummary.textContent = formatLogDetailSummary(detail);
-    if (logDetailMeta) {
-      logDetailMeta.innerHTML = formatLogDetailMeta(detail);
-    }
+    replaceChildren(logDetailMeta, formatLogDetailMeta(detail));
     for (const details of logDetailSections) {
       if (details.open) {
         renderLogDetailSection(details);
@@ -1913,15 +1876,11 @@ async function showLogDetail(logId) {
     }
   } catch (error) {
     logDetailSummary.textContent = `加载失败：${error.message}`;
-    if (logDetailMeta) {
-      logDetailMeta.innerHTML = `
-        <div class="log-detail-meta-card log-detail-error-card">
-          <span class="log-detail-meta-label">加载失败</span>
-          <strong>${escapeHtml(error.message)}</strong>
-          <small>请稍后重试或刷新日志列表。</small>
-        </div>
-      `;
-    }
+    replaceChildren(logDetailMeta,
+      el("div", { class: "log-detail-meta-card log-detail-error-card" },
+        el("span", { class: "log-detail-meta-label" }, "加载失败"),
+        el("strong", {}, error.message),
+        el("small", {}, "请稍后重试或刷新日志列表。")));
   }
 }
 

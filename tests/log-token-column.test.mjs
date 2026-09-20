@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+import { createDomContext, extractFunction, read, vm } from "./dom-stub.mjs";
+
+/** 真跑一次 formatTokens，拿它实际造出的节点树断言。 */
+function renderTokenCell(log) {
+  const context = createDomContext();
+  vm.runInContext(extractFunction(read("static/js/logs.js"), "formatTokens"), context);
+  context.log = log;
+  return vm.runInContext("formatTokens(log).outerHTML", context);
+}
 
 /** 列表里那个 Tokens 单元格的构造函数。 */
 function listTokenCell() {
@@ -36,12 +43,20 @@ test("输入输出各占一行，用上下箭头区分", () => {
 });
 
 test("箭头对读屏隐藏，数值另有文字标签", () => {
-  const cell = listTokenCell();
+  const html = renderTokenCell({ prompt_tokens: 1234, completion_tokens: 567 });
   // 读屏念不出 ↑↓，所以整体挂 aria-label，箭头本身隐藏。
-  assert.match(cell, /aria-hidden="true">\$\{arrow\}/);
-  assert.match(cell, /aria-label="\$\{escapeHtml\(label\)\}"/);
-  assert.match(cell, /输入/);
-  assert.match(cell, /输出/);
+  assert.match(html, /aria-label="输入 1234 tokens，输出 567 tokens"/);
+  assert.match(html, /aria-hidden="true">↑</);
+  assert.match(html, /aria-hidden="true">↓</);
+  assert.match(html, /<b>1234<\/b>/);
+  assert.match(html, /<b>567<\/b>/);
+});
+
+test("缺失的 token 数显示为 -，不编造 0", () => {
+  // 0 和“没有记录”是两回事，一个失败的请求不该看起来像用了 0 个 token。
+  const html = renderTokenCell({ prompt_tokens: null, completion_tokens: undefined });
+  assert.match(html, /<b>-<\/b>/);
+  assert.doesNotMatch(html, /<b>0<\/b>/);
 });
 
 test("旧的三列类名没有残留", () => {

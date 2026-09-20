@@ -1,23 +1,20 @@
 // 会话模式的解析器。重点在容错：日志正文几乎总是被截断的（正文上限 1MB，
 // 而一轮 Claude Code 请求常常超过它），标准 JSON.parse 对绝大多数日志都会失败。
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
 
-const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+import { createDomContext, read, vm } from "./dom-stub.mjs";
 
 function conversationContext() {
-  const context = vm.createContext({
-    // 渲染要用 bootstrap.js 里的 escapeHtml，这里给一个等价实现。
-    escapeHtml: (value) =>
-      String(value).replace(/[&<>"']/g, (c) => (
-        { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
-      )),
-    TextEncoder,
-  });
+  // 渲染函数返回节点，所以沙箱要带 DOM 和真实的 el()。
+  const context = createDomContext({ TextEncoder });
   vm.runInContext(read("static/js/conversation.js"), context);
   return context;
+}
+
+/** 渲染一次并把节点树序列化成标记，断言照旧按标记写。 */
+function renderMarkup(context, expression) {
+  return vm.runInContext(`(${expression}).outerHTML`, context);
 }
 
 function call(context, expression, value) {
@@ -258,7 +255,7 @@ test("截断的会话渲染出提示，并说明恢复了多少", () => {
     '{"messages":[{"role":"user","content":"你好"},{"role":"assistant","content":"被截');
   context.__parsed = parsed;
   context.__meta = { truncated: true, byteLength: 1800000, capturedLength: 1000000 };
-  const html = vm.runInContext("renderConversationHtml(__parsed, __meta)", context);
+  const html = renderMarkup(context, "renderConversation(__parsed, __meta)");
 
   assert.match(html, /conv-truncated/);
   assert.match(html, /已恢复 1 条消息/);
@@ -267,7 +264,7 @@ test("截断的会话渲染出提示，并说明恢复了多少", () => {
 
 test("解析不出会话时给出切回原始模式的提示", () => {
   const context = conversationContext();
-  const html = vm.runInContext("renderConversationHtml(null, {})", context);
+  const html = renderMarkup(context, "renderConversation(null, {})");
   assert.match(html, /无法解析成会话/);
   assert.match(html, /原始模式/);
 });
@@ -277,7 +274,7 @@ test("渲染对内容做 HTML 转义", () => {
   const parsed = call(context, "parseConversationRequest(__input)",
     JSON.stringify({ messages: [{ role: "user", content: "<img src=x onerror=alert(1)>" }] }));
   context.__parsed = parsed;
-  const html = vm.runInContext("renderConversationHtml(__parsed, {})", context);
+  const html = renderMarkup(context, "renderConversation(__parsed, {})");
 
   assert.doesNotMatch(html, /<img src=x/);
   assert.match(html, /&lt;img src=x/);
@@ -290,7 +287,7 @@ test("长正文平铺显示，不折叠也不加预览摘要", () => {
   const parsed = call(context, "parseConversationRequest(__input)",
     JSON.stringify({ messages: [{ role: "user", content: long }] }));
   context.__parsed = parsed;
-  const html = vm.runInContext("renderConversationHtml(__parsed, {})", context);
+  const html = renderMarkup(context, "renderConversation(__parsed, {})");
 
   assert.doesNotMatch(html, /<details/, "正文不应折叠");
   assert.match(html, /conv-block--text/);
@@ -310,7 +307,7 @@ test("多行的思考与工具块用可折叠块，且默认展开", () => {
     }],
   }));
   context.__parsed = parsed;
-  const html = vm.runInContext("renderConversationHtml(__parsed, {})", context);
+  const html = renderMarkup(context, "renderConversation(__parsed, {})");
 
   const details = html.match(/<details[^>]*>/g) || [];
   assert.equal(details.length, 2, "思考与工具各是一个折叠块");
@@ -336,7 +333,7 @@ test("单行内容内联成一行，不套折叠块", () => {
     }],
   }));
   context.__parsed = parsed;
-  const html = vm.runInContext("renderConversationHtml(__parsed, {})", context);
+  const html = renderMarkup(context, "renderConversation(__parsed, {})");
 
   assert.doesNotMatch(html, /<details/, "单行内容不该套折叠块");
   assert.equal((html.match(/conv-block--inline/g) || []).length, 3, "三个块都应内联");
@@ -362,7 +359,7 @@ test("角色不再独占一行", () => {
   const parsed = call(context, "parseConversationRequest(__input)",
     JSON.stringify({ messages: [{ role: "user", content: "你好" }] }));
   context.__parsed = parsed;
-  const html = vm.runInContext("renderConversationHtml(__parsed, {})", context);
+  const html = renderMarkup(context, "renderConversation(__parsed, {})");
 
   // 角色与序号仍在，但和内容并排（靠 CSS grid 分栏），不再是一个标题行。
   assert.match(html, /conv-msg-role/);
@@ -399,7 +396,7 @@ test("正文、思考、工具结果都会做空白清理", () => {
     }],
   }));
   context.__parsed = parsed;
-  const html = vm.runInContext("renderConversationHtml(__parsed, {})", context);
+  const html = renderMarkup(context, "renderConversation(__parsed, {})");
 
   assert.doesNotMatch(html, /开头\n{3,}/, "三种块都不应残留成片空行");
   assert.equal((html.match(/开头\n\n结尾/g) || []).length, 3, "三种块都应压成一个空行");
@@ -410,7 +407,7 @@ test("会话头部提供一键全部折叠的出口", () => {
   const parsed = call(context, "parseConversationRequest(__input)",
     JSON.stringify({ messages: [{ role: "user", content: "你好" }] }));
   context.__parsed = parsed;
-  const html = vm.runInContext("renderConversationHtml(__parsed, {})", context);
+  const html = renderMarkup(context, "renderConversation(__parsed, {})");
 
   assert.match(html, /data-conv-fold="collapse"/);
   assert.match(html, /全部折叠/);

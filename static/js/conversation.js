@@ -540,12 +540,9 @@ function formatCharCount(count) {
 // 默认展开：读一段对话不该先点开十几个块。summary 留着当标签用（"思考"、
 // "调用 Bash"），展开状态下它仍然是有用的分隔，也让需要时能手动收起来。
 function renderCollapsibleBlock(className, summary, body) {
-  return `
-    <details class="conv-block ${className}" open>
-      <summary>${summary}</summary>
-      <pre class="conv-block-body">${escapeHtml(body)}</pre>
-    </details>
-  `;
+  return el("details", { class: `conv-block ${className}`, open: true },
+    el("summary", {}, summary),
+    el("pre", { class: "conv-block-body" }, body));
 }
 
 // 正文一律平铺，不做折叠。之前给长文加的预览摘要在默认展开后就成了重复内容
@@ -564,8 +561,9 @@ function tidyBlockText(text) {
 
 function renderTextBlock(text) {
   const value = tidyBlockText(text);
-  if (!value) return "";
-  return `<div class="conv-block conv-block--text"><pre class="conv-block-body">${escapeHtml(value)}</pre></div>`;
+  if (!value) return null;
+  return el("div", { class: "conv-block conv-block--text" },
+    el("pre", { class: "conv-block-body" }, value));
 }
 
 function renderToolInput(input) {
@@ -593,21 +591,26 @@ function renderToolInput(input) {
 // 单行内容不值得一个可折叠块：摘要一行、正文一行，两行装一行的东西。
 // 这里把标签和内容排在同一行，仍然保留标签的类型提示。
 function renderInlineBlock(className, tag, body) {
-  return `
-    <div class="conv-block conv-block--inline ${className}">
-      <span class="conv-block-tag">${tag}</span>
-      <span class="conv-inline-body">${escapeHtml(body)}</span>
-    </div>
-  `;
+  return el("div", { class: `conv-block conv-block--inline ${className}` },
+    tag,
+    el("span", { class: "conv-inline-body" }, body));
 }
 
 // 内容只有一行时走内联，多行才用折叠块。
+// tag 是节点（或节点数组），两个分支只会用到其中一个，不会被搬两次。
 function renderLabelledBlock(className, tag, meta, body) {
   if (body && !body.includes("\n")) {
     return renderInlineBlock(className, tag, body);
   }
-  const summary = meta ? `${tag} <span class="conv-block-meta">${meta}</span>` : tag;
+  const summary = meta
+    ? frag(tag, " ", el("span", { class: "conv-block-meta" }, meta))
+    : tag;
   return renderCollapsibleBlock(className, summary, body);
+}
+
+/** 块标签：“思考”、“工具结果”这类小标题。 */
+function blockTag(text) {
+  return el("span", { class: "conv-block-tag" }, text);
 }
 
 function renderConversationBlock(block) {
@@ -616,15 +619,15 @@ function renderConversationBlock(block) {
       return renderTextBlock(block.text);
     case "thinking": {
       const text = tidyBlockText(block.text);
-      if (!text) return "";
+      if (!text) return null;
       return renderLabelledBlock(
-        "conv-block--thinking", '<span class="conv-block-tag">思考</span>',
+        "conv-block--thinking", blockTag("思考"),
         formatCharCount(text.length), text,
       );
     }
     case "tool_use": {
       const body = renderToolInput(block.input);
-      const tag = `<span class="conv-block-tag">调用</span> ${escapeHtml(block.name || "工具")}`;
+      const tag = frag(blockTag("调用"), " ", block.name || "工具");
       return renderLabelledBlock("conv-block--tool-use", tag, "", body);
     }
     case "tool_result": {
@@ -632,36 +635,31 @@ function renderConversationBlock(block) {
       const label = block.isError ? "工具报错" : "工具结果";
       return renderLabelledBlock(
         `conv-block--tool-result${block.isError ? " is-error" : ""}`,
-        `<span class="conv-block-tag">${label}</span>`,
+        blockTag(label),
         formatCharCount(text.length), text,
       );
     }
     case "image":
-      return `<div class="conv-block conv-block--image">${escapeHtml(block.text || "[图片]")}</div>`;
+      return el("div", { class: "conv-block conv-block--image" }, block.text || "[图片]");
     case "error":
-      return `<div class="conv-block conv-block--error">${escapeHtml(block.text || "错误")}</div>`;
-    default: {
-      const summary = `<span class="conv-block-tag">${escapeHtml(block.label || "其他")}</span>`;
-      return renderCollapsibleBlock("conv-block--other", summary, safeStringify(block.input));
-    }
+      return el("div", { class: "conv-block conv-block--error" }, block.text || "错误");
+    default:
+      return renderCollapsibleBlock("conv-block--other",
+        blockTag(block.label || "其他"), safeStringify(block.input));
   }
 }
 
 function renderConversationMessage(message, index) {
-  const blocks = message.blocks.map(renderConversationBlock).join("");
-  if (!blocks) return "";
+  const blocks = message.blocks.map(renderConversationBlock).filter(Boolean);
+  if (blocks.length === 0) return null;
   const role = String(message.role || "user");
   /* 角色放在左侧窄栏而不是单独一行：26% 的消息内容只有一两行，一个专门的
      标题行等于把它们的高度翻倍。 */
-  return `
-    <li class="conv-msg conv-msg--${escapeHtml(role)}">
-      <div class="conv-msg-role">
-        <span class="conv-role-name">${escapeHtml(conversationRoleLabel(role))}</span>
-        <span class="conv-msg-index">${index + 1}</span>
-      </div>
-      <div class="conv-msg-blocks">${blocks}</div>
-    </li>
-  `;
+  return el("li", { class: `conv-msg conv-msg--${role}` },
+    el("div", { class: "conv-msg-role" },
+      el("span", { class: "conv-role-name" }, conversationRoleLabel(role)),
+      el("span", { class: "conv-msg-index" }, index + 1)),
+    el("div", { class: "conv-msg-blocks" }, blocks));
 }
 
 function formatByteSize(bytes) {
@@ -671,36 +669,35 @@ function formatByteSize(bytes) {
   return `${bytes}B`;
 }
 
+/** 无法渲染时的空态，两种原因共用一个形状。 */
+function conversationEmpty(title, detail) {
+  return el("div", { class: "conv-empty" },
+    el("strong", {}, title),
+    el("span", {}, detail));
+}
+
 // meta 来自 normalizeSnapshotBody：{ truncated, byteLength, capturedLength }
-function renderConversationHtml(parsed, meta = {}) {
+function renderConversation(parsed, meta = {}) {
   if (!parsed) {
-    return `
-      <div class="conv-empty">
-        <strong>这段正文无法解析成会话</strong>
-        <span>可能不是对话请求，或上游返回的不是 JSON（例如网关的 HTML 错误页）。切换到原始模式查看完整内容。</span>
-      </div>
-    `;
+    return conversationEmpty("这段正文无法解析成会话",
+      "可能不是对话请求，或上游返回的不是 JSON（例如网关的 HTML 错误页）。切换到原始模式查看完整内容。");
   }
 
-  const rendered = parsed.messages.map(renderConversationMessage).filter(Boolean).join("");
-  if (!rendered) {
-    return `
-      <div class="conv-empty">
-        <strong>没有可显示的消息</strong>
-        <span>正文解析成功，但其中不含消息内容。切换到原始模式查看完整内容。</span>
-      </div>
-    `;
+  const rendered = parsed.messages.map(renderConversationMessage).filter(Boolean);
+  if (rendered.length === 0) {
+    return conversationEmpty("没有可显示的消息",
+      "正文解析成功，但其中不含消息内容。切换到原始模式查看完整内容。");
   }
 
   const summary = [];
-  if (parsed.model) summary.push(escapeHtml(parsed.model));
+  if (parsed.model) summary.push(parsed.model);
   summary.push(`${parsed.messages.length} 条消息`);
   if (parsed.toolCount > 0) summary.push(`${parsed.toolCount} 个工具`);
-  if (parsed.stopReason) summary.push(`结束原因 ${escapeHtml(parsed.stopReason)}`);
+  if (parsed.stopReason) summary.push(`结束原因 ${parsed.stopReason}`);
   if (parsed.stream) summary.push("流式重组");
 
   // 正文被截断时说清楚恢复了多少、丢了多少，避免把残缺的会话误当成全部。
-  let notice = "";
+  let notice = null;
   if (!parsed.complete || meta.truncated) {
     const parts = [`已恢复 ${parsed.messages.length} 条消息`];
     const original = formatByteSize(meta.byteLength);
@@ -710,26 +707,20 @@ function renderConversationHtml(parsed, meta = {}) {
     } else if (original) {
       parts.push(`原始正文 ${original}`);
     }
-    notice = `
-      <div class="conv-truncated">
-        <strong>正文被截断，末尾的消息已丢失</strong>
-        <span>${escapeHtml(parts.join(" · "))}</span>
-      </div>
-    `;
+    notice = el("div", { class: "conv-truncated" },
+      el("strong", {}, "正文被截断，末尾的消息已丢失"),
+      el("span", {}, parts.join(" · ")));
   }
 
-  /* 默认全部展开，但几百条消息的会话铺开会很长，所以给一个一键收起的出口。
-     按钮的实际开合由 logs.js 的委托处理，这里只出标记。 */
-  const controls = `
-    <button type="button" class="conv-fold-all" data-conv-fold="collapse">全部折叠</button>
-  `;
-
-  return `
-    <div class="conv-summary">
-      <span>${summary.join(" · ")}</span>
-      ${controls}
-    </div>
-    <ol class="conv-list">${rendered}</ol>
-    ${notice}
-  `;
+  return frag(
+    el("div", { class: "conv-summary" },
+      el("span", {}, summary.join(" · ")),
+      /* 默认全部展开，但几百条消息的会话铺开会很长，所以给一个一键收起的
+         出口。按钮的实际开合由 logs.js 的委托处理，这里只出节点。 */
+      el("button", {
+        type: "button", class: "conv-fold-all",
+        dataset: { convFold: "collapse" },
+      }, "全部折叠")),
+    el("ol", { class: "conv-list" }, rendered),
+    notice);
 }

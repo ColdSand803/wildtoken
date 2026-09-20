@@ -18,13 +18,13 @@ function logTableColumns() {
   return columns;
 }
 
-/** createActiveLogRow 里逐个单元格的 data-col。 */
+/** createActiveLogRow 里逐个单元格的 col。 */
 function activeRowColumns() {
   const source = read(LOGS_SOURCE);
   const start = source.indexOf("function createActiveLogRow(");
   assert.notEqual(start, -1, "进行中的行必须有构造函数");
   const body = source.slice(start, source.indexOf("\n}", start));
-  return [...body.matchAll(/<td[^>]*data-col="([a-z-]+)"/g)].map((match) => match[1]);
+  return [...body.matchAll(/dataset: \{ col: "([a-z-]+)" \}/g)].map((match) => match[1]);
 }
 
 test("进行中的行与日志表头逐列对齐", () => {

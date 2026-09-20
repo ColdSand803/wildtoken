@@ -1,38 +1,18 @@
 // 日志里的思考强度有三个环节：下游请求的、实际发往上游的、上游回报的。
 // 这里锁住合并规则——改写发生时必须看得见真实发出的那个值。
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
 
-const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-
-function extractFunction(source, name) {
-  const start = source.indexOf(`function ${name}(`);
-  assert.notEqual(start, -1, `${name} must exist`);
-
-  const bodyStart = source.indexOf("{", start);
-  let depth = 0;
-  for (let index = bodyStart; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === "{") depth += 1;
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return source.slice(start, index + 1);
-      }
-    }
-  }
-
-  throw new Error(`could not extract ${name}`);
-}
+import { createDomContext, extractFunction, read, vm } from "./dom-stub.mjs";
 
 function routeContext() {
   const source = read("static/js/logs.js");
-  const context = vm.createContext({ escapeHtml: (v) => String(v) });
+  // 渲染返回节点，所以沙箱要带 DOM 和真实的 el()。
+  const context = createDomContext();
   for (const name of [
     "getReasoningEffortRoute",
     "reasoningEffortTitle",
+    "routeFollowerLine",
     "renderLogReasoningEffort",
   ]) {
     vm.runInContext(extractFunction(source, name), context);
@@ -103,17 +83,19 @@ test("没有改写时的显示与从前一致", () => {
 test("单值渲染成纯文本，多环节渲染成带 title 的路由", () => {
   const context = routeContext();
 
-  context.single = { reasoning_effort: "high", upstream_reasoning_effort: "high" };
-  const single = vm.runInContext("renderLogReasoningEffort(single)", context);
+  const render = (log) => {
+    context.candidate = log;
+    return vm.runInContext("renderLogReasoningEffort(candidate).outerHTML", context);
+  };
+
+  const single = render({ reasoning_effort: "high", upstream_reasoning_effort: "high" });
   assert.match(single, /model-single/);
   assert.doesNotMatch(single, /model-route/);
 
-  context.routed = { reasoning_effort: "max", upstream_reasoning_effort: "xhigh" };
-  const routed = vm.runInContext("renderLogReasoningEffort(routed)", context);
+  const routed = render({ reasoning_effort: "max", upstream_reasoning_effort: "xhigh" });
   assert.match(routed, /model-route/);
   assert.match(routed, /请求强度：max；上游强度：xhigh/);
   assert.match(routed, /xhigh/);
 
-  const empty = vm.runInContext("renderLogReasoningEffort({})", context);
-  assert.match(empty, /muted/);
+  assert.match(render({}), /muted/);
 });
