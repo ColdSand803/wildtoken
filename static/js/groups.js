@@ -45,31 +45,32 @@ function renderGroups() {
     return;
   }
   if (groupCache.length === 0) {
-    groupTableBody.innerHTML = `<tr><td colspan="5" class="empty">暂无分组</td></tr>`;
+    replaceChildren(groupTableBody,
+      el("tr", {}, el("td", { colspan: 5, class: "empty" }, "暂无分组")));
     return;
   }
 
-  groupTableBody.innerHTML = groupCache
-    .map((group) => {
+  replaceChildren(groupTableBody, groupCache.map((group) => el("tr", {},
+    el("td", {},
+      el("div", { class: "name-inline" },
+        el("strong", { title: group.name }, group.name),
+        /* 「默认」是名称的附注，不是状态，所以用中性徽章：比名称小一号、灰调
+           填充，扫一眼能认出兜底分组，又不会盖过名称本身。 */
+        group.is_default ? el("span", { class: "badge neutral" }, "默认") : null)),
+    descriptionCell(group.description),
+    el("td", { class: "numeric" }, group.upstream_count),
+    el("td", { class: "numeric" }, group.token_count),
+    el("td", { class: "actions-col" },
+      el("button", {
+        type: "button", class: "secondary ghost",
+        dataset: { groupEdit: group.id },
+      }, "编辑"),
       /* default 分组是所有令牌和渠道的兜底，删掉它会让引用它的令牌无处可去，
          所以这里连按钮都不给。 */
-      const actions = group.is_default
-        ? `<button type="button" class="secondary ghost" data-group-edit="${group.id}">编辑</button>`
-        : `<button type="button" class="secondary ghost" data-group-edit="${group.id}">编辑</button>
-           <button type="button" class="secondary ghost danger" data-group-delete="${group.id}">删除</button>`;
-      /* 「默认」是名称的附注，不是状态，所以用中性徽章：比名称小一号、灰调填充，
-         扫一眼能认出兜底分组，又不会盖过名称本身。 */
-      const badge = group.is_default ? `<span class="badge neutral">默认</span>` : "";
-      const name = escapeHtml(group.name);
-      return `<tr>
-        <td><div class="name-inline"><strong title="${name}">${name}</strong>${badge}</div></td>
-        ${renderDescriptionCell(group.description)}
-        <td class="numeric">${group.upstream_count}</td>
-        <td class="numeric">${group.token_count}</td>
-        <td class="actions-col">${actions}</td>
-      </tr>`;
-    })
-    .join("");
+      group.is_default ? null : el("button", {
+        type: "button", class: "secondary ghost danger",
+        dataset: { groupDelete: group.id },
+      }, "删除")))));
 }
 
 function openGroupDialog(group) {
@@ -147,14 +148,8 @@ async function fillTokenGroupOptions(selectedId) {
   }
   const groups = groupCache.length > 0 ? groupCache : await loadGroups({ render: false });
   const target = Number(selectedId) || DEFAULT_GROUP_ID;
-  tokenGroupSelect.innerHTML = groups
-    .map(
-      (group) =>
-        `<option value="${group.id}"${group.id === target ? " selected" : ""}>${escapeHtml(
-          group.name,
-        )}</option>`,
-    )
-    .join("");
+  replaceChildren(tokenGroupSelect, groups.map((group) =>
+    el("option", { value: group.id, selected: group.id === target }, group.name)));
 }
 
 /** 把分组列表填进渠道表单的多选框，selectedIds 缺省时勾上 default。 */
@@ -168,14 +163,11 @@ async function fillUpstreamGroupOptions(selectedIds) {
       ? selectedIds.map(Number)
       : [DEFAULT_GROUP_ID],
   );
-  upstreamGroupList.innerHTML = groups
-    .map(
-      (group) =>
-        `<label class="group-checkbox"><input type="checkbox" value="${group.id}"${
-          selected.has(group.id) ? " checked" : ""
-        } /> <span>${escapeHtml(group.name)}</span></label>`,
-    )
-    .join("");
+  replaceChildren(upstreamGroupList, groups.map((group) =>
+    el("label", { class: "group-checkbox" },
+      el("input", { type: "checkbox", value: group.id, checked: selected.has(group.id) }),
+      " ",
+      el("span", {}, group.name))));
 }
 
 /** 读回渠道表单里勾选的分组。空数组交给服务端兜底成 default。 */

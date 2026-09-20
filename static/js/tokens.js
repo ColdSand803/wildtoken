@@ -81,15 +81,14 @@ function expiryBadgeTone(deltaMs) {
   return deltaMs <= EXPIRY_SOON_MS ? "neutral" : "on";
 }
 
-function expiryCellMarkup(expiresAt, nowMs) {
-  if (!expiresAt) return `<span class="muted">永不过期</span>`;
+function expiryCell(expiresAt, nowMs) {
+  if (!expiresAt) return el("span", { class: "muted" }, "永不过期");
   const timestamp = parseLogTimestamp(expiresAt);
-  if (!Number.isFinite(timestamp)) return `<span class="muted">—</span>`;
+  if (!Number.isFinite(timestamp)) return el("span", { class: "muted" }, "—");
   const delta = timestamp - nowMs;
-  return `<div class="token-expiry">
-        <span class="token-expiry-time">${escapeHtml(logTimeFormatter.format(new Date(timestamp)))}</span>
-        <span class="badge ${expiryBadgeTone(delta)}">${escapeHtml(formatExpiryDistance(delta))}</span>
-      </div>`;
+  return el("div", { class: "token-expiry" },
+    el("span", { class: "token-expiry-time" }, logTimeFormatter.format(new Date(timestamp))),
+    el("span", { class: `badge ${expiryBadgeTone(delta)}` }, formatExpiryDistance(delta)));
 }
 
 /** 把存储的 UTC 时间戳变回输入框里可编辑的读数，用控制台展示时区。 */
@@ -157,21 +156,22 @@ const TOKEN_SEALED_TITLE =
 /* 预览片段本身就是复制按钮：表格已经八列，再塞一个独立按钮会挤掉别的列。
    按钮常驻 tab 序（不可复制的行用 aria-disabled 而不是 disabled），所以键盘用户
    一样停得上来、读得到 title 里的原因。 */
-function tokenPreviewCellMarkup(token) {
-  const preview = escapeHtml(token.token_preview || "");
-  const name = escapeHtml(token.name);
+function tokenPreviewCell(token) {
   const sealed = !token.token;
   const confirmed = token.id === tokenCopyConfirmedId;
-
-  const state = sealed
-    ? `aria-disabled="true" aria-label="令牌 ${name} 的完整值不可复制" title="${escapeHtml(TOKEN_SEALED_TITLE)}"`
-    : `aria-label="复制令牌 ${name} 的完整值" title="复制完整令牌"`;
-
-  return `<button type="button" class="token-preview-button${confirmed ? " is-confirmed" : ""}"`
-    + ` data-token-action="copy-token" data-token-id="${token.id}" ${state}>`
-    + `<code class="token-preview-code">${preview}</code>`
-    + `<span class="token-preview-icon" aria-hidden="true">${sealed ? TOKEN_SEALED_GLYPH : TOKEN_COPY_GLYPH}</span>`
-    + `</button>`;
+  return el("button", {
+    type: "button",
+    class: `token-preview-button${confirmed ? " is-confirmed" : ""}`,
+    dataset: { tokenAction: "copy-token", tokenId: token.id },
+    "aria-disabled": sealed || null,
+    "aria-label": sealed
+      ? `令牌 ${token.name} 的完整值不可复制`
+      : `复制令牌 ${token.name} 的完整值`,
+    title: sealed ? TOKEN_SEALED_TITLE : "复制完整令牌",
+  },
+    el("code", { class: "token-preview-code" }, token.token_preview || ""),
+    el("span", { class: "token-preview-icon", "aria-hidden": "true" },
+      sealed ? TOKEN_SEALED_GLYPH : TOKEN_COPY_GLYPH));
 }
 
 function renderTokenRows() {
@@ -204,42 +204,41 @@ function renderTokenRows() {
   // One reading of the clock for the whole table, so every row's remaining
   // time is measured against the same instant.
   const nowMs = Date.now();
-  tokenRows.innerHTML = filtered
-    .map(
-      (t) => `
-    <tr>
-      <td><strong>${escapeHtml(t.name)}</strong></td>
-      ${renderDescriptionCell(t.description)}
-      <td>${tokenPreviewCellMarkup(t)}</td>
-      <td>${escapeHtml(t.group_name || "default")}</td>
-      <td class="col-quota">${quotaCellMarkup(t)}</td>
-      <td class="col-expiry">${expiryCellMarkup(t.expires_at, nowMs)}</td>
-      <td class="col-status">
-        <button
-          type="button"
-          class="status-switch ${t.enabled ? "on" : "off"}"
-          data-token-action="${t.enabled ? "disable" : "enable"}"
-          data-token-id="${t.id}"
-          role="switch"
-          aria-checked="${t.enabled ? "true" : "false"}"
-          aria-label="${t.enabled ? "停用" : "启用"}令牌 ${escapeHtml(t.name)}"
-          title="${t.enabled ? "点击停用" : "点击启用"}"
-        >
-          <span class="status-switch-track" aria-hidden="true">
-            <span class="status-switch-thumb"></span>
-          </span>
-        </button>
-      </td>
-      <td class="action-cell">
-        <button type="button" class="secondary small" data-token-action="edit" data-token-id="${t.id}">编辑</button>
-        ${t.quota?.limit_tokens
-          ? `<button type="button" class="secondary small" data-token-action="reset-usage" data-token-id="${t.id}" title="把已用量清零，限额保持不变">重置用量</button>`
-          : ""}
-        <button type="button" class="secondary small danger" data-token-action="delete" data-token-id="${t.id}">删除</button>
-      </td>
-    </tr>`,
-    )
-    .join("");
+  replaceChildren(tokenRows, filtered.map((t) => el("tr", {},
+    el("td", {}, el("strong", {}, t.name)),
+    descriptionCell(t.description),
+    el("td", {}, tokenPreviewCell(t)),
+    el("td", {}, t.group_name || "default"),
+    el("td", { class: "col-quota" }, quotaCell(t)),
+    el("td", { class: "col-expiry" }, expiryCell(t.expires_at, nowMs)),
+    el("td", { class: "col-status" },
+      el("button", {
+        type: "button",
+        class: `status-switch ${t.enabled ? "on" : "off"}`,
+        dataset: { tokenAction: t.enabled ? "disable" : "enable", tokenId: t.id },
+        role: "switch",
+        "aria-checked": t.enabled ? "true" : "false",
+        "aria-label": `${t.enabled ? "停用" : "启用"}令牌 ${t.name}`,
+        title: t.enabled ? "点击停用" : "点击启用",
+      },
+        el("span", { class: "status-switch-track", "aria-hidden": "true" },
+          el("span", { class: "status-switch-thumb" })))),
+    el("td", { class: "action-cell" },
+      el("button", {
+        type: "button", class: "secondary small",
+        dataset: { tokenAction: "edit", tokenId: t.id },
+      }, "编辑"),
+      t.quota?.limit_tokens
+        ? el("button", {
+          type: "button", class: "secondary small",
+          dataset: { tokenAction: "reset-usage", tokenId: t.id },
+          title: "把已用量清零，限额保持不变",
+        }, "重置用量")
+        : null,
+      el("button", {
+        type: "button", class: "secondary small danger",
+        dataset: { tokenAction: "delete", tokenId: t.id },
+      }, "删除")))));
 }
 
 async function loadTokens() {
@@ -370,18 +369,22 @@ function formatTokenCount(count) {
   return String(amount);
 }
 
-function quotaCellMarkup(token) {
+function quotaCell(token) {
   const quota = token.quota || {};
   const used = Number(quota.used_tokens) || 0;
   // 限速和限额挤同一列：限速命中率低，单独占列大多数行都是空的。
   const rateNote = token.rate_limit
-    ? `<span class="muted quota-rate-note" title="限速 ${escapeHtml(token.rate_limit)}">${escapeHtml(token.rate_limit)}</span>`
-    : "";
+    ? el("span", { class: "muted quota-rate-note", title: `限速 ${token.rate_limit}` }, token.rate_limit)
+    : null;
+  const sep = () => el("span", { class: "quota-sep" }, "/");
 
   if (quota.limit_tokens === null || quota.limit_tokens === undefined) {
-    return `<span class="quota-cell" title="已用 ${used.toLocaleString()} tokens，未设限额">`
-      + `<span class="quota-used">${formatTokenCount(used)}</span>`
-      + `<span class="quota-sep">/</span><span class="muted">不限</span></span>${rateNote}`;
+    return frag(
+      el("span", { class: "quota-cell", title: `已用 ${used.toLocaleString()} tokens，未设限额` },
+        el("span", { class: "quota-used" }, formatTokenCount(used)),
+        sep(),
+        el("span", { class: "muted" }, "不限")),
+      rateNote);
   }
 
   const limit = Number(quota.limit_tokens) || 0;
@@ -392,13 +395,14 @@ function quotaCellMarkup(token) {
   const title = `已用 ${used.toLocaleString()} / 剩余 ${remaining.toLocaleString()}`
     + ` / 限额 ${limit.toLocaleString()} tokens`;
 
-  return `<span class="quota-cell ${tone}" title="${escapeHtml(title)}">`
-    + `<span class="quota-used">${formatTokenCount(used)}</span>`
-    + `<span class="quota-sep">/</span>`
-    + `<span class="quota-remaining">${formatTokenCount(remaining)}</span>`
-    + `<span class="quota-sep">/</span>`
-    + `<span class="quota-limit">${escapeHtml(quota.limit_expression || formatTokenCount(limit))}</span>`
-    + `</span>${rateNote}`;
+  return frag(
+    el("span", { class: `quota-cell ${tone}`, title },
+      el("span", { class: "quota-used" }, formatTokenCount(used)),
+      sep(),
+      el("span", { class: "quota-remaining" }, formatTokenCount(remaining)),
+      sep(),
+      el("span", { class: "quota-limit" }, quota.limit_expression || formatTokenCount(limit))),
+    rateNote);
 }
 
 function openTokenDialog(mode = "new") {
@@ -507,7 +511,7 @@ async function handleTokenAction(button) {
       const updated = await api(`/api/admin/tokens/${id}/usage/reset`, { method: "POST" });
       Object.assign(token, updated);
       renderTokenRows();
-      setStatus(`令牌 ${escapeHtml(updated.name)} 的用量已重置。`, "ok");
+      setStatus(`令牌 ${updated.name} 的用量已重置。`, "ok");
     } catch (error) {
       button.disabled = false;
       button.classList.remove("is-busy");
@@ -518,7 +522,6 @@ async function handleTokenAction(button) {
 
   if (button.dataset.tokenAction === "enable" || button.dataset.tokenAction === "disable") {
     const nextEnabled = button.dataset.tokenAction === "enable";
-    const originalMarkup = button.innerHTML;
     button.disabled = true;
     button.classList.add("is-busy");
     try {
@@ -528,11 +531,10 @@ async function handleTokenAction(button) {
       });
       Object.assign(token, updated);
       renderTokenRows();
-      setStatus(`令牌 ${escapeHtml(updated.name)} 已${updated.enabled ? "启用" : "停用"}。`, "ok");
+      setStatus(`令牌 ${updated.name} 已${updated.enabled ? "启用" : "停用"}。`, "ok");
     } catch (error) {
       button.disabled = false;
       button.classList.remove("is-busy");
-      button.innerHTML = originalMarkup;
       setStatus(`切换令牌状态失败：${error.message}`, "error");
     }
     return;

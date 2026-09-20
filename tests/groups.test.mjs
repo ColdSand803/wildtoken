@@ -41,7 +41,7 @@ test("分组页的表头与渲染出的单元格列数一致", () => {
   const source = read("static/js/groups.js");
   // 名称、描述、渠道数、令牌数、操作
   assert.equal(headerCount, 5);
-  assert.match(source, /colspan="5"/);
+  assert.match(source, /colspan: 5/);
 });
 
 test("新增分组弹框使用完整的头部、底部和紧凑宽度结构", () => {
@@ -108,11 +108,15 @@ test("读回渠道分组勾选时转成数字，避免服务端收到字符串 i
 test("default 分组不给删除按钮", () => {
   const source = read("static/js/groups.js");
   // 删掉 default 会让引用它的令牌无处可去，所以按钮本身就不该出现。
-  assert.match(source, /group\.is_default\s*\n?\s*\?\s*`<button[^`]*data-group-edit/);
-  assert.doesNotMatch(
-    source.slice(source.indexOf("group.is_default"), source.indexOf("const badge")),
-    /is_default\s*\?[^:]*data-group-delete/,
+  // 编辑按钮无条件渲染，删除按钮在 is_default 为真时给 null。
+  assert.match(source, /dataset: \{ groupEdit: group\.id \}/);
+  assert.match(source, /group\.is_default \? null : el\(/);
+
+  const deleteBranch = source.slice(
+    source.indexOf("group.is_default ? null"),
+    source.indexOf("删除"),
   );
+  assert.match(deleteBranch, /dataset: \{ groupDelete: group\.id \}/);
 });
 
 test("新建渠道和新建令牌都会清掉上一次的分组残留", () => {
