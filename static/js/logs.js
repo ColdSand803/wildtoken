@@ -1,3 +1,24 @@
+/* 本模块自己的状态。原先放在 bootstrap.js 并通过 store 函数写入——
+   那层间接是为跨模块赋值准备的，而这些变量只有本文件会写。 */
+let currentLogDetail = null;
+let logCursorStack = [];
+let logHasMore = false;
+let logPageSize = readStoredLogPageSize();
+let logSensitiveHidden = (() => {
+  try {
+    return localStorage.getItem(LOG_SENSITIVE_HIDDEN_KEY) !== "false";
+  } catch {
+    return true;
+  }
+})();
+let logsLoadedOnce = false;
+let logsLoading = false;
+
+// 下拉框初值跟着 logPageSize 走，所以和它一起落在这个模块。
+if (logPageSizeSelect) {
+  logPageSizeSelect.value = String(logPageSize);
+}
+
 // Request log list, performance formatting, snapshots, and detail dialog.
 const LOG_SENSITIVE_MASK = "******";
 const LOG_RATE_ANIMATION_MS = 520;
@@ -541,8 +562,8 @@ function normalizeLogCursor(cursor) {
 
 function resetLogPagination() {
   storeLogOffset(0);
-  storeLogHasMore(false);
-  storeLogCursorStack([]);
+  logHasMore = false;
+  logCursorStack = [];
   storeLogCurrentCursor(null);
   storeLogNextCursor(null);
   clearLogStreamPendingEntries();
@@ -721,7 +742,7 @@ function setLogPageSize(nextSize, { reload = true } = {}) {
     if (logPageSizeSelect) logPageSizeSelect.value = String(logPageSize);
     return;
   }
-  storeLogPageSize(size);
+  logPageSize = size;
   try {
     localStorage.setItem(LOG_PAGE_SIZE_KEY, String(logPageSize));
   } catch {
@@ -1035,7 +1056,7 @@ function flushLogStreamEntries() {
     return true;
   });
   if (uniqueItems.length > logPageSize) {
-    storeLogHasMore(true);
+    logHasMore = true;
   }
   logPageItems = uniqueItems.slice(0, logPageSize);
 
@@ -1311,7 +1332,7 @@ function refreshOpenLogDetail() {
 }
 
 function setLogSensitiveHidden(hidden) {
-  storeLogSensitiveHidden(Boolean(hidden));
+  logSensitiveHidden = Boolean(hidden);
   try {
     localStorage.setItem(LOG_SENSITIVE_HIDDEN_KEY, String(logSensitiveHidden));
   } catch {
@@ -1435,19 +1456,6 @@ function renderLogRows(items, options = {}) {
   applyAllColumnVisibility();
 }
 
-function formatByteCount(value) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return "未知大小";
-  }
-  if (value < 1024) {
-    return `${value} B`;
-  }
-  if (value < 1024 * 1024) {
-    return `${(value / 1024).toFixed(1).replace(/\.0$/, "")} KB`;
-  }
-  return `${(value / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
-}
-
 function prettyBodyText(text) {
   const clean = String(text || "");
   const trimmed = clean.trim();
@@ -1459,26 +1467,6 @@ function prettyBodyText(text) {
   } catch (_) {
     return clean;
   }
-}
-
-function formatBodyHeading(body) {
-  const parts = ["Body"];
-  if (!body || typeof body !== "object") {
-    return parts.join(" · ");
-  }
-  if (body.encoding) {
-    parts.push(body.encoding);
-  }
-  const byteLength = typeof body.byte_length === "number"
-    ? body.byte_length
-    : (typeof body.size === "number" ? body.size : null);
-  if (typeof byteLength === "number") {
-    parts.push(formatByteCount(byteLength));
-  }
-  if (body.truncated) {
-    parts.push("已截断");
-  }
-  return parts.join(" · ");
 }
 
 function normalizeSnapshotBody(rawBody) {
@@ -1843,7 +1831,7 @@ function updateLogViewModeControls() {
 }
 
 async function showLogDetail(logId) {
-  storeCurrentLogDetail(null);
+  currentLogDetail = null;
   logDetailTitle.textContent = "请求详情";
   logDetailSummary.textContent = "正在加载...";
   replaceChildren(logDetailMeta,
@@ -1865,7 +1853,7 @@ async function showLogDetail(logId) {
 
   try {
     const detail = await api(`/api/admin/logs/${logId}`);
-    storeCurrentLogDetail(detail);
+    currentLogDetail = detail;
     logDetailTitle.textContent = "请求详情";
     logDetailSummary.textContent = formatLogDetailSummary(detail);
     replaceChildren(logDetailMeta, formatLogDetailMeta(detail));
@@ -1893,7 +1881,7 @@ async function loadLogs() {
   logLoadInFlight = true;
   const showSkeleton = !logsLoadedOnce;
   if (showSkeleton) {
-    storeLogsLoading(true);
+    logsLoading = true;
     renderLogRows([]);
   }
 
@@ -1915,10 +1903,10 @@ async function loadLogs() {
     const page = await api(`/api/admin/logs?${params}`);
     if (requestGeneration !== logLoadGeneration) return;
     const items = page.items || [];
-    storeLogHasMore(Boolean(page.has_more));
+    logHasMore = Boolean(page.has_more);
     storeLogNextCursor(normalizeLogCursor(page.next_cursor)
       || (logHasMore && items.length > 0 ? normalizeLogCursor(items[items.length - 1]) : null));
-    storeLogsLoadedOnce(true);
+    logsLoadedOnce = true;
     logPageItems = items;
     logPageFiltersActive = filtersActive;
     renderCurrentLogPage();
@@ -1936,7 +1924,7 @@ async function loadLogs() {
     setStatus(`加载日志失败：${error.message}`, "error");
   } finally {
     logLoadInFlight = false;
-    storeLogsLoading(false);
+    logsLoading = false;
     if (logLoadQueued) {
       logLoadQueued = false;
       void loadLogs();

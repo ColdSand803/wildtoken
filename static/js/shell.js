@@ -1,3 +1,12 @@
+/* 本模块自己的状态。原先放在 bootstrap.js 并通过 store 函数写入——
+   那层间接是为跨模块赋值准备的，而这些变量只有本文件会写。 */
+let dashboardRefreshTimer = null;
+let effectiveWeightTickTimer = null;
+let logRefreshTimer = null;
+let modelTestPromptTemplates = [];
+let modelTestUpstream = null;
+let upstreamRefreshTimer = null;
+
 // Navigation, dialogs, API access, settings, and model-test workflows.
 function isEditableTarget(target) {
   if (!target || !(target instanceof Element)) {
@@ -404,7 +413,7 @@ function startLogRefresh() {
     updateLiveIndicator();
     return;
   }
-  storeLogRefreshTimer(window.setInterval(loadLogs, interval));
+  logRefreshTimer = window.setInterval(loadLogs, interval);
   updateLiveIndicator();
 }
 
@@ -413,7 +422,7 @@ function startUpstreamRefresh() {
     updateLiveIndicator();
     return;
   }
-  storeUpstreamRefreshTimer(window.setInterval(loadUpstreams, DEFAULT_REFRESH_MS));
+  upstreamRefreshTimer = window.setInterval(loadUpstreams, DEFAULT_REFRESH_MS);
   updateLiveIndicator();
 }
 
@@ -423,7 +432,7 @@ function stopUpstreamRefresh() {
     return;
   }
   window.clearInterval(upstreamRefreshTimer);
-  storeUpstreamRefreshTimer(null);
+  upstreamRefreshTimer = null;
   updateLiveIndicator();
 }
 
@@ -431,7 +440,7 @@ function startEffectiveWeightTick() {
   if (effectiveWeightTickTimer !== null || !pageVisible) {
     return;
   }
-  storeEffectiveWeightTickTimer(window.setInterval(updateEffectiveWeightNotes, EFFECTIVE_WEIGHT_TICK_MS));
+  effectiveWeightTickTimer = window.setInterval(updateEffectiveWeightNotes, EFFECTIVE_WEIGHT_TICK_MS);
 }
 
 function stopEffectiveWeightTick() {
@@ -439,7 +448,7 @@ function stopEffectiveWeightTick() {
     return;
   }
   window.clearInterval(effectiveWeightTickTimer);
-  storeEffectiveWeightTickTimer(null);
+  effectiveWeightTickTimer = null;
 }
 
 function stopLogRefresh() {
@@ -448,7 +457,7 @@ function stopLogRefresh() {
     return;
   }
   window.clearInterval(logRefreshTimer);
-  storeLogRefreshTimer(null);
+  logRefreshTimer = null;
   updateLiveIndicator();
 }
 
@@ -457,7 +466,7 @@ function startDashboardRefresh() {
     updateLiveIndicator();
     return;
   }
-  storeDashboardRefreshTimer(window.setInterval(loadDashboardData, DASHBOARD_REFRESH_MS));
+  dashboardRefreshTimer = window.setInterval(loadDashboardData, DASHBOARD_REFRESH_MS);
   updateLiveIndicator();
 }
 
@@ -467,7 +476,7 @@ function stopDashboardRefresh() {
     return;
   }
   window.clearInterval(dashboardRefreshTimer);
-  storeDashboardRefreshTimer(null);
+  dashboardRefreshTimer = null;
   updateLiveIndicator();
 }
 
@@ -758,7 +767,7 @@ async function loadSettingsPage() {
     ]);
     fillServerSettings(settings);
     renderSystemInfo(system);
-    storeModelTestPromptTemplates(prompts);
+    modelTestPromptTemplates = prompts;
     renderModelTestPromptList();
   } catch (error) {
     if (currentViewFromHash() === "settings") {
@@ -770,7 +779,7 @@ async function loadSettingsPage() {
 }
 
 function closeModelTestDialog() {
-  storeModelTestUpstream(null);
+  modelTestUpstream = null;
   clearDialogMaximized(modelTestDialog);
   if (modelTestDialog.open && typeof modelTestDialog.close === "function") modelTestDialog.close();
   else modelTestDialog.removeAttribute("open");
@@ -824,7 +833,7 @@ function renderModelTestModelOptions(models, selected = "") {
 }
 
 async function openModelTestDialog(upstream) {
-  storeModelTestUpstream(upstream);
+  modelTestUpstream = upstream;
   modelTestTitle.textContent = `测试模型：${upstream.name}`;
   modelTestSummary.textContent = "向当前渠道发送一次实际模型请求。";
   modelTestResult.hidden = true;
@@ -832,7 +841,7 @@ async function openModelTestDialog(upstream) {
   modelTestRequestBody.textContent = "";
   modelTestResponseBody.textContent = "";
   try {
-    storeModelTestPromptTemplates(await api("/api/admin/settings/model-test-prompts"));
+    modelTestPromptTemplates = await api("/api/admin/settings/model-test-prompts");
     renderModelTestPromptTemplateOptions();
     syncModelTestPrompt();
     renderModelTestModelOptions(configuredModels(upstream));
@@ -902,7 +911,7 @@ function closeModelTestPromptDialog() {
 /* 测试窗口的 Prompt 下拉只在打开时填一次，所以设置页改完要主动同步一遍，
    否则窗口还开着的人会选到一个已经改名或删掉的模板。 */
 async function refreshModelTestPromptDropdown() {
-  storeModelTestPromptTemplates(await api("/api/admin/settings/model-test-prompts"));
+  modelTestPromptTemplates = await api("/api/admin/settings/model-test-prompts");
   renderModelTestPromptList();
   if (!modelTestPromptTemplate) return;
   const previous = Number(modelTestPromptTemplate.value);

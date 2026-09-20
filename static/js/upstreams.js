@@ -1,3 +1,11 @@
+/* 本模块自己的状态。原先放在 bootstrap.js 并通过 store 函数写入——
+   那层间接是为跨模块赋值准备的，而这些变量只有本文件会写。 */
+let activeActionMenuButton = null;
+let channelImportParsed = null;
+let lastUpstreamLoadError = "";
+let openActionMenuUpstreamId = null;
+let upstreamsLoading = false;
+
 // Channel form, validation, table rendering, and channel operations.
 function parseHeaderOverrides(value = fields.extraHeaders.value) {
   let parsed;
@@ -1196,8 +1204,8 @@ function openUpstreamActionMenu(button) {
   }
 
   closeUpstreamActionMenu();
-  storeActiveActionMenuButton(button);
-  storeOpenActionMenuUpstreamId(Number(button.dataset.menuId));
+  activeActionMenuButton = button;
+  openActionMenuUpstreamId = Number(button.dataset.menuId);
   button.setAttribute("aria-expanded", "true");
   replaceChildren(upstreamActionMenu, actionMenuItems(Number(button.dataset.menuId)));
   upstreamActionMenu.style.visibility = "hidden";
@@ -1214,8 +1222,8 @@ function closeUpstreamActionMenu(restoreFocus = false) {
   if (button) {
     button.setAttribute("aria-expanded", "false");
   }
-  storeActiveActionMenuButton(null);
-  storeOpenActionMenuUpstreamId(null);
+  activeActionMenuButton = null;
+  openActionMenuUpstreamId = null;
   upstreamActionMenu.style.removeProperty("left");
   upstreamActionMenu.style.removeProperty("top");
   upstreamActionMenu.style.visibility = "";
@@ -1253,7 +1261,7 @@ function positionUpstreamActionMenu() {
 async function loadUpstreams() {
   const showSkeleton = !upstreamsLoadedOnce;
   if (showSkeleton) {
-    storeUpstreamsLoading(true);
+    upstreamsLoading = true;
     if (!priorityEditorIsOpen()) {
       renderRows();
     }
@@ -1266,7 +1274,7 @@ async function loadUpstreams() {
         : null;
     }
     storeUpstreamsLoadedOnce(true);
-    storeLastUpstreamLoadError("");
+    lastUpstreamLoadError = "";
     if (!priorityEditorIsOpen()) {
       renderRows();
     } else {
@@ -1277,10 +1285,10 @@ async function loadUpstreams() {
     const message = `加载失败：${error.message}`;
     if (message !== lastUpstreamLoadError) {
       setStatus(message, "error");
-      storeLastUpstreamLoadError(message);
+      lastUpstreamLoadError = message;
     }
   } finally {
-    storeUpstreamsLoading(false);
+    upstreamsLoading = false;
   }
 }
 
@@ -1519,13 +1527,13 @@ function renderChannelImportPreview(message = "", tone = "") {
 function refreshChannelImportPreview() {
   const raw = channelImportText.value.trim();
   if (!raw) {
-    storeChannelImportParsed(null);
+    channelImportParsed = null;
     channelImportConfirm.disabled = true;
     renderChannelImportPreview();
     return;
   }
   try {
-    storeChannelImportParsed(parseChannelImportDocument(raw));
+    channelImportParsed = parseChannelImportDocument(raw);
     const channels = channelImportParsed.channels;
     const withKeys = channels.filter((channel) => typeof channel.api_key === "string" && channel.api_key).length;
     const existing = channels.filter(
@@ -1540,14 +1548,14 @@ function refreshChannelImportPreview() {
     renderChannelImportPreview(`${parts.join("；")}。`, "ok");
     channelImportConfirm.disabled = false;
   } catch (error) {
-    storeChannelImportParsed(null);
+    channelImportParsed = null;
     channelImportConfirm.disabled = true;
     renderChannelImportPreview(error.message, "error");
   }
 }
 
 function openChannelImportDialog() {
-  storeChannelImportParsed(null);
+  channelImportParsed = null;
   channelImportText.value = "";
   if (channelImportFile) {
     channelImportFile.value = "";

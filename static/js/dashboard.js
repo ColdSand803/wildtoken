@@ -1,3 +1,20 @@
+/* 本模块自己的状态。原先放在 bootstrap.js 并通过 store 函数写入——
+   那层间接是为跨模块赋值准备的，而这些变量只有本文件会写。 */
+let dashboardChannelNameHidden = (() => {
+  try {
+    return localStorage.getItem(DASHBOARD_CHANNEL_NAME_HIDDEN_KEY) === "true";
+  } catch {
+    return false;
+  }
+})();
+let dashboardLoading = false;
+let dashboardLogItems = [];
+let dashboardOverview = null;
+let dashboardRuntimeMetrics = null;
+let dashboardTokenUsage = null;
+let dashboardTopStats = null;
+let lastDashboardLoadError = "";
+
 // ── Dashboard ────────────────────────────────────────────
 // Range state lives in bootstrap.js with the other shared view state.
 
@@ -760,7 +777,7 @@ function updateDashboardChannelNameToggle() {
 }
 
 function setDashboardChannelNameHidden(hidden) {
-  storeDashboardChannelNameHidden(Boolean(hidden));
+  dashboardChannelNameHidden = Boolean(hidden);
   try {
     localStorage.setItem(DASHBOARD_CHANNEL_NAME_HIDDEN_KEY, String(dashboardChannelNameHidden));
   } catch {
@@ -1351,7 +1368,7 @@ function renderDashboard() {
 
 async function loadDashboardData() {
   if (dashboardLoading) return;
-  storeDashboardLoading(true);
+  dashboardLoading = true;
   try {
     if (!upstreamsLoadedOnce) {
       await loadUpstreams();
@@ -1398,24 +1415,24 @@ async function loadDashboardData() {
       api(`/api/admin/logs/top?${topParams}`),
       api(`/api/admin/logs/overview?${overviewParams}`),
     ]);
-    storeDashboardLogItems(page.items || []);
-    storeDashboardTokenUsage(tokenUsage);
-    storeDashboardRuntimeMetrics(runtimeMetrics || null);
-    storeDashboardTopStats(topStats || null);
-    storeDashboardOverview(overview || null);
-    storeLastDashboardLoadError("");
+    dashboardLogItems = page.items || [];
+    dashboardTokenUsage = tokenUsage;
+    dashboardRuntimeMetrics = runtimeMetrics || null;
+    dashboardTopStats = topStats || null;
+    dashboardOverview = overview || null;
+    lastDashboardLoadError = "";
     renderDashboard();
   } catch (error) {
     const message = `看板加载失败：${error.message}`;
     if (message !== lastDashboardLoadError) {
       setStatus(message, "error");
-      storeLastDashboardLoadError(message);
+      lastDashboardLoadError = message;
     }
     if (dashboardScope) {
       dashboardScope.textContent = message;
     }
   } finally {
-    storeDashboardLoading(false);
+    dashboardLoading = false;
   }
 }
 

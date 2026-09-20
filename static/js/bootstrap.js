@@ -62,8 +62,6 @@ const quickImportApiKeyInput = document.querySelector("#quick-import-apikey");
 const quickImportFillButton = document.querySelector("#quick-import-fill");
 const QUICK_IMPORT_DEFAULT_PRIORITY = 999;
 const QUICK_IMPORT_FILL_LABEL = "填入并拉取模型";
-let quickImportFetchController = null;
-
 const channelExportButton = document.querySelector("#channel-export");
 const channelExportDialog = document.querySelector("#channel-export-dialog");
 const channelExportClose = document.querySelector("#channel-export-close");
@@ -86,8 +84,6 @@ const CHANNEL_IMPORT_MAX_ENTRIES = 500;
 // Mirrors the server's request body limit so an oversized paste fails locally
 // with a readable message instead of a bare HTTP 413.
 const CHANNEL_IMPORT_MAX_BYTES = 2 * 1024 * 1024;
-let channelImportParsed = null;
-
 const confirmDialog = document.querySelector("#confirm-dialog");
 const confirmTitle = document.querySelector("#confirm-title");
 const confirmMessage = document.querySelector("#confirm-message");
@@ -214,7 +210,6 @@ async function copyTextToClipboard(text) {
   return copied;
 }
 
-
 const logRatePills = document.querySelector("#log-rate-pills");
 const logRows = document.querySelector("#log-rows");
 const logUpstreamFilter = document.querySelector("#log-upstream-filter");
@@ -237,7 +232,6 @@ const logDetailMeta = document.querySelector("#log-detail-meta");
 const logDetailClose = document.querySelector("#log-detail-close");
 const logDetailSections = document.querySelectorAll(".log-detail-section");
 const requestDetailGrid = document.querySelector(".request-detail-grid");
-let currentLogDetail = null;
 const LOG_PAGE_SIZE_KEY = "wildtoken_log_page_size";
 const LOG_PAGE_SIZE_VALUES = new Set([20, 50, 100, 200]);
 const LOG_REFRESH_KEY = "wildtoken_log_refresh_seconds";
@@ -282,32 +276,10 @@ function readStoredLogPageSize() {
   }
   return 50;
 }
-let logPageSize = readStoredLogPageSize();
-if (logPageSizeSelect) {
-  logPageSizeSelect.value = String(logPageSize);
-}
 let logOffset = 0;
-let logHasMore = false;
-let logCursorStack = [];
 let logCurrentCursor = null;
 let logNextCursor = null;
-let logRefreshTimer = null;
-let logsLoadedOnce = false;
-let logsLoading = false;
-let logSensitiveHidden = (() => {
-  try {
-    return localStorage.getItem(LOG_SENSITIVE_HIDDEN_KEY) !== "false";
-  } catch {
-    return true;
-  }
-})();
-
-let dashboardLogItems = [];
-let dashboardTokenUsage = null;
-let dashboardRuntimeMetrics = null;
-let dashboardTopStats = null;
 // 按所选时间范围的服务端聚合（KPI 卡、状态分布、延迟趋势的数据源）。
-let dashboardOverview = null;
 // One range drives the token cards, the request cards, and the Top rankings.
 let dashboardTimeRange = (() => {
   try {
@@ -339,10 +311,6 @@ let dashboardCustomEndDate = null;
 if (dashboardTimeRange === "custom" && !(dashboardCustomStartDate && dashboardCustomEndDate)) {
   dashboardTimeRange = DASHBOARD_DEFAULT_RANGE;
 }
-let dashboardRefreshTimer = null;
-let dashboardLoading = false;
-let lastDashboardLoadError = "";
-
 const dashboardPanel = document.querySelector(".dashboard-panel");
 const dashboardScope = document.querySelector("#dashboard-scope");
 const dashboardKpis = document.querySelector("#dashboard-kpis");
@@ -386,24 +354,13 @@ if (dashboardCustomRange) {
   dashboardCustomRange.hidden = dashboardTimeRange !== "custom";
 }
 
-let dashboardChannelNameHidden = (() => {
-  try {
-    return localStorage.getItem(DASHBOARD_CHANNEL_NAME_HIDDEN_KEY) === "true";
-  } catch {
-    return false;
-  }
-})();
-
-let upstreamRefreshTimer = null;
 let upstreamsLoadedOnce = false;
-let upstreamsLoading = false;
 let upstreamSearchQuery = "";
 let upstreamStatusFilterValue = "";
 let upstreamSearchTimer = null;
 
 const EFFECTIVE_WEIGHT_TICK_MS = 1000;
 const MAX_MODEL_CHIPS = 5;
-let effectiveWeightTickTimer = null;
 let pageVisible = typeof document.visibilityState === "string"
   ? document.visibilityState !== "hidden"
   : true;
@@ -485,9 +442,6 @@ const modelTestPromptCancel = document.querySelector("#model-test-prompt-cancel"
 const modelTestPromptId = document.querySelector("#model-test-prompt-id");
 const modelTestPromptName = document.querySelector("#model-test-prompt-name");
 const modelTestPromptContent = document.querySelector("#model-test-prompt-content");
-let modelTestPromptTemplates = [];
-let modelTestUpstream = null;
-
 const modelDialog = document.querySelector("#model-dialog");
 const modelDialogTitle = document.querySelector("#model-dialog-title");
 const modelDialogSummary = document.querySelector("#model-dialog-summary");
@@ -550,17 +504,10 @@ const tokenExpiresPreview = document.querySelector("#token-expires-preview");
 const tokenEnabledCheckbox = document.querySelector("#token-enabled");
 const tokenIdInput = document.querySelector("#token-id");
 
-let tokenRefreshTimer = null;
-let tokens = [];
-let tokensLoadedOnce = false;
-let tokensLoading = false;
 let tokenSearchQuery = "";
 let tokenSearchTimer = null;
 
 let upstreams = [];
-let activeActionMenuButton = null;
-let openActionMenuUpstreamId = null;
-let lastUpstreamLoadError = "";
 const modelDialogState = {
   upstream: null,
   mode: "form",
@@ -571,7 +518,6 @@ const modelDialogState = {
   mappings: {},
   selectedMappings: new Set(),
 };
-
 
 function setStatus(message, tone = "neutral", options = {}) {
   const toast = document.createElement("div");
@@ -1649,46 +1595,15 @@ function formatEffectiveZeroNote(seconds) {
    命名用 store 而不是 set：set 前缀已经被几个带副作用的业务函数占着
    （setLogPageSize 还要落盘和重渲染），这里只负责存值。 */
 
-function storeActiveActionMenuButton(value) { activeActionMenuButton = value; }
-function storeChannelImportParsed(value) { channelImportParsed = value; }
-function storeCurrentLogDetail(value) { currentLogDetail = value; }
-function storeDashboardChannelNameHidden(value) { dashboardChannelNameHidden = value; }
 function storeDashboardCustomEndDate(value) { dashboardCustomEndDate = value; }
 function storeDashboardCustomStartDate(value) { dashboardCustomStartDate = value; }
-function storeDashboardLoading(value) { dashboardLoading = value; }
-function storeDashboardLogItems(value) { dashboardLogItems = value; }
-function storeDashboardOverview(value) { dashboardOverview = value; }
-function storeDashboardRefreshTimer(value) { dashboardRefreshTimer = value; }
-function storeDashboardRuntimeMetrics(value) { dashboardRuntimeMetrics = value; }
 function storeDashboardTimeRange(value) { dashboardTimeRange = value; }
-function storeDashboardTokenUsage(value) { dashboardTokenUsage = value; }
-function storeDashboardTopStats(value) { dashboardTopStats = value; }
-function storeEffectiveWeightTickTimer(value) { effectiveWeightTickTimer = value; }
-function storeLastDashboardLoadError(value) { lastDashboardLoadError = value; }
-function storeLastUpstreamLoadError(value) { lastUpstreamLoadError = value; }
 function storeLogCurrentCursor(value) { logCurrentCursor = value; }
-function storeLogCursorStack(value) { logCursorStack = value; }
-function storeLogHasMore(value) { logHasMore = value; }
 function storeLogNextCursor(value) { logNextCursor = value; }
 function storeLogOffset(value) { logOffset = value; }
-function storeLogPageSize(value) { logPageSize = value; }
-function storeLogRefreshTimer(value) { logRefreshTimer = value; }
-function storeLogSensitiveHidden(value) { logSensitiveHidden = value; }
-function storeLogsLoadedOnce(value) { logsLoadedOnce = value; }
-function storeLogsLoading(value) { logsLoading = value; }
-function storeModelTestPromptTemplates(value) { modelTestPromptTemplates = value; }
-function storeModelTestUpstream(value) { modelTestUpstream = value; }
-function storeOpenActionMenuUpstreamId(value) { openActionMenuUpstreamId = value; }
 function storePageVisible(value) { pageVisible = value; }
-function storeQuickImportFetchController(value) { quickImportFetchController = value; }
-function storeTokenRefreshTimer(value) { tokenRefreshTimer = value; }
 function storeTokenSearchQuery(value) { tokenSearchQuery = value; }
-function storeTokens(value) { tokens = value; }
-function storeTokensLoadedOnce(value) { tokensLoadedOnce = value; }
-function storeTokensLoading(value) { tokensLoading = value; }
-function storeUpstreamRefreshTimer(value) { upstreamRefreshTimer = value; }
 function storeUpstreamSearchQuery(value) { upstreamSearchQuery = value; }
 function storeUpstreamStatusFilterValue(value) { upstreamStatusFilterValue = value; }
 function storeUpstreams(value) { upstreams = value; }
 function storeUpstreamsLoadedOnce(value) { upstreamsLoadedOnce = value; }
-function storeUpstreamsLoading(value) { upstreamsLoading = value; }

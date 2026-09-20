@@ -1,3 +1,7 @@
+/* 本模块自己的状态。原先放在 bootstrap.js 并通过 store 函数写入——
+   那层间接是为跨模块赋值准备的，而这些变量只有本文件会写。 */
+let quickImportFetchController = null;
+
 // Model selection plus application authentication and initial loading.
 const FORM_MODEL_PREVIEW_LIMIT = 6;
 
@@ -805,7 +809,7 @@ quickImportFillButton.addEventListener("click", async () => {
 
   if (baseUrl) {
     const controller = new AbortController();
-    storeQuickImportFetchController(controller);
+    quickImportFetchController = controller;
     setQuickImportInputsDisabled(true);
     quickImportFillButton.textContent = "正在拉取模型";
     updateQuickImportFillState();
@@ -829,7 +833,7 @@ quickImportFillButton.addEventListener("click", async () => {
       fetchError = error;
     } finally {
       if (quickImportFetchController === controller) {
-        storeQuickImportFetchController(null);
+        quickImportFetchController = null;
         setQuickImportInputsDisabled(false);
         quickImportFillButton.textContent = QUICK_IMPORT_FILL_LABEL;
         updateQuickImportFillState();

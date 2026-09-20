@@ -1,3 +1,10 @@
+/* 本模块自己的状态。原先放在 bootstrap.js 并通过 store 函数写入——
+   那层间接是为跨模块赋值准备的，而这些变量只有本文件会写。 */
+let tokenRefreshTimer = null;
+let tokens = [];
+let tokensLoadedOnce = false;
+let tokensLoading = false;
+
 // ── 有效期 ───────────────────────────────────────────────────
 
 /* 有效期输入接受两种写法：1d3h 这样的时长，或 2026-09-01 12:00 这样的时刻。
@@ -122,7 +129,7 @@ function startTokenRefresh() {
     updateLiveIndicator();
     return;
   }
-  storeTokenRefreshTimer(window.setInterval(loadTokens, DEFAULT_REFRESH_MS));
+  tokenRefreshTimer = window.setInterval(loadTokens, DEFAULT_REFRESH_MS);
   updateLiveIndicator();
 }
 
@@ -132,7 +139,7 @@ function stopTokenRefresh() {
     return;
   }
   window.clearInterval(tokenRefreshTimer);
-  storeTokenRefreshTimer(null);
+  tokenRefreshTimer = null;
   updateLiveIndicator();
 }
 
@@ -244,17 +251,17 @@ function renderTokenRows() {
 async function loadTokens() {
   const showSkeleton = !tokensLoadedOnce;
   if (showSkeleton) {
-    storeTokensLoading(true);
+    tokensLoading = true;
     renderTokenRows();
   }
   try {
-    storeTokens(await api("/api/admin/tokens"));
-    storeTokensLoadedOnce(true);
+    tokens = await api("/api/admin/tokens");
+    tokensLoadedOnce = true;
     renderTokenRows();
   } catch (error) {
     setStatus(`加载令牌失败：${error.message}`, "error");
   } finally {
-    storeTokensLoading(false);
+    tokensLoading = false;
   }
 }
 
