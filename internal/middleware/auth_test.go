@@ -66,6 +66,62 @@ func TestFallsBackToUserAgentAndPreservesOtherClientTypes(t *testing.T) {
 	}
 }
 
+func TestRecognizesPiFromItsUserAgent(t *testing.T) {
+	// The first is the shape observed in production; the rest guard the
+	// prefixes the matcher also accepts.
+	for _, userAgent := range []string{
+		"pi (linux 7.2.2-arch1-1; x64)",
+		"pi (darwin 24.0.0; arm64)",
+		"pi/1.2.3",
+		"pi",
+		"pi-coding-agent",
+	} {
+		request := requestWithHeaders(map[string]string{"user-agent": userAgent})
+		if got := DetectClientType(request, false); got != "pi" {
+			t.Errorf("user-agent %q gave %q, want pi", userAgent, got)
+		}
+	}
+}
+
+// pi speaking the Messages API was being filed as claude, because that branch
+// keys on the protocol rather than on who sent the request.
+func TestPiOnTheAnthropicPathIsNotFiledAsClaude(t *testing.T) {
+	request := requestWithHeaders(map[string]string{
+		"user-agent":        "pi (linux 7.2.2-arch1-1; x64)",
+		"anthropic-version": "2023-06-01",
+	})
+	if got := DetectClientType(request, true); got != "pi" {
+		t.Errorf("pi on the Anthropic path gave %q, want pi", got)
+	}
+}
+
+// pi impersonating another client is that client as far as the upstream is
+// concerned, and the log has to agree with what was actually sent.
+func TestPiImpersonatingAnotherClientKeepsThatLabel(t *testing.T) {
+	claudeChannel := requestWithHeaders(map[string]string{
+		"user-agent": "claude-cli/2.1.251 (external, cli)",
+	})
+	if got := DetectClientType(claudeChannel, true); got != "claude" {
+		t.Errorf("a claude-cli user-agent gave %q, want claude", got)
+	}
+}
+
+// "pi" is two letters, and a substring match would claim every client that
+// happens to contain them.
+func TestClientsContainingPiAreNotMistakenForIt(t *testing.T) {
+	for userAgent, want := range map[string]string{
+		"GitHubCopilotChat/0.35.0": "unknown",
+		"rapidapi-client/1.0":      "unknown",
+		"happing/2.0":              "unknown",
+		"opencode/1.0":             "opencode",
+	} {
+		request := requestWithHeaders(map[string]string{"user-agent": userAgent})
+		if got := DetectClientType(request, false); got != want {
+			t.Errorf("user-agent %q gave %q, want %q", userAgent, got, want)
+		}
+	}
+}
+
 func TestMissingOrEmptyCredentialsAreRejectedBeforeLookup(t *testing.T) {
 	if _, ok := extractDownstreamToken(requestWithHeaders(nil), false); ok {
 		t.Error("a request without credentials produced a token")
