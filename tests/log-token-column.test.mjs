@@ -6,6 +6,13 @@ import { createDomContext, extractFunction, read, vm } from "./dom-stub.mjs";
 /** 真跑一次 formatTokens，拿它实际造出的节点树断言。 */
 function renderTokenCell(log) {
   const context = createDomContext();
+  // formatTokens 要用缩写器，它在 bootstrap.js。
+  const shared = read("static/js/bootstrap.js");
+  vm.runInContext(
+    shared.slice(shared.indexOf("const QUOTA_UNITS"), shared.indexOf("function formatTokenCount")),
+    context,
+  );
+  vm.runInContext(extractFunction(shared, "formatTokenCount"), context);
   vm.runInContext(extractFunction(read("static/js/logs.js"), "formatTokens"), context);
   context.log = log;
   return vm.runInContext("formatTokens(log).outerHTML", context);
@@ -45,11 +52,18 @@ test("输入输出各占一行，用上下箭头区分", () => {
 test("箭头对读屏隐藏，数值另有文字标签", () => {
   const html = renderTokenCell({ prompt_tokens: 1234, completion_tokens: 567 });
   // 读屏念不出 ↑↓，所以整体挂 aria-label，箭头本身隐藏。
-  assert.match(html, /aria-label="输入 1234 tokens，输出 567 tokens"/);
   assert.match(html, /aria-hidden="true">↑</);
   assert.match(html, /aria-hidden="true">↓</);
-  assert.match(html, /<b>1234<\/b>/);
-  assert.match(html, /<b>567<\/b>/);
+});
+
+test("列里显示缩写，精确值留在 title 和 aria-label", () => {
+  /* 扫列表要的是量级，2500000 这种长数字会挤掉别的列。但缩写不能把数字
+     弄丢，精确值必须还能看到。 */
+  const html = renderTokenCell({ prompt_tokens: 2_500_000, completion_tokens: 1234 });
+  assert.match(html, /<b>2\.5M<\/b>/);
+  assert.match(html, /<b>1\.2K<\/b>/);
+  assert.match(html, /aria-label="输入 2,500,000 tokens，输出 1,234 tokens"/);
+  assert.match(html, /title="输入 2,500,000 tokens"/);
 });
 
 test("缺失的 token 数显示为 -，不编造 0", () => {

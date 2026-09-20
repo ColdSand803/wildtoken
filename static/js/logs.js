@@ -249,12 +249,16 @@ function renderLogErrorDetail(log) {
 }
 
 function formatTokens(log) {
-  const part = (value) => (value === null || value === undefined ? "-" : value);
   const lines = [
     ["↑", "输入", log.prompt_tokens, "in"],
     ["↓", "输出", log.completion_tokens, "out"],
   ];
-  const describe = ([, name, value]) => `${name} ${part(value)} tokens`;
+  // 列里只给量级，精确值放 title 和 aria-label——缩写不该把数字弄丢。
+  const short = (value) => (value === null || value === undefined ? "-" : formatTokenCount(value));
+  const exact = (value) => (
+    value === null || value === undefined ? "-" : Number(value).toLocaleString("zh-CN")
+  );
+  const describe = ([, name, value]) => `${name} ${exact(value)} tokens`;
   return el("span", {
     class: "token-io",
     "aria-label": lines.map(describe).join("，"),
@@ -262,7 +266,7 @@ function formatTokens(log) {
     const [arrow, , value, tone] = line;
     return el("span", { class: `token-io-line token-io-${tone}`, title: describe(line) },
       el("span", { class: "token-io-arrow", "aria-hidden": "true" }, arrow),
-      el("b", {}, String(part(value))));
+      el("b", {}, short(value)));
   }));
 }
 

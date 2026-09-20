@@ -122,22 +122,19 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* 输入在上、输出在下，两行。标签改成箭头后不再占一行，整列能收得很窄。 */
+/* 输入在上、输出在下，两行。没有底色和边框：一行两个小数字不需要被圈
+   起来，去掉之后整列安静很多。 */
 .token-io {
   display: grid;
-  gap: 3px;
-  max-width: 128px;
+  gap: 2px;
+  max-width: 96px;
 }
 
 .token-io-line {
   align-items: baseline;
-  background: var(--panel-subtle);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
   display: flex;
-  gap: 6px;
+  gap: 5px;
   min-width: 0;
-  padding: 2px 7px;
 }
 
 .token-io-arrow {

@@ -352,30 +352,6 @@ function resetTokenForm() {
   }
 }
 
-/* 限额展示成「已用 / 剩余 / 限额」。数字按 K/M/B 缩写，免得一列全是长数字看不清；
-   完整数值放 title 里。不限额的令牌只显示已用量，不编造一个剩余值出来。 */
-const QUOTA_UNITS = [
-  { suffix: "T", value: 1e12 },
-  { suffix: "B", value: 1e9 },
-  { suffix: "M", value: 1e6 },
-  { suffix: "K", value: 1e3 },
-];
-
-function formatTokenCount(count) {
-  const amount = Number(count) || 0;
-  for (const unit of QUOTA_UNITS) {
-    if (amount >= unit.value) {
-      const scaled = amount / unit.value;
-      // 整数就不带小数点，2.5M 这种保留一位足够看清量级。
-      const text = scaled >= 100 || Number.isInteger(scaled)
-        ? String(Math.round(scaled))
-        : scaled.toFixed(1);
-      return `${text}${unit.suffix}`;
-    }
-  }
-  return String(amount);
-}
-
 function quotaCell(token) {
   const quota = token.quota || {};
   const used = Number(quota.used_tokens) || 0;

@@ -6,11 +6,13 @@ import { createDomContext, extractFunction, read, vm } from "./dom-stub.mjs";
 /** 把限额单元格跑起来：真实的 el()，配上最小 DOM。 */
 function quotaContext(source) {
   const context = createDomContext();
+  // 缩写器已经移到 bootstrap.js，因为日志列表和令牌限额都要用。
+  const shared = read("static/js/bootstrap.js");
   vm.runInContext(
-    source.slice(source.indexOf("const QUOTA_UNITS"), source.indexOf("function formatTokenCount")),
+    shared.slice(shared.indexOf("const QUOTA_UNITS"), shared.indexOf("function formatTokenCount")),
     context,
   );
-  vm.runInContext(extractFunction(source, "formatTokenCount"), context);
+  vm.runInContext(extractFunction(shared, "formatTokenCount"), context);
   vm.runInContext(extractFunction(source, "quotaCell"), context);
   return context;
 }
