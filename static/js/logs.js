@@ -540,11 +540,11 @@ function normalizeLogCursor(cursor) {
 }
 
 function resetLogPagination() {
-  logOffset = 0;
-  logHasMore = false;
-  logCursorStack = [];
-  logCurrentCursor = null;
-  logNextCursor = null;
+  storeLogOffset(0);
+  storeLogHasMore(false);
+  storeLogCursorStack([]);
+  storeLogCurrentCursor(null);
+  storeLogNextCursor(null);
   clearLogStreamPendingEntries();
   clearLogNewEntriesNotice();
 }
@@ -721,7 +721,7 @@ function setLogPageSize(nextSize, { reload = true } = {}) {
     if (logPageSizeSelect) logPageSizeSelect.value = String(logPageSize);
     return;
   }
-  logPageSize = size;
+  storeLogPageSize(size);
   try {
     localStorage.setItem(LOG_PAGE_SIZE_KEY, String(logPageSize));
   } catch {
@@ -734,7 +734,7 @@ function setLogPageSize(nextSize, { reload = true } = {}) {
 
 function refreshLatestLogCursorFromItems() {
   const lastItem = logPageItems[logPageItems.length - 1];
-  logNextCursor = lastItem ? normalizeLogCursor(lastItem) : null;
+  storeLogNextCursor(lastItem ? normalizeLogCursor(lastItem) : null);
   updateLogPaginationControls();
 }
 
@@ -1035,7 +1035,7 @@ function flushLogStreamEntries() {
     return true;
   });
   if (uniqueItems.length > logPageSize) {
-    logHasMore = true;
+    storeLogHasMore(true);
   }
   logPageItems = uniqueItems.slice(0, logPageSize);
 
@@ -1311,7 +1311,7 @@ function refreshOpenLogDetail() {
 }
 
 function setLogSensitiveHidden(hidden) {
-  logSensitiveHidden = Boolean(hidden);
+  storeLogSensitiveHidden(Boolean(hidden));
   try {
     localStorage.setItem(LOG_SENSITIVE_HIDDEN_KEY, String(logSensitiveHidden));
   } catch {
@@ -1843,7 +1843,7 @@ function updateLogViewModeControls() {
 }
 
 async function showLogDetail(logId) {
-  currentLogDetail = null;
+  storeCurrentLogDetail(null);
   logDetailTitle.textContent = "请求详情";
   logDetailSummary.textContent = "正在加载...";
   replaceChildren(logDetailMeta,
@@ -1865,7 +1865,7 @@ async function showLogDetail(logId) {
 
   try {
     const detail = await api(`/api/admin/logs/${logId}`);
-    currentLogDetail = detail;
+    storeCurrentLogDetail(detail);
     logDetailTitle.textContent = "请求详情";
     logDetailSummary.textContent = formatLogDetailSummary(detail);
     replaceChildren(logDetailMeta, formatLogDetailMeta(detail));
@@ -1893,7 +1893,7 @@ async function loadLogs() {
   logLoadInFlight = true;
   const showSkeleton = !logsLoadedOnce;
   if (showSkeleton) {
-    logsLoading = true;
+    storeLogsLoading(true);
     renderLogRows([]);
   }
 
@@ -1915,10 +1915,10 @@ async function loadLogs() {
     const page = await api(`/api/admin/logs?${params}`);
     if (requestGeneration !== logLoadGeneration) return;
     const items = page.items || [];
-    logHasMore = Boolean(page.has_more);
-    logNextCursor = normalizeLogCursor(page.next_cursor)
-      || (logHasMore && items.length > 0 ? normalizeLogCursor(items[items.length - 1]) : null);
-    logsLoadedOnce = true;
+    storeLogHasMore(Boolean(page.has_more));
+    storeLogNextCursor(normalizeLogCursor(page.next_cursor)
+      || (logHasMore && items.length > 0 ? normalizeLogCursor(items[items.length - 1]) : null));
+    storeLogsLoadedOnce(true);
     logPageItems = items;
     logPageFiltersActive = filtersActive;
     renderCurrentLogPage();
@@ -1936,7 +1936,7 @@ async function loadLogs() {
     setStatus(`加载日志失败：${error.message}`, "error");
   } finally {
     logLoadInFlight = false;
-    logsLoading = false;
+    storeLogsLoading(false);
     if (logLoadQueued) {
       logLoadQueued = false;
       void loadLogs();

@@ -805,7 +805,7 @@ quickImportFillButton.addEventListener("click", async () => {
 
   if (baseUrl) {
     const controller = new AbortController();
-    quickImportFetchController = controller;
+    storeQuickImportFetchController(controller);
     setQuickImportInputsDisabled(true);
     quickImportFillButton.textContent = "正在拉取模型";
     updateQuickImportFillState();
@@ -829,7 +829,7 @@ quickImportFillButton.addEventListener("click", async () => {
       fetchError = error;
     } finally {
       if (quickImportFetchController === controller) {
-        quickImportFetchController = null;
+        storeQuickImportFetchController(null);
         setQuickImportInputsDisabled(false);
         quickImportFillButton.textContent = QUICK_IMPORT_FILL_LABEL;
         updateQuickImportFillState();
@@ -1064,17 +1064,17 @@ logFirstButton?.addEventListener("click", () => {
 });
 logPrevButton?.addEventListener("click", () => {
   if (logCursorStack.length === 0) return;
-  logCurrentCursor = logCursorStack.pop() || null;
-  logNextCursor = null;
-  logOffset = Math.max(0, logOffset - logPageSize);
+  storeLogCurrentCursor(logCursorStack.pop() || null);
+  storeLogNextCursor(null);
+  storeLogOffset(Math.max(0, logOffset - logPageSize));
   loadLogs();
 });
 logNextButton?.addEventListener("click", () => {
   if (!logHasMore || !logNextCursor) return;
   logCursorStack.push(logCurrentCursor);
-  logCurrentCursor = logNextCursor;
-  logNextCursor = null;
-  logOffset += logPageSize;
+  storeLogCurrentCursor(logNextCursor);
+  storeLogNextCursor(null);
+  storeLogOffset(logOffset + logPageSize);
   loadLogs();
 });
 logPageSizeSelect?.addEventListener("change", () => {

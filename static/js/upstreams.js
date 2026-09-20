@@ -1196,8 +1196,8 @@ function openUpstreamActionMenu(button) {
   }
 
   closeUpstreamActionMenu();
-  activeActionMenuButton = button;
-  openActionMenuUpstreamId = Number(button.dataset.menuId);
+  storeActiveActionMenuButton(button);
+  storeOpenActionMenuUpstreamId(Number(button.dataset.menuId));
   button.setAttribute("aria-expanded", "true");
   replaceChildren(upstreamActionMenu, actionMenuItems(Number(button.dataset.menuId)));
   upstreamActionMenu.style.visibility = "hidden";
@@ -1214,8 +1214,8 @@ function closeUpstreamActionMenu(restoreFocus = false) {
   if (button) {
     button.setAttribute("aria-expanded", "false");
   }
-  activeActionMenuButton = null;
-  openActionMenuUpstreamId = null;
+  storeActiveActionMenuButton(null);
+  storeOpenActionMenuUpstreamId(null);
   upstreamActionMenu.style.removeProperty("left");
   upstreamActionMenu.style.removeProperty("top");
   upstreamActionMenu.style.visibility = "";
@@ -1253,20 +1253,20 @@ function positionUpstreamActionMenu() {
 async function loadUpstreams() {
   const showSkeleton = !upstreamsLoadedOnce;
   if (showSkeleton) {
-    upstreamsLoading = true;
+    storeUpstreamsLoading(true);
     if (!priorityEditorIsOpen()) {
       renderRows();
     }
   }
   try {
-    upstreams = await api("/api/admin/upstreams");
+    storeUpstreams(await api("/api/admin/upstreams"));
     for (const upstream of upstreams) {
       upstream.effectiveRecoveryAtMs = upstream.health_recovery_remaining_seconds
         ? Date.now() + upstream.health_recovery_remaining_seconds * 1000
         : null;
     }
-    upstreamsLoadedOnce = true;
-    lastUpstreamLoadError = "";
+    storeUpstreamsLoadedOnce(true);
+    storeLastUpstreamLoadError("");
     if (!priorityEditorIsOpen()) {
       renderRows();
     } else {
@@ -1277,10 +1277,10 @@ async function loadUpstreams() {
     const message = `加载失败：${error.message}`;
     if (message !== lastUpstreamLoadError) {
       setStatus(message, "error");
-      lastUpstreamLoadError = message;
+      storeLastUpstreamLoadError(message);
     }
   } finally {
-    upstreamsLoading = false;
+    storeUpstreamsLoading(false);
   }
 }
 
@@ -1519,13 +1519,13 @@ function renderChannelImportPreview(message = "", tone = "") {
 function refreshChannelImportPreview() {
   const raw = channelImportText.value.trim();
   if (!raw) {
-    channelImportParsed = null;
+    storeChannelImportParsed(null);
     channelImportConfirm.disabled = true;
     renderChannelImportPreview();
     return;
   }
   try {
-    channelImportParsed = parseChannelImportDocument(raw);
+    storeChannelImportParsed(parseChannelImportDocument(raw));
     const channels = channelImportParsed.channels;
     const withKeys = channels.filter((channel) => typeof channel.api_key === "string" && channel.api_key).length;
     const existing = channels.filter(
@@ -1540,14 +1540,14 @@ function refreshChannelImportPreview() {
     renderChannelImportPreview(`${parts.join("；")}。`, "ok");
     channelImportConfirm.disabled = false;
   } catch (error) {
-    channelImportParsed = null;
+    storeChannelImportParsed(null);
     channelImportConfirm.disabled = true;
     renderChannelImportPreview(error.message, "error");
   }
 }
 
 function openChannelImportDialog() {
-  channelImportParsed = null;
+  storeChannelImportParsed(null);
   channelImportText.value = "";
   if (channelImportFile) {
     channelImportFile.value = "";

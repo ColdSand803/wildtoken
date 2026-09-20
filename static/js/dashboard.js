@@ -760,7 +760,7 @@ function updateDashboardChannelNameToggle() {
 }
 
 function setDashboardChannelNameHidden(hidden) {
-  dashboardChannelNameHidden = Boolean(hidden);
+  storeDashboardChannelNameHidden(Boolean(hidden));
   try {
     localStorage.setItem(DASHBOARD_CHANNEL_NAME_HIDDEN_KEY, String(dashboardChannelNameHidden));
   } catch {
@@ -1351,7 +1351,7 @@ function renderDashboard() {
 
 async function loadDashboardData() {
   if (dashboardLoading) return;
-  dashboardLoading = true;
+  storeDashboardLoading(true);
   try {
     if (!upstreamsLoadedOnce) {
       await loadUpstreams();
@@ -1359,13 +1359,13 @@ async function loadDashboardData() {
       // Refresh the upstream snapshot for enabled and effective-weight counts.
       try {
         const list = await api("/api/admin/upstreams");
-        upstreams = list;
+        storeUpstreams(list);
         for (const upstream of upstreams) {
           upstream.effectiveRecoveryAtMs = upstream.health_recovery_remaining_seconds
             ? Date.now() + upstream.health_recovery_remaining_seconds * 1000
             : null;
         }
-        upstreamsLoadedOnce = true;
+        storeUpstreamsLoadedOnce(true);
       } catch {
         // Keep previous upstreams cache if refresh fails.
       }
@@ -1398,24 +1398,24 @@ async function loadDashboardData() {
       api(`/api/admin/logs/top?${topParams}`),
       api(`/api/admin/logs/overview?${overviewParams}`),
     ]);
-    dashboardLogItems = page.items || [];
-    dashboardTokenUsage = tokenUsage;
-    dashboardRuntimeMetrics = runtimeMetrics || null;
-    dashboardTopStats = topStats || null;
-    dashboardOverview = overview || null;
-    lastDashboardLoadError = "";
+    storeDashboardLogItems(page.items || []);
+    storeDashboardTokenUsage(tokenUsage);
+    storeDashboardRuntimeMetrics(runtimeMetrics || null);
+    storeDashboardTopStats(topStats || null);
+    storeDashboardOverview(overview || null);
+    storeLastDashboardLoadError("");
     renderDashboard();
   } catch (error) {
     const message = `看板加载失败：${error.message}`;
     if (message !== lastDashboardLoadError) {
       setStatus(message, "error");
-      lastDashboardLoadError = message;
+      storeLastDashboardLoadError(message);
     }
     if (dashboardScope) {
       dashboardScope.textContent = message;
     }
   } finally {
-    dashboardLoading = false;
+    storeDashboardLoading(false);
   }
 }
 

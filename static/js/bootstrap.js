@@ -1639,3 +1639,56 @@ function formatEffectiveZeroNote(seconds) {
   if (!seconds) return "有效权重 0 · 等待恢复周期";
   return `有效权重 0 · ${seconds}s 后恢复`;
 }
+
+/* ── 跨模块可写状态 ──────────────────────────────────────────────
+
+   这些 let 被别的文件赋值。改成 ES 模块后，import 进来的绑定是只读的，
+   跨模块直接赋值会抛 TypeError，所以写入统一走这里的 store 函数；读取仍是
+   直接读（模块绑定是实时的，读没有这个限制）。
+
+   命名用 store 而不是 set：set 前缀已经被几个带副作用的业务函数占着
+   （setLogPageSize 还要落盘和重渲染），这里只负责存值。 */
+
+function storeActiveActionMenuButton(value) { activeActionMenuButton = value; }
+function storeChannelImportParsed(value) { channelImportParsed = value; }
+function storeCurrentLogDetail(value) { currentLogDetail = value; }
+function storeDashboardChannelNameHidden(value) { dashboardChannelNameHidden = value; }
+function storeDashboardCustomEndDate(value) { dashboardCustomEndDate = value; }
+function storeDashboardCustomStartDate(value) { dashboardCustomStartDate = value; }
+function storeDashboardLoading(value) { dashboardLoading = value; }
+function storeDashboardLogItems(value) { dashboardLogItems = value; }
+function storeDashboardOverview(value) { dashboardOverview = value; }
+function storeDashboardRefreshTimer(value) { dashboardRefreshTimer = value; }
+function storeDashboardRuntimeMetrics(value) { dashboardRuntimeMetrics = value; }
+function storeDashboardTimeRange(value) { dashboardTimeRange = value; }
+function storeDashboardTokenUsage(value) { dashboardTokenUsage = value; }
+function storeDashboardTopStats(value) { dashboardTopStats = value; }
+function storeEffectiveWeightTickTimer(value) { effectiveWeightTickTimer = value; }
+function storeLastDashboardLoadError(value) { lastDashboardLoadError = value; }
+function storeLastUpstreamLoadError(value) { lastUpstreamLoadError = value; }
+function storeLogCurrentCursor(value) { logCurrentCursor = value; }
+function storeLogCursorStack(value) { logCursorStack = value; }
+function storeLogHasMore(value) { logHasMore = value; }
+function storeLogNextCursor(value) { logNextCursor = value; }
+function storeLogOffset(value) { logOffset = value; }
+function storeLogPageSize(value) { logPageSize = value; }
+function storeLogRefreshTimer(value) { logRefreshTimer = value; }
+function storeLogSensitiveHidden(value) { logSensitiveHidden = value; }
+function storeLogsLoadedOnce(value) { logsLoadedOnce = value; }
+function storeLogsLoading(value) { logsLoading = value; }
+function storeModelTestPromptTemplates(value) { modelTestPromptTemplates = value; }
+function storeModelTestUpstream(value) { modelTestUpstream = value; }
+function storeOpenActionMenuUpstreamId(value) { openActionMenuUpstreamId = value; }
+function storePageVisible(value) { pageVisible = value; }
+function storeQuickImportFetchController(value) { quickImportFetchController = value; }
+function storeTokenRefreshTimer(value) { tokenRefreshTimer = value; }
+function storeTokenSearchQuery(value) { tokenSearchQuery = value; }
+function storeTokens(value) { tokens = value; }
+function storeTokensLoadedOnce(value) { tokensLoadedOnce = value; }
+function storeTokensLoading(value) { tokensLoading = value; }
+function storeUpstreamRefreshTimer(value) { upstreamRefreshTimer = value; }
+function storeUpstreamSearchQuery(value) { upstreamSearchQuery = value; }
+function storeUpstreamStatusFilterValue(value) { upstreamStatusFilterValue = value; }
+function storeUpstreams(value) { upstreams = value; }
+function storeUpstreamsLoadedOnce(value) { upstreamsLoadedOnce = value; }
+function storeUpstreamsLoading(value) { upstreamsLoading = value; }

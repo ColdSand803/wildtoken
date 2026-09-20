@@ -122,7 +122,7 @@ function startTokenRefresh() {
     updateLiveIndicator();
     return;
   }
-  tokenRefreshTimer = window.setInterval(loadTokens, DEFAULT_REFRESH_MS);
+  storeTokenRefreshTimer(window.setInterval(loadTokens, DEFAULT_REFRESH_MS));
   updateLiveIndicator();
 }
 
@@ -132,7 +132,7 @@ function stopTokenRefresh() {
     return;
   }
   window.clearInterval(tokenRefreshTimer);
-  tokenRefreshTimer = null;
+  storeTokenRefreshTimer(null);
   updateLiveIndicator();
 }
 
@@ -244,17 +244,17 @@ function renderTokenRows() {
 async function loadTokens() {
   const showSkeleton = !tokensLoadedOnce;
   if (showSkeleton) {
-    tokensLoading = true;
+    storeTokensLoading(true);
     renderTokenRows();
   }
   try {
-    tokens = await api("/api/admin/tokens");
-    tokensLoadedOnce = true;
+    storeTokens(await api("/api/admin/tokens"));
+    storeTokensLoadedOnce(true);
     renderTokenRows();
   } catch (error) {
     setStatus(`加载令牌失败：${error.message}`, "error");
   } finally {
-    tokensLoading = false;
+    storeTokensLoading(false);
   }
 }
 

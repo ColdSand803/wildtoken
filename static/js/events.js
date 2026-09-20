@@ -505,7 +505,7 @@ if (dashboardTimePreset) {
       syncDashboardRangeChips();
       return;
     }
-    dashboardTimeRange = value;
+    storeDashboardTimeRange(value);
     // 不同范围下的错误率没有可比性，环比基线随范围切换清零。
     resetDashboardErrorRateBaseline();
     persistDashboardRange();
@@ -555,9 +555,9 @@ if (dashboardApplyCustom && dashboardStartDate && dashboardEndDate) {
       return;
     }
 
-    dashboardTimeRange = "custom";
-    dashboardCustomStartDate = start;
-    dashboardCustomEndDate = end;
+    storeDashboardTimeRange("custom");
+    storeDashboardCustomStartDate(start);
+    storeDashboardCustomEndDate(end);
     resetDashboardErrorRateBaseline();
     persistDashboardRange();
     loadDashboardData();
@@ -628,7 +628,7 @@ if (batchDisableBtn) {
 
 // ── Page Visibility smart polling ────────────────────────
 document.addEventListener("visibilitychange", () => {
-  pageVisible = document.visibilityState !== "hidden";
+  storePageVisible(document.visibilityState !== "hidden");
   if (pageVisible) {
     resumeAutoRefreshForCurrentView();
     refreshCurrentView();
@@ -642,7 +642,7 @@ if (upstreamSearchInput) {
   upstreamSearchInput.addEventListener(
     "input",
     debounce(() => {
-      upstreamSearchQuery = upstreamSearchInput.value || "";
+      storeUpstreamSearchQuery(upstreamSearchInput.value || "");
       if (!priorityEditorIsOpen()) {
         renderRows();
       }
@@ -651,7 +651,7 @@ if (upstreamSearchInput) {
 }
 if (upstreamStatusFilter) {
   upstreamStatusFilter.addEventListener("change", () => {
-    upstreamStatusFilterValue = upstreamStatusFilter.value || "";
+    storeUpstreamStatusFilterValue(upstreamStatusFilter.value || "");
     if (!priorityEditorIsOpen()) {
       renderRows();
     }
@@ -661,7 +661,7 @@ if (tokenSearchInput) {
   tokenSearchInput.addEventListener(
     "input",
     debounce(() => {
-      tokenSearchQuery = tokenSearchInput.value || "";
+      storeTokenSearchQuery(tokenSearchInput.value || "");
       renderTokenRows();
     }, 150),
   );
