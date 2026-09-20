@@ -83,7 +83,7 @@ test("占位行的 colspan 等于表头列数", () => {
   assert.equal(declared, logTableColumns().length, "列数常量与表头脱节");
 
   /* 空态、无匹配、骨架行都要横跨整表；写死的数字漏改一处就会差一列。 */
-  for (const helper of ["skeletonRowsMarkup", "noMatchStateCell", "emptyStateCell"]) {
+  for (const helper of ["skeletonRows", "noMatchStateRow", "emptyStateRow"]) {
     assert.match(
       source,
       new RegExp(`${helper}\\(LOG_TABLE_COLUMN_COUNT`),

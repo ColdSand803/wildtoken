@@ -204,7 +204,7 @@ test("the token table header and its body cells agree on the column count", () =
   const source = read("static/js/tokens.js");
   // 名称、描述、令牌预览、分组、限额、有效期、状态、操作
   assert.equal(headerCount, 8);
-  assert.match(source, /skeletonRowsMarkup\(8, 5\)/);
-  assert.match(source, /emptyStateCell\(8, \{/);
-  assert.match(source, /noMatchStateCell\(8, \{/);
+  assert.match(source, /skeletonRows\(8, 5\)/);
+  assert.match(source, /emptyStateRow\(8, \{/);
+  assert.match(source, /noMatchStateRow\(8, \{/);
 });

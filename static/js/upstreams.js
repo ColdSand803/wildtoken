@@ -515,29 +515,29 @@ function setUpstreamView(view) {
 
 function renderRows() {
   const hadOpenMenu = openActionMenuUpstreamId !== null && !upstreamActionMenu.hidden;
-  // 锚点节点即将被 innerHTML 清掉，先松开引用，但保留 id 这个事实。
+  // 锚点节点即将被清掉，先松开引用，但保留 id 这个事实。
   activeActionMenuButton = null;
 
-  rows.innerHTML = "";
+  rows.replaceChildren();
   renderUpstreamSummary();
 
   // 选择、ID、渠道名、模型匹配、分组、优先级、权重、状态、操作
   const colCount = 9;
 
   if (upstreamsLoading && !upstreamsLoadedOnce) {
-    rows.innerHTML = skeletonRowsMarkup(colCount, 6);
+    replaceChildren(rows, skeletonRows(colCount, 6));
     updateBatchToolbar();
     return;
   }
 
   if (upstreamsLoadedOnce && upstreams.length === 0 && !upstreamFiltersActive()) {
     closeUpstreamActionMenu();
-    rows.innerHTML = emptyStateCell(colCount, {
+    replaceChildren(rows, emptyStateRow(colCount, {
       title: "暂无渠道",
       copy: "还没有配置上游渠道。创建后即可按优先级与模型规则路由请求。",
       actionLabel: "新增渠道",
       actionId: "new-upstream",
-    });
+    }));
     updateBatchToolbar();
     return;
   }
@@ -545,12 +545,12 @@ function renderRows() {
   const filtered = getFilteredUpstreams();
   if (upstreamsLoadedOnce && filtered.length === 0) {
     closeUpstreamActionMenu();
-    rows.innerHTML = noMatchStateCell(colCount, {
+    replaceChildren(rows, noMatchStateRow(colCount, {
       title: "无匹配渠道",
       copy: "当前筛选条件下没有结果。可调整搜索词或状态筛选。",
       actionLabel: "清除筛选",
       actionId: "clear-upstream-filters",
-    });
+    }));
     updateBatchToolbar();
     return;
   }

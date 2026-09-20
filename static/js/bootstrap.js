@@ -1177,6 +1177,68 @@ function uniqueList(items) {
   return result;
 }
 
+/* ── DOM 构建 ────────────────────────────────────────────
+
+   渲染一律走这里，不再拼 HTML 字符串。安全性来自结构而不是约定：字符串子节点
+   总是变成文本节点，想插标记就必须先造一个节点。原来靠每处记得调 escapeHtml，
+   漏一处就是一个注入点。 */
+
+/** 把子节点追加到 parent：null/false 跳过，数组展平，字符串转文本节点。 */
+function appendChildren(parent, children) {
+  for (const child of children) {
+    if (child === null || child === undefined || child === false || child === "") continue;
+    if (Array.isArray(child)) {
+      appendChildren(parent, child);
+      continue;
+    }
+    parent.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+}
+
+/**
+ * 造一个元素。
+ *
+ * props 里：class 走 className，dataset 整个合并，style 接对象或字符串，
+ * on* 挂事件，其余当属性写。值为 null/undefined/false 的属性直接不写，
+ * 省掉调用方到处写三元表达式。
+ */
+function el(tag, props, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === "class") {
+      node.className = value;
+    } else if (key === "dataset") {
+      Object.assign(node.dataset, value);
+    } else if (key === "style") {
+      if (typeof value === "string") node.style.cssText = value;
+      else Object.assign(node.style, value);
+    } else if (key.startsWith("on") && typeof value === "function") {
+      node.addEventListener(key.slice(2).toLowerCase(), value);
+    } else if (value === true) {
+      node.setAttribute(key, "");
+    } else {
+      node.setAttribute(key, String(value));
+    }
+  }
+  appendChildren(node, children);
+  return node;
+}
+
+/** 多个平级节点，用于一次 append 多个兄弟元素。 */
+function frag(...children) {
+  const fragment = document.createDocumentFragment();
+  appendChildren(fragment, children);
+  return fragment;
+}
+
+/** 清空容器并填入新内容，替代 container.innerHTML = ... 的写法。 */
+function replaceChildren(parent, ...children) {
+  if (!parent) return;
+  parent.replaceChildren();
+  appendChildren(parent, children);
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => {
     const entities = {
@@ -1506,7 +1568,7 @@ let upstreamColumns = readJsonStorage(UPSTREAM_COLUMNS_KEY, DEFAULT_UPSTREAM_COL
 let logColumns = readJsonStorage(LOG_COLUMNS_KEY, DEFAULT_LOG_COLUMNS);
 let upstreamSort = { key: "priority", direction: "desc" };
 
-function applyColumnVisibility(table, columns, prefix) {
+function applyColumnVisibility(table, columns) {
   if (!table) return;
   for (const key of Object.keys(columns)) {
     table.classList.toggle(`col-hide-${key}`, columns[key] === false);
@@ -1514,8 +1576,8 @@ function applyColumnVisibility(table, columns, prefix) {
 }
 
 function applyAllColumnVisibility() {
-  applyColumnVisibility(upstreamTable, upstreamColumns, "upstream");
-  applyColumnVisibility(logTable, logColumns, "log");
+  applyColumnVisibility(upstreamTable, upstreamColumns);
+  applyColumnVisibility(logTable, logColumns);
 }
 
 function renderColumnMenu(menu, columns, labels, locked, storageKey, table) {

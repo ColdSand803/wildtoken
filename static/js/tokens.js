@@ -176,28 +176,28 @@ function tokenPreviewCellMarkup(token) {
 
 function renderTokenRows() {
   if (tokensLoading && !tokensLoadedOnce) {
-    tokenRows.innerHTML = skeletonRowsMarkup(8, 5);
+    replaceChildren(tokenRows, skeletonRows(8, 5));
     return;
   }
 
   if (tokensLoadedOnce && tokens.length === 0 && !tokenFiltersActive()) {
-    tokenRows.innerHTML = emptyStateCell(8, {
+    replaceChildren(tokenRows, emptyStateRow(8, {
       title: "暂无令牌",
       copy: "还没有创建下游 API 访问令牌。",
       actionLabel: "新增令牌",
       actionId: "new-token",
-    });
+    }));
     return;
   }
 
   const filtered = getFilteredTokens();
   if (tokensLoadedOnce && filtered.length === 0) {
-    tokenRows.innerHTML = noMatchStateCell(8, {
+    replaceChildren(tokenRows, noMatchStateRow(8, {
       title: "无匹配令牌",
       copy: "当前搜索条件下没有结果。",
       actionLabel: "清除筛选",
       actionId: "clear-token-filters",
-    });
+    }));
     return;
   }
 

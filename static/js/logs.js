@@ -961,7 +961,7 @@ function insertLiveLogRows(logs) {
   if (rows.length === 0) return;
 
   if (logRows.querySelector(".empty-state, .no-match-state, .skeleton-row")) {
-    logRows.innerHTML = "";
+    logRows.replaceChildren();
   }
 
   const existingRows = [...logRows.querySelectorAll("tr[data-log-id]")];
@@ -1420,28 +1420,28 @@ function renderLogRows(items, options = {}) {
     noMatch = false,
   } = options;
 
-  logRows.innerHTML = "";
+  logRows.replaceChildren();
 
   if (logsLoading && !logsLoadedOnce) {
-    logRows.innerHTML = skeletonRowsMarkup(LOG_TABLE_COLUMN_COUNT, 6);
+    replaceChildren(logRows, skeletonRows(LOG_TABLE_COLUMN_COUNT, 6));
     return;
   }
 
   if (items.length === 0) {
     if (noMatch) {
-      logRows.innerHTML = noMatchStateCell(LOG_TABLE_COLUMN_COUNT, {
+      replaceChildren(logRows, noMatchStateRow(LOG_TABLE_COLUMN_COUNT, {
         title: "无匹配日志",
         copy: "全库中没有符合当前筛选条件的日志。",
         actionLabel: "清除筛选",
         actionId: "clear-log-filters",
-      });
+      }));
     } else {
-      logRows.innerHTML = emptyStateCell(LOG_TABLE_COLUMN_COUNT, {
+      replaceChildren(logRows, emptyStateRow(LOG_TABLE_COLUMN_COUNT, {
         title: emptyTitle,
         copy: emptyCopy,
         actionLabel: emptyActionLabel,
         actionId: emptyActionId,
-      });
+      }));
     }
     return;
   }

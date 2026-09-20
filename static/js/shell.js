@@ -103,47 +103,37 @@ function closeDialogElement(dialog) {
   return true;
 }
 
-function skeletonRowsMarkup(colspan, count = 5) {
+/* 三个表格占位行。返回节点而不是字符串，所以名字里的 Markup / Cell 都去掉了
+   —— 它们给的本来就是 <tr>，不是 cell。 */
+
+function skeletonRows(colspan, count = 5) {
   const widths = ["w-md", "w-lg", "w-sm", "w-xs", "w-md", "w-sm", "w-lg"];
-  return Array.from({ length: count }, (_, rowIndex) => {
-    const cells = Array.from({ length: colspan }, (__, colIndex) => {
-      const width = widths[(rowIndex + colIndex) % widths.length];
-      return `<td><span class="skeleton-block ${width}"></span></td>`;
-    }).join("");
-    return `<tr class="skeleton-row" aria-hidden="true">${cells}</tr>`;
-  }).join("");
+  return frag(...Array.from({ length: count }, (_, rowIndex) =>
+    el("tr", { class: "skeleton-row", "aria-hidden": "true" },
+      Array.from({ length: colspan }, (__, colIndex) =>
+        el("td", {},
+          el("span", { class: `skeleton-block ${widths[(rowIndex + colIndex) % widths.length]}` }))))));
 }
 
-function emptyStateCell(colspan, { title, copy, actionLabel, actionId }) {
-  return `
-    <tr>
-      <td colspan="${colspan}" class="empty empty-state">
-        <div class="empty-state-inner">
-          <p class="empty-state-title">${escapeHtml(title)}</p>
-          <p class="empty-state-copy">${escapeHtml(copy)}</p>
-          <div class="empty-state-actions">
-            <button type="button" data-empty-action="${escapeHtml(actionId)}">${escapeHtml(actionLabel)}</button>
-          </div>
-        </div>
-      </td>
-    </tr>
-  `;
+function emptyStateRow(colspan, { title, copy, actionLabel, actionId }) {
+  return el("tr", {},
+    el("td", { colspan, class: "empty empty-state" },
+      el("div", { class: "empty-state-inner" },
+        el("p", { class: "empty-state-title" }, title),
+        el("p", { class: "empty-state-copy" }, copy),
+        el("div", { class: "empty-state-actions" },
+          el("button", { type: "button", dataset: { emptyAction: actionId } }, actionLabel)))));
 }
 
-function noMatchStateCell(colspan, { title, copy, actionLabel, actionId }) {
-  return `
-    <tr>
-      <td colspan="${colspan}" class="empty no-match-state">
-        <div class="empty-state-inner">
-          <p class="no-match-state-title">${escapeHtml(title)}</p>
-          <p class="no-match-state-copy">${escapeHtml(copy)}</p>
-          <div class="no-match-state-actions">
-            <button type="button" class="secondary" data-empty-action="${escapeHtml(actionId)}">${escapeHtml(actionLabel)}</button>
-          </div>
-        </div>
-      </td>
-    </tr>
-  `;
+function noMatchStateRow(colspan, { title, copy, actionLabel, actionId }) {
+  return el("tr", {},
+    el("td", { colspan, class: "empty no-match-state" },
+      el("div", { class: "empty-state-inner" },
+        el("p", { class: "no-match-state-title" }, title),
+        el("p", { class: "no-match-state-copy" }, copy),
+        el("div", { class: "no-match-state-actions" },
+          el("button", { type: "button", class: "secondary", dataset: { emptyAction: actionId } },
+            actionLabel)))));
 }
 
 function getFilteredUpstreams() {
@@ -744,7 +734,13 @@ function renderSystemInfo(system) {
       ? `${Number(cleanup.current_rows_cleared || 0).toLocaleString("zh-CN")} 行 / ${Number(cleanup.current_batches || 0).toLocaleString("zh-CN")} 批`
       : `${Number(cleanup.last_rows_cleared || 0).toLocaleString("zh-CN")} 行 · ${formatMetricDuration(cleanup.last_duration_ms)}`],
   ];
-  systemInfoGrid.innerHTML = entries.map(([label, value]) => `<div class="system-info-item"><span>${escapeHtml(label)}</span><strong${label === "运行时长" ? " data-system-uptime" : ""}${label === "当前服务器时间" ? " data-system-server-time" : ""}>${escapeHtml(String(value))}</strong></div>`).join("");
+  replaceChildren(systemInfoGrid, entries.map(([label, value]) =>
+    el("div", { class: "system-info-item" },
+      el("span", {}, label),
+      el("strong", {
+        "data-system-uptime": label === "运行时长" || null,
+        "data-system-server-time": label === "当前服务器时间" || null,
+      }, String(value)))));
   const timeout = Number(system.default_upstream_timeout_seconds);
   const timeoutEl = document.querySelector("#settings-default-timeout");
   if (timeoutEl && Number.isFinite(timeout)) timeoutEl.textContent = `${timeout} 秒`;
@@ -768,7 +764,7 @@ async function loadSettingsPage() {
     if (currentViewFromHash() === "settings") {
       setSettingsStatus("无法加载设置，请检查连接后重试。", "error");
       setRoutingSettingsStatus("无法加载路由策略，请检查连接后重试。", "error");
-      if (systemInfoGrid) systemInfoGrid.innerHTML = `<p class="settings-loading">运行信息暂不可用。</p>`;
+      replaceChildren(systemInfoGrid, el("p", { class: "settings-loading" }, "运行信息暂不可用。"));
     }
   }
 }
@@ -782,7 +778,8 @@ function closeModelTestDialog() {
 
 function renderModelTestPromptTemplateOptions() {
   const randomTemplate = modelTestPromptTemplates[Math.floor(Math.random() * modelTestPromptTemplates.length)];
-  modelTestPromptTemplate.innerHTML = modelTestPromptTemplates.map((template) => `<option value="${template.id}">${escapeHtml(template.name)}</option>`).join("");
+  replaceChildren(modelTestPromptTemplate, modelTestPromptTemplates.map((template) =>
+    el("option", { value: template.id }, template.name)));
   if (randomTemplate) modelTestPromptTemplate.value = String(randomTemplate.id);
 }
 
@@ -819,9 +816,9 @@ function configuredModels(upstream) {
 
 function renderModelTestModelOptions(models, selected = "") {
   const normalized = [...new Set(models)].sort((a, b) => a.localeCompare(b));
-  modelTestModel.innerHTML = normalized.length
-    ? normalized.map((model) => `<option value="${escapeHtml(model)}">${escapeHtml(model)}</option>`).join("")
-    : `<option value="" disabled selected>此渠道尚未配置模型</option>`;
+  replaceChildren(modelTestModel, normalized.length
+    ? normalized.map((model) => el("option", { value: model }, model))
+    : el("option", { value: "", disabled: true, selected: true }, "此渠道尚未配置模型"));
   if (selected && normalized.includes(selected)) modelTestModel.value = selected;
   modelTestSubmit.disabled = normalized.length === 0;
 }
@@ -866,14 +863,23 @@ async function refreshModelTestModels() {
 function renderModelTestPromptList() {
   if (!modelTestPromptList) return;
   if (modelTestPromptTemplates.length === 0) {
-    modelTestPromptList.innerHTML = `<p class="settings-loading">暂无 Prompt。</p>`;
+    replaceChildren(modelTestPromptList, el("p", { class: "settings-loading" }, "暂无 Prompt。"));
     return;
   }
-  modelTestPromptList.innerHTML = modelTestPromptTemplates.map((template) => `
-    <div class="model-test-template-item">
-      <div><strong>${escapeHtml(template.name)}</strong><p title="${escapeHtml(template.prompt)}">${escapeHtml(template.prompt)}</p></div>
-      <div class="model-test-template-actions"><button type="button" class="secondary small" data-model-prompt-action="edit" data-prompt-id="${template.id}">编辑</button><button type="button" class="secondary small danger" data-model-prompt-action="delete" data-prompt-id="${template.id}">删除</button></div>
-    </div>`).join("");
+  replaceChildren(modelTestPromptList, modelTestPromptTemplates.map((template) =>
+    el("div", { class: "model-test-template-item" },
+      el("div", {},
+        el("strong", {}, template.name),
+        el("p", { title: template.prompt }, template.prompt)),
+      el("div", { class: "model-test-template-actions" },
+        el("button", {
+          type: "button", class: "secondary small",
+          dataset: { modelPromptAction: "edit", promptId: template.id },
+        }, "编辑"),
+        el("button", {
+          type: "button", class: "secondary small danger",
+          dataset: { modelPromptAction: "delete", promptId: template.id },
+        }, "删除")))));
 }
 
 function openModelTestPromptDialog(template = null) {
@@ -900,7 +906,8 @@ async function refreshModelTestPromptDropdown() {
   renderModelTestPromptList();
   if (!modelTestPromptTemplate) return;
   const previous = Number(modelTestPromptTemplate.value);
-  modelTestPromptTemplate.innerHTML = modelTestPromptTemplates.map((template) => `<option value="${template.id}">${escapeHtml(template.name)}</option>`).join("");
+  replaceChildren(modelTestPromptTemplate, modelTestPromptTemplates.map((template) =>
+    el("option", { value: template.id }, template.name)));
   // 原来选的还在就留着，不打断正在编辑的一次测试；没了才让浏览器落到第一项。
   if (modelTestPromptTemplates.some((template) => template.id === previous)) {
     modelTestPromptTemplate.value = String(previous);
