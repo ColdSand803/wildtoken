@@ -408,26 +408,6 @@ function formatTotalDurationTime(log) {
   }, label);
 }
 
-function formatThroughput(log) {
-  if (!log.stream) {
-    return null;
-  }
-  const rate = outputTokensPerSecond(log);
-  const displayRate = rate === null ? "—" : rate.toFixed(1).replace(/\.0$/, "");
-  const rateTitle = rate === null ? "暂无输出吞吐数据" : `输出吞吐 ${displayRate} tokens/s`;
-  return el("span", {
-    class: "stream-throughput",
-    title: rateTitle,
-    "aria-label": `流式响应，${rateTitle}`,
-  },
-    el("span", { class: "stream-state" },
-      el("span", { class: "stream-state-dot", "aria-hidden": "true" }),
-      "流式"),
-    el("span", { class: "throughput-stat" },
-      el("small", {}, "TPS"),
-      el("strong", {}, displayRate)));
-}
-
 function normalizeLogRate(value) {
   if (value === null || value === undefined) return null;
   const number = Number(value);
@@ -1406,8 +1386,7 @@ function createLogRow(log, options = {}) {
         el("span", { class: "latency-metric" },
           el("small", {}, "首字"), formatFirstTokenTime(log.first_token_ms)),
         el("span", { class: "latency-metric" },
-          el("small", {}, "总耗时"), formatTotalDurationTime(log))),
-      formatThroughput(log)),
+          el("small", {}, "总耗时"), formatTotalDurationTime(log)))),
     el("td", { class: "tokens-cell", dataset: { col: "tokens" } }, formatTokens(log)),
     el("td", { class: "detail-cell", dataset: { col: "detail" } }, renderLogErrorDetail(log)));
   return row;

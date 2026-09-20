@@ -59,6 +59,34 @@ test("缺失的 token 数显示为 -，不编造 0", () => {
   assert.doesNotMatch(html, /<b>0<\/b>/);
 });
 
+test("响应性能列只有首字和总耗时两行", () => {
+  const source = read("static/js/logs.js");
+  // 定位到日志行；进行中的行（createActiveLogRow）在它前面，且只有“已用时”一项。
+  const rowStart = source.indexOf("function createLogRow(");
+  const cell = source.slice(
+    source.indexOf('class: "duration-cell"', rowStart),
+    source.indexOf('class: "tokens-cell"', rowStart),
+  );
+  const labels = [...cell.matchAll(/el\("small", \{\}, "([^"]+)"\)/g)].map((m) => m[1]);
+  assert.deepEqual(labels, ["首字", "总耗时"]);
+
+  // 流式标签和 TPS 已移除，否则这一列又会回到三行。
+  assert.doesNotMatch(source, /formatThroughput/);
+  assert.doesNotMatch(read("static/css/tables.css"), /stream-throughput|throughput-stat/);
+});
+
+test("标签与数值同行，两项竖向堆叠", () => {
+  /* 两行而不是四行：容器是单列 grid，每项内部是 flex（标签+值同行）。
+     反过来写就是原来那个占三行的版本。 */
+  const css = read("static/css/tables.css");
+  const metrics = css.slice(css.indexOf(".latency-metrics {"), css.indexOf("}", css.indexOf(".latency-metrics {")));
+  assert.match(metrics, /display:\s*grid/);
+  assert.doesNotMatch(metrics, /grid-template-columns|display:\s*flex/);
+
+  const metric = css.slice(css.indexOf(".latency-metric {"), css.indexOf("}", css.indexOf(".latency-metric {")));
+  assert.match(metric, /display:\s*flex/);
+});
+
 test("旧的三列类名没有残留", () => {
   // 留着会是一条指向不存在元素的规则，下一个人得先证明它是死的。
   for (const file of [
