@@ -124,7 +124,7 @@ func New(ctx context.Context) (*Server, error) {
 	}
 	// The client reads the proxy setting through the runtime store on every
 	// request, so a console edit applies to new connections without a restart.
-	state.HTTPClient = newHTTPClient(settings.Upstream.DefaultTimeoutSeconds, state.Runtime.Get)
+	state.HTTPClient = newHTTPClient(state.Runtime.Get)
 
 	go db.RunLogStatsRefreshLoop(jobsCtx, database, logStats, runtimeMetrics)
 	go proxy.RunCleanupLoop(jobsCtx, database, state.Runtime.Get, runtimeMetrics, logStats)
@@ -276,7 +276,7 @@ func sqliteDSN(settings config.DatabaseSettings) (string, error) {
 // is a channel leading the gateway somewhere it was not configured to go.
 const maxUpstreamRedirects = 3
 
-func newHTTPClient(defaultTimeoutSeconds float64, runtime func() models.RuntimeSettings) *http.Client {
+func newHTTPClient(runtime func() models.RuntimeSettings) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConnsPerHost = 20
 	// A streamed response must reach the client as it arrives, so the transport
