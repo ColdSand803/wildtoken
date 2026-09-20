@@ -215,7 +215,7 @@ async function copyTextToClipboard(text) {
 }
 
 
-const logRpm = document.querySelector("#log-rpm");
+const logRatePills = document.querySelector("#log-rate-pills");
 const logRows = document.querySelector("#log-rows");
 const logUpstreamFilter = document.querySelector("#log-upstream-filter");
 const logSearchInput = document.querySelector("#log-search");
@@ -1418,6 +1418,7 @@ const DEFAULT_LOG_COLUMNS = {
   status: true,
   duration: true,
   tokens: true,
+  detail: true,
 };
 
 const UPSTREAM_LOCKED_COLS = new Set(["check", "id", "name", "actions"]);
@@ -1445,6 +1446,7 @@ const LOG_COL_LABELS = {
   status: "状态码",
   duration: "耗时",
   tokens: "Tokens",
+  detail: "详情",
 };
 
 function readJsonStorage(key, fallback) {

@@ -45,6 +45,73 @@
   animation-delay: var(--log-row-delay, 0ms);
 }
 
+/* 详情列：错误文本最多占两行，完整内容在 title 里。不限高的话一条上游堆栈
+   能把整行撛成一屏。 */
+.detail-cell {
+  max-width: 320px;
+  min-width: 160px;
+}
+
+.log-error-detail {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--danger);
+  display: -webkit-box;
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* 进行中的请求：还没有日志行，所以整行不可点，靠左侧竖条和呼吸的圆点区分。 */
+.log-row--active {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+  cursor: default;
+}
+
+.log-row--active:hover,
+.log-row--active:focus {
+  background: var(--accent-soft);
+}
+
+.status-active {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.status-active-dot {
+  animation: status-active-pulse 1.4s ease-in-out infinite;
+  background: var(--accent);
+  border-radius: 50%;
+  height: 6px;
+  width: 6px;
+}
+
+.active-attempt {
+  margin-left: 6px;
+}
+
+@keyframes status-active-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-active-dot {
+    animation: none;
+  }
+}
+
 .log-row:hover,
 .log-row:focus {
   background: var(--row-hover);
@@ -55,24 +122,32 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.token-triple {
+/* 输入在上、输出在下，两行。标签改成箭头后不再占一行，整列能收得很窄。 */
+.token-io {
   display: grid;
-  gap: 4px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  max-width: 360px;
+  gap: 3px;
+  max-width: 128px;
 }
 
-.token-triple span {
+.token-io-line {
+  align-items: baseline;
   background: var(--panel-subtle);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
-  display: grid;
-  gap: 1px;
+  display: flex;
+  gap: 6px;
   min-width: 0;
-  padding: 3px 5px;
+  padding: 2px 7px;
 }
 
-.token-triple b {
+.token-io-arrow {
+  color: var(--muted);
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.token-io b {
   color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -82,12 +157,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.token-triple small {
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.1;
 }
 
 @keyframes log-row-enter {

@@ -706,8 +706,9 @@ td.no-match-state {
   line-height: 1;
 }
 
+/* 只剩输入输出两行，原来的 300px 是六格并排时的宽度，留着就是一列空白。 */
 .tokens-cell {
-  min-width: 300px;
+  min-width: 132px;
 }
 
 .priority-value {

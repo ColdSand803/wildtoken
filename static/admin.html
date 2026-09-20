@@ -425,18 +425,24 @@
                 <span class="eyebrow">REQUEST STREAM</span>
                 <h2>使用日志</h2>
                 <p
-                  id="log-rpm"
-                  class="log-rpm"
+                  id="log-rate-pills"
+                  class="log-rate-pills"
                   aria-live="polite"
                   aria-atomic="true"
                   aria-label="最近 60 秒全局请求数或 Token 数暂不可用"
                 >
-                  <span class="log-rpm-window">近 60 秒</span>
-                  <span class="log-rpm-value" data-log-rate="rpm" aria-hidden="true">—</span>
-                  <span class="log-rpm-unit">RPM</span>
-                  <span class="log-rpm-divider" aria-hidden="true">·</span>
-                  <span class="log-rpm-value" data-log-rate="tpm" aria-hidden="true">—</span>
-                  <span class="log-rpm-unit">TPM</span>
+                  <span class="log-rate-pill">
+                    <span class="log-rate-pill-label">RPM</span>
+                    <span class="log-rate-value" data-log-rate="rpm" aria-hidden="true">—</span>
+                  </span>
+                  <span class="log-rate-pill">
+                    <span class="log-rate-pill-label">TPM</span>
+                    <span class="log-rate-value" data-log-rate="tpm" aria-hidden="true">—</span>
+                  </span>
+                  <span class="log-rate-pill">
+                    <span class="log-rate-pill-label">并发</span>
+                    <span class="log-rate-value" data-log-rate="concurrency" aria-hidden="true">—</span>
+                  </span>
                 </p>
               </div>
             </div>
@@ -518,6 +524,7 @@
                     <th data-col="status">状态码</th>
                     <th data-col="duration">响应性能</th>
                     <th data-col="tokens">Tokens</th>
+                    <th data-col="detail">详情</th>
                   </tr>
                 </thead>
                 <tbody id="log-rows"></tbody>

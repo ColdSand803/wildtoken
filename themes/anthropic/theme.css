@@ -156,7 +156,7 @@ html[data-theme="anthropic"] .panel h2 {
 }
 
 /* Keep the RPM pill flat — a quiet clay wash, no gradient. */
-html[data-theme="anthropic"] .panel p.log-rpm {
+html[data-theme="anthropic"] .log-rate-pill {
   background: var(--accent-soft);
 }
 

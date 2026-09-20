@@ -95,7 +95,7 @@ html[data-theme="sakura-mist"] .aurora {
   display: none;
 }
 
-html[data-theme="sakura-mist"] .panel p.log-rpm {
+html[data-theme="sakura-mist"] .log-rate-pill {
   background: var(--accent-soft);
 }
 

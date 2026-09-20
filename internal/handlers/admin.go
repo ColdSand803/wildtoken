@@ -582,22 +582,70 @@ func AdminListLogs(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		// In-flight requests belong to the newest page only, and are left for the
+		// console to filter: they carry the same fields the filters read, and the
+		// stream already hands them over unfiltered.
+		var active []models.ActiveRequestOut
+		var activeTotal int
+		if cursor == nil && offset == 0 {
+			snapshot := state.ActiveRequests.Snapshot()
+			active, activeTotal = snapshot.Requests, snapshot.Total
+		}
+
 		apperr.WriteJSON(w, http.StatusOK, models.RequestLogPage{
-			Items:      items,
-			HasMore:    hasMore,
-			RecentRPM:  recentRate.RequestCount,
-			RecentTPM:  recentRate.TotalTokens,
-			NextCursor: nextCursor,
+			Items:       items,
+			HasMore:     hasMore,
+			Active:      active,
+			ActiveTotal: activeTotal,
+			RecentRPM:   recentRate.RequestCount,
+			RecentTPM:   recentRate.TotalTokens,
+			NextCursor:  nextCursor,
 		})
 	}
 }
 
+// activePollInterval is how often the stream looks for a change to the
+// in-flight set.
+//
+// Nothing is sent when the version has not moved, so an idle gateway costs one
+// comparison a second. The requests are not re-sent to advance their elapsed
+// time either: the console counts that up from what it was given.
+const activePollInterval = time.Second
+
+// writeActiveRequests emits the in-flight set and reports the version it sent.
+func writeActiveRequests(w http.ResponseWriter, flusher http.Flusher,
+	state *appstate.State) uint64 {
+	snapshot := state.ActiveRequests.Snapshot()
+	requests := snapshot.Requests
+	if requests == nil {
+		requests = []models.ActiveRequestOut{}
+	}
+	// total travels with the list because the list is capped: concurrency is
+	// read from the count, not from how many rows fit.
+	encoded, err := json.Marshal(map[string]any{
+		"requests": requests,
+		"total":    snapshot.Total,
+	})
+	if err != nil {
+		// The set is built from plain values, so this cannot fail without a
+		// programming error. An empty set is the safe reading of one.
+		encoded = []byte(`{"requests":[],"total":0}`)
+	}
+	fmt.Fprintf(w, "event: active\ndata: %s\n\n", encoded)
+	flusher.Flush()
+	return snapshot.Version
+}
+
 // AdminStreamLogs streams lightweight list-row events for request logs that
-// have committed to SQLite.
+// have committed to SQLite, plus the set of requests still in flight.
 //
 // The endpoint intentionally does not replay historical rows. A disconnected or
 // lagged client reloads the normal paginated endpoint, which remains the source
 // of truth and keeps cursor pagination stable.
+//
+// In-flight requests are sent as a whole set rather than as per-request events.
+// The set is small and short-lived, and one snapshot cannot leave a console
+// holding a row for a request that ended while it was not listening.
 func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth, ok := middleware.AdminAuthFrom(r.Context())
@@ -619,6 +667,12 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 		w.Header().Set("connection", "keep-alive")
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
+
+		// The console starts with an empty list, so the opening snapshot is sent
+		// unconditionally; after that only a changed version is worth bytes.
+		sentActiveVersion := writeActiveRequests(w, flusher, state)
+		activePoll := time.NewTicker(activePollInterval)
+		defer activePoll.Stop()
 
 		// A rotation invalidates this stream, so a revoked operator stops
 		// receiving live logs without waiting for their connection to drop.
@@ -643,6 +697,22 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 				}
 				fmt.Fprintf(w, "event: log\nid: %d\ndata: %s\n\n", event.Log.ID, encoded)
 				flusher.Flush()
+
+				// A committed row is the one moment the two views are certain to
+				// disagree: the request left the in-flight set before its log was
+				// written, so without this the console shows it twice until the
+				// next poll.
+				if state.ActiveRequests.Version() != sentActiveVersion {
+					sentActiveVersion = writeActiveRequests(w, flusher, state)
+				}
+
+			case <-activePoll.C:
+				if state.Credentials.Version() != auth.CredentialVersion {
+					return
+				}
+				if state.ActiveRequests.Version() != sentActiveVersion {
+					sentActiveVersion = writeActiveRequests(w, flusher, state)
+				}
 
 			case <-authCheck.C:
 				if state.Credentials.Version() != auth.CredentialVersion {

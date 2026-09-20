@@ -117,6 +117,7 @@ func New(ctx context.Context) (*Server, error) {
 		LogStats:            logStats,
 		ModelsCache:         appstate.NewModelsListCache(),
 		Routing:             proxy.NewRoutingCache(),
+		ActiveRequests:      proxy.NewActiveRegistry(),
 		TokenRateLimiter:    ratelimit.NewLimiter(),
 		UpstreamRateLimiter: ratelimit.NewLimiter(),
 		Quotas:              quotas,
