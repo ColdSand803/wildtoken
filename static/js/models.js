@@ -1128,7 +1128,7 @@ for (const button of document.querySelectorAll("[data-log-view-mode]")) {
 }
 updateLogViewModeControls();
 
-/* 会话内容是 innerHTML 塞进去的，全部折叠/展开按钮只能靠委托。作用范围限定
+/* 会话内容是渲染时整体换掉的，全部折叠/展开按钮只能靠委托。作用范围限定
    在按钮所在的那个面板，四个面板互不影响。 */
 logDetailDialog.addEventListener("click", (event) => {
   const button = event.target.closest("[data-conv-fold]");

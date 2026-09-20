@@ -172,9 +172,10 @@ test("the request KPI spark uses the whole card as its hover target", () => {
   assert.match(source, /card\.addEventListener\("pointerleave"/);
   assert.doesNotMatch(source, /hoverLayer\.addEventListener\("pointermove"/);
   assert.match(styles, /\.kpi-bg-spark\s*\{[\s\S]*?pointer-events:\s*none;/);
-  // tooltip 必须是卡片的直接子节点，不能塞回曲线容器里被数字压住。
-  assert.match(source, /class="kpi-spark-tooltip" role="status"/);
-  assert.doesNotMatch(source, /class="kpi-spark-hit-layer"/);
+  /* tooltip 必须是卡片的直接子节点，不能塞回曲线容器里被数字压住——
+     buildKpiBackgroundSpark 返回 frag，展开后曲线和 tooltip 平级。 */
+  assert.match(source, /el\("div", \{ class: "kpi-spark-tooltip", role: "status", hidden: true \}\)/);
+  assert.doesNotMatch(source, /kpi-spark-hit-layer/);
 });
 
 test("request KPI spark maps pointer X to interpolated bucket data", () => {

@@ -142,7 +142,7 @@ function cleanupRuntimeHint(cleanup) {
 }
 
 /* Tone of each KPI as it was on the previous render, keyed by container and
-   label. The dashboard is rebuilt with `innerHTML =` on a five-second poll, so
+   label. The dashboard is rebuilt wholesale on a five-second poll, so
    a CSS animation declared on `.tone-danger` would not play when a metric goes
    bad — it would replay every five seconds for as long as it stayed bad, which
    is the failure mode this console has to avoid above all others.
@@ -160,7 +160,7 @@ function renderDashboardKpiCards(container, cards) {
   const entering = container.childElementCount === 0;
   const previous = kpiToneMemory.get(container) || new Map();
   const next = new Map();
-  const html = cards.map((card, index) => {
+  const nodes = cards.map((card, index) => {
     const tone = card.tone || "";
     next.set(card.label, tone);
     const before = previous.get(card.label);
@@ -168,37 +168,32 @@ function renderDashboardKpiCards(container, cards) {
     // page that is already failing is a state, not an event.
     const escalated = before !== undefined
       && (TONE_RANK[tone] ?? 0) > (TONE_RANK[before] ?? 0);
-    /* valueHtml / labelHtml 是调用方已经拼好的安全 HTML（分母缩小、呼吸圆点、
-       环比箭头这类富内容）；不传则照旧走转义的纯文本。hoverHint 为 true 时
-       说明文字挪进 title，鼠标滑过才显示，卡面留给数字。backgroundHtml 放在
-       卡片最底层（低透明度趋势曲线之类）。cardKey 用于识别需要背景曲线过渡的卡。 */
-    const valueHtml = card.valueHtml ?? escapeHtml(card.value);
-    const labelHtml = card.labelHtml ?? escapeHtml(card.label);
-    const hintTitle = card.hoverHint && card.hint ? ` title="${escapeHtml(card.hint)}"` : "";
-    const hintBlock = card.hoverHint
-      ? ""
-      : `<div class="dashboard-kpi-hint">${escapeHtml(card.hint)}</div>`;
-    const cardKeyAttr = card.cardKey ? ` data-card-key="${escapeHtml(card.cardKey)}"` : "";
-    /* 背景曲线（SVG + 它的 hover tooltip）已经自带绝对定位容器，直接摊在
-       卡片里：曲线贴卡片下半部，tooltip 作为卡片的直接子节点，才能浮在
-       数字文本之上而不被曲线容器的层叠上下文压住。 */
-    const backgroundBlock = card.backgroundHtml || "";
-    return `
-    <div class="dashboard-kpi ${tone}${entering ? " is-entering" : ""}"${escalated ? ' data-tone-escalated="true"' : ""}${entering ? ` style="--kpi-i:${index}"` : ""}${hintTitle}${cardKeyAttr}>
-      ${backgroundBlock}
-      <div class="dashboard-kpi-value">${valueHtml}</div>
-      <div class="dashboard-kpi-label">${labelHtml}</div>
-      ${hintBlock}
-    </div>
-  `;
-  }).join("");
+    /* value / label 接节点或纯文本：分母缩小、呼吸圆点、环比箭头这类富内容
+       给节点，普通数字给字符串。hoverHint 为 true 时说明文字挪进 title，鼠标
+       滑过才显示，卡面留给数字。cardKey 用于识别需要背景曲线过渡的卡。
+
+       背景曲线（SVG + 它的 hover tooltip）已经自带绝对定位容器，直接摊在卡片
+       里：曲线贴卡片下半部，tooltip 作为卡片的直接子节点，才能浮在数字文本
+       之上而不被曲线容器的层叠上下文压住。 */
+    return el("div", {
+      class: `dashboard-kpi ${tone}${entering ? " is-entering" : ""}`,
+      "data-tone-escalated": escalated ? "true" : null,
+      style: entering ? { "--kpi-i": index } : null,
+      title: card.hoverHint && card.hint ? card.hint : null,
+      dataset: card.cardKey ? { cardKey: card.cardKey } : null,
+    },
+      card.background,
+      el("div", { class: "dashboard-kpi-value" }, card.value),
+      el("div", { class: "dashboard-kpi-label" }, card.label),
+      card.hoverHint ? null : el("div", { class: "dashboard-kpi-hint" }, card.hint));
+  });
   kpiToneMemory.set(container, next);
-  container.innerHTML = html;
+  replaceChildren(container, nodes);
   animateKpiNumbers(container);
 }
 
 /* ── KPI 数字滚动 ─────────────────────────────────────────────
-   卡片每次刷新都是整体重建 innerHTML，数字会瞬间跳变。带 data-count-key 的
+   卡片每次刷新都是整体重建，数字会瞬间跳变。带 data-count-key 的
    节点（主数字、增长率/环比徽标里的百分比）在重建后从上一次的数值缓动滚到
    新值，格式化函数逐帧套用，滚动过程中显示的始终是合法格式（1.2k、6.0%）。
    徽标可能整个消失再出现（噪声下限、小基数保护），所以每个容器记住上一轮
@@ -345,7 +340,7 @@ function smoothSeries(values, passes = 2) {
 
 /// svg 内的每条可变形 path 带 spark-morph-<name> 类（area / line / p95），
 /// pathsForRecords 把一组记录映射成 { <name>: pathData }。卡片每次刷新都
-/// 整体重建 innerHTML，所以上一序列由调用方按图表记在模块级变量里传
+/// 整体重建，所以上一序列由调用方按图表记在模块级变量里传
 /// 进来；数据没变（实时刷新）时插值结果相同，直接落位。
 function animateSparkMorph(svg, previousRecords, nextRecords, keys, pathsForRecords) {
   if (!svg) return;
@@ -477,7 +472,9 @@ function bindKpiRequestSparkInteraction(card, values) {
     dot.setAttribute("cx", point.x / dotScaleX);
     dot.setAttribute("cy", onCurve.y);
 
-    tooltip.innerHTML = `<strong>请求数</strong><span>${formatCompactNumber(Math.round(point.value))}</span>`;
+    replaceChildren(tooltip,
+      el("strong", {}, "请求数"),
+      el("span", {}, formatCompactNumber(Math.round(point.value))));
     tooltip.hidden = false;
     // 点在 svg 里，tooltip 挂在卡片上：换算成卡片坐标，再夹进卡片内。
     const cardBounds = card.getBoundingClientRect();
@@ -527,30 +524,37 @@ function bindKpiRequestSparkInteraction(card, values) {
    曲线容器只负责画，pointer-events 全关；hover 命中的是整张卡片（见
    bindKpiRequestSparkInteraction）。tooltip 是卡片的直接子节点，不放进
    曲线容器里——那个容器 z-index 低于文字层，塞进去会被数字压住。 */
+/** 渐变填充：每张图一个 id，重复了后面的图会复用第一张的渐变。 */
+function sparkGradient(gradientId, topOpacity, bottomOpacity) {
+  return svg("defs", {},
+    svg("linearGradient", { id: gradientId, x1: "0%", y1: "0%", x2: "0%", y2: "100%" },
+      svg("stop", { offset: "0%", "stop-color": "currentColor", "stop-opacity": topOpacity }),
+      svg("stop", { offset: "100%", "stop-color": "currentColor", "stop-opacity": bottomOpacity })));
+}
+
 function buildKpiBackgroundSpark(values) {
-  if (!Array.isArray(values) || values.length < 2) return "";
+  if (!Array.isArray(values) || values.length < 2) return null;
   const { line, area } = kpiBackgroundSparkPaths(values.map((value) => ({ v: value })));
   const gradientId = `kpi-bg-gradient-${++dashboardSparkGradientSeq}`;
-  return `
-    <div class="kpi-bg-spark">
-      <svg class="kpi-bg-spark-svg" viewBox="0 0 ${KPI_SPARK_VIEW.width} ${KPI_SPARK_VIEW.height}"
-           preserveAspectRatio="none" aria-hidden="true">
-        <defs>
-          <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stop-color="currentColor" stop-opacity="0.16" />
-            <stop offset="100%" stop-color="currentColor" stop-opacity="0.02" />
-          </linearGradient>
-        </defs>
-        <path class="spark-morph-area" d="${area}" fill="url(#${gradientId})" />
-        <path class="spark-morph-line" d="${line}" fill="none" stroke="currentColor" stroke-opacity="0.45"
-              stroke-width="1.2" vector-effect="non-scaling-stroke" />
-        <line class="kpi-spark-hover-guide" x1="0" y1="0" x2="0" y2="${KPI_SPARK_VIEW.height}"
-              vector-effect="non-scaling-stroke" />
-        <circle class="kpi-spark-hover-dot" r="2.5" cx="0" cy="0" />
-      </svg>
-    </div>
-    <div class="kpi-spark-tooltip" role="status" hidden></div>
-  `;
+  return frag(
+    el("div", { class: "kpi-bg-spark" },
+      svg("svg", {
+        class: "kpi-bg-spark-svg",
+        viewBox: `0 0 ${KPI_SPARK_VIEW.width} ${KPI_SPARK_VIEW.height}`,
+        preserveAspectRatio: "none", "aria-hidden": "true",
+      },
+        sparkGradient(gradientId, 0.16, 0.02),
+        svg("path", { class: "spark-morph-area", d: area, fill: `url(#${gradientId})` }),
+        svg("path", {
+          class: "spark-morph-line", d: line, fill: "none", stroke: "currentColor",
+          "stroke-opacity": 0.45, "stroke-width": 1.2, "vector-effect": "non-scaling-stroke",
+        }),
+        svg("line", {
+          class: "kpi-spark-hover-guide", x1: 0, y1: 0, x2: 0, y2: KPI_SPARK_VIEW.height,
+          "vector-effect": "non-scaling-stroke",
+        }),
+        svg("circle", { class: "kpi-spark-hover-dot", r: 2.5, cx: 0, cy: 0 }))),
+    el("div", { class: "kpi-spark-tooltip", role: "status", hidden: true }));
 }
 
 
@@ -591,28 +595,32 @@ function latencySparkPaths(records, width, height) {
 
 function buildSparklineSvg(records, { width = 240, height = 44 } = {}) {
   if (!records.length) {
-    return '<div class="dashboard-chart-empty">暂无耗时数据</div>';
+    return el("div", { class: "dashboard-chart-empty" }, "暂无耗时数据");
   }
   const { line, area, p95 } = latencySparkPaths(records, width, height);
   const gradientId = `dashboard-spark-gradient-${++dashboardSparkGradientSeq}`;
-  return `
-    <svg class="ops-chart-svg dashboard-spark" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" aria-hidden="true">
-      <defs>
-        <linearGradient id="${gradientId}" x1="0%" y1="0%" x2="0%" y2="100%">
-          <stop offset="0%" stop-color="currentColor" stop-opacity="0.25" />
-          <stop offset="100%" stop-color="currentColor" stop-opacity="0.04" />
-        </linearGradient>
-      </defs>
-      <path class="spark-morph-area" d="${area}" fill="url(#${gradientId})" />
-      <path class="spark-morph-p95" d="${p95}" fill="none" stroke="currentColor" stroke-opacity="0.35"
-            stroke-width="1.2" stroke-dasharray="4 3" vector-effect="non-scaling-stroke" />
-      <path class="spark-morph-line" d="${line}" fill="none" stroke="currentColor" stroke-width="1.8" vector-effect="non-scaling-stroke" />
-      <line class="spark-hover-guide" x1="0" y1="2" x2="0" y2="100" vector-effect="non-scaling-stroke" />
-      <circle class="spark-hover-dot spark-hover-dot--avg" r="3" cx="0" cy="0" />
-      <circle class="spark-hover-dot spark-hover-dot--p95" r="3" cx="0" cy="0" />
-      <rect class="spark-hit-area" x="0" y="0" width="${width}" height="${height}" />
-    </svg>
-  `;
+  return svg("svg", {
+    class: "ops-chart-svg dashboard-spark", viewBox: `0 0 ${width} ${height}`,
+    preserveAspectRatio: "none", "aria-hidden": "true",
+  },
+    sparkGradient(gradientId, 0.25, 0.04),
+    svg("path", { class: "spark-morph-area", d: area, fill: `url(#${gradientId})` }),
+    svg("path", {
+      class: "spark-morph-p95", d: p95, fill: "none", stroke: "currentColor",
+      "stroke-opacity": 0.35, "stroke-width": 1.2, "stroke-dasharray": "4 3",
+      "vector-effect": "non-scaling-stroke",
+    }),
+    svg("path", {
+      class: "spark-morph-line", d: line, fill: "none", stroke: "currentColor",
+      "stroke-width": 1.8, "vector-effect": "non-scaling-stroke",
+    }),
+    svg("line", {
+      class: "spark-hover-guide", x1: 0, y1: 2, x2: 0, y2: 100,
+      "vector-effect": "non-scaling-stroke",
+    }),
+    svg("circle", { class: "spark-hover-dot spark-hover-dot--avg", r: 3, cx: 0, cy: 0 }),
+    svg("circle", { class: "spark-hover-dot spark-hover-dot--p95", r: 3, cx: 0, cy: 0 }),
+    svg("rect", { class: "spark-hit-area", x: 0, y: 0, width, height }));
 }
 
 function bindLatencySparkInteractions(container, records) {
@@ -694,7 +702,9 @@ function bindLatencySparkInteractions(container, records) {
     const pointLabel = activeSeries === "p95" ? "P95" : "平均耗时";
     const pointValue = activeSeries === "p95" ? p95Value : avgValue;
     const displayRecord = progress >= 0.5 ? rightRecord : leftRecord;
-    tooltip.innerHTML = `<strong>${escapeHtml(formatPointTime(displayRecord))}</strong><span>${pointLabel} ${escapeHtml(formatSeconds(pointValue))}</span>`;
+    replaceChildren(tooltip,
+      el("strong", {}, formatPointTime(displayRecord)),
+      el("span", {}, `${pointLabel} ${formatSeconds(pointValue)}`));
     tooltip.hidden = false;
     positionTooltip(activeSeries === "p95" ? p95 : avg);
   };
@@ -773,16 +783,16 @@ function setDashboardChannelNameHidden(hidden) {
 function renderDashboardRankList(container, rows, emptyText, options = {}) {
   if (!container) return;
   if (!rows.length) {
-    container.innerHTML = `<div class="dashboard-chart-empty">${escapeHtml(emptyText)}</div>`;
+    replaceChildren(container, el("div", { class: "dashboard-chart-empty" }, emptyText));
     return;
   }
   const formatValue = typeof options.formatValue === "function"
     ? options.formatValue
     : (value) => String(Math.round(value));
-  const metaHtml = typeof options.metaHtml === "function" ? options.metaHtml : null;
+  const renderMeta = typeof options.meta === "function" ? options.meta : null;
   const hideNames = Boolean(options.hideNames);
   const max = Math.max(...rows.map((row) => Number(row.count) || 0), 1);
-  container.innerHTML = rows.map((row) => {
+  replaceChildren(container, rows.map((row) => {
     const count = Number(row.count) || 0;
     const displayCount = formatValue(count);
     const width = Math.max(4, (count / max) * 100);
@@ -798,24 +808,17 @@ function renderDashboardRankList(container, rows, emptyText, options = {}) {
       hideNames ? null : (row.name || null),
       displayCount,
     ].filter(Boolean);
-    const idHtml = channelId == null
-      ? ""
-      : `<span class="dashboard-rank-index" title="渠道 #${channelId}">${escapeHtml(idLabel)}</span>`;
-    const meta = metaHtml ? (metaHtml(row) || "") : "";
-    return `
-      <div class="dashboard-rank-row" title="${escapeHtml(titleParts.join(" · "))}">
-        <div class="dashboard-rank-head">
-          ${idHtml}
-          <span class="dashboard-rank-name${hideNames ? " is-masked" : ""}">${escapeHtml(displayName)}</span>
-          ${meta}
-          <span class="dashboard-rank-count">${escapeHtml(displayCount)}</span>
-        </div>
-        <div class="dashboard-rank-track" aria-hidden="true">
-          <span class="dashboard-rank-fill" style="width:${width.toFixed(1)}%"></span>
-        </div>
-      </div>
-    `;
-  }).join("");
+    return el("div", { class: "dashboard-rank-row", title: titleParts.join(" · ") },
+      el("div", { class: "dashboard-rank-head" },
+        channelId == null
+          ? null
+          : el("span", { class: "dashboard-rank-index", title: `渠道 #${channelId}` }, idLabel),
+        el("span", { class: `dashboard-rank-name${hideNames ? " is-masked" : ""}` }, displayName),
+        renderMeta ? renderMeta(row) : null,
+        el("span", { class: "dashboard-rank-count" }, displayCount)),
+      el("div", { class: "dashboard-rank-track", "aria-hidden": "true" },
+        el("span", { class: "dashboard-rank-fill", style: { width: `${width.toFixed(1)}%` } })));
+  }));
 }
 
 /// Compact label for the ranking card headers, which have less room than the
@@ -906,11 +909,22 @@ function renderDashboard() {
   if (errorRatePct !== null) {
     previousErrorRatePct = errorRatePct;
   }
-  let errorDeltaHtml = "";
+  let errorDelta = null;
   if (errorRatePct !== null && lastErrorRateDelta !== null) {
     const up = lastErrorRateDelta > 0;
     const magnitude = Math.abs(lastErrorRateDelta);
-    errorDeltaHtml = `<span class="kpi-delta ${up ? "kpi-delta--up" : "kpi-delta--down"}" title="较最近一次变化前">${up ? "↑" : "↓"}<span data-count-key="dashboard-error-delta" data-count-to="${magnitude.toFixed(3)}" data-count-format="percent1">${magnitude.toFixed(1)}%</span></span>`;
+    errorDelta = el("span", {
+      class: `kpi-delta ${up ? "kpi-delta--up" : "kpi-delta--down"}`,
+      title: "较最近一次变化前",
+    },
+      up ? "↑" : "↓",
+      el("span", {
+        dataset: {
+          countKey: "dashboard-error-delta",
+          countTo: magnitude.toFixed(3),
+          countFormat: "percent1",
+        },
+      }, `${magnitude.toFixed(1)}%`));
   }
 
   /* 请求数的环比增长率：对比上一同长周期（今天 vs 昨天同时段）。基数为 0
@@ -921,33 +935,45 @@ function renderDashboard() {
      它描述的其实是"上期几乎没流量"，不是真的涨了 289 倍。这种情况下改显
      绝对增量（+289 条），信息更诚实。 */
   const previousTotal = overview?.previous_total;
-  let requestTrendHtml = "";
+  let requestTrend = null;
   if (total > 0 && typeof previousTotal === "number" && previousTotal > 0) {
     const up = total > previousTotal;
-    const toneClass = up ? "kpi-trend--up" : "kpi-trend--down";
-    const title = `较上一同长周期（${previousTotal} 条）`;
+    const trend = (countKey, countTo, countFormat, text, suffix) => el("span", {
+      class: `kpi-trend ${up ? "kpi-trend--up" : "kpi-trend--down"}`,
+      title: `较上一同长周期（${previousTotal} 条）`,
+    },
+      up ? "↑" : "↓",
+      el("span", { dataset: { countKey, countTo, countFormat } }, text),
+      suffix);
+
     if (previousTotal < GROWTH_RATE_MIN_BASE) {
       const diff = Math.abs(total - previousTotal);
       if (diff > 0) {
-        requestTrendHtml = `<span class="kpi-trend ${toneClass}" title="${title}">${up ? "↑" : "↓"}<span data-count-key="dashboard-request-growth-abs" data-count-to="${diff}" data-count-format="compact">${escapeHtml(formatCompactNumber(diff))}</span> 条</span>`;
+        requestTrend = trend("dashboard-request-growth-abs", diff, "compact",
+          formatCompactNumber(diff), " 条");
       }
     } else {
       const growth = ((total - previousTotal) / previousTotal) * 100;
       if (Math.abs(growth) >= 0.05) {
         const magnitude = Math.abs(growth);
-        requestTrendHtml = `<span class="kpi-trend ${toneClass}" title="${title}">${up ? "↑" : "↓"}<span data-count-key="dashboard-request-growth" data-count-to="${magnitude.toFixed(3)}" data-count-format="growth">${formatKpiCount(magnitude, "growth")}</span></span>`;
+        requestTrend = trend("dashboard-request-growth", magnitude.toFixed(3), "growth",
+          formatKpiCount(magnitude, "growth"));
       }
     }
   }
   const requestSeries = Array.isArray(overview?.request_series) ? overview.request_series : [];
   const requestSparkValues = requestSeries.map((bucket) => Number(bucket.count) || 0);
-  const requestSparkHtml = buildKpiBackgroundSpark(requestSparkValues);
+  const requestSpark = buildKpiBackgroundSpark(requestSparkValues);
 
   renderDashboardKpiCards(dashboardKpis, [
     {
-      value: formatCompactNumber(total),
-      valueHtml: `<span class="kpi-number" data-count-key="dashboard-requests" data-count-to="${total}" data-count-format="compact">${escapeHtml(formatCompactNumber(total))}</span>${requestTrendHtml}`,
-      backgroundHtml: requestSparkHtml,
+      value: frag(
+        el("span", {
+          class: "kpi-number",
+          dataset: { countKey: "dashboard-requests", countTo: total, countFormat: "compact" },
+        }, formatCompactNumber(total)),
+        requestTrend),
+      background: requestSpark,
       label: "请求数",
       hint: total ? `${overviewRangeLabel} · 共 ${total} 条` : `${overviewRangeLabel} · 暂无请求`,
       hoverHint: true,
@@ -955,12 +981,19 @@ function renderDashboard() {
       cardKey: "requests",
     },
     {
-      value: errorRateLabel,
-      valueHtml: errorRatePct === null
-        ? `<span class="kpi-number" data-count-key="dashboard-error-rate">—</span>`
-        : `<span class="kpi-number" data-count-key="dashboard-error-rate" data-count-to="${errorRatePct.toFixed(3)}" data-count-format="percent">${escapeHtml(errorRateLabel)}</span>${errorDeltaHtml}`,
-      label: "错误率",
-      labelHtml: '<span class="kpi-pulse-dot" aria-hidden="true"></span>错误率',
+      value: errorRatePct === null
+        ? el("span", { class: "kpi-number", dataset: { countKey: "dashboard-error-rate" } }, "—")
+        : frag(
+          el("span", {
+            class: "kpi-number",
+            dataset: {
+              countKey: "dashboard-error-rate",
+              countTo: errorRatePct.toFixed(3),
+              countFormat: "percent",
+            },
+          }, errorRateLabel),
+          errorDelta),
+      label: frag(el("span", { class: "kpi-pulse-dot", "aria-hidden": "true" }), "错误率"),
       hint: total ? `${errorTotal} / ${total} 条失败` : "暂无日志",
       hoverHint: true,
       tone: errorTone,
@@ -973,8 +1006,8 @@ function renderDashboard() {
       tone: "",
     },
     {
-      value: `${enabledCount}/${totalChannels}`,
-      valueHtml: `${enabledCount}<span class="kpi-denominator">/${totalChannels}</span>`,
+      value: frag(String(enabledCount),
+        el("span", { class: "kpi-denominator" }, `/${totalChannels}`)),
       label: "启用渠道",
       hint: totalChannels ? `停用 ${disabledCount}` : "暂无渠道",
       hoverHint: true,
@@ -1086,13 +1119,18 @@ function renderDashboard() {
   }
   if (dashboardStatusChart) {
     if (total === 0) {
-      dashboardStatusChart.innerHTML = '<div class="dashboard-chart-empty">所选范围内暂无请求</div>';
+      replaceChildren(dashboardStatusChart,
+        el("div", { class: "dashboard-chart-empty" }, "所选范围内暂无请求"));
     } else {
       const pct = (count) => (count / total) * 100;
       const barSeg = (cls, count) => {
         const width = pct(count);
-        if (width <= 0) return "";
-        return `<span class="ops-bar-seg ${cls}" style="width:${width.toFixed(2)}%" title="${count}"></span>`;
+        if (width <= 0) return null;
+        return el("span", {
+          class: `ops-bar-seg ${cls}`,
+          style: { width: `${width.toFixed(2)}%` },
+          title: count,
+        });
       };
 
       /* 图例的环比徽标。小基数保护：上一周期不足 10 条时百分比全是噪声
@@ -1100,21 +1138,38 @@ function renderDashboard() {
          2xx 涨绿跌灰（跌通常只是流量降，报警交给错误类），错误类涨红跌绿。 */
       const prevStatus = overview?.previous_status;
       const legendDelta = (key, current, previous, upClass, downClass) => {
-        if (typeof previous !== "number" || previous < GROWTH_RATE_MIN_BASE) return "";
+        if (typeof previous !== "number" || previous < GROWTH_RATE_MIN_BASE) return null;
         const growth = ((current - previous) / previous) * 100;
-        if (Math.abs(growth) < 0.5) return "";
+        if (Math.abs(growth) < 0.5) return null;
         const up = growth > 0;
         const magnitude = Math.abs(growth);
-        return `<span class="status-delta ${up ? upClass : downClass}" title="较上一同长周期（${previous} 条）">${up ? "↑" : "↓"}<span data-count-key="status-delta-${key}" data-count-to="${magnitude.toFixed(3)}" data-count-format="growth">${formatKpiCount(magnitude, "growth")}</span></span>`;
+        return el("span", {
+          class: `status-delta ${up ? upClass : downClass}`,
+          title: `较上一同长周期（${previous} 条）`,
+        },
+          up ? "↑" : "↓",
+          el("span", {
+            dataset: {
+              countKey: `status-delta-${key}`,
+              countTo: magnitude.toFixed(3),
+              countFormat: "growth",
+            },
+          }, formatKpiCount(magnitude, "growth")));
       };
-      const legendItem = (seg, label, count, countKey, deltaHtml) => `
-        <span class="status-legend-item">
-          <span class="status-legend-dot ops-bar-seg ${seg}" aria-hidden="true"></span>
-          <span class="status-legend-label">${label}</span>
-          <strong class="status-legend-count" data-count-key="status-count-${countKey}" data-count-to="${count}" data-count-format="compact">${formatCompactNumber(count)}</strong>
-          ${deltaHtml}
-        </span>`;
-      const legendHtml = [
+      const legendItem = (seg, label, count, countKey, delta) =>
+        el("span", { class: "status-legend-item" },
+          el("span", { class: `status-legend-dot ops-bar-seg ${seg}`, "aria-hidden": "true" }),
+          el("span", { class: "status-legend-label" }, label),
+          el("strong", {
+            class: "status-legend-count",
+            dataset: {
+              countKey: `status-count-${countKey}`,
+              countTo: count,
+              countFormat: "compact",
+            },
+          }, formatCompactNumber(count)),
+          delta);
+      const legendItems = [
         legendItem("ok", "2xx", c2, "2xx",
           legendDelta("2xx", c2, prevStatus?.status_2xx, "status-delta--good", "status-delta--calm")),
         legendItem("warn", "4xx", c4, "4xx",
@@ -1123,38 +1178,47 @@ function renderDashboard() {
           legendDelta("5xx", c5, prevStatus?.status_5xx, "status-delta--bad", "status-delta--good")),
         legendItem("muted", "其他", cOther, "other",
           legendDelta("other", cOther, prevStatus?.status_other, "status-delta--bad", "status-delta--good")),
-      ].join("");
+      ];
 
       /* 错误时间细带：每桶一格，颜色深浅随该桶错误率，回答"错误发生在何时、
          是集中爆发还是均匀散布"——分段条本身没有时间维度。 */
-      let stripHtml = "";
+      let strip = null;
       if (requestSeriesForStatus.length >= 2) {
         const cells = requestSeriesForStatus.map((bucket) => {
           const count = Number(bucket.count) || 0;
           const bucketErrors = Number(bucket.errors) || 0;
           const when = logTimeFormatter.format(new Date((Number(bucket.bucket_epoch) || 0) * 1000));
           if (!bucketErrors) {
-            return `<span class="status-error-cell is-clean" title="${escapeHtml(when)} · ${count} 条 · 无错误"></span>`;
+            return el("span", {
+              class: "status-error-cell is-clean",
+              title: `${when} · ${count} 条 · 无错误`,
+            });
           }
           const rate = count > 0 ? bucketErrors / count : 0;
           // 错误率 50% 及以上就到满色；下限 0.25 保证个位数错误也看得见。
           const opacity = (0.25 + 0.75 * Math.min(1, rate / 0.5)).toFixed(2);
-          return `<span class="status-error-cell" style="opacity:${opacity}" title="${escapeHtml(when)} · 错误 ${bucketErrors}/${count}"></span>`;
-        }).join("");
-        stripHtml = `
-          <div class="status-error-strip-wrap">
-            <span class="status-error-strip-label">错误时间分布</span>
-            <div class="status-error-strip" role="img" aria-label="按时间桶的错误分布">${cells}</div>
-          </div>`;
+          return el("span", {
+            class: "status-error-cell",
+            style: { opacity },
+            title: `${when} · 错误 ${bucketErrors}/${count}`,
+          });
+        });
+        strip = el("div", { class: "status-error-strip-wrap" },
+          el("span", { class: "status-error-strip-label" }, "错误时间分布"),
+          el("div", {
+            class: "status-error-strip", role: "img",
+            "aria-label": "按时间桶的错误分布",
+          }, cells));
       }
 
-      dashboardStatusChart.innerHTML = `
-        <div class="ops-bar-track" role="img" aria-label="2xx ${c2} · 4xx ${c4} · 5xx ${c5} · 其他 ${cOther}">
-          ${barSeg("ok", c2)}${barSeg("warn", c4)}${barSeg("danger", c5)}${barSeg("muted", cOther)}
-        </div>
-        <div class="status-legend">${legendHtml}</div>
-        ${stripHtml}
-      `;
+      replaceChildren(dashboardStatusChart,
+        el("div", {
+          class: "ops-bar-track", role: "img",
+          "aria-label": `2xx ${c2} · 4xx ${c4} · 5xx ${c5} · 其他 ${cOther}`,
+        },
+          barSeg("ok", c2), barSeg("warn", c4), barSeg("danger", c5), barSeg("muted", cOther)),
+        el("div", { class: "status-legend" }, legendItems),
+        strip);
     }
     // 图例的数量与环比徽标也走数字滚动（这块不经过 KPI 构建器，手动扫一次）。
     animateKpiNumbers(dashboardStatusChart);
@@ -1174,24 +1238,28 @@ function renderDashboard() {
   }
   if (dashboardLatencyChart) {
     if (latencySeries.length === 0) {
-      dashboardLatencyChart.innerHTML = '<div class="dashboard-chart-empty">所选范围内暂无有效耗时</div>';
+      replaceChildren(dashboardLatencyChart,
+        el("div", { class: "dashboard-chart-empty" }, "所选范围内暂无有效耗时"));
       lastLatencySparkRecords = null;
     } else {
       const latestAvg = Number(latencySeries[latencySeries.length - 1].avg_ms) || 0;
       const minDuration = Number(overview?.min_duration_ms) || 0;
       const maxDuration = Number(overview?.max_duration_ms) || 0;
-      dashboardLatencyChart.innerHTML = `
-        ${buildSparklineSvg(sparkRecords, { width: 320, height: 100 })}
-        <div class="dashboard-chart-tooltip" role="status" hidden></div>
-        <dl class="dashboard-latency-summary" aria-label="「${overviewRangeLabel}」${durationCount} 条有效耗时的延迟摘要">
-          <div><dt>最近</dt><dd>${escapeHtml(formatSeconds(latestAvg))}</dd></div>
-          <div><dt>平均</dt><dd>${escapeHtml(formatSeconds(avgMs))}</dd></div>
-          <div><dt>范围</dt><dd>${escapeHtml(formatSeconds(minDuration))}–${escapeHtml(formatSeconds(maxDuration))}</dd></div>
-          <div><dt>P50</dt><dd>${overview?.p50_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p50_duration_ms))) : "—"}</dd></div>
-          <div><dt>P95</dt><dd>${overview?.p95_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p95_duration_ms))) : "—"}</dd></div>
-          <div><dt>P99</dt><dd>${overview?.p99_duration_ms != null ? escapeHtml(formatSeconds(Number(overview.p99_duration_ms))) : "—"}</dd></div>
-        </dl>
-      `;
+      const summaryItem = (term, value) => el("div", {}, el("dt", {}, term), el("dd", {}, value));
+      const percentile = (value) => (value != null ? formatSeconds(Number(value)) : "—");
+      replaceChildren(dashboardLatencyChart,
+        buildSparklineSvg(sparkRecords, { width: 320, height: 100 }),
+        el("div", { class: "dashboard-chart-tooltip", role: "status", hidden: true }),
+        el("dl", {
+          class: "dashboard-latency-summary",
+          "aria-label": `「${overviewRangeLabel}」${durationCount} 条有效耗时的延迟摘要`,
+        },
+          summaryItem("最近", formatSeconds(latestAvg)),
+          summaryItem("平均", formatSeconds(avgMs)),
+          summaryItem("范围", `${formatSeconds(minDuration)}–${formatSeconds(maxDuration)}`),
+          summaryItem("P50", percentile(overview?.p50_duration_ms)),
+          summaryItem("P95", percentile(overview?.p95_duration_ms)),
+          summaryItem("P99", percentile(overview?.p99_duration_ms))));
       // 曲线起伏从上一形态逐帧变形到新形态，而不是整图跳变
       animateSparkMorph(
         dashboardLatencyChart.querySelector(".ops-chart-svg"),
@@ -1231,15 +1299,15 @@ function renderDashboard() {
   });
   renderDashboardRankList(dashboardTopModels, topModelRequests, "暂无模型请求数据", {
     // 后端为请求排行附带平均耗时与错误率：哪个模型"又慢又容易挂"一眼可见。
-    metaHtml: (row) => {
+    meta: (row) => {
       const parts = [];
       if (row.avg_duration_ms != null) parts.push(formatSeconds(Number(row.avg_duration_ms)));
       if (row.error_rate != null) {
         parts.push(`${((Number(row.error_rate) || 0) * 100).toFixed(1)}% 错误`);
       }
       return parts.length
-        ? `<span class="dashboard-rank-meta">${escapeHtml(parts.join(" · "))}</span>`
-        : "";
+        ? el("span", { class: "dashboard-rank-meta" }, parts.join(" · "))
+        : null;
     },
   });
   renderDashboardRankList(dashboardTopModelTokens, topModelTokens, "暂无模型 token 数据", {
@@ -1254,32 +1322,29 @@ function renderDashboard() {
       })
       .slice(0, 8);
     if (errors.length === 0) {
-      dashboardErrorRows.innerHTML = `
-        <tr>
-          <td colspan="5" class="empty">
-            <span class="muted">${items.length ? "近窗内暂无 4xx/5xx/无响应记录" : "暂无近窗日志"}</span>
-          </td>
-        </tr>
-      `;
+      replaceChildren(dashboardErrorRows,
+        el("tr", {},
+          el("td", { colspan: 5, class: "empty" },
+            el("span", { class: "muted" },
+              items.length ? "近窗内暂无 4xx/5xx/无响应记录" : "暂无近窗日志"))));
     } else {
-      dashboardErrorRows.innerHTML = errors.map((log) => {
-        const time = formatLogTimestamp(log.created_at);
-        const channel = log.upstream_name
-          ? escapeHtml(log.upstream_name)
-          : '<span class="muted">未匹配</span>';
-        const model = log.model
-          ? `<code title="${escapeHtml(log.model)}">${escapeHtml(log.model)}</code>`
-          : '<span class="muted">-</span>';
-        return `
-          <tr class="log-row dashboard-error-row" data-log-id="${log.id}" tabindex="0" title="点击查看请求详情">
-            <td class="time-cell"><span>${escapeHtml(time)}</span><span class="muted">#${log.id}</span></td>
-            <td class="channel-cell">${channel}</td>
-            <td class="model-cell">${model}</td>
-            <td>${formatStatusBadge(log.status_code)}</td>
-            <td class="duration-cell">${escapeHtml(formatSeconds(log.duration_ms))}</td>
-          </tr>
-        `;
-      }).join("");
+      replaceChildren(dashboardErrorRows, errors.map((log) => el("tr", {
+        class: "log-row dashboard-error-row",
+        dataset: { logId: log.id },
+        tabindex: 0,
+        title: "点击查看请求详情",
+      },
+        el("td", { class: "time-cell" },
+          el("span", {}, formatLogTimestamp(log.created_at)),
+          el("span", { class: "muted" }, `#${log.id}`)),
+        el("td", { class: "channel-cell" }, log.upstream_name
+          ? log.upstream_name
+          : el("span", { class: "muted" }, "未匹配")),
+        el("td", { class: "model-cell" }, log.model
+          ? el("code", { title: log.model }, log.model)
+          : el("span", { class: "muted" }, "-")),
+        el("td", {}, formatStatusBadge(log.status_code)),
+        el("td", { class: "duration-cell" }, formatSeconds(log.duration_ms)))));
     }
   }
 }
