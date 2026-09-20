@@ -1016,11 +1016,20 @@ html[data-theme="light"] .nav-link:hover {
 
 .log-toolbar > .log-sensitive-toggle {
   align-items: center;
+  background: var(--panel-muted);
+  border: 1px solid var(--line);
   display: inline-flex;
   justify-content: center;
+  /* 和筛选控件同形同高。原来也是 ghost，视觉盒子塌成一个小图标。 */
+  min-height: var(--control-h);
   min-width: 34px;
   padding: 0;
   width: 34px;
+}
+
+.log-toolbar > .log-sensitive-toggle:hover {
+  background: var(--panel-subtle);
+  border-color: var(--line-strong);
 }
 
 .log-new-entries-notice {
