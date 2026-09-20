@@ -1072,15 +1072,9 @@ html[data-theme="light"] .nav-link:hover {
   opacity: 1;
 }
 
+/* 日志页的筛选控件，同 .filter-field——去掉了文字标签以对齐工具栏高度。 */
 .log-filter {
-  color: var(--muted);
   display: flex;
-  flex-direction: column;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  gap: 5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .log-filter select,
@@ -1127,15 +1121,12 @@ html[data-theme="light"] .nav-link:hover {
   min-width: 72px;
 }
 
+/* 筛选控件在工具栏里的包装。曾经是「文字标签在上、输入在下」两行，
+   但标签把整组撑高约 18px，工具栏里按钮和筛选块就高矮不齐。
+   现在标签只存在于 aria-label 和 placeholder 里，这里就剩一个容器。
+   输入框自己的排版见下面的 .filter-field input/select 覆盖。 */
 .filter-field {
-  color: var(--muted);
   display: flex;
-  flex-direction: column;
-  font-size: var(--text-xs);
-  font-weight: 600;
-  gap: 5px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .filter-field input,

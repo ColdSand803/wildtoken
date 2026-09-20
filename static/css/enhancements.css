@@ -130,7 +130,9 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 }
 
 .col-menu-btn {
-  min-height: 32px;
+  /* 和 .view-toolbar 里其他控件同一高度。原来写死 32px，比 34px 的
+     按钮和输入框矮一截，工具栏右侧就参差不齐。 */
+  min-height: var(--control-h);
   min-width: 48px;
 }
 

@@ -342,18 +342,20 @@
             </div>
             <div id="upstream-summary" class="summary-strip" aria-live="polite"></div>
             <div class="view-toolbar upstream-toolbar">
+              <!-- 筛选控件不再带文字标签：标签会把整组撑高约 18px，工具栏就
+                   高矮不齐。placeholder 和 aria-label 承担说明，select 则由
+                   当前选项自己说明。 -->
               <label class="filter-field">
-                搜索
                 <input
                   id="upstream-search"
                   type="search"
                   autocomplete="off"
+                  aria-label="搜索渠道"
                   placeholder="名称、Base URL、模型…"
                 />
               </label>
               <label class="filter-field">
-                状态
-                <select id="upstream-status-filter">
+                <select id="upstream-status-filter" aria-label="按状态筛选渠道">
                   <option value="">全部</option>
                   <option value="enabled">启用</option>
                   <option value="disabled">停用</option>
@@ -474,25 +476,24 @@
               </div>
             </div>
             <div class="log-toolbar">
+              <!-- 同渠道页：筛选控件去掉文字标签，理由见 upstream-toolbar 的注释。 -->
               <label class="log-filter log-filter-channel">
-                渠道
-                <select id="log-upstream-filter">
+                <select id="log-upstream-filter" aria-label="按渠道筛选日志">
                   <option value="">全部渠道</option>
                 </select>
               </label>
               <label class="log-filter">
-                搜索
                 <input
                   id="log-search"
                   type="search"
                   autocomplete="off"
+                  aria-label="搜索日志"
                   placeholder="模型、渠道、令牌、状态码…"
                 />
               </label>
               <label class="log-filter">
-                客户端
-                <select id="log-client-filter">
-                  <option value="">全部</option>
+                <select id="log-client-filter" aria-label="按客户端筛选日志">
+                  <option value="">全部客户端</option>
                   <option value="codex-desktop">codex-desktop</option>
                   <option value="codex-tui">codex-tui</option>
                   <option value="codex">codex</option>
@@ -507,8 +508,7 @@
                 </select>
               </label>
               <label class="log-filter">
-                状态码
-                <select id="log-status-filter">
+                <select id="log-status-filter" aria-label="按状态码筛选日志">
                   <option value="">全部</option>
                   <option value="2xx">2xx</option>
                   <option value="4xx">4xx</option>
@@ -623,11 +623,11 @@
             </div>
             <div class="view-toolbar token-toolbar">
               <label class="filter-field">
-                搜索
                 <input
                   id="token-search"
                   type="search"
                   autocomplete="off"
+                  aria-label="搜索令牌"
                   placeholder="名称、描述、预览…"
                 />
               </label>

@@ -7,6 +7,30 @@
     overflow-wrap: anywhere;
     white-space: normal;
   }
+
+  /* 这个宽度下工具栏还是 flex+wrap（改成 grid 的规则在 760px 那个断点里）。
+     搜索框和状态下拉都是固定宽度，加上右侧四个动作按钮，在 800–1000px
+     这一档放不下，动作组会被挤到第二行。
+
+     让搜索框在这一档收缩。注意不能给 flex-grow：实测它一增长就把第一行
+     填满（1000px 视口下吃到 535px），动作组被挤下去后就再也回不来。
+     收缩才是正解——基定 180px，需要时让位，min-width: 0 是能突破
+     input 那个 180px 下限的前提。 */
+  .view-toolbar > .filter-field:first-of-type {
+    flex: 0 1 180px;
+    min-width: 0;
+  }
+
+  .view-toolbar > .filter-field:first-of-type input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  /* 状态筛选跟着收缩，但保留下拉箭头的位置和最小宽度，别挤成一条缝。 */
+  .view-toolbar > .filter-field:nth-of-type(2) select {
+    min-width: 120px;
+    width: auto;
+  }
 }
 
 @media (max-width: 760px) {
