@@ -883,16 +883,8 @@ func optionalQueryInt64(value string) *int64 {
 	return &parsed
 }
 
-func optionalQueryString(value string) *string {
-	trimmed := strings.TrimSpace(value)
-	if trimmed == "" {
-		return nil
-	}
-	return &trimmed
-}
-
-// boundedQueryString is optionalQueryString with a ceiling on the length, for
-// values that end up inside a query's cost rather than beside it.
+// boundedQueryString trims a query value and caps its length, for values that
+// end up inside a query's cost rather than beside it.
 func boundedQueryString(value string, maxChars int) *string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
