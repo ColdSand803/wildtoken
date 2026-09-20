@@ -1,3 +1,7 @@
+import {
+  el, frag,
+} from "./bootstrap.js";
+
 // 把日志快照里的请求/响应正文解析成会话视图。
 //
 // 这里的正文几乎总是被截断的：日志正文上限是 1MB，而 Claude Code 一轮请求
@@ -724,3 +728,15 @@ function renderConversation(parsed, meta = {}) {
     el("ol", { class: "conv-list" }, rendered),
     notice);
 }
+
+export {
+  CONVERSATION_ROLE_LABELS, blockTag, conversationEmpty, conversationRoleLabel,
+  describeImageBlock, formatApproxBytes, formatByteSize, formatCharCount,
+  normalizeContentBlocks, normalizeSystemPrompt, parseConversationRequest,
+  parseConversationResponse, parseLenientRoot, parseNonStreamResponse, readJsonValue,
+  readSsePayloads, reassembleAnthropicStream, reassembleOpenAIStream,
+  reassembleResponsesStream, renderCollapsibleBlock, renderConversation,
+  renderConversationBlock, renderConversationMessage, renderInlineBlock,
+  renderLabelledBlock, renderTextBlock, renderToolInput, safeStringify, salvageArrayItems,
+  scanTopLevelEntries, stringifyToolResult, tidyBlockText, toRenderBlock,
+};

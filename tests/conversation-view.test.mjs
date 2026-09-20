@@ -3,12 +3,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createDomContext, read, vm } from "./dom-stub.mjs";
+import { createDomContext, read, readScript, vm } from "./dom-stub.mjs";
 
 function conversationContext() {
   // 渲染函数返回节点，所以沙箱要带 DOM 和真实的 el()。
   const context = createDomContext({ TextEncoder });
-  vm.runInContext(read("static/js/conversation.js"), context);
+  vm.runInContext(readScript("static/js/conversation.js"), context);
   return context;
 }
 

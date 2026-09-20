@@ -1,3 +1,22 @@
+import {
+  LOG_PAGE_SIZE_KEY, LOG_PAGE_SIZE_VALUES, LOG_SENSITIVE_HIDDEN_KEY, currentLogDetail, el,
+  escapeHtml, formatLogTimestamp, frag, logClientFilter, logCurrentCursor, logCursorStack,
+  logDetailDialog, logDetailMeta, logDetailSections, logDetailSummary, logDetailTitle,
+  logFirstButton, logHasMore, logNewEntriesButton, logNewEntriesNotice, logNextButton,
+  logNextCursor, logOffset, logPageMeta, logPageSize, logPageSizeSelect, logPrevButton,
+  logRatePills, logRows, logSearchInput, logSensitiveHidden, logSensitiveToggle,
+  logStatusFilter, logUpstreamFilter, logsLoadedOnce, logsLoading, pageVisible,
+  parseLogTimestamp, replaceChildren, requestDetailGrid, rows, setStatus, upstreams,
+} from "./bootstrap.js";
+import {
+  parseConversationRequest, parseConversationResponse, renderConversation,
+} from "./conversation.js";
+import {
+  api, clearAdminToken, clearDialogMaximized, currentViewFromHash, emptyStateRow,
+  getAdminToken, noMatchStateRow, openAdminTokenDialog, showAdminTokenError, skeletonRows,
+  startLogRefresh, stopLogRefresh, updateLiveIndicator,
+} from "./shell.js";
+
 // Request log list, performance formatting, snapshots, and detail dialog.
 const LOG_SENSITIVE_MASK = "******";
 const LOG_RATE_ANIMATION_MS = 520;
@@ -1948,3 +1967,47 @@ async function loadLogs() {
 
 updateLogSensitiveToggle();
 logNewEntriesButton?.addEventListener("click", returnToLatestLogPage);
+
+export {
+  LOG_ACTIVE_TICK_MS, LOG_ERROR_PREVIEW_CHARS, LOG_RATE_ANIMATION_MS,
+  LOG_ROW_PUSH_ANIMATION_MS, LOG_ROW_PUSH_STAGGER_MS, LOG_SENSITIVE_MASK,
+  LOG_STREAM_BATCH_RENDER_MS, LOG_STREAM_MAX_BUFFER_CHARS, LOG_STREAM_PATH,
+  LOG_STREAM_RECONNECT_MAX_MS, LOG_STREAM_RECONNECT_MIN_MS, LOG_STREAM_RELOAD_DEBOUNCE_MS,
+  LOG_STREAM_STABLE_CONNECTION_MS, LOG_TABLE_COLUMN_COUNT, LOG_VIEW_MODE_STORAGE_KEY,
+  activeElapsedMs, activeMatchesCurrentFilters, animateShiftedLogRow,
+  appendLogPaginationParams, clearLogNewEntriesNotice, clearLogStreamPendingEntries,
+  closeLogDetailDialog, compactText, consumeLogStream, countIsEmptyLogPage,
+  createActiveLogRow, createLogRow, currentLogPageNumber, errorMessageFromSnapshot,
+  extractLogDetailError, firstErrorMessageFromValue, firstTokenTone, flushLogStreamEntries,
+  formatActiveChannel, formatActiveElapsed, formatBodyHeading, formatByteCount,
+  formatCacheHitRate, formatFirstTokenTime, formatHttpSnapshot, formatLogChannelLabel,
+  formatLogChannelStack, formatLogDetailMeta, formatLogDetailSummary, formatLogModelText,
+  formatLogPageRange, formatLogToken, formatLogUpstreamFilterLabel, formatReasoningEffort,
+  formatSeconds, formatStatusBadge, formatThroughput, formatTokenDetailPanel, formatTokens,
+  formatTokensPerSecondLine, formatTotalDurationTime, getLogModelRoute,
+  getLogStreamErrorMessage, getReasoningEffortRoute, handleLogStreamEvent,
+  handleLogStreamRecord, insertLiveLogRows, isOnLatestLogPage, loadLogs,
+  logActiveReceivedAt, logActiveRequests, logActiveTicker, logActiveTotal,
+  logDetailViewMode, logLoadGeneration, logLoadInFlight, logLoadQueued,
+  logMatchesCurrentFilters, logMatchesSearchFilter, logMatchesStatusFilter,
+  logPageFiltersActive, logPageItems, logRateAnimationFrames, logRateAnimations,
+  logRateDisplayedValues, logRateElements, logRateReducedMotion, logRateValues,
+  logRenderOptions, logStreamBatchTimer, logStreamController, logStreamPendingEntries,
+  logStreamReconnectAttempts, logStreamReconnectTimer, logStreamReloadTimer,
+  normalizeActiveRequest, normalizeActiveStreamPayload, normalizeLogCursor,
+  normalizeLogListRow, normalizeLogRate, normalizeLogStreamPayload, normalizeSnapshotBody,
+  openLogDetailDialog, openLogStream, outputTokensPerSecond, parseLogStreamEvent,
+  prettyBodyText, readStoredLogViewMode, reasoningEffortTitle,
+  refreshLatestLogCursorFromItems, refreshOpenLogDetail, renderCurrentLogPage,
+  renderLogConversation, renderLogDetailSection, renderLogErrorDetail,
+  renderLogFilterOptions, renderLogModel, renderLogReasoningEffort, renderLogRows,
+  resetLogPagination, returnToLatestLogPage, routeFollowerLine,
+  scheduleLogStreamBatchRender, scheduleLogStreamReconnect, scheduleLogStreamReload,
+  setLogActiveRequests, setLogDetailViewMode, setLogPageSize, setLogSensitiveHidden,
+  shouldStreamLogs, showLogDetail, showLogNewEntriesNotice, snapshotBodyForConversation,
+  snapshotBodyText, startActiveElapsedTicker, startLogStream, stopActiveElapsedTicker,
+  stopLogStream, storeLogViewMode, syncActiveLogRows, totalDurationRating,
+  updateActiveElapsedCells, updateLogConcurrency, updateLogPaginationControls,
+  updateLogRateValue, updateLogRates, updateLogRatesLabel, updateLogSensitiveToggle,
+  updateLogViewModeControls, visibleActiveRequests,
+};

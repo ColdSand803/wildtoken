@@ -1,3 +1,32 @@
+import { provide } from "./registry.js";
+import {
+  CHANNEL_DOCUMENT_KIND, CHANNEL_DOCUMENT_VERSION, CHANNEL_IMPORT_MAX_BYTES,
+  CHANNEL_IMPORT_MAX_ENTRIES, activeActionMenuButton, advancedSettings, batchActionsEl,
+  channelExportConfirm, channelExportDialog, channelExportIncludeKeys, channelExportScopeEl,
+  channelImportConfirm, channelImportDialog, channelImportFile, channelImportParsed,
+  channelImportPreview, channelImportText, el, fields, frag, hidePopoverLayer,
+  lastUpstreamLoadError, openActionMenuUpstreamId, parseEffortMappings, parseModelMappings,
+  replaceChildren, rows, selectedUpstreamIds, setStatus, showPopoverLayer, splitList, svg,
+  upstreamActionMenu, upstreamCardsContainer, upstreamDialog, upstreamSelectAll, upstreams,
+  upstreamsLoadedOnce, upstreamsLoading, viewGridBtn, viewListBtn,
+} from "./bootstrap.js";
+import {
+  scheduleRenderUpstreamSummary,
+} from "./dashboard.js";
+import {
+  fillUpstreamGroupOptions, readUpstreamGroupSelection,
+} from "./groups.js";
+import {
+  formatSeconds, renderLogFilterOptions,
+} from "./logs.js";
+import {
+  getFormModels, handleUpstreamAction,
+} from "./models.js";
+import {
+  DOWNSTREAM_CREDENTIAL_HEADERS, HEADER_NAME_PATTERN, NON_OVERRIDABLE_CHANNEL_HEADERS, api,
+  clearDialogMaximized, clearUpstreamFilters, getFilteredUpstreams, upstreamFiltersActive,
+} from "./shell.js";
+
 // Channel form, validation, table rendering, and channel operations.
 function parseHeaderOverrides(value = fields.extraHeaders.value) {
   let parsed;
@@ -1690,5 +1719,31 @@ if (upstreamCardsContainer) {
 if (currentUpstreamView === "grid") {
   setUpstreamView("grid");
 }
+/* 注册给 bootstrap 的跨层回调：它是底层，不能反过来 import 这里。 */
+provide("closeUpstreamActionMenu", closeUpstreamActionMenu);
 
-
+export {
+  CHANNEL_SPARK_VIEW, EMPTY_UPSTREAM_STATS, UPSTREAM_STATS_TTL_MS, actionMenuItems,
+  batchSetEnabled, bindChannelSparklineInteraction, buildChannelExportFilename,
+  cachedUpstreamHealth, cachedUpstreamStats, cancelPriorityEdit, cancelQuickImportFetch,
+  cancelUpstreamDialog, channelExportScope, closeBalanceDialog, closeChannelExportDialog,
+  closeChannelImportDialog, closeQuickImportDialog, closeUpstreamActionMenu,
+  closeUpstreamDialog, copyUpstreamInfo, createChannelCard, currentUpstreamView,
+  downloadJsonFile, duplicateUpstream, editUpstream, fetchAllUpstreamStats,
+  formatBalanceAmount, formatChannelImportResult, formatEffectiveWeight, formatMetric,
+  formatUpstreamClipboardText, formatZeroWeightNote, hasExtraHeaders, hasMappings,
+  hydrateVisibleCardStats, isFixedWeight, liveEffectiveRecoverySeconds,
+  loadChannelImportFile, loadUpstreams, openBalanceDialog, openChannelExportDialog,
+  openChannelImportDialog, openQuickImportDialog, openUpstreamActionMenu,
+  openUpstreamDialog, parseChannelImportDocument, parseEffortMappingsFromForm,
+  parseHeaderOverrides, parseQuickImport, payloadFromForm, pendingUpstreamGroupIds,
+  positionUpstreamActionMenu, priorityEditorIsOpen, reanchorUpstreamActionMenu,
+  refreshBalance, refreshChannelImportPreview, renderBalanceResult, renderBalanceRow,
+  renderCards, renderChannelExportScope, renderChannelImportPreview, renderHealthBars,
+  renderRows, renderSparkline, resetForm, runChannelExport, runChannelImport,
+  savePriorityEdit, selectedChannelImportMode, setAdvancedSettingsOpen,
+  setBalanceRefreshBusy, setQuickImportInputsDisabled, setUpstreamView, showBalance,
+  sparklineGradientSeq, startPriorityEdit, statsRefreshPromise, suggestNameFromUrl,
+  syncQuickImportFields, updateBatchToolbar, updateEffectiveWeightNotes,
+  updateQuickImportFillState, upstreamHealthCache, upstreamStatsCache, weightCell,
+};

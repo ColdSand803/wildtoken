@@ -14,6 +14,22 @@ import vm from "node:vm";
 const root = path.resolve(import.meta.dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
 
+/**
+ * 读源文件并剥掉 import / export 语句，给 vm 的 script 模式用。
+ *
+ * 模块化之后源文件带了 import，vm.runInContext 按脚本解析会直接
+ * SyntaxError。这里只是把模块语法拿掉；被剥掉的依赖由调用方在 context
+ * 里直接注入，跟模块化之前的做法一致。
+ */
+export function readScript(relative) {
+  return read(relative)
+    .replace(/^import\s*\{[^}]*\}\s*from\s*"[^"]+";/gm, "")
+    .replace(/^import\s+\w+\s+from\s*"[^"]+";/gm, "")
+    .replace(/^import\s*"[^"]+";/gm, "")
+    .replace(/\n*export\s*\{[^}]*\};\s*$/, "\n")
+    .replace(/^export\s+(?=(?:async\s+)?function|class|const|let|var)/gm, "");
+}
+
 /** 取出单个顶层函数体，好在不加载整个模块的情况下单独跑它。 */
 export function extractFunction(source, name) {
   const start = source.search(new RegExp(`(?:async\\s+)?function ${name}\\(`));

@@ -129,14 +129,19 @@ test("新建渠道和新建令牌都会清掉上一次的分组残留", () => {
   assert.match(tokens, /delete tokenGroupSelect\?\.dataset\.pendingGroupId;/);
 });
 
-test("groups.js 在 upstreams.js 与 tokens.js 之后加载", () => {
+test("分组填充函数的可见性由 import 保证，不再靠脚本顺序", () => {
+  /* 旧版本这里断言的是 admin.html 里三个 script 标签的先后：经典脚本共享
+     全局作用域，groups.js 的填充函数得在使用方之后定义才拿得到。改成 ES
+     模块后这个约束没了——依赖写在 import 里，执行顺序由依赖图定，换标签
+     位置不再能把它弄坏。所以改成锁真正的保证：使用方确实 import 了它们。 */
   const markup = read("static/admin.html");
-  const order = ["upstreams.js", "tokens.js", "groups.js"].map((file) =>
-    markup.indexOf(`/static/js/${file}`),
-  );
-  // 经典脚本共享全局作用域，groups.js 里的填充函数要在两者之后定义才拿得到。
-  assert.ok(order.every((position) => position > 0), "脚本标签缺失");
-  assert.deepEqual([...order].sort((a, b) => a - b), order);
+  assert.match(markup, /<script type="module" src="\/static\/js\/app\.js"><\/script>/);
+
+  for (const consumer of ["static/js/upstreams.js", "static/js/tokens.js"]) {
+    const source = read(consumer);
+    const block = source.match(/import\s*\{([^}]*)\}\s*from\s*"\.\/groups\.js";/);
+    assert.ok(block, `${consumer} 应从 groups.js 导入填充函数`);
+  }
 });
 
 test("渠道表的分组列在表头、列菜单与行渲染里三处齐全", () => {
@@ -165,7 +170,9 @@ test("渠道表的分组列在表头、列菜单与行渲染里三处齐全", ()
 /** 分组列的渲染靠 modelChipList，两个都要放进沙箱。 */
 function groupCellContext() {
   const source = read("static/js/bootstrap.js");
-  const context = createDomContext({ MAX_MODEL_CHIPS: 3, groupById: () => null });
+  /* bootstrap 不能反向 import groups.js，所以分组名是通过 registry 要的。
+     这里给一个返回 null 的 hook，模拟分组列表尚未加载。 */
+  const context = createDomContext({ MAX_MODEL_CHIPS: 3, invoke: () => null });
   vm.runInContext(extractFunction(source, "modelChipList"), context);
   vm.runInContext(extractFunction(source, "renderUpstreamGroups"), context);
   return context;

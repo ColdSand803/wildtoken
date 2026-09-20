@@ -1,3 +1,54 @@
+import {
+  LOG_COLUMNS_KEY, QUICK_IMPORT_DEFAULT_PRIORITY, QUICK_IMPORT_FILL_LABEL,
+  UPSTREAM_COLUMNS_KEY, activeActionMenuButton, adminLogoutButton, adminTokenDialog,
+  adminTokenForm, adminTokenInput, balanceClose, balanceDialog, balanceRefresh,
+  channelExportButton, channelExportCancel, channelExportClose, channelExportConfirm,
+  channelExportDialog, channelImportButton, channelImportCancel, channelImportClose,
+  channelImportConfirm, channelImportDialog, channelImportFile, channelImportText, debounce,
+  dismissOnBackdropClick, fetchModelsButton, fields, form, formModelAddManualButton,
+  formModelManualInput, formTitle, joinList, joinModelMappings, logClientFilter, logColMenu,
+  logColMenuBtn, logCurrentCursor, logCursorStack, logDetailClose, logDetailDialog,
+  logDetailSections, logFirstButton, logHasMore, logNextButton, logNextCursor, logOffset,
+  logPageSize, logPageSizeSelect, logPrevButton, logRefreshButton, logRows, logSearchInput,
+  logSensitiveHidden, logSensitiveToggle, logStatusFilter, logTable, logUpstreamFilter,
+  manageModelsButton, modelAddManualButton, modelCancelSelectionButton, modelClearAllButton,
+  modelDialog, modelDialogClose, modelDialogState, modelDialogSummary, modelDialogTitle,
+  modelFilter, modelManualInput, modelOptions, modelRemoveUnavailableButton,
+  modelSaveSelectionButton, modelSelectAllButton, modelSelectedOnly, modelSelectionCount,
+  modelSelectionPreview, navLinks, newButton, parseManualModelEntry, persistedFormApiKey,
+  quickImportApiKeyInput, quickImportBaseUrlInput, quickImportButton, quickImportCancel,
+  quickImportClose, quickImportDialog, quickImportFetchController, quickImportFillButton,
+  quickImportText, readModelMappingsLenient, requestConfirm, requestDetailGrid, resetButton,
+  rows, selectedUpstreamIds, setStatus, splitList, uniqueList, upstreamActionMenu,
+  upstreamColMenu, upstreamColMenuBtn, upstreamDialog, upstreamDialogClose, upstreamTable,
+  upstreams,
+} from "./bootstrap.js";
+import {
+  loadGroups,
+} from "./groups.js";
+import {
+  closeLogDetailDialog, loadLogs, renderLogDetailSection, resetLogPagination,
+  returnToLatestLogPage, setLogDetailViewMode, setLogPageSize, setLogSensitiveHidden,
+  showLogDetail, updateLogViewModeControls,
+} from "./logs.js";
+import {
+  api, clearAdminToken, clearDialogMaximized, clearLogFilters, clearUpstreamFilters,
+  closeAdminTokenDialog, currentViewFromHash, openModelTestDialog, setAdminToken,
+  showAdminTokenError, switchView,
+} from "./shell.js";
+import {
+  handleBaseUrlAction, loadTokens,
+} from "./tokens.js";
+import {
+  cancelPriorityEdit, cancelQuickImportFetch, cancelUpstreamDialog, closeBalanceDialog,
+  closeChannelExportDialog, closeChannelImportDialog, closeQuickImportDialog,
+  closeUpstreamActionMenu, closeUpstreamDialog, loadChannelImportFile, loadUpstreams,
+  openChannelExportDialog, openChannelImportDialog, openQuickImportDialog,
+  openUpstreamActionMenu, openUpstreamDialog, parseHeaderOverrides, payloadFromForm,
+  refreshChannelImportPreview, runChannelExport, runChannelImport, savePriorityEdit,
+  startPriorityEdit, syncQuickImportFields, updateBatchToolbar, updateQuickImportFillState,
+} from "./upstreams.js";
+
 // Model selection plus application authentication and initial loading.
 const FORM_MODEL_PREVIEW_LIMIT = 6;
 
@@ -1207,7 +1258,7 @@ function initApp() {
   resetForm();
   /* 渠道列表要把 group_ids 翻成分组名，所以先把分组拉回来。失败也不拦着启动，
      渠道页会退化成显示 #id。 */
-  if (typeof loadGroups === "function") {
+  {
     loadGroups({ render: false }).catch(() => {});
   }
   switchView(currentViewFromHash());
@@ -1220,3 +1271,12 @@ function initApp() {
     loadLogs().catch(() => {});
   }
 }
+
+export {
+  FORM_MODEL_PREVIEW_LIMIT, addFormManualModels, addManualModels, closeModelDialog,
+  commitFormManualModels, fetchModelsForUpstream, fetchModelsFromForm, getFormMappings,
+  getFormModels, getUnavailableSelectedModels, getVisibleDialogMappings,
+  getVisibleDialogModels, handleUpstreamAction, initApp, makeSelectionChip,
+  openFormModelManager, openModelDialog, renderFormModelSelection, renderModelDialogSummary,
+  renderModelOptions, saveModelSelection, setFormModels, updateRemoveUnavailableButton,
+};

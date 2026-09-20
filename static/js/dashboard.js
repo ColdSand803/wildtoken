@@ -1,3 +1,28 @@
+import {
+  DASHBOARD_CHANNEL_NAME_HIDDEN_KEY, DASHBOARD_DEFAULT_RANGE, DASHBOARD_LOG_LIMIT,
+  DASHBOARD_RANGE_VALUES, DASHBOARD_TOP_LIMIT, dashboardChannelNameHidden,
+  dashboardChannelNameToggle, dashboardChannelTokensMeta, dashboardChannelsMeta,
+  dashboardCustomEndDate, dashboardCustomRange, dashboardCustomStartDate,
+  dashboardErrorRows, dashboardKpis, dashboardLatencyChart, dashboardLatencyMeta,
+  dashboardLoading, dashboardLogItems, dashboardModelTokensMeta, dashboardModelsMeta,
+  dashboardOverview, dashboardPanel, dashboardRequestKpis, dashboardRuntimeKpis,
+  dashboardRuntimeMetrics, dashboardScope, dashboardSelectedRangeMeta, dashboardStatusChart,
+  dashboardStatusMeta, dashboardTimePreset, dashboardTimeRange, dashboardTokenKpis,
+  dashboardTokenRangeMeta, dashboardTokenUsage, dashboardTopChannelTokens,
+  dashboardTopChannels, dashboardTopModelTokens, dashboardTopModels, dashboardTopStats,
+  debounce, el, formatLogTimestamp, frag, lastDashboardLoadError, logTimeFormatter,
+  replaceChildren, setStatus, svg, upstreams, upstreamsLoadedOnce,
+} from "./bootstrap.js";
+import {
+  formatSeconds, formatStatusBadge,
+} from "./logs.js";
+import {
+  api,
+} from "./shell.js";
+import {
+  loadUpstreams,
+} from "./upstreams.js";
+
 // ── Dashboard ────────────────────────────────────────────
 // Range state lives in bootstrap.js with the other shared view state.
 
@@ -1525,3 +1550,23 @@ document.querySelectorAll(".dashboard-date-field").forEach((field) => {
 window.addEventListener("resize", () => {
   window.requestAnimationFrame(syncDashboardRangeThumb);
 });
+
+export {
+  DASHBOARD_CUSTOM_RANGE_MOTION_MS, GROWTH_RATE_MIN_BASE, KPI_COUNT_DURATION_MS,
+  KPI_SPARK_VIEW, SPARK_MORPH_MS, SPARK_MORPH_SAMPLES, TONE_RANK, animateKpiNumbers,
+  animateSparkMorph, bindKpiRequestSparkInteraction, bindLatencySparkInteractions,
+  buildKpiBackgroundSpark, buildSparklineSvg, cacheHitRateCard, cleanupRuntimeHint,
+  dashboardCustomRangeHideTimer, dashboardRangeParams, dashboardShowsSingleWindow,
+  dashboardSparkGradientSeq, dashboardTopWindowLabel, dropKpiNumberKey, easeInOutCubic,
+  formatBucketSpan, formatCompactNumber, formatDashboardCacheHitRate,
+  formatDashboardDateLabel, formatKpiCount, formatRuntimeDuration, getTimeRangeLabel,
+  kpiBackgroundSparkPaths, kpiNumberContainerKeys, kpiNumberFrames, kpiNumberMemory,
+  kpiSparkPointAtRatio, kpiToneMemory, lastErrorRateDelta, lastLatencySparkRecords,
+  lastRequestSparkRecords, latencySparkPaths, latencySparkPointSeries, loadDashboardData,
+  prefersReducedDashboardMotion, previousErrorRatePct, renderDashboard,
+  renderDashboardKpiCards, renderDashboardRankList, requestCountCard, resampleRecords,
+  resampleSeries, resetDashboardErrorRateBaseline, scheduleRenderUpstreamSummary,
+  setDashboardChannelNameHidden, setDashboardCustomRangeOpen, smoothSeries, sparkGradient,
+  syncDashboardDateMirrors, syncDashboardRangeChips, syncDashboardRangeThumb,
+  tokenUsageCard, updateDashboardChannelNameToggle,
+};

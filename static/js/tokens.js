@@ -1,3 +1,21 @@
+import {
+  DEFAULT_REFRESH_MS, consoleWallClockToTimestamp, consoleZoneFields, copyTextToClipboard,
+  dismissOnBackdropClick, el, frag, logTimeFormatter, newTokenButton, pageVisible,
+  parseLogTimestamp, replaceChildren, requestConfirm, setStatus, toStoredTimestamp,
+  tokenCustomCopy, tokenCustomHint, tokenCustomInput, tokenCustomLabel,
+  tokenDescriptionInput, tokenDialog, tokenDialogClose, tokenEnabledCheckbox,
+  tokenExpiresInput, tokenExpiresPresets, tokenExpiresPreview, tokenForm, tokenFormTitle,
+  tokenIdInput, tokenLimitInput, tokenNameInput, tokenRateLimitInput, tokenRefreshTimer,
+  tokenResetButton, tokenRows, tokens, tokensLoadedOnce, tokensLoading,
+} from "./bootstrap.js";
+import {
+  fillTokenGroupOptions, tokenGroupSelect,
+} from "./groups.js";
+import {
+  api, clearDialogMaximized, clearTokenFilters, emptyStateRow, getFilteredTokens,
+  noMatchStateRow, skeletonRows, tokenFiltersActive, updateLiveIndicator,
+} from "./shell.js";
+
 // ── 有效期 ───────────────────────────────────────────────────
 
 /* 有效期输入接受两种写法：1d3h 这样的时长，或 2026-09-01 12:00 这样的时刻。
@@ -726,3 +744,15 @@ tokenForm.addEventListener("submit", async (event) => {
     setStatus(`保存失败：${error.message}`, "error");
   }
 });
+
+export {
+  EXPIRY_ABSOLUTE_PATTERN, EXPIRY_INPUT_ERROR, EXPIRY_INPUT_HINT, EXPIRY_SOON_MS,
+  EXPIRY_UNIT_SECONDS, QUOTA_UNITS, TOKEN_COPY_GLYPH, TOKEN_CUSTOM_COPY, TOKEN_SEALED_GLYPH,
+  TOKEN_SEALED_TITLE, TOKEN_WEAK_BYTES, closeTokenDialog, confirmWeakToken,
+  customTokenByteLength, editToken, expiryBadgeTone, expiryCell, expiryInputValue,
+  formatExpiryDistance, formatTokenCount, handleBaseUrlAction, handleTokenAction,
+  loadTokens, openTokenDialog, parseExpiryInput, quotaCell, renderExpiryPreview,
+  renderTokenRows, resetTokenCustomCopyButton, resetTokenForm, setTokenCustomField,
+  startTokenRefresh, stopTokenRefresh, syncTokenCustomCopyButton, tokenCopyConfirmedId,
+  tokenCopyConfirmedTimer, tokenCustomCopyTimer, tokenCustomOriginal, tokenPreviewCell,
+};
