@@ -40,6 +40,12 @@ const upstreamActionMenu = document.querySelector("#upstream-action-menu");
 const rows = document.querySelector("#upstream-rows");
 const upstreamSummary = document.querySelector("#upstream-summary");
 const upstreamCardsContainer = document.querySelector("#upstream-cards");
+/* 归档区的三个节点：整块（hidden 是「一个归档渠道都没有」）、
+   折叠标题按钮、装行的 tbody。 */
+const archivedPanel = document.querySelector("#archived-panel");
+const archivedToggle = document.querySelector("#archived-toggle");
+const archivedRows = document.querySelector("#archived-rows");
+const archivedCount = document.querySelector("#archived-count");
 const viewGridBtn = document.querySelector("#upstream-view-grid");
 const viewListBtn = document.querySelector("#upstream-view-list");
 const upstreamTableWrap = document.querySelector(".view[data-view='upstreams'] .table-wrap");

@@ -149,6 +149,8 @@ function getFilteredUpstreams() {
   const query = upstreamSearchQuery.trim().toLowerCase();
   const status = upstreamStatusFilterValue;
   return upstreams.filter((upstream) => {
+    // 归档渠道在主列表里不出现，它们在表格下方的折叠区。
+    if (upstream.archived) return false;
     if (status === "enabled" && !upstream.enabled) return false;
     if (status === "disabled" && upstream.enabled) return false;
     if (status === "effective-zero" && Number(upstream.effective_weight) > 0) return false;
@@ -162,6 +164,20 @@ function getFilteredUpstreams() {
       ...Object.keys(upstream.model_mappings || {}),
       ...Object.values(upstream.model_mappings || {}),
     ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(query);
+  }).sort(compareUpstreams);
+}
+
+/* 归档区有一套自己的筛选：不带状态筛选（归档本身就是状态），
+   只用搜索词。这样主列表搜不到时，归档区还能找到想恢复的渠道。 */
+function getFilteredArchivedUpstreams() {
+  const query = upstreamSearchQuery.trim().toLowerCase();
+  return upstreams.filter((upstream) => {
+    if (!upstream.archived) return false;
+    if (!query) return true;
+    const haystack = [upstream.name, upstream.base_url, String(upstream.id)]
       .join(" ")
       .toLowerCase();
     return haystack.includes(query);

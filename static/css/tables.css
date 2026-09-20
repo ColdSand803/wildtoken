@@ -1054,3 +1054,89 @@ td.no-match-state {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+
+/* ── 已归档渠道 ─────────────────────────────────────────────
+   主表格下方一块可折叠区域。收起时只露标题一行，展开后才看到表格。
+   不碰主表格的样式：这里是另一张表，靠间距和标题行和上面区分。 */
+
+.archived-panel {
+  border-top: 1px solid var(--line-soft);
+  margin-top: 18px;
+}
+
+.archived-toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 13px;
+  gap: 8px;
+  padding: 10px 2px;
+  width: 100%;
+}
+
+.archived-toggle:hover {
+  color: var(--text);
+}
+
+.archived-toggle:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 1px;
+}
+
+.archived-chevron {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.archived-toggle.is-open .archived-chevron {
+  transform: rotate(90deg);
+}
+
+.archived-title {
+  font-weight: 600;
+}
+
+.archived-count {
+  background: var(--panel-subtle);
+  border-radius: 999px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 7px;
+}
+
+.archived-hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: auto;
+}
+
+/* 归档行整行降饱和：眼一扫就过，不会和上面真正在跑的渠道抢注意力。 */
+.row-archived {
+  color: var(--muted-strong);
+}
+
+.row-archived:hover {
+  color: var(--text);
+}
+
+.archived-tag {
+  align-items: center;
+  color: var(--muted-strong);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.archived-tag-dot {
+  background: var(--muted);
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  width: 6px;
+}

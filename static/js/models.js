@@ -610,6 +610,44 @@ async function handleUpstreamAction(button) {
     return;
   }
 
+  if (button.dataset.action === "archive" || button.dataset.action === "unarchive") {
+    const archiving = button.dataset.action === "archive";
+    const verb = archiving ? "归档" : "恢复";
+    // 归档改的是「是否参与路由」，后果比删它小但比停用大，确认一下。
+    if (!(await requestConfirm({
+      title: archiving ? "归档这个渠道？" : "恢复这个渠道？",
+      message: archiving
+        ? `「${upstream.name}」将被停用并移出路由，可在表格下方展开「已归档渠道」查看和恢复。`
+        : `「${upstream.name}」将恢复归档前的启用状态并重新参与路由。`,
+      confirmLabel: verb,
+      danger: false,
+    }))) {
+      return;
+    }
+
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    button.classList.add("is-busy");
+    try {
+      const updated = await api(`/api/admin/upstreams/${id}/archived`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived: archiving }),
+      });
+      Object.assign(upstream, updated);
+      // 恢复后它回到主列表，展开归档区已经没有意义。
+      if (!archiving) closeArchivedPanel();
+      await loadUpstreams();
+      setStatus(`渠道 ${updated.name} 已${verb}。`, "ok");
+    } catch (error) {
+      setStatus(`渠道${verb}失败：${error.message}`, "error");
+    } finally {
+      button.disabled = false;
+      button.removeAttribute("aria-busy");
+      button.classList.remove("is-busy");
+    }
+    return;
+  }
+
   if (button.dataset.action === "test") {
     try {
       const result = await api(`/api/admin/upstreams/${id}/test`, {

@@ -36,11 +36,27 @@ test("upstream action menu distinguishes channel clone and credential copy actio
   // 菜单真跑一次：两个动作名字相近，弄反了会把“复制凭据”变成“新建渠道”。
   const context = createDomContext();
   vm.runInContext(extractFunction(read("static/js/upstreams.js"), "actionMenuItems"), context);
-  const html = vm.runInContext("actionMenuItems(7).outerHTML", context);
+  context.upstream = { id: 7, name: "primary", archived: false };
+  const html = vm.runInContext("actionMenuItems(upstream).outerHTML", context);
 
   assert.match(html, /data-action="duplicate" data-id="7">复制渠道<\/button>/);
   assert.match(html, /data-action="copy-info" data-id="7">复制渠道信息<\/button>/);
   assert.doesNotMatch(html, /data-action="duplicate"[^>]*>复制<\/button>/);
+});
+
+test("归档渠道的菜单是恢复而不是停用类操作", () => {
+  /* 归档渠道不路由，给它「测试连接」没有意义；而恢复正常不该藏在
+     「编辑」里让人找不到。 */
+  const context = createDomContext();
+  vm.runInContext(extractFunction(read("static/js/upstreams.js"), "actionMenuItems"), context);
+  context.upstream = { id: 9, name: "parked", archived: true };
+  const html = vm.runInContext("actionMenuItems(upstream).outerHTML", context);
+
+  assert.match(html, /data-action="unarchive" data-id="9">恢复<\/button>/);
+  assert.doesNotMatch(html, /data-action="archive"/);
+  // 对一个不路由的渠道测连接，得到的失败说明不了任何事。
+  assert.doesNotMatch(html, /data-action="test"/);
+  assert.doesNotMatch(html, /data-action="balance"/);
 });
 
 test("upstream credential clipboard text keeps the requested two-line shape", () => {

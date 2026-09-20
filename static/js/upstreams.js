@@ -513,6 +513,9 @@ function setUpstreamView(view) {
     if (upstreamCardsContainer) upstreamCardsContainer.hidden = false;
     if (viewGridBtn) viewGridBtn.setAttribute("aria-pressed", "true");
     if (viewListBtn) viewListBtn.setAttribute("aria-pressed", "false");
+    // 归档区跟着表格走：它复用表格的列结构，卡片视图里没有对应形态。
+    if (archivedPanel) archivedPanel.hidden = true;
+    if (archivedToggle) archivedToggle.classList.remove("is-open");
     renderCards();
     reanchorUpstreamActionMenu();
   } else {
@@ -520,6 +523,8 @@ function setUpstreamView(view) {
     if (upstreamCardsContainer) upstreamCardsContainer.hidden = true;
     if (viewGridBtn) viewGridBtn.setAttribute("aria-pressed", "false");
     if (viewListBtn) viewListBtn.setAttribute("aria-pressed", "true");
+    // 回到列表视图时按当前数据重建归档区，没有归档渠道就整块消失。
+    renderArchivedRows();
     reanchorUpstreamActionMenu();
   }
 }
@@ -637,6 +642,7 @@ function renderRows() {
   rows.append(fragment);
   updateBatchToolbar();
   applyAllColumnVisibility();
+  renderArchivedRows();
 
   // Also update cards if in grid view
   if (currentUpstreamView === "grid") {
@@ -646,6 +652,90 @@ function renderRows() {
      此时锚到表格里的按钮会拿到全 0 的 rect，菜单被夹到 (8, 8)。 */
   if (hadOpenMenu) {
     reanchorUpstreamActionMenu();
+  }
+}
+
+/* 归档区：表格下方一个折叠块。
+
+   收起来是默认的——归档渠道是「暂时不用但不想删」的，日常不需要看见它们。
+   展开状态只存在内存里：刷新回到收起，符合这个区域的定位。
+
+   没有复选框，因为批量操作不该碰归档渠道：批量启用/停用改的是 enabled，
+   而一个归档渠道恢复时该是什么状态由归档时记下的值决定，不该被批量覆盖。 */
+function renderArchivedRows() {
+  if (!archivedPanel) return;
+  const archived = getFilteredArchivedUpstreams();
+
+  // 一个都没有就整块消失，而不是留个空的折叠标题。
+  archivedPanel.hidden = archived.length === 0;
+  if (archivedCount) archivedCount.textContent = String(archived.length);
+  if (archived.length === 0) {
+    closeArchivedPanel();
+    return;
+  }
+  archivedRows.replaceChildren();
+
+  const fragment = document.createDocumentFragment();
+  for (const upstream of archived) {
+    const row = document.createElement("tr");
+    row.className = "row-archived";
+    row.dataset.upstreamId = String(upstream.id);
+    row.dataset.archivedId = String(upstream.id);
+    row.append(
+      el("td", { class: "col-id", dataset: { col: "id" } }, upstream.id),
+      el("td", { class: "name-cell", dataset: { col: "name" } },
+        el("div", { class: "name-stack" },
+          el("strong", { title: upstream.name }, upstream.name),
+          renderBaseUrlCell(upstream))),
+      el("td", { class: "match-cell", dataset: { col: "models" } }, renderModelMatches(upstream)),
+      el("td", { class: "match-cell", dataset: { col: "groups" } }, renderUpstreamGroups(upstream)),
+      el("td", { class: "col-priority", dataset: { col: "priority" } }, upstream.priority),
+      el("td", { class: "col-weight", dataset: { col: "weight" } },
+        el("div", { class: "weight-stack" }, weightCell(upstream))),
+      el("td", { class: "col-status", dataset: { col: "status" } },
+        // 不给开关：在这里启用会让「已归档」和「正在启用」同时成立，
+        // 而它依旧不路由，看着像坏了。恢复渠道用的是操作菜单里的「恢复」。
+        el("span", { class: "archived-tag" },
+          el("span", { class: "archived-tag-dot", "aria-hidden": "true" }),
+          "已归档")),
+      el("td", { class: "row-actions col-actions", dataset: { col: "actions" } },
+        el("button", {
+          type: "button", class: "secondary action-menu-trigger",
+          dataset: { menuId: upstream.id },
+          "aria-haspopup": "menu", "aria-expanded": "false",
+          "aria-label": `打开 ${upstream.name} 的操作菜单`,
+          title: "操作",
+        }, el("span", { "aria-hidden": "true" }, "⋮"))));
+    fragment.append(row);
+  }
+  archivedRows.append(fragment);
+  applyAllColumnVisibility();
+}
+
+function openArchivedPanel() {
+  if (!archivedToggle || !archivedPanel) return;
+  const body = document.querySelector("#archived-body");
+  if (body) body.hidden = false;
+  archivedToggle.setAttribute("aria-expanded", "true");
+  archivedToggle.classList.add("is-open");
+}
+
+function closeArchivedPanel() {
+  if (!archivedToggle || !archivedPanel) return;
+  const body = document.querySelector("#archived-body");
+  if (body) body.hidden = true;
+  archivedToggle.setAttribute("aria-expanded", "false");
+  archivedToggle.classList.remove("is-open");
+  // 收起时若菜单停在归档区里，它所属的行已经看不见了。
+  closeUpstreamActionMenu();
+}
+
+function toggleArchivedPanel() {
+  const body = document.querySelector("#archived-body");
+  if (body?.hidden === false) {
+    closeArchivedPanel();
+  } else {
+    openArchivedPanel();
   }
 }
 
@@ -1176,12 +1266,28 @@ function updateEffectiveWeightNotes() {
   scheduleRenderUpstreamSummary();
 }
 
-function actionMenuItems(upstreamId) {
+/* archive 与否是调用方的事实，不该由菜单回头翻全局列表——那样菜单就看
+   不见只在沙箱里存在的场景，也让「菜单内容取决于列表当前内容」这条隐式
+   依赖藏进了函数内部。 */
+function actionMenuItems(upstream) {
+  const upstreamId = upstream.id;
+  const archived = Boolean(upstream.archived);
+  // 归档区里的项和主列表不同：恢复替代归档，且不给测试类操作——
+  // 对一个不路由的渠道测连接没有意义。
   const item = (action, label, extraClass) => el("button", {
     type: "button", role: "menuitem", class: extraClass || null,
     dataset: { action, id: upstreamId },
   }, label);
   const separator = () => el("div", { class: "action-menu-separator", role: "separator" });
+
+  if (archived) {
+    return frag(
+      item("unarchive", "恢复", "primary"),
+      item("edit", "编辑"),
+      item("copy-info", "复制渠道信息"),
+      separator(),
+      item("delete", "删除", "danger"));
+  }
 
   return frag(
     item("test-model", "测试模型"),
@@ -1194,6 +1300,7 @@ function actionMenuItems(upstreamId) {
     item("duplicate", "复制渠道"),
     item("copy-info", "复制渠道信息"),
     separator(),
+    item("archive", "归档"),
     item("delete", "删除", "danger"));
 }
 
@@ -1204,10 +1311,12 @@ function openUpstreamActionMenu(button) {
   }
 
   closeUpstreamActionMenu();
+  const upstream = upstreams.find((item) => item.id === Number(button.dataset.menuId));
+  if (!upstream) return;
   activeActionMenuButton = button;
-  openActionMenuUpstreamId = Number(button.dataset.menuId);
+  openActionMenuUpstreamId = upstream.id;
   button.setAttribute("aria-expanded", "true");
-  replaceChildren(upstreamActionMenu, actionMenuItems(Number(button.dataset.menuId)));
+  replaceChildren(upstreamActionMenu, actionMenuItems(upstream));
   upstreamActionMenu.style.visibility = "hidden";
   showPopoverLayer(upstreamActionMenu, true);
   window.requestAnimationFrame(() => {

@@ -657,6 +657,16 @@ if (upstreamStatusFilter) {
     }
   });
 }
+/* 折叠开关用 click 而不是 change：它包着计数和提示文字，不是表单控件。
+   aria-expanded 由 openArchivedPanel/closeArchivedPanel 维护。 */
+if (archivedToggle) {
+  archivedToggle.addEventListener("click", () => {
+    toggleArchivedPanel();
+  });
+}
+/* 归档渠道没有复选框，所以「全选」不能把归档行卷进来。
+   rows 只含主列表的 tbody，这里天然不会选中归档行——
+   但重新渲染后要同步一次，否则复选框会停在旧状态。 */
 if (tokenSearchInput) {
   tokenSearchInput.addEventListener(
     "input",

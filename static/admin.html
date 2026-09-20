@@ -412,6 +412,33 @@
                 <tbody id="upstream-rows"></tbody>
               </table>
             </div>
+            <section class="archived-panel" id="archived-panel" hidden>
+              <button type="button" class="archived-toggle" id="archived-toggle" aria-expanded="false" aria-controls="archived-body">
+                <span class="archived-chevron" aria-hidden="true">▸</span>
+                <span class="archived-title">已归档渠道</span>
+                <span class="archived-count" id="archived-count">0</span>
+                <span class="archived-hint">不参与路由</span>
+              </button>
+              <div class="archived-body" id="archived-body" hidden>
+                <div class="table-wrap">
+                  <table class="admin-table upstream-table">
+                    <thead>
+                      <tr>
+                        <th class="col-id" data-col="id">ID</th>
+                        <th data-col="name">渠道名</th>
+                        <th data-col="models">模型匹配</th>
+                        <th data-col="groups">分组</th>
+                        <th class="col-priority" data-col="priority">优先级</th>
+                        <th class="col-weight" data-col="weight">权重</th>
+                        <th class="col-status" data-col="status">状态</th>
+                        <th class="col-actions" data-col="actions">操作</th>
+                      </tr>
+                    </thead>
+                    <tbody id="archived-rows"></tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
             <div id="upstream-cards" class="upstream-cards-grid" hidden>
               <!-- Cards will be rendered by upstreams.js -->
             </div>
