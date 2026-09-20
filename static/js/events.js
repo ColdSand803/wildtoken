@@ -811,24 +811,24 @@ function renderCommandPaletteList(query = "") {
     commandPaletteActiveIndex = Math.max(0, commandPaletteVisible.length - 1);
   }
   if (commandPaletteVisible.length === 0) {
-    commandPaletteList.innerHTML = `<div class="command-palette-empty">无匹配命令</div>`;
+    replaceChildren(commandPaletteList,
+      el("div", { class: "command-palette-empty" }, "无匹配命令"));
     return;
   }
-  commandPaletteList.innerHTML = commandPaletteVisible
-    .map((cmd, index) => `
-      <button
-        type="button"
-        class="command-palette-item${index === commandPaletteActiveIndex ? " is-active" : ""}"
-        role="option"
-        data-command-id="${escapeHtml(cmd.id)}"
-        aria-selected="${index === commandPaletteActiveIndex}"
-      >
-        <span class="command-palette-item-title">${escapeHtml(cmd.title)}</span>
-        ${cmd.keys ? `<span class="command-palette-item-keys">${escapeHtml(cmd.keys)}</span>` : "<span></span>"}
-        <span class="command-palette-item-subtitle">${escapeHtml(cmd.subtitle)}</span>
-      </button>
-    `)
-    .join("");
+  replaceChildren(commandPaletteList, commandPaletteVisible.map((cmd, index) =>
+    el("button", {
+      type: "button",
+      class: `command-palette-item${index === commandPaletteActiveIndex ? " is-active" : ""}`,
+      role: "option",
+      dataset: { commandId: cmd.id },
+      "aria-selected": String(index === commandPaletteActiveIndex),
+    },
+      el("span", { class: "command-palette-item-title" }, cmd.title),
+      // 第二格固定占位：没快捷键也要给一个空 span，否则第三格会向前塔。
+      cmd.keys
+        ? el("span", { class: "command-palette-item-keys" }, cmd.keys)
+        : el("span", {}),
+      el("span", { class: "command-palette-item-subtitle" }, cmd.subtitle))));
 }
 
 function openCommandPalette() {

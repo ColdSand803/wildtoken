@@ -35,7 +35,7 @@ function renderFormModelSelection() {
   const mappings = Object.entries(getFormMappings());
   const total = models.length + mappings.length;
   modelSelectionCount.textContent = total ? `${total} 项` : "未选择";
-  modelSelectionPreview.innerHTML = "";
+  modelSelectionPreview.replaceChildren();
 
   if (total === 0) {
     const empty = document.createElement("span");
@@ -211,7 +211,7 @@ function renderModelDialogSummary() {
 function renderModelOptions() {
   const visibleModels = getVisibleDialogModels();
   const visibleMappings = getVisibleDialogMappings();
-  modelOptions.innerHTML = "";
+  modelOptions.replaceChildren();
   renderModelDialogSummary();
 
   if (visibleModels.length === 0 && visibleMappings.length === 0) {
@@ -582,7 +582,6 @@ async function handleUpstreamAction(button) {
 
   if (button.dataset.action === "toggle-enabled") {
     const nextEnabled = !upstream.enabled;
-    const originalMarkup = button.innerHTML;
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
     button.classList.add("is-busy");
@@ -602,7 +601,6 @@ async function handleUpstreamAction(button) {
       button.disabled = false;
       button.removeAttribute("aria-busy");
       button.classList.remove("is-busy");
-      button.innerHTML = originalMarkup;
       setStatus(`切换渠道状态失败：${error.message}`, "error");
     }
     return;

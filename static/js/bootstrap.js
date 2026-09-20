@@ -833,7 +833,7 @@ function closeCustomSelect(restoreFocus = false) {
   selectActiveIndex = -1;
   selectOptionButtons = [];
   if (selectPanel && !selectPanel.hidden) {
-    selectPanel.innerHTML = "";
+    selectPanel.replaceChildren();
     selectPanel.style.visibility = "";
     selectPanel.style.width = "";
     selectPanel.style.left = "";
@@ -919,7 +919,7 @@ function openCustomSelect(select) {
   activeSelect = select;
   select.focus({ preventScroll: true });
   const entries = selectOptionEntries(select);
-  selectPanel.innerHTML = "";
+  selectPanel.replaceChildren();
   selectOptionButtons = [];
 
   if (!entries.length) {
@@ -1209,8 +1209,15 @@ function applyProps(node, props) {
     if (key === "dataset") {
       Object.assign(node.dataset, value);
     } else if (key === "style") {
-      if (typeof value === "string") node.style.cssText = value;
-      else Object.assign(node.style, value);
+      if (typeof value === "string") {
+        node.style.cssText = value;
+      } else {
+        for (const [prop, propValue] of Object.entries(value)) {
+          // 自定义属性（--kpi-i 这类）必须走 setProperty，直接赋值不生效。
+          if (prop.startsWith("--")) node.style.setProperty(prop, propValue);
+          else node.style[prop] = propValue;
+        }
+      }
     } else if (key.startsWith("on") && typeof value === "function") {
       node.addEventListener(key.slice(2).toLowerCase(), value);
     } else if (value === true) {
@@ -1582,7 +1589,7 @@ function applyAllColumnVisibility() {
 
 function renderColumnMenu(menu, columns, labels, locked, storageKey, table) {
   if (!menu) return;
-  menu.innerHTML = "";
+  menu.replaceChildren();
   const fragment = document.createDocumentFragment();
   for (const [key, label] of Object.entries(labels)) {
     const row = document.createElement("label");
