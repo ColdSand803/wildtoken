@@ -23,10 +23,14 @@ function useDialog(open: boolean) {
 export function ChannelExportDialog({
   open,
   document: doc,
+  includeKeys,
+  onToggleKeys,
   onClose,
 }: {
   open: boolean;
   document: ChannelExportDocument | null;
+  includeKeys: boolean;
+  onToggleKeys: (next: boolean) => void;
   onClose: () => void;
 }) {
   const ref = useDialog(open);
@@ -37,9 +41,28 @@ export function ChannelExportDialog({
       <div className="modal-head">
         <div>
           <h2>导出渠道</h2>
-          <p>{doc ? `${doc.channels.length} 个渠道。API Key 不包含在内。` : "准备中…"}</p>
+          <p>
+            {doc
+              ? `${doc.channels.length} 个渠道。导出为 JSON，包含模型、映射、优先级、权重与 Header 覆盖。`
+              : "准备中…"}
+          </p>
         </div>
       </div>
+      {/* 默认带密钥。不带密钥的备份看着完整，导回去每个渠道都要重填。 */}
+      <div className="toggle-list">
+        <label className="toggle-row">
+          <input
+            type="checkbox"
+            checked={includeKeys}
+            onChange={(event) => onToggleKeys(event.target.checked)}
+          />
+          <span>
+            <strong>包含 API Key</strong>
+            <small>取消后导出文件不含密钥；用它覆盖导入时会保留目标渠道已有的密钥。</small>
+          </span>
+        </label>
+      </div>
+
       <textarea readOnly rows={14} value={json} aria-label="导出的渠道 JSON" />
       <div className="modal-actions">
         <button type="button" className="secondary" onClick={onClose}>

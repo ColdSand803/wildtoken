@@ -941,6 +941,49 @@ async function main() {
       await page.press("Escape");
     });
 
+    /* 不带密钥的备份看着完整，导回去每个渠道都要重填。直接比导出文本里
+       有没有密钥字段，不看开关勾没勾。 */
+    await check("导出默认带密钥，关掉后不带", async () => {
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("button")].find(
+          (node) => node.textContent.trim() === "导出",
+        );
+        if (!button) throw new Error("找不到导出按钮");
+        button.click();
+      });
+      await page.waitForSelector("dialog.quick-import-dialog[open]", { label: "导出窗" });
+
+      const withKeys = await page.waitFor(
+        () => {
+          const text = document.querySelector("dialog.quick-import-dialog[open] textarea")?.value ?? "";
+          return text.includes("channels") ? text : false;
+        },
+        { label: "导出文本", timeout: 10_000 },
+      );
+      assert(withKeys.includes("api_key"), "默认导出应带密钥字段");
+
+      // 关掉开关要重新取一份，而不是在前端裁。
+      await page.click("dialog.quick-import-dialog[open] .toggle-row input[type=checkbox]");
+      const withoutKeys = await page.waitFor(
+        () => {
+          const text = document.querySelector("dialog.quick-import-dialog[open] textarea")?.value ?? "";
+          return text.includes("channels") && !text.includes("api_key") ? text : false;
+        },
+        { label: "不带密钥的导出", timeout: 10_000 },
+      );
+      assert(!withoutKeys.includes("api_key"), "关掉后不该还有密钥字段");
+
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("dialog.quick-import-dialog[open] button")].find(
+          (node) => node.textContent.trim() === "关闭",
+        );
+        button.click();
+      });
+      await page.waitFor(() => document.querySelector("dialog.quick-import-dialog[open]") === null, {
+        label: "导出窗关闭",
+      });
+    });
+
     // ── 卡片视图 ────────────────────────────────────────────
     console.log("\n卡片视图");
 

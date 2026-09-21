@@ -117,6 +117,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [health, setHealth] = useState<Record<string, UpstreamHealth>>({});
   const [exportDoc, setExportDoc] = useState<ChannelExportDocument | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [exportIncludeKeys, setExportIncludeKeys] = useState(true);
   const [importOpen, setImportOpen] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -270,12 +271,16 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     await mutate(upstream.id, () => setUpstreamPriority(upstream.id, next));
   }
 
-  /** 导出：有勾选就只导选中的，否则全部。 */
-  async function runExport() {
+  /**
+   * 导出：有勾选就只导选中的，否则全部。
+   *
+   * 带不带密钥是服务端决定的，所以开关一变就得重新取一份，不能在前端裁。
+   */
+  async function runExport(includeKeys = exportIncludeKeys) {
     setBusyDialog(true);
     setExportOpen(true);
     try {
-      setExportDoc(await exportUpstreams(visibleSelected.map((u) => u.id)));
+      setExportDoc(await exportUpstreams(visibleSelected.map((u) => u.id), includeKeys));
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else toast(`导出失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
@@ -882,6 +887,11 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       <ChannelExportDialog
         open={exportOpen}
         document={exportDoc}
+        includeKeys={exportIncludeKeys}
+        onToggleKeys={(next) => {
+          setExportIncludeKeys(next);
+          void runExport(next);
+        }}
         onClose={() => {
           setExportOpen(false);
           setExportDoc(null);

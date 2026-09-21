@@ -361,10 +361,22 @@ export function fetchUpstreamHealth(): Promise<Record<string, UpstreamHealth>> {
 }
 
 /** 导出文档。后端返回的是带 kind/version 的包装，直接存成文件。 */
-export function exportUpstreams(ids?: number[]): Promise<ChannelExportDocument> {
+/**
+ * 导出渠道配置。
+ *
+ * includeApiKeys 默认开——不带密钥的备份看着完整，导回去每个渠道都要重填。
+ * 要把文件给别人时才关掉它。
+ */
+export function exportUpstreams(
+  ids?: number[],
+  includeApiKeys = true,
+): Promise<ChannelExportDocument> {
   return api<ChannelExportDocument>("/api/admin/upstreams/export", {
     method: "POST",
-    body: JSON.stringify(ids?.length ? { ids } : {}),
+    body: JSON.stringify({
+      ...(ids?.length ? { ids } : {}),
+      include_api_keys: includeApiKeys,
+    }),
   });
 }
 
