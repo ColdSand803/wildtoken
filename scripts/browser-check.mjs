@@ -2058,6 +2058,12 @@ async function main() {
       );
       assertEqual(cells, 10, "在途行格数");
 
+      /* 一开始就用秒。一秒内显毫秒的话，这一格会在 312ms 和 1.3s 之间突然
+         换单位，逐秒刷新看上去像倒退了。 */
+      const shown = first.replace("已用时", "").trim();
+      assert(!shown.includes("ms"), `在途计时不该出现毫秒：${shown}`);
+      assert(/^\d+\.\ds$|^\d+m\d{2}s$/.test(shown), `不是秒格式：${shown}`);
+
       await sleepInPage(page, 1200);
       const second = await page.evaluate(
         () => document.querySelector("tr.log-row--active")?.querySelector("[data-col=duration]")

@@ -32,11 +32,16 @@ export function elapsedMs(baseElapsedMs: number, receivedAt: number, now: number
   return Math.max(0, baseElapsedMs + (now - receivedAt));
 }
 
-/** 秒以下带一位小数，让数字看得出在动；超过一分钟就不需要那个精度了。 */
+/**
+ * 一开始就用秒，带一位小数让数字看得出在动。
+ *
+ * 不在一秒内显示毫秒：那样这一格会在 312ms 和 1.3s 之间突然换单位，数值
+ * 跟着跳一个量级，逐秒刷新的计时器看上去像倒退了。
+ */
 export function formatElapsed(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  const seconds = ms / 1000;
+  const seconds = Math.max(0, ms) / 1000;
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   const minutes = Math.floor(seconds / 60);
-  return `${minutes}m${Math.floor(seconds % 60)}s`;
+  // 秒数补零：1m5s 比 1m50s 窄一位，不补的话整列每秒抽一下。
+  return `${minutes}m${String(Math.floor(seconds % 60)).padStart(2, "0")}s`;
 }
