@@ -992,8 +992,7 @@ td.no-match-state {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   background: var(--glass-strong);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--toast-neutral);
+  border: 1px solid var(--line-strong, var(--line));
   border-radius: var(--radius);
   box-shadow: var(--shadow-md);
   display: grid;
@@ -1005,11 +1004,11 @@ td.no-match-state {
 }
 
 .toast[data-tone="ok"] {
-  border-left-color: var(--ok);
+  border-color: var(--ok-border, var(--ok));
 }
 
 .toast[data-tone="error"] {
-  border-left-color: var(--danger);
+  border-color: var(--danger-border, var(--danger));
 }
 
 .toast-message {

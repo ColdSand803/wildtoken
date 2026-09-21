@@ -58,8 +58,12 @@ function themeDescription(id) {
 function updateThemeHint(id) {
   if (!settingsThemeHint) return;
   const description = themeDescription(id);
-  settingsThemeHint.textContent = description;
-  settingsThemeHint.hidden = !description;
+  if (description) {
+    settingsThemeHint.textContent = description;
+    wtReveal(settingsThemeHint);
+    return;
+  }
+  wtHide(settingsThemeHint, { onSettled: () => { settingsThemeHint.textContent = ""; } });
 }
 
 function themeMenuChoices() {
@@ -299,14 +303,15 @@ async function initializeThemes() {
 
 function setThemeMenuOpen(open, { focus = false, position = "selected" } = {}) {
   if (!themeMenu || !themeToggle) return;
-  themeMenu.hidden = !open;
+  if (open) wtReveal(themeMenu);
+  else wtHide(themeMenu);
   themeToggle.setAttribute("aria-expanded", String(open));
   if (open && focus) focusThemeMenuChoice(position);
 }
 
 initializeThemes();
 if (themeToggle) {
-  themeToggle.addEventListener("click", () => setThemeMenuOpen(Boolean(themeMenu?.hidden), { focus: true }));
+  themeToggle.addEventListener("click", () => setThemeMenuOpen(themeToggle.getAttribute("aria-expanded") !== "true", { focus: true }));
   themeToggle.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
@@ -433,26 +438,27 @@ modelTestForm?.addEventListener("submit", async (event) => {
   if (!modelTestUpstream) return;
   modelTestSubmit.disabled = true;
   modelTestSubmit.textContent = "测试中";
-  modelTestResult.hidden = true;
+  wtHide(modelTestResult);
   try {
     const result = await api(`/api/admin/upstreams/${modelTestUpstream.id}/test-model`, {
       method: "POST",
       body: JSON.stringify({ model: modelTestModel.value, protocol: modelTestProtocol.value, prompt_template_id: Number(modelTestPromptTemplate.value), prompt: modelTestPrompt.value.trim() }),
     });
-    modelTestResult.hidden = false;
     modelTestResultStatus.textContent = result.ok ? `测试成功 · HTTP ${result.status_code}` : `测试失败${result.status_code ? ` · HTTP ${result.status_code}` : ""}`;
     modelTestResultMeta.textContent = result.content_type || "";
     modelTestPrompt.value = result.prompt || modelTestPrompt.value;
     modelTestResultBody.textContent = result.reply || result.preview || result.message || "渠道未返回正文。";
     modelTestRequestBody.textContent = formatHttpRequest(result.request || { url: "http://invalid/", headers: {}, body: {} });
     modelTestResponseBody.textContent = formatHttpResponse(result);
+    wtReveal(modelTestResult);
   } catch (error) {
-    modelTestResult.hidden = false;
     modelTestResultStatus.textContent = "测试失败";
     modelTestResultMeta.textContent = "";
     modelTestResultBody.textContent = error.message;
     modelTestRequestBody.textContent = "";
     modelTestResponseBody.textContent = "";
+    /* 内容都填好再显示，否则淡入的是上一轮的空壳。 */
+    wtReveal(modelTestResult);
   } finally {
     modelTestSubmit.disabled = false;
     modelTestSubmit.textContent = "发送测试";

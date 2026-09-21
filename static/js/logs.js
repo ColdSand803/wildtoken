@@ -623,12 +623,12 @@ function isOnLatestLogPage() {
 
 function clearLogNewEntriesNotice() {
   if (!logNewEntriesNotice) return;
-  logNewEntriesNotice.hidden = true;
+  wtHide(logNewEntriesNotice);
 }
 
 function showLogNewEntriesNotice() {
   if (!logNewEntriesNotice || !logNewEntriesNotice.hidden) return;
-  logNewEntriesNotice.hidden = false;
+  wtReveal(logNewEntriesNotice);
 }
 
 function returnToLatestLogPage() {
@@ -2118,8 +2118,8 @@ function renderLogRetryChain(detail) {
   if (!container) return;
 
   if (!detail || !detail.request_uid) {
-    container.hidden = true;
-    container.innerHTML = "";
+    /* 同上：清空交给收尾回调，别在淡出开始前就抹掉内容。 */
+    wtHide(container, { onSettled: () => { container.innerHTML = ""; } });
     return;
   }
 
@@ -2139,8 +2139,9 @@ function renderLogRetryChain(detail) {
   const maxAttemptIndex = attempts.reduce((max, item) => Math.max(max, Number(item.attempt_index) || 0), 0);
 
   if (attempts.length <= 1 && maxAttemptIndex === 0) {
-    container.hidden = true;
-    container.innerHTML = "";
+    /* 清空要等淡出走完：现在就抹 innerHTML 的话，淡出去的是个空盒子，
+       而内容已经先"啪"地没了。 */
+    wtHide(container, { onSettled: () => { container.innerHTML = ""; } });
     return;
   }
 
@@ -2151,7 +2152,6 @@ function renderLogRetryChain(detail) {
     return (Number(a.id) || 0) - (Number(b.id) || 0);
   });
 
-  container.hidden = false;
   const uid = escapeHtml(detail.request_uid);
 
   const stepsHtml = attempts.map((attempt) => {
@@ -2202,6 +2202,10 @@ function renderLogRetryChain(detail) {
     </div>
   `;
 
+  /* 内容装好再显示：wtReveal 会同步落 hidden = false 并起一段淡入，提前调用
+     淡入的就是个空盒子。 */
+  wtReveal(container);
+
   const buttons = container.querySelectorAll("button[data-retry-log-id]");
   buttons.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -2218,8 +2222,7 @@ async function showLogDetail(logId) {
   logDetailTitle.textContent = "请求详情";
   logDetailSummary.textContent = "正在加载...";
   if (logDetailRetryChain) {
-    logDetailRetryChain.hidden = true;
-    logDetailRetryChain.innerHTML = "";
+    wtHide(logDetailRetryChain, { onSettled: () => { logDetailRetryChain.innerHTML = ""; } });
   }
   if (logDetailMeta) {
     logDetailMeta.innerHTML = `
@@ -2269,8 +2272,7 @@ async function showLogDetail(logId) {
       `;
     }
     if (logDetailRetryChain) {
-      logDetailRetryChain.hidden = true;
-      logDetailRetryChain.innerHTML = "";
+      wtHide(logDetailRetryChain, { onSettled: () => { logDetailRetryChain.innerHTML = ""; } });
     }
   }
 }

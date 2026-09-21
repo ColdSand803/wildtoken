@@ -67,6 +67,26 @@ function installTimingHelpers(context, logsSource) {
   }
 }
 
+/* updateLogFilterChips 用 motion.js 的 wtReveal / wtHide 显示筛选徽标。照同一套
+   "从源码里抽"的规矩把它们搬进用例上下文：模块级的时长与状态直接取源码。徽标元素
+   没有 .animate，走"直接落最终态"那条路，断言看到的仍是同步显隐。 */
+function motionHelpers() {
+  const source = read("static/js/motion.js");
+  const declarations = [...source.matchAll(/^(?:const|let) [A-Za-z_]+ = [^\n]+;$/gm)]
+    .map((match) => match[0]);
+  const names = ["wtMotionReduced", "wtMotionEnabled", "wtMotionTakeOver", "wtReveal", "wtHide"];
+  const context = vm.createContext({});
+  vm.runInContext(
+    [
+      declarations.join("\n"),
+      ...names.map((name) => extractFunction(source, name)),
+      ...names.map((name) => `this.${name} = ${name};`),
+    ].join("\n"),
+    context,
+  );
+  return { wtReveal: context.wtReveal, wtHide: context.wtHide };
+}
+
 function formatSeconds(ms) {
   if (ms === null || ms === undefined || !Number.isFinite(Number(ms))) return "-";
   const n = Number(ms);
@@ -111,6 +131,7 @@ test("bootstrap.js manages setLogTimeRange, getLogTimeRange, clearLogTimeRange, 
     logRangeStart: "",
     logRangeEnd: "",
     logRangeLabel: "",
+    ...motionHelpers(),
   });
 
   vm.runInContext(extractFunction(source, "updateLogFilterChips"), context);

@@ -48,7 +48,7 @@
 .settings-inline-status[data-tone="ok"] { color: var(--ok); }
 .settings-inline-status[data-tone="error"] { color: var(--danger); }
 .settings-readonly { border-color: var(--line-soft); }
-.settings-note { background: var(--panel-subtle); border-left: 3px solid var(--accent); border-radius: 0 var(--radius) var(--radius) 0; padding: 12px 14px; }
+.settings-note { background: var(--panel-subtle); border: 1px solid var(--accent-border, var(--line)); border-radius: var(--radius); padding: 12px 14px; }
 .settings-note strong { color: var(--text); font-size: var(--text-base); }
 .settings-action-row { background: var(--danger-soft); border: 1px solid var(--danger-border); border-radius: var(--radius); margin-top: 0; padding: 14px; }
 .settings-action-row strong { color: var(--text); }

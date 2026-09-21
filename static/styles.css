@@ -20,3 +20,9 @@ html[data-theme] #token-custom {
   font-variant-ligatures: none;
   letter-spacing: 0;
 }
+
+/* Typography hierarchy: clear proportional scale (step ratio >= 1.25x) */
+body { font-size: 13px; }
+h1 { font-size: 24px; }
+h2 { font-size: 19px; }
+h3 { font-size: 15px; }
