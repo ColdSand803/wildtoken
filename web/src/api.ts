@@ -8,6 +8,7 @@ import type {
   Group,
   ImportResult,
   LogOverview,
+  ModelTestResult,
   PromptTemplate,
   RequestLogDetail,
   RequestLogPage,
@@ -116,6 +117,22 @@ export function testUpstream(id: number, path = "/v1/models"): Promise<unknown> 
 
 export function fetchUpstreamModels(id: number): Promise<{ models: string[] }> {
   return api<{ models: string[] }>(`/api/admin/upstreams/${id}/models`, { method: "POST" });
+}
+
+/**
+ * 向渠道发一次真实模型请求。
+ *
+ * 上游报错不会让这个调用失败——后端把结果包成 200，成败看 ok 字段。
+ * 要的就是这个：上游返回 500 也得把请求和响应原样展出来供排查。
+ */
+export function testUpstreamModel(
+  id: number,
+  body: { model: string; protocol: string; prompt_template_id: number; prompt: string },
+): Promise<ModelTestResult> {
+  return api<ModelTestResult>(`/api/admin/upstreams/${id}/test-model`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 /** new-api 与 sub2api 两种余额接口，路径不同。 */

@@ -28,6 +28,7 @@ import {
 } from "../components/ImportExportDialogs";
 import { ModelDialog } from "../components/ModelDialog";
 import type { ModelSelection } from "../components/ModelDialog";
+import { ModelTestDialog } from "../components/ModelTestDialog";
 import { UpstreamDialog } from "../components/UpstreamDialog";
 import type { UpstreamPayload } from "../components/UpstreamDialog";
 import { useConfirm, useToast } from "../components/feedback";
@@ -117,6 +118,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     { upstream: Upstream; catalog: string[] | null; selection: ModelSelection } | null
   >(null);
   const [pickerSaving, setPickerSaving] = useState(false);
+  const [testing, setTesting] = useState<Upstream | null>(null);
 
   const toast = useToast();
   const confirm = useConfirm();
@@ -508,6 +510,9 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       ];
     }
     return [
+      /* 顺序照抄旧版：测试模型在最上面。它是唯一会真的走一遍路由的动作，
+         排查渠道能不能用时第一个要点的就是它。 */
+      { key: "test-model", label: "测试模型", onSelect: () => setTesting(upstream) },
       { key: "test", label: "测试连接", onSelect: () => void runAction(upstream.id, "测试连接", () => testUpstream(upstream.id)) },
       { key: "models", label: "拉取模型", onSelect: () => void openModelPicker(upstream) },
       { key: "balance", label: "查询 new-api 余额", onSelect: () => void runAction(upstream.id, "查询余额", () => fetchUpstreamBalance(upstream.id, "new-api")) },
@@ -882,6 +887,8 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         onSubmit={(name, baseUrl, apiKey) => void runQuickImport(name, baseUrl, apiKey)}
         onClose={() => setQuickOpen(false)}
       />
+
+      <ModelTestDialog open={testing !== null} upstream={testing} onClose={() => setTesting(null)} />
 
       {picker ? (
         <ModelDialog

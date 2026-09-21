@@ -32,6 +32,7 @@ const CHROME = "google-chrome-stable";
 // 假上游。拉取模型、测连接这类动作要真的有个东西应答，否则只能测到失败路径。
 const FAKE_UPSTREAM_PORT = 3106;
 const FAKE_MODELS = ["gpt-4o", "gpt-4o-mini", "claude-sonnet-5", "grok-4.5"];
+const FAKE_REPLY = "假上游的回复。";
 
 // ── CDP ──────────────────────────────────────────────────────────────────────
 
@@ -264,13 +265,37 @@ async function startServer(dataDir) {
  * 一步都走不到。
  */
 function startFakeUpstream() {
+  /* 三种协议各自的响应形状。后端按形状抽回复，随便返回一个 200 是测不出
+     「回复没抽出来」这类问题的。 */
+  const bodies = {
+    "/v1/responses": {
+      output: [{ content: [{ type: "output_text", text: FAKE_REPLY }] }],
+    },
+    "/v1/chat/completions": {
+      choices: [{ message: { role: "assistant", content: FAKE_REPLY } }],
+    },
+    "/v1/messages": {
+      content: [{ type: "text", text: FAKE_REPLY }],
+    },
+  };
+
   const server = createServer((request, response) => {
-    if (!request.url?.startsWith("/v1/models")) {
-      response.writeHead(404).end("{}");
+    const path = (request.url ?? "").split("?")[0];
+
+    if (path === "/v1/models") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ object: "list", data: FAKE_MODELS.map((id) => ({ id })) }));
+      return;
+    }
+
+    const body = bodies[path];
+    if (!body) {
+      response.writeHead(404, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: { message: `no route for ${path}` } }));
       return;
     }
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ object: "list", data: FAKE_MODELS.map((id) => ({ id })) }));
+    response.end(JSON.stringify(body));
   });
   return new Promise((resolve, reject) => {
     server.on("error", reject);
@@ -401,6 +426,12 @@ async function seed() {
   });
 
   await adminPost("/api/admin/tokens", { name: "check-token", description: "验证用", enabled: true });
+
+  /* 只建一条模板。新版开窗时随机选一条，多于一条的话断言就不确定了。 */
+  await adminPost("/api/admin/settings/model-test-prompts", {
+    name: "打个招呼",
+    prompt: "说一句你好。",
+  });
 
   return { vipId: vip.id, autoId: auto.id };
 }
@@ -712,6 +743,125 @@ async function main() {
         { label: "模型匹配格更新" },
       );
       assert(!cell.includes("retired-model"), `移除的模型还在：${cell}`);
+    });
+
+    // ── 测试模型 ──────────────────────────────────────────────
+    console.log("\n测试模型");
+
+    await check("菜单第一项就是测试模型", async () => {
+      await openRowMenu(page, "auto-weight");
+      const first = await page.evaluate(() =>
+        document.querySelector("[role=menu] [role=menuitem]")?.textContent?.trim() ?? null,
+      );
+      assertEqual(first, "测试模型", "菜单首项");
+    });
+
+    await check("开窗后模型与 Prompt 都预填了", async () => {
+      await clickMenuItem(page, "测试模型");
+      await page.waitForSelector("dialog[aria-label=测试模型][open]", { label: "测试窗" });
+      const state = await page.waitFor(
+        () => {
+          const dialog = document.querySelector("dialog[aria-label=测试模型]");
+          const selects = dialog?.querySelectorAll("select");
+          const prompt = dialog?.querySelector("textarea")?.value ?? "";
+          if (!selects || !prompt) return false;
+          return { model: selects[0].value, protocol: selects[1].value, prompt };
+        },
+        { label: "预填值" },
+      );
+      assertEqual(state.protocol, "responses", "默认协议");
+      assert(state.model !== "", "模型下拉没预填");
+      assert(state.prompt !== "", "Prompt 没预填");
+
+      /* 开窗时是随机挑一条模板，所以不能对死文本。要验的是另一件事：
+         预填的正文确实是当前选中那条模板的，而不是别人的。 */
+      const matched = await page.evaluate(async () => {
+        const dialog = document.querySelector("dialog[aria-label=测试模型]");
+        const id = Number(dialog.querySelectorAll("select")[2].value);
+        const response = await fetch("/api/admin/settings/model-test-prompts", {
+          headers: { "x-admin-token": localStorage.getItem("wildtoken_admin_token") },
+        });
+        const list = await response.json();
+        return list.find((item) => item.id === id)?.prompt === dialog.querySelector("textarea").value;
+      });
+      assertEqual(matched, true, "预填正文与选中模板一致");
+    });
+
+    await check("换模板时 Prompt 跟着换", async () => {
+      const changed = await page.evaluate(() => {
+        const dialog = document.querySelector("dialog[aria-label=测试模型]");
+        const select = dialog.querySelectorAll("select")[2];
+        const before = dialog.querySelector("textarea").value;
+        const other = [...select.options].find((option) => option.value !== select.value);
+        if (!other) return "only-one";
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+        setter.call(select, other.value);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        return { before, label: other.textContent };
+      });
+      assert(changed !== "only-one", "只有一条模板，这条断言没意义");
+      const after = await page.evaluate(
+        () => document.querySelector("dialog[aria-label=测试模型] textarea").value,
+      );
+      assert(after !== changed.before, `换了模板「${changed.label}」Prompt 没变`);
+    });
+
+    await check("发送测试抽出模型回复", async () => {
+      await page.evaluate(() => {
+        const dialog = document.querySelector("dialog[aria-label=测试模型]");
+        dialog.querySelector(".modal-footer button[type=submit]").click();
+      });
+      const status = await page.waitFor(
+        () =>
+          document.querySelector("dialog[aria-label=测试模型] .test-model-result-head strong")
+            ?.textContent ?? false,
+        { label: "测试结果", timeout: 15_000 },
+      );
+      assertEqual(status, "测试成功 · HTTP 200", "结果状态行");
+      const reply = await page.text("dialog[aria-label=测试模型] .test-model-response pre");
+      assertEqual(reply, "假上游的回复。", "模型回复");
+    });
+
+    await check("请求与响应原文都摊开了", async () => {
+      const bodies = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog[aria-label=测试模型] .test-model-details pre")].map(
+          (pre) => pre.textContent ?? "",
+        ),
+      );
+      assertEqual(bodies.length, 2, "两个折叠区");
+      assert(bodies[0].startsWith("POST /v1/responses"), `请求首行：${bodies[0].slice(0, 60)}`);
+      assert(bodies[0].includes("host: 127.0.0.1:"), "请求头里应有 host");
+      assert(bodies[1].startsWith("HTTP/1.1 200"), `响应首行：${bodies[1].slice(0, 60)}`);
+    });
+
+    await check("切协议后打到对应路径", async () => {
+      await page.evaluate(() => {
+        const select = document.querySelectorAll("dialog[aria-label=测试模型] select")[1];
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+        setter.call(select, "messages");
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await page.evaluate(() => {
+        const dialog = document.querySelector("dialog[aria-label=测试模型]");
+        dialog.querySelector(".modal-footer button[type=submit]").click();
+      });
+      const request = await page.waitFor(
+        () => {
+          const pre = document.querySelector("dialog[aria-label=测试模型] .test-model-details pre");
+          const text = pre?.textContent ?? "";
+          return text.startsWith("POST /v1/messages") ? text : false;
+        },
+        { label: "messages 协议请求", timeout: 15_000 },
+      );
+      // claude-cli 会带这个参数，旧版照实发。
+      assert(request.includes("beta=true"), "messages 应带 beta=true");
+    });
+
+    await check("关掉测试窗", async () => {
+      await page.click("dialog[aria-label=测试模型] .icon-close");
+      await page.waitFor(() => document.querySelector("dialog[aria-label=测试模型][open]") === null, {
+        label: "测试窗关闭",
+      });
     });
 
     /* 第二条入口：渠道编辑表单里的两个按钮。它走的是另一个接口（探一个还没

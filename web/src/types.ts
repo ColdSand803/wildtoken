@@ -216,6 +216,25 @@ export interface PromptTemplate {
   updated_at: string;
 }
 
+/**
+ * 模型测试结果。
+ *
+ * 接口总是 200，成败看 ok。连不上上游时 status_code 为 null 且只有 message。
+ */
+export interface ModelTestResult {
+  ok: boolean;
+  status_code: number | null;
+  content_type?: string | null;
+  response_headers?: Record<string, string>;
+  /** 后端解析后的实际 prompt——留空时它会去模板里取。 */
+  prompt?: string;
+  request?: { url: string; headers: Record<string, string>; body: unknown };
+  /** 从响应里抽出的模型回复。抽不出就是空串。 */
+  reply?: string;
+  preview?: string;
+  message?: string;
+}
+
 /** 分组。计数由后端给，不用前端聚合。 */
 export interface Group {
   id: number;
