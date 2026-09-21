@@ -15,27 +15,19 @@ import type { MenuEntry } from "../components/ActionMenu";
 import { TokenDialog } from "../components/TokenDialog";
 import type { TokenPayload } from "../components/TokenDialog";
 import { useConfirm, useToast } from "../components/feedback";
+import {
+  expiryDistance,
+  expiryTone,
+  formatCount,
+  quotaTone,
+  tokenPreview,
+} from "../tokenFormat";
 import type { APIToken } from "../types";
 
 /** 创建于明文保存启用之前的令牌，完整值已经取不回来了。 */
 const SEALED_TITLE = "这个令牌创建于明文保存启用之前，完整值已经无法恢复。需要完整令牌只能删除后重建。";
 
 /** 大数字缩写，和限额输入框接受的写法对称。四级与旧版 formatTokenCount 一致。 */
-function formatCount(value: number): string {
-  for (const [suffix, unit] of [
-    ["T", 1e12],
-    ["B", 1e9],
-    ["M", 1e6],
-    ["K", 1e3],
-  ] as const) {
-    if (value >= unit) {
-      const scaled = value / unit;
-      return `${scaled >= 100 || Number.isInteger(scaled) ? Math.round(scaled) : scaled.toFixed(1)}${suffix}`;
-    }
-  }
-  return String(value);
-}
-
 /**
  * 配额单元格。嵌套照抄旧版 quotaCell：限速注记在 quota-cell 外面并列，
  * 不在里面。两个分隔符把已用 / 剩余 / 限额 隔开。
@@ -64,9 +56,9 @@ function QuotaCell({ token }: { token: APIToken }) {
 
   const limit = Number(quota.limit_tokens) || 0;
   const remaining = Number(quota.remaining_tokens) || 0;
-  const ratio = limit > 0 ? used / limit : 0;
   // 用尽标红、接近用尽标黄，好在一列里扫出该处理哪个。
-  const tone = quota.exhausted ? " danger" : ratio >= 0.8 ? " warn" : "";
+  const toneName = quotaTone({ exhausted: quota.exhausted, used, limit });
+  const tone = toneName ? ` ${toneName}` : "";
 
   return (
     <>
@@ -125,7 +117,12 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
     const q = query.trim().toLowerCase();
     if (!q) return true;
     // 按看得见的那串匹配：屏上显示的已经不是后端那个前缀预览了。
-    return [token.name, token.description, tokenPreview(token), token.group_name]
+    return [
+      token.name,
+      token.description,
+      tokenPreview(token.token, token.token_preview),
+      token.group_name,
+    ]
       .join(" ")
       .toLowerCase()
       .includes(q);
@@ -206,13 +203,18 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
   }
 
   function menuFor(token: APIToken): MenuEntry[] {
-    return [
+    /* 显式标注：直接在字面量上接 .filter 会把 tone 的字面量类型放宽成 string。 */
+    const entries: (MenuEntry | null)[] = [
       { key: "edit", label: "编辑", onSelect: () => setEditing({ token }) },
       { key: "copy", label: "复制完整令牌", onSelect: () => void copyToken(token) },
-      { key: "reset", label: "清零已用额度", onSelect: () => void resetUsage(token) },
+      /* 没设限额时不给这一项：计数本身不拦任何请求，清零没有意义。 */
+      token.quota.limit_tokens === null || token.quota.limit_tokens === undefined
+        ? null
+        : { key: "reset", label: "清零已用额度", onSelect: () => void resetUsage(token) },
       MENU_SEPARATOR,
       { key: "delete", label: "删除", tone: "danger", onSelect: () => void remove(token) },
     ];
+    return entries.filter((entry) => entry !== null);
   }
 
   return (
@@ -326,19 +328,9 @@ function DescriptionCell({ text }: { text: string }) {
   );
 }
 
-const EXPIRY_SOON_MS = 7 * 24 * 60 * 60 * 1000;
+
 
 /** 距今多久。旧版分钟/小时/天三档，过期直说已过期。 */
-function expiryDistance(deltaMs: number): string {
-  if (deltaMs <= 0) return "已过期";
-  const minutes = Math.floor(deltaMs / 60_000);
-  if (minutes < 1) return "不到 1 分钟";
-  if (minutes < 60) return `${minutes} 分钟后`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时后`;
-  return `${Math.floor(hours / 24)} 天后`;
-}
-
 /**
  * 有效期格。
  *
@@ -354,7 +346,7 @@ function ExpiryCell({ expiresAt }: { expiresAt: string | null }) {
   if (Number.isNaN(at.getTime())) return <span className="muted">—</span>;
 
   const delta = at.getTime() - Date.now();
-  const tone = delta <= 0 ? "danger" : delta <= EXPIRY_SOON_MS ? "neutral" : "on";
+  const tone = expiryTone(delta);
   return (
     <div className="token-expiry">
       <span className="token-expiry-time">{at.toLocaleString("zh-CN", { hour12: false })}</span>
@@ -386,15 +378,6 @@ const sealedGlyph = () => (
  *
  * 用 Array.from 而不是 slice：按码元切会把超出 BMP 的字符斬成半个。
  */
-function tokenPreview(token: APIToken): string {
-  if (!token.token) return token.token_preview;
-
-  const chars = Array.from(token.token);
-  if (chars.length <= 8) return token.token;
-  // 固定四个星号，不随真实长度变——变了就把长度泄露出去了。
-  return `${chars.slice(0, 4).join("")}****${chars.slice(-4).join("")}`;
-}
-
 function TokenRow({
   token,
   busy,
@@ -429,7 +412,9 @@ function TokenRow({
           title={sealed ? SEALED_TITLE : "复制完整令牌"}
           onClick={onCopy}
         >
-          <code className="token-preview-code">{tokenPreview(token)}</code>
+          <code className="token-preview-code">
+            {tokenPreview(token.token, token.token_preview)}
+          </code>
           <span className="token-preview-icon" aria-hidden="true">
             {sealed ? sealedGlyph() : copyGlyph()}
           </span>

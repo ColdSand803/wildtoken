@@ -26,11 +26,8 @@ func NewRouter(state *appstate.State) http.Handler {
 
 	router.Get("/health", handlers.HealthCheck(state))
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		// 根路径进新控制台；旧版仍可直接访问 /admin。
 		http.Redirect(w, r, "/console", http.StatusSeeOther)
 	})
-	router.Get("/admin", serveAdminHTML)
-	// 新控制台（React）。与 /admin 并存：旧版不动，新版出问题不影响任何人。
 	router.Get("/console", serveConsoleHTML)
 	router.Mount("/console/assets", noStore(http.StripPrefix("/console/assets",
 		http.FileServer(http.Dir(filepath.Join("web", "dist", "assets"))))))
@@ -186,25 +183,12 @@ func allowAnyOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// serveAdminHTML serves the admin console from static/.
-func serveAdminHTML(w http.ResponseWriter, r *http.Request) {
-	html, err := os.ReadFile(filepath.Join("static", "admin.html"))
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Admin page not found"))
-		return
-	}
-	w.Header().Set("content-type", "text/html; charset=utf-8")
-	w.Header().Set("cache-control", noStoreCacheControl)
-	w.Write(html)
-}
-
-// serveConsoleHTML serves the React console from web/dist.
+// serveConsoleHTML serves the console from web/dist.
 //
-// The probe's build output lives under web/dist; the bundle's asset paths are
-// already prefixed with /console/ by Vite's base setting. A missing build is
-// reported rather than served as an empty page, because the old console at
-// /admin must keep working either way.
+// The build output lives under web/dist; the bundle's asset paths are already
+// prefixed with /console/ by Vite's base setting. A missing build is reported
+// rather than served as an empty page, so the cause is visible instead of
+// looking like a blank console.
 func serveConsoleHTML(w http.ResponseWriter, r *http.Request) {
 	index := filepath.Join("web", "dist", "index.html")
 	html, err := os.ReadFile(index)
@@ -218,7 +202,7 @@ func serveConsoleHTML(w http.ResponseWriter, r *http.Request) {
 	w.Write(html)
 }
 
-// AdminURLFromSettings builds the browser-facing admin URL.
+// AdminURLFromSettings builds the browser-facing console URL.
 //
 // When the server binds on all interfaces (0.0.0.0 or ::), loopback is opened
 // instead, because a wildcard address is not something a browser can visit.
@@ -227,7 +211,7 @@ func AdminURLFromSettings(host string, port uint16) string {
 	case "0.0.0.0", "::", "[::]":
 		host = "127.0.0.1"
 	}
-	return "http://" + host + ":" + strconv.Itoa(int(port)) + "/admin"
+	return "http://" + host + ":" + strconv.Itoa(int(port)) + "/console"
 }
 
 // IsLoopbackBindHost reports whether a configured bind host only accepts local

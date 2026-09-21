@@ -1,7 +1,7 @@
 # ── Console build stage ──────────────────────────────────────────────────────
-# The React console is a separate frontend served at /console. It builds here so
-# `docker compose up -d --build` stays the single deployment command; the old
-# console under static/ needs no build step and is copied as-is.
+# The console is served at /console. It builds here so
+# `docker compose up -d --build` stays the single deployment command; the
+# shared CSS, fonts and theme packs under static/ are copied as-is.
 FROM node:24-bookworm-slim AS console-builder
 
 WORKDIR /web

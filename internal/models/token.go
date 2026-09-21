@@ -12,9 +12,9 @@ import (
 const (
 	APITokenNameMaxChars        = 80
 	APITokenDescriptionMaxChars = 200
-	// APITokenMinBytes no longer floors a custom token at 16 bytes. The console
-	// warns and asks for a second confirmation below that, and the threshold
-	// lives there (TOKEN_WEAK_BYTES in static/js/tokens.js) rather than here: a
+	// APITokenMinBytes no longer floors a custom token at 16 bytes. The warning
+	// and second confirmation below that threshold belong to the console rather
+	// than here, and the current console does not implement them: a
 	// stateless request cannot distinguish an operator who was warned and
 	// accepted from one who never saw the warning, so enforcing it server-side
 	// would either refuse the confirmed case or need a "yes I mean it" flag that

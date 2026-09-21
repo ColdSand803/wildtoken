@@ -86,26 +86,27 @@ test("耗时格式：一开始就用秒，过分钟补零", () => {
   assert.equal(format(110_000), "1m50s");
 });
 
-/* 这些常量和旧控制台是一套，两边漂了观感就不一致。 */
-test("流参数与旧控制台一致", () => {
-  const next = read("web/src/useLogStream.ts");
-  const legacy = read("static/js/logs.js");
+/* 这几个值决定列表的观感，改动得是有意识的，所以钉成具体数字。
+   \b 不能省：/= 100/ 会在 "= 1000" 里命中。 */
+test("流参数维持在调好的值上", () => {
+  const stream = read("web/src/useLogStream.ts");
 
-  for (const [nextName, legacyName] of [
-    ["BATCH_RENDER_MS", "LOG_STREAM_BATCH_RENDER_MS"],
-    ["RECONNECT_MIN_MS", "LOG_STREAM_RECONNECT_MIN_MS"],
-    ["RECONNECT_MAX_MS", "LOG_STREAM_RECONNECT_MAX_MS"],
+  for (const [name, expected] of [
+    // 批量渲染窗：再大新行出现得肃，再小就失去合并的意义。
+    ["BATCH_RENDER_MS", 80],
+    // 重连退避的下上界。
+    ["RECONNECT_MIN_MS", 1000],
+    ["RECONNECT_MAX_MS", 30000],
   ]) {
-    const nextValue = new RegExp(`${nextName} = (\\d+)`).exec(next)?.[1];
-    const legacyValue = new RegExp(`${legacyName} = (\\d+)`).exec(legacy)?.[1];
-    assert.ok(nextValue, `${nextName} 必须存在`);
-    assert.equal(nextValue, legacyValue, `${nextName} 应与 ${legacyName} 一致`);
+    assert.match(
+      stream,
+      new RegExp(`${name} = ${expected}\\b`),
+      `${name} 应为 ${expected}`,
+    );
   }
 
-  /* 计时 100ms：旧版为了让小数位连续跳动特意从 1000 改下来的。
-     \b 不能省：/TICK_MS = 100/ 会在 "TICK_MS = 1000" 里命中，改回去也不报错。 */
+  // 计时 100ms：为了让已用时的小数位连续跳动。
   assert.match(read("web/src/useTicker.ts"), /TICK_MS = 100\b/);
-  assert.match(legacy, /LOG_ACTIVE_TICK_MS = 100\b/);
 });
 
 /* 没有令牌时不能静默退出：用户在弹框里登录不会重新触发 effect，

@@ -15,7 +15,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  group: >-
+    release-${{ github.event_name == 'workflow_dispatch' && inputs.tag
+    || github.ref_name }}
   cancel-in-progress: false
 
 env:
@@ -54,9 +56,11 @@ jobs:
           commit="$(git rev-list -n 1 "$tag")"
           git checkout --detach "$commit"
 
-          version="$(sed -n 's/^const Version = "\(.*\)"$/\1/p' internal/handlers/admin.go)"
+          version_file=internal/handlers/admin.go
+          version_expr='s/^const Version = "\(.*\)"$/\1/p'
+          version="$(sed -n "$version_expr" "$version_file")"
           if [[ -z "$version" ]]; then
-            echo "Could not read the service version from internal/handlers/admin.go" >&2
+            echo "Could not read the service version from $version_file" >&2
             exit 1
           fi
           if [[ "$tag" != "v$version" ]]; then
@@ -140,10 +144,29 @@ jobs:
         with:
           ref: ${{ needs.prepare.outputs.commit }}
 
+      # Caching is off in this job on purpose: its output ships to users, and a
+      # restored cache is writable by any earlier job in the same repository.
       - name: Install Go toolchain
         uses: actions/setup-go@v6
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      # The console is served from web/dist, so the package needs it built.
+      # No `cache:` input, so this step restores nothing; the audit flags the
+      # action itself as cache-capable.
+      - name: Install Node toolchain
+        uses: actions/setup-node@v7 # zizmor: ignore[cache-poisoning]
+        with:
+          node-version: 22
+
+      - name: Build console
+        shell: bash
+        working-directory: web
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
 
       - name: Build release binary
         shell: bash
@@ -165,8 +188,13 @@ jobs:
           set -euo pipefail
           package="wildtoken-${RELEASE_TAG}-${{ matrix.label }}"
           mkdir -p "$package"
-          install -m 755 "build/${{ matrix.binary }}" "$package/${{ matrix.binary }}"
+          binary="${{ matrix.binary }}"
+          install -m 755 "build/$binary" "$package/$binary"
           cp -R static config themes "$package/"
+          # The console is looked up at web/dist under the working directory.
+          mkdir -p "$package/web"
+          cp -R web/dist "$package/web/"
+          test -f "$package/web/dist/index.html"
           cp .env.example "$package/"
           test ! -e "$package/README.md"
 
@@ -197,8 +225,16 @@ jobs:
             sleep 1
           done
           curl -fsS 'http://127.0.0.1:3110/health' >/dev/null
-          curl -fsS 'http://127.0.0.1:3110/admin' -o "$RUNNER_TEMP/wildtoken-admin.html"
-          grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-admin.html"
+          console_html="$RUNNER_TEMP/wildtoken-console.html"
+          curl -fsS 'http://127.0.0.1:3110/console' -o "$console_html"
+          grep -q 'WildToken Console' "$console_html"
+          # 旧控制台已删；/admin 应该是 404。
+          admin_status="$(curl -s -o /dev/null -w '%{http_code}' \
+            'http://127.0.0.1:3110/admin')"
+          if [[ "$admin_status" != "404" ]]; then
+            echo "/admin 返回 $admin_status，期望 404" >&2
+            exit 1
+          fi
           curl -fsS 'http://127.0.0.1:3110/theme-packs/ark/theme.css' >/dev/null
           kill "$pid"
           wait "$pid" || true
@@ -234,9 +270,13 @@ jobs:
         run: |
           set -euo pipefail
           cd release-assets
-          mapfile -t archives < <(find . -maxdepth 1 -type f \( -name '*.zip' -o -name '*.tar.gz' \) -printf '%f\n' | sort)
+          mapfile -t archives < <(
+            find . -maxdepth 1 -type f \
+              \( -name '*.zip' -o -name '*.tar.gz' \) \
+              -printf '%f\n' | sort
+          )
           if [[ "${#archives[@]}" -ne 5 ]]; then
-            printf 'Expected 5 release archives, found %s\n' "${#archives[@]}" >&2
+            printf 'Expected 5 archives, found %s\n' "${#archives[@]}" >&2
             exit 1
           fi
           sha256sum "${archives[@]}" > SHA256SUMS

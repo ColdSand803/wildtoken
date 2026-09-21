@@ -30,32 +30,38 @@ function definedClasses() {
     }
   }
 
-  /* 旧 HTML 里出现过的类也算数。有些是纯结构类（archived-body 靠
-     hidden 属性控显隐、col-priority 只用于列显隐脚本），CSS 里没有规则
-     但它们是旧版真在用的名字，照抄不算错。 */
-  const markup = readFileSync(join(root, "static/admin.html"), "utf8");
-  for (const match of markup.matchAll(/class="([^"]*)"/g)) {
-    for (const name of match[1].split(/\s+/)) if (name) names.add(name);
-  }
-
-  /* 旧 JS 动态拼出来的类。token-io-${tone} 这种 HTML 里根本不存在，
-     但它确实是旧版在发的名字。把前缀展开成已知后缀，比“凡含插值就
-     放行”精确得多。 */
-  const legacyJs = walk(join(root, "static/js"), /\.js$/)
-    .map((file) => readFileSync(file, "utf8"))
-    .join("\n");
-  /* 前缀后面紧跟插值的片段，例如 `token-io-line token-io-${tone}` 里的
-     token-io-。不要求整串只有一个类——旧版多数是“固定类 + 动态类”混写。 */
-  for (const match of legacyJs.matchAll(/([a-z][a-z0-9]*(?:-[a-z0-9]+)*-)\$\{/g)) {
-    for (const suffix of ["in", "out", "on", "off", "ok", "warn", "danger", "neutral"]) {
-      names.add(`${match[1]}${suffix}`);
-    }
-  }
-  // 模板串里的普通类名片段，例如 `token-io-line token-io-${tone}`。
-  for (const match of legacyJs.matchAll(/class: ["`]([^"`]*)["`]/g)) {
-    for (const name of match[1].replace(/\S*\$\{[^}]*\}\S*/g, " ").split(/\s+/)) {
-      if (name) names.add(name);
-    }
+  /* 结构类：只用于定位、列显隐或语义标记，CSS 里没有规则——旧控制台
+     同样没有。显式列出而不是“凡找不到就放行”：再添一个得是有意识的动作，
+     名字打错仍然会被拦下。 */
+  for (const name of [
+    // 列定位 / 列显隐
+    "col-priority",
+    "col-quota",
+    "actions-col",
+    "numeric",
+    "token-cell",
+    // 靠 hidden 属性控显隐
+    "archived-body",
+    // 测试与脚本的定位钩子
+    "dialog-icon--close",
+    "dialog-icon--refresh",
+    "log-sensitive-eye",
+    "kpi-number",
+    "upstream-row-check",
+    // 语义分组，样式在父容器上
+    "model-single",
+    "model-request",
+    "model-route-target",
+    "token-io-in",
+    "token-io-out",
+    "pager-size-label",
+    "token-toolbar",
+    "settings-view",
+    "settings-server-form",
+    "settings-security",
+    "wt-page-head",
+  ]) {
+    names.add(name);
   }
 
   return names;

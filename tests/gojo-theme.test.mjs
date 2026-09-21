@@ -5,8 +5,8 @@ import test from "node:test";
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const manifest = JSON.parse(read("themes/gojo/theme.json"));
 const css = read("themes/gojo/theme.css");
-const events = read("static/js/events.js");
-const adminHtml = read("static/admin.html");
+const themeModule = read("web/src/theme.ts");
+const consoleHtml = read("web/index.html");
 
 test("Gojo manifest exposes the Limitless palette", () => {
   assert.deepEqual(manifest, {
@@ -46,13 +46,15 @@ test("Gojo covers every console view with a distinct domain mark", () => {
   assert.equal(new Set(marks).size, views.length);
 });
 
-test("Gojo is available during boot and runtime theme initialization", () => {
+/* The pack has to be registered in two places: the pre-paint script in
+   index.html, which runs before React and prevents a flash of the default
+   theme, and the runtime registry the theme menu reads. Missing either one
+   fails in a way that only shows up in a browser. */
+test("Gojo is registered for both pre-paint and runtime theme selection", () => {
   const cssHref = "/theme-packs/gojo/theme.css";
-  assert.match(
-    events,
-    /\{ id: "gojo", label: "五条悟", swatch: \["#070910", "#63dcff"\], css: "\/theme-packs\/gojo\/theme\.css", description: ".*" \}/,
-  );
-  assert.ok(adminHtml.includes(`gojo: "${cssHref}"`));
+  assert.ok(themeModule.includes(`gojo: "${cssHref}"`), "missing runtime pack entry");
+  assert.ok(themeModule.includes('gojo: ["#070910", "#63dcff"]'), "missing swatch");
+  assert.ok(consoleHtml.includes(`gojo: "${cssHref}"`), "missing pre-paint entry");
 });
 
 test("Gojo keeps the mobile dock stable and honors reduced motion", () => {
