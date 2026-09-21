@@ -509,7 +509,7 @@ async function seed() {
     prompt: "说一句你好。",
   });
 
-  return { vipId: vip.id, autoId: auto.id };
+  return { vipId: vip.id, autoId: auto.id, downstreamToken: token.token };
 }
 
 // ── 页面上的常见动作 ──────────────────────────────────────────
@@ -646,13 +646,18 @@ async function main() {
     /* 带着 URL 才能判断一次失败是不是预期的。loadingFailed 本身只给 requestId。 */
     const urlByRequest = new Map();
     cdp.on("Network.requestWillBeSent", (event) => urlByRequest.set(event.requestId, event.request.url));
+    /* 只盯控制台自己的请求。字体走 Google Fonts（和旧版一致），第三方 CDN 抽一下
+       就把这条断言打红的话，它会很快被当成噪音忽略。 */
+    const ours = (url) => url.startsWith(ORIGIN);
     cdp.on("Network.responseReceived", (event) => {
       if (!collecting || event.response.status < 400) return;
+      if (!ours(event.response.url)) return;
       noise.requests.push(`${event.response.status} ${event.response.url}`);
     });
     cdp.on("Network.loadingFailed", (event) => {
       if (!collecting) return;
       const url = urlByRequest.get(event.requestId) ?? "";
+      if (!ours(url)) return;
       // 离开日志页时 SSE 连接是被主动 abort 掉的，不算缺陷。
       if (event.canceled && url.includes("/api/admin/logs/stream")) return;
       noise.requests.push(`失败 ${event.errorText} ${url}`);
@@ -1402,6 +1407,7 @@ async function main() {
       assert(names.includes("archived-channel"), `渠道不全：${names}`);
     });
 
+
     await check("会话模式把请求体还原成对话", async () => {
       await openProxiedLogDetail(page);
       await page.waitForSelector("dialog.log-detail-dialog[open]", { label: "详情窗" });
@@ -1482,6 +1488,43 @@ async function main() {
       );
       await page.click("dialog.log-detail-dialog [data-log-view-mode=conversation]");
       await page.click("dialog.log-detail-dialog .icon-close");
+    });
+
+    /* SSE 推送是日志页的核心：不刷新页面，新请求要自己出现。之前只测过
+       「日志页能渲染」，那证明不了流还活着。 */
+    await check("SSE 把新请求推到表里，不靠刷新", async () => {
+      const before = await page.count("table.log-table tbody tr");
+      const navBefore = await page.evaluate(
+        () => performance.getEntriesByType("navigation").length,
+      );
+
+      // 从页面里直接走一遍网关，产生一条真日志。
+      await page.evaluate(async (token) => {
+        await fetch("/v1/chat/completions", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            model: "gpt-4o",
+            messages: [{ role: "user", content: "sse 探活" }],
+          }),
+        });
+      }, seeded.downstreamToken);
+
+      const after = await page.waitFor(
+        (count) => {
+          const rows = document.querySelectorAll("table.log-table tbody tr").length;
+          return rows > count ? rows : false;
+        },
+        { label: "SSE 推来的新行", timeout: 15_000 },
+        before,
+      );
+      assert(after > before, `行数没增加：${before} → ${after}`);
+
+      // 要是页面重载了，那新行不能算 SSE 的功劳。
+      const navAfter = await page.evaluate(
+        () => performance.getEntriesByType("navigation").length,
+      );
+      assertEqual(navAfter, navBefore, "期间发生了整页重载");
     });
 
     // ── 看板页 ──────────────────────────────────────────────
