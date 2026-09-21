@@ -4,6 +4,7 @@
 
 import type {
   APIToken,
+  BalanceResult,
   ChannelExportDocument,
   Group,
   ImportResult,
@@ -136,11 +137,14 @@ export function testUpstreamModel(
 }
 
 /** new-api 与 sub2api 两种余额接口，路径不同。 */
-export function fetchUpstreamBalance(id: number, provider: "new-api" | "sub2api"): Promise<unknown> {
+export function fetchUpstreamBalance(
+  id: number,
+  provider: "new-api" | "sub2api",
+): Promise<BalanceResult> {
   const path = provider === "sub2api"
     ? `/api/admin/upstreams/${id}/balance/sub2api`
     : `/api/admin/upstreams/${id}/balance`;
-  return api<unknown>(path, { method: "POST" });
+  return api<BalanceResult>(path, { method: "POST" });
 }
 
 export function listGroups(): Promise<Array<{ id: number; name: string }>> {

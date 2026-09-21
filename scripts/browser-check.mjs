@@ -279,12 +279,49 @@ function startFakeUpstream() {
     },
   };
 
+  /* 计费端点：第一次故意慢，且每次报的总额递增。这样才能制造出「先发的
+     后到」，测出陈旧响应会不会盖掉新结果。 */
+  let billingCalls = 0;
+
   const server = createServer((request, response) => {
     const path = (request.url ?? "").split("?")[0];
 
     if (path === "/v1/models") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ object: "list", data: FAKE_MODELS.map((id) => ({ id })) }));
+      return;
+    }
+
+    if (path === "/v1/dashboard/billing/subscription") {
+      const first = billingCalls++ === 0;
+      const send = () => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ hard_limit_usd: 100 }));
+      };
+      // 金额恒定，只是第一次慢——让断言不依赖调用次序。
+      if (first) setTimeout(send, 1500);
+      else send();
+      return;
+    }
+
+    if (path === "/v1/dashboard/billing/usage") {
+      response.writeHead(200, { "content-type": "application/json" });
+      // new-api 用分报，后端除 100。
+      response.end(JSON.stringify({ total_usage: 2500 }));
+      return;
+    }
+
+    if (path === "/v1/usage") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(
+        JSON.stringify({
+          remaining: 12.5,
+          usage: { total: { actual_cost: 3.25 } },
+          planName: "pro",
+          isValid: true,
+          mode: "shared",
+        }),
+      );
       return;
     }
 
@@ -862,6 +899,84 @@ async function main() {
       await page.waitFor(() => document.querySelector("dialog[aria-label=测试模型][open]") === null, {
         label: "测试窗关闭",
       });
+    });
+
+    // ── 余额查询 ──────────────────────────────────────────────
+    console.log("\n余额查询");
+
+    /* 假上游的第一次计费请求慢 1.5 秒。趁它在途中关窗并换查 sub2api，先发的
+       new-api 必然后到。没有作废机制的话，它会落进一个已经换了主题的窗口，
+       界面上就出现另一家的数字。
+
+       注意不能拿「点刷新」构造竞态：查询期间刷新按钮是禁用的，那条路压根不
+       存在。 */
+    await check("关窗作废在途查询，不串到下一个窗口", async () => {
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "查询 new-api 余额");
+      await page.waitForSelector("dialog.balance-dialog[open]", { label: "余额窗" });
+      await page.click("dialog.balance-dialog .icon-close");
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "查询 sub2api 余额");
+
+      await page.waitFor(
+        () =>
+          [...document.querySelectorAll("dialog.balance-dialog .balance-row .label")].some(
+            (label) => label.textContent === "计划",
+          ),
+        { label: "sub2api 结果", timeout: 10_000 },
+      );
+
+      // 等慢的那个 new-api 响应回来，再看一眼窗里是不是还是 sub2api。
+      await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 2000)));
+      const labels = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.balance-dialog .balance-row .label")].map(
+          (label) => label.textContent,
+        ),
+      );
+      assert(labels.includes("计划"), `窗里不再是 sub2api：${labels}`);
+      assert(!labels.includes("总额"), `new-api 的结果串进来了：${labels}`);
+    });
+
+    await check("sub2api 换一套字段", async () => {
+      const rows = await page.evaluate(() =>
+        Object.fromEntries(
+          [...document.querySelectorAll("dialog.balance-dialog .balance-row")].map((row) => [
+            row.querySelector(".label")?.textContent,
+            row.querySelector(".value")?.textContent,
+          ]),
+        ),
+      );
+      assertEqual(rows["余额"], "$12.5", "余额");
+      assertEqual(rows["累计实耗"], "$3.25", "累计实耗");
+      assertEqual(rows["计划"], "pro", "计划");
+      assertEqual(rows["状态"], "有效", "状态");
+      assertEqual(rows["模式"], "shared", "模式");
+    });
+
+    await check("new-api 算出剩余", async () => {
+      await page.click("dialog.balance-dialog .icon-close");
+      await page.waitFor(() => document.querySelector("dialog.balance-dialog[open]") === null, {
+        label: "余额窗关闭",
+      });
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "查询 new-api 余额");
+      const rows = await page.waitFor(
+        () => {
+          const entries = [...document.querySelectorAll("dialog.balance-dialog .balance-row")];
+          if (entries.length === 0) return false;
+          return Object.fromEntries(
+            entries.map((row) => [
+              row.querySelector(".label")?.textContent,
+              row.querySelector(".value")?.textContent,
+            ]),
+          );
+        },
+        { label: "new-api 余额行", timeout: 10_000 },
+      );
+      assertEqual(rows["总额"], "$100", "总额");
+      assertEqual(rows["已用"], "$25", "已用（后端把分除以 100）");
+      assertEqual(rows["剩余"], "$75", "剩余 = 总额 - 已用");
+      await page.click("dialog.balance-dialog .icon-close");
     });
 
     /* 第二条入口：渠道编辑表单里的两个按钮。它走的是另一个接口（探一个还没

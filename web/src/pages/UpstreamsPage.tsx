@@ -5,7 +5,6 @@ import {
   createUpstream,
   deleteUpstream,
   exportUpstreams,
-  fetchUpstreamBalance,
   fetchUpstreamModels,
   fetchUpstreamStats,
   getUpstream,
@@ -20,6 +19,8 @@ import {
 } from "../api";
 import { ActionMenu, MENU_SEPARATOR } from "../components/ActionMenu";
 import type { MenuEntry } from "../components/ActionMenu";
+import { BalanceDialog } from "../components/BalanceDialog";
+import type { BalanceProvider } from "../components/BalanceDialog";
 import { ChannelCard } from "../components/ChannelCard";
 import {
   ChannelExportDialog,
@@ -119,6 +120,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   >(null);
   const [pickerSaving, setPickerSaving] = useState(false);
   const [testing, setTesting] = useState<Upstream | null>(null);
+  const [balance, setBalance] = useState<{ upstream: Upstream; provider: BalanceProvider } | null>(null);
 
   const toast = useToast();
   const confirm = useConfirm();
@@ -515,8 +517,8 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       { key: "test-model", label: "测试模型", onSelect: () => setTesting(upstream) },
       { key: "test", label: "测试连接", onSelect: () => void runAction(upstream.id, "测试连接", () => testUpstream(upstream.id)) },
       { key: "models", label: "拉取模型", onSelect: () => void openModelPicker(upstream) },
-      { key: "balance", label: "查询 new-api 余额", onSelect: () => void runAction(upstream.id, "查询余额", () => fetchUpstreamBalance(upstream.id, "new-api")) },
-      { key: "balance-sub2api", label: "查询 sub2api 余额", onSelect: () => void runAction(upstream.id, "查询余额", () => fetchUpstreamBalance(upstream.id, "sub2api")) },
+      { key: "balance", label: "查询 new-api 余额", onSelect: () => setBalance({ upstream, provider: "new-api" }) },
+      { key: "balance-sub2api", label: "查询 sub2api 余额", onSelect: () => setBalance({ upstream, provider: "sub2api" }) },
       MENU_SEPARATOR,
       { key: "edit", label: "编辑", onSelect: () => void openEditor(upstream) },
       { key: "duplicate", label: "复制渠道", onSelect: () => void duplicate(upstream) },
@@ -889,6 +891,13 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       />
 
       <ModelTestDialog open={testing !== null} upstream={testing} onClose={() => setTesting(null)} />
+
+      <BalanceDialog
+        open={balance !== null}
+        upstream={balance?.upstream ?? null}
+        provider={balance?.provider ?? "new-api"}
+        onClose={() => setBalance(null)}
+      />
 
       {picker ? (
         <ModelDialog

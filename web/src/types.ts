@@ -217,6 +217,26 @@ export interface PromptTemplate {
 }
 
 /**
+ * 余额查询结果。
+ *
+ * 和模型测试一样，接口总是 200，成败看 ok。三个金额字段都可能为 null：
+ * 有些渠道只报剩余，有些只报总额。
+ */
+export interface BalanceResult {
+  ok: boolean;
+  provider?: string;
+  total_usd?: number | null;
+  used_usd?: number | null;
+  remaining_usd?: number | null;
+  unit?: string;
+  /** 以下四项只有 sub2api 会给。 */
+  plan_name?: string | null;
+  is_valid?: boolean;
+  mode?: string | null;
+  message?: string;
+}
+
+/**
  * 模型测试结果。
  *
  * 接口总是 200，成败看 ok。连不上上游时 status_code 为 null 且只有 message。
