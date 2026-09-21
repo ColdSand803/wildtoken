@@ -489,6 +489,11 @@ async function openRowMenu(page, nameFragment) {
   await sleep(60);
 }
 
+/** 在页内等一会儿。等的是渲染，所以让浏览器自己计时而不是在这边 sleep。 */
+function sleepInPage(page, ms) {
+  return page.evaluate((delay) => new Promise((resolve) => setTimeout(resolve, delay)), ms);
+}
+
 async function clickMenuItem(page, label) {
   const clicked = await page.evaluate((text) => {
     const item = [...document.querySelectorAll("[role=menu] [role=menuitem]")].find(
@@ -979,15 +984,59 @@ async function main() {
       await page.click("dialog.balance-dialog .icon-close");
     });
 
-    /* 第二条入口：渠道编辑表单里的两个按钮。它走的是另一个接口（探一个还没
-       存下来的 Base URL），也不碰服务端，和行菜单那条没有任何共用逻辑。 */
-    await check("编辑表单里管理模型不拉取", async () => {
+    // ── 渠道编辑表单 ─────────────────────────────────────────
+    console.log("\n渠道编辑表单");
+
+    await check("分四节，高级区可折叠", async () => {
       await openRowMenu(page, "auto-weight");
       await clickMenuItem(page, "编辑");
       await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
+      const heads = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.upstream-dialog[open] .form-section-head h3")].map(
+          (h) => h.textContent,
+        ),
+      );
+      assertEqual(heads.join(","), "基础信息,模型路由,运行设置", "分节标题");
+      const collapsible = await page.count("dialog.upstream-dialog[open] details.form-section-collapsible");
+      assertEqual(collapsible, 1, "可折叠的高级区");
+    });
+
+    await check("所属分组预勾上", async () => {
+      const checked = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.upstream-dialog[open] .group-checkbox")]
+          .filter((label) => label.querySelector("input")?.checked)
+          .map((label) => label.querySelector("span")?.textContent),
+      );
+      assertEqual(checked.join(","), "vip", "已勾分组");
+    });
+
+    await check("已选模型渲染成芯片", async () => {
+      const chips = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.upstream-dialog[open] .model-selection-chip-name")].map(
+          (chip) => chip.textContent,
+        ),
+      );
+      assert(chips.length > 0, "一个芯片都没有");
+      assert(
+        chips.some((chip) => chip.includes("=>")),
+        `映射没渲染成芯片：${chips}`,
+      );
+    });
+
+    await check("芯片可以就地摘掉", async () => {
+      const before = await page.count("dialog.upstream-dialog[open] .model-selection-chip");
+      await page.click("dialog.upstream-dialog[open] .model-selection-remove");
+      const after = await page.count("dialog.upstream-dialog[open] .model-selection-chip");
+      assertEqual(after, before - 1, "摘掉一个后的芯片数");
+    });
+
+    /* 第二条入口：渠道编辑表单里的两个按钮。它走的是另一个接口（探一个还没
+       存下来的 Base URL），也不碰服务端，和行菜单那条没有任何共用逻辑。 */
+    await check("编辑表单里管理模型不拉取", async () => {
       await page.evaluate(() => {
-        const button = [...document.querySelectorAll("dialog.upstream-dialog .model-toolbar-actions button")]
-          .find((b) => b.textContent.trim() === "管理模型");
+        const button = [
+          ...document.querySelectorAll("dialog.upstream-dialog[open] .form-section-head-actions button"),
+        ].find((b) => b.textContent.trim() === "管理模型");
         if (!button) throw new Error("找不到管理模型按钮");
         button.click();
       });
@@ -1014,10 +1063,12 @@ async function main() {
       await page.waitFor(() => document.querySelector("dialog.model-dialog[open]") === null, {
         label: "选择器关闭",
       });
-      const textarea = await page.evaluate(
-        () => document.querySelector("dialog.upstream-dialog textarea")?.value ?? "",
+      const chips = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.upstream-dialog[open] .model-selection-chip-name")].map(
+          (chip) => chip.textContent,
+        ),
       );
-      assert(textarea.includes("draft-only"), `没写回模型名框：${JSON.stringify(textarea)}`);
+      assert(chips.includes("draft-only"), `没写回芯片：${chips}`);
       // 表单没提交，库里不该有这个名字。
       const stored = await page.evaluate(async () => {
         const response = await fetch("/api/admin/upstreams/", {
@@ -1031,8 +1082,9 @@ async function main() {
 
     await check("表单里拉取模型走预览接口", async () => {
       await page.evaluate(() => {
-        const button = [...document.querySelectorAll("dialog.upstream-dialog .model-toolbar-actions button")]
-          .find((b) => b.textContent.trim() === "拉取模型");
+        const button = [
+          ...document.querySelectorAll("dialog.upstream-dialog[open] .form-section-head-actions button"),
+        ].find((b) => b.textContent.trim() === "拉取模型");
         if (!button) throw new Error("找不到拉取模型按钮");
         button.click();
       });
@@ -1040,7 +1092,69 @@ async function main() {
       const summary = await page.text("dialog.model-dialog .modal-head p");
       assert(summary?.includes(`上游返回 ${FAKE_MODELS.length}`), `摘要不对：${summary}`);
       await page.click("dialog.model-dialog .modal-actions button.secondary");
-      await page.click("dialog.upstream-dialog .modal-actions button.secondary");
+    });
+
+    /* 旧控制台把映射显示成 `a => b`。从那边复制过来的内容必须能原样吃下；
+       只找第一个 `=` 的写法会把它切成 `a` 和 `> b`，而且不报错。 */
+    await check("思考强度映射吃得下箭头写法", async () => {
+      await page.evaluate(() => {
+        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
+        details.open = true;
+      });
+      await page.evaluate(() => {
+        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        setter.call(areas[1], "max => xhigh");
+        areas[1].dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await page.evaluate(() => {
+        document
+          .querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]")
+          .click();
+      });
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "编辑对话框关闭",
+        timeout: 10_000,
+      });
+      const stored = await page.evaluate(async () => {
+        const response = await fetch("/api/admin/upstreams/", {
+          headers: { "x-admin-token": localStorage.getItem("wildtoken_admin_token") },
+        });
+        const list = await response.json();
+        return list.find((item) => item.name.includes("auto-weight"))?.effort_mappings ?? null;
+      });
+      assertEqual(JSON.stringify(stored), '{"max":"xhigh"}', "落库的思考强度映射");
+    });
+
+    await check("Header 不是合法 JSON 就不保存", async () => {
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "编辑");
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
+      await page.evaluate(() => {
+        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
+        details.open = true;
+        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        setter.call(areas[0], "{not json");
+        areas[0].dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await page.evaluate(() => {
+        document
+          .querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]")
+          .click();
+      });
+      await sleepInPage(page, 300);
+      const stillOpen = await page.evaluate(
+        () => document.querySelector("dialog.upstream-dialog[open]") !== null,
+      );
+      assertEqual(stillOpen, true, "解析失败时对话框应留着");
+      const toasted = await page.evaluate(() =>
+        [...document.querySelectorAll(".toast")].some((node) =>
+          node.textContent.includes("Header 覆盖"),
+        ),
+      );
+      assertEqual(toasted, true, "应提示 Header 解析失败");
+      await page.click("dialog.upstream-dialog[open] .icon-close");
       await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
         label: "编辑对话框关闭",
       });
