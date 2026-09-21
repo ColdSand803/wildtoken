@@ -977,6 +977,88 @@ function Summary({ label, value }: { label: string; value: number }) {
   );
 }
 
+/**
+ * 只放行 http(s)。
+ *
+ * base_url 是管理员填的，不校就把一个 javascript: 开头的值变成了可点击的
+ * 脚本执行入口。照抄旧版 normalizeHttpUrl。
+ */
+function httpUrlOrNull(value: string): string | null {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Base URL 格。
+ *
+ * 旧版是 code 加两个按钮：复制、在新标签打开。只渲染纯文本的话，想拿地址
+ * 去试一下得自己选中拷贝，而这一格宽度有限、地址常常被截。
+ */
+function BaseUrlCell({ upstream }: { upstream: Upstream }) {
+  const toast = useToast();
+  const openable = httpUrlOrNull(upstream.base_url);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(upstream.base_url);
+      toast("Base URL 已复制。", { tone: "ok" });
+    } catch {
+      toast("复制失败：浏览器拒绝了剪贴板访问。", { tone: "error" });
+    }
+  }
+
+  return (
+    <div className="url-cell-inner">
+      <code title={upstream.base_url}>{upstream.base_url}</code>
+      <span className="url-cell-actions" aria-label="Base URL 操作">
+        <button
+          type="button"
+          className="secondary ghost url-action"
+          aria-label={`复制 ${upstream.name} 的 Base URL`}
+          title="复制 Base URL"
+          onClick={() => void copy()}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <rect x="9" y="9" width="10" height="10" rx="2" />
+            <path d="M5 15V7a2 2 0 0 1 2-2h8" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="secondary ghost url-action"
+          aria-label={`打开 ${upstream.name} 的 Base URL`}
+          title={openable ? "打开 Base URL" : "不是可打开的 http(s) 地址"}
+          disabled={openable === null}
+          onClick={() => {
+            if (openable) window.open(openable, "_blank", "noopener,noreferrer");
+          }}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M14 5h5v5" />
+            <path d="M10 14 19 5" />
+            <path d="M19 14v3a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3" />
+          </svg>
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/** 有效权重为 0 的原因。自动权重降到 0 时还要说清楚还有多久恢复。 */
+function zeroWeightNote(upstream: Upstream): string {
+  if (!upstream.auto_weight_enabled) return "固定权重 0 · 不参与路由";
+  if (Number(upstream.weight) === 0) return "基础权重 0 · 不参与动态路由";
+  const remaining = upstream.health_recovery_remaining_seconds;
+  return remaining ? `有效权重 0 · ${remaining}s 后恢复` : "有效权重 0 · 等待恢复周期";
+}
+
 /** 整数不带小数点，非整数保留两位再去尾零。照抄旧版 formatEffectiveWeight。 */
 function formatWeight(value: number): string {
   const number = Number(value);
@@ -1060,7 +1142,7 @@ function UpstreamRow({
       <td className="name-cell" data-col="name">
         <div className="name-stack">
           <strong title={upstream.name}>{upstream.name}</strong>
-          <span className="url-cell-inner">{upstream.base_url}</span>
+          <BaseUrlCell upstream={upstream} />
         </div>
       </td>
       <td className="match-cell" data-col="models">
@@ -1149,7 +1231,11 @@ function UpstreamRow({
               <span className="status-switch-thumb" />
             </span>
           </button>
-          {zeroWeight ? <span className="effective-zero-note">有效权重为 0</span> : null}
+          {/* 三种 0 要分开说：固定权重 0、基础权重 0、被动态降到 0。
+              只说「有效权重为 0」的话，前两种看起来像故障，其实是配的。 */}
+          {zeroWeight ? (
+            <span className="effective-zero-note">{zeroWeightNote(upstream)}</span>
+          ) : null}
         </div>
       </td>
       <td className="row-actions col-actions" data-col="actions">

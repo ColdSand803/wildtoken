@@ -851,6 +851,72 @@ async function main() {
 
     /* 先断言存在再断言状态。只写「hidden 不为 false」的话，归档区根本没渲染
        也能蒙混过关——首跑就是这么蒙过去的。 */
+    await check("Base URL 格带复制和打开按钮", async () => {
+      const cell = await page.evaluate(() => {
+        const rows = [...document.querySelectorAll("table.upstream-table tbody tr")];
+        const row = rows.find((r) => r.querySelector("[data-col=name]")?.textContent?.includes("auto-weight"));
+        const inner = row?.querySelector(".url-cell-inner");
+        return {
+          code: inner?.querySelector("code")?.textContent ?? null,
+          buttons: [...(inner?.querySelectorAll(".url-action") ?? [])].map((b) => ({
+            label: b.getAttribute("aria-label"),
+            disabled: b.disabled,
+          })),
+        };
+      });
+      assert(cell.code?.startsWith("http"), `Base URL 没放进 code：${cell.code}`);
+      assertEqual(cell.buttons.length, 2, "复制 + 打开两个按钮");
+      // 种子指向真实 http 地址，打开按钮不该被禁用。
+      assert(
+        cell.buttons.every((b) => !b.disabled),
+        `按钮被禁用了：${JSON.stringify(cell.buttons)}`,
+      );
+    });
+
+    /* 三种 0 要分开说。fixed-weight-channel 是固定权重，把它改成 0 看文案。 */
+    await check("零权重注记说清楚是哪种 0", async () => {
+      await page.evaluate(async () => {
+        const admin = localStorage.getItem("wildtoken_admin_token");
+        const list = await (
+          await fetch("/api/admin/upstreams/", { headers: { "x-admin-token": admin } })
+        ).json();
+        const target = list.find((item) => item.name.includes("fixed-weight"));
+        await fetch(`/api/admin/upstreams/${target.id}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json", "x-admin-token": admin },
+          body: JSON.stringify({
+            name: target.name,
+            base_url: target.base_url,
+            api_key: null,
+            clear_api_key: false,
+            model_names: target.model_names,
+            model_prefixes: target.model_prefixes,
+            model_mappings: target.model_mappings,
+            effort_mappings: target.effort_mappings,
+            priority: target.priority,
+            weight: 0,
+            auto_weight_enabled: false,
+            timeout_seconds: target.timeout_seconds,
+            enabled: target.enabled,
+            extra_headers: target.extra_headers,
+            rate_limit: target.rate_limit,
+            group_ids: target.group_ids,
+          }),
+        });
+      });
+      await gotoView(page, "日志");
+      await gotoView(page, "渠道");
+      const note = await page.waitFor(
+        () => {
+          const rows = [...document.querySelectorAll("table.upstream-table tbody tr")];
+          const row = rows.find((r) => r.querySelector("[data-col=name]")?.textContent?.includes("fixed-weight"));
+          return row?.querySelector(".effective-zero-note")?.textContent ?? false;
+        },
+        { label: "零权重注记", timeout: 10_000 },
+      );
+      assertEqual(note, "固定权重 0 · 不参与路由", "固定权重 0 的文案");
+    });
+
     await check("归档区存在且默认收起", async () => {
       await page.waitForSelector(".archived-toggle", { label: "归档区" });
       const hidden = await page.evaluate(
