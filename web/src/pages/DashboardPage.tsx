@@ -3,24 +3,31 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { UnauthorizedError, fetchDashboard } from "../api";
 import type { LogOverview, RequestLog, TokenUsage, TopStats } from "../types";
 
-/** 时间范围档。值就是后端认的 range 参数。 */
+/* 时间范围档。这些字符串直接进 query，必须是后端 parseDashboardRange 认的
+   词——它只收 today/1d/3d/7d/30d/all/default/custom，别的一律 400。
+
+   default（多窗口对比）和 custom（自定义区间）要额外的日期参数，留到看板页
+   整体对齐旧版时一起做。 */
 const RANGES = [
-  { key: "1h", label: "1 小时" },
-  { key: "6h", label: "6 小时" },
-  { key: "24h", label: "24 小时" },
-  { key: "7d", label: "7 天" },
-  { key: "30d", label: "30 天" },
+  { key: "today", label: "今天" },
+  { key: "1d", label: "24小时" },
+  { key: "3d", label: "3天" },
+  { key: "7d", label: "7天" },
+  { key: "30d", label: "30天" },
+  { key: "all", label: "全部" },
 ] as const;
 
+/* 和旧控制台同一个键，两版之间切换保持选择；默认值也照抄旧版的 30d。 */
 const RANGE_KEY = "wildtoken_dashboard_range";
+const DEFAULT_RANGE = "30d";
 const MASK_KEY = "wildtoken_dashboard_mask_channels";
 
 function readRange(): string {
   try {
     const raw = localStorage.getItem(RANGE_KEY);
-    return RANGES.some((r) => r.key === raw) ? (raw as string) : "24h";
+    return RANGES.some((r) => r.key === raw) ? (raw as string) : DEFAULT_RANGE;
   } catch {
-    return "24h";
+    return DEFAULT_RANGE;
   }
 }
 

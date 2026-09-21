@@ -18,6 +18,12 @@ export function App() {
   const [view, setView] = useState<ViewId>("upstreams");
   const [needsToken, setNeedsToken] = useState(() => getAdminToken() === "");
   const [tokenError, setTokenError] = useState("");
+  /* 登录成功后自增，作为 <main> 的 key。
+
+     401 的那一刻页面已经取数失败并停在空态，而每个页面的取数只在挂载时
+     跑一次——光关掉登录框，界面会一直空着，看起来像坏了。重挂载让当前页
+     自己重新取数，不必每个页面都知道有认证这回事。 */
+  const [authEpoch, setAuthEpoch] = useState(0);
 
   /* 401 从任何请求里冒出来时统一处理：清掉令牌、弹登录框。旧控制台是在
      api() 里直接开弹窗，这里改成往上抛，由一处集中接住——组件不需要知道
@@ -40,7 +46,7 @@ export function App() {
       <ConfirmProvider>
         <div className="app-shell">
           <Topbar view={view} onNavigate={setView} />
-          <main className="content">
+          <main className="content" key={authEpoch}>
             {view === "upstreams" ? (
               <UpstreamsPage onUnauthorized={handleUnauthorized} />
             ) : view === "logs" ? (
@@ -64,6 +70,7 @@ export function App() {
             onSubmitted={() => {
               setNeedsToken(false);
               setTokenError("");
+              setAuthEpoch((epoch) => epoch + 1);
             }}
           />
         </div>
