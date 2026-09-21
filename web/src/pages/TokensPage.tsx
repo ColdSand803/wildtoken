@@ -20,9 +20,10 @@ import type { APIToken } from "../types";
 /** 创建于明文保存启用之前的令牌，完整值已经取不回来了。 */
 const SEALED_TITLE = "这个令牌创建于明文保存启用之前，完整值已经无法恢复。需要完整令牌只能删除后重建。";
 
-/** 大数字缩写，和限额输入框接受的写法对称。 */
+/** 大数字缩写，和限额输入框接受的写法对称。四级与旧版 formatTokenCount 一致。 */
 function formatCount(value: number): string {
   for (const [suffix, unit] of [
+    ["T", 1e12],
     ["B", 1e9],
     ["M", 1e6],
     ["K", 1e3],
@@ -33,6 +34,55 @@ function formatCount(value: number): string {
     }
   }
   return String(value);
+}
+
+/**
+ * 配额单元格。嵌套照抄旧版 quotaCell：限速注记在 quota-cell 外面并列，
+ * 不在里面。两个分隔符把已用 / 剩余 / 限额 隔开。
+ */
+function QuotaCell({ token }: { token: APIToken }) {
+  const quota = token.quota;
+  const used = Number(quota.used_tokens) || 0;
+  const rateNote = token.rate_limit ? (
+    <span className="muted quota-rate-note" title={`限速 ${token.rate_limit}`}>
+      {token.rate_limit}
+    </span>
+  ) : null;
+
+  if (quota.limit_tokens === null || quota.limit_tokens === undefined) {
+    return (
+      <>
+        <span className="quota-cell" title={`已用 ${used.toLocaleString()} tokens，未设限额`}>
+          <span className="quota-used">{formatCount(used)}</span>
+          <span className="quota-sep">/</span>
+          <span className="muted">不限</span>
+        </span>
+        {rateNote}
+      </>
+    );
+  }
+
+  const limit = Number(quota.limit_tokens) || 0;
+  const remaining = Number(quota.remaining_tokens) || 0;
+  const ratio = limit > 0 ? used / limit : 0;
+  // 用尽标红、接近用尽标黄，好在一列里扫出该处理哪个。
+  const tone = quota.exhausted ? " danger" : ratio >= 0.8 ? " warn" : "";
+
+  return (
+    <>
+      <span
+        className={`quota-cell${tone}`}
+        title={`已用 ${used.toLocaleString()} / 剩余 ${remaining.toLocaleString()} / 限额 ${limit.toLocaleString()} tokens`}
+      >
+        <span className="quota-used">{formatCount(used)}</span>
+        <span className="quota-sep">/</span>
+        <span className="quota-remaining">{formatCount(remaining)}</span>
+        <span className="quota-sep">/</span>
+        <span className="quota-limit">{quota.limit_expression || formatCount(limit)}</span>
+      </span>
+      {rateNote}
+    </>
+  );
 }
 
 export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
@@ -290,7 +340,6 @@ function TokenRow({
   onToggle: () => void;
 }) {
   const sealed = !token.token;
-  const quota = token.quota;
 
   return (
     <tr className={token.enabled ? undefined : "row-disabled"}>
@@ -321,20 +370,7 @@ function TokenRow({
       </td>
 
       <td className="col-quota">
-        <span className={`quota-cell${quota.exhausted ? " danger" : ""}`}>
-          <span className="quota-used">{formatCount(quota.used_tokens)}</span>
-          {quota.limit_tokens === null ? (
-            <span className="muted"> / 不限</span>
-          ) : (
-            <>
-              <span className="quota-sep"> / </span>
-              <span className="quota-limit">{quota.limit_expression}</span>
-            </>
-          )}
-          {token.rate_limit ? (
-            <span className="muted quota-rate-note">{token.rate_limit}</span>
-          ) : null}
-        </span>
+        <QuotaCell token={token} />
       </td>
 
       <td className="col-expiry">
