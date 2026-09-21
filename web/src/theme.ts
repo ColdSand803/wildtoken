@@ -31,6 +31,37 @@ export const THEME_LABELS: Record<string, string> = {
   gojo: "Gojo",
 };
 
+/** 色板取自旧版 THEMES：[底色, 强调色]，给主题菜单的小方块用。 */
+export const THEME_SWATCHES: Record<string, [string, string]> = {
+  dark: ["#020617", "#22d3ee"],
+  light: ["#f4f6fb", "#0891b2"],
+  ark: ["#080a0b", "#18d1ff"],
+  endfield: ["#f2f2f0", "#fffa00"],
+  "sakura-mist": ["#ffe3ee", "#535369"],
+  anthropic: ["#faf9f5", "#d97757"],
+  "anthropic-dark": ["#141413", "#d97757"],
+  gojo: ["#070910", "#63dcff"],
+};
+
+export const DENSITY_KEY = "wildtoken_density";
+
+export function currentDensity(): string {
+  return document.documentElement.getAttribute("data-density") === "compact"
+    ? "compact"
+    : "comfortable";
+}
+
+/** 密度和主题一样和旧控制台共用键，两版之间切换保持选择。 */
+export function applyDensity(density: string): void {
+  const next = density === "compact" ? "compact" : "comfortable";
+  document.documentElement.setAttribute("data-density", next);
+  try {
+    localStorage.setItem(DENSITY_KEY, next);
+  } catch {
+    // 存不进去不影响当前页面。
+  }
+}
+
 const SAFE_THEME_ID = /^[a-z][a-z0-9-]{0,47}$/;
 const SAFE_THEME_CSS = /^\/theme-packs\/[a-z][a-z0-9-]{0,47}\/[A-Za-z0-9._/-]+\.css$/;
 

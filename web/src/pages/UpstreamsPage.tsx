@@ -684,6 +684,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                   <UpstreamRow
                     key={upstream.id}
                     upstream={upstream}
+                    groups={groups}
                     busy={pending === upstream.id}
                     menu={menuFor(upstream)}
                     checked={selected.has(upstream.id)}
@@ -861,8 +862,51 @@ function Summary({ label, value }: { label: string; value: number }) {
   );
 }
 
+/** 整数不带小数点，非整数保留两位再去尾零。照抄旧版 formatEffectiveWeight。 */
+function formatWeight(value: number): string {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  return Number.isInteger(number)
+    ? String(number)
+    : number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+/** 旧版 MAX_MODEL_CHIPS：只显示前几个，剩下的折成 +N。 */
+const MAX_MODEL_CHIPS = 5;
+
+type Chip = { label: string; type: string };
+
+/** 芯片列表。容器是 div 不是 span，全量标签放 title，和旧版 modelChipList 一致。 */
+function ChipList({ items }: { items: Chip[] }) {
+  const visible = items.slice(0, MAX_MODEL_CHIPS);
+  const hiddenCount = items.length - visible.length;
+  return (
+    <div className="model-chip-list" title={items.map((item) => item.label).join(", ")}>
+      {visible.map((item, index) => (
+        <span key={`${item.type}-${item.label}-${index}`} className={`model-chip ${item.type}`}>
+          {item.label}
+        </span>
+      ))}
+      {hiddenCount > 0 ? <span className="model-chip more">{`+${hiddenCount}`}</span> : null}
+    </div>
+  );
+}
+
+/** 映射在前、精确名在中、前缀在后，顺序照抄旧版 modelMatchItems。 */
+function modelMatchItems(upstream: Upstream): Chip[] {
+  return [
+    ...Object.entries(upstream.model_mappings || {}).map(([downstream, target]) => ({
+      label: `${downstream}=>${target}`,
+      type: "mapping",
+    })),
+    ...upstream.model_names.map((value) => ({ label: value, type: "name" })),
+    ...upstream.model_prefixes.map((value) => ({ label: `${value}*`, type: "prefix" })),
+  ];
+}
+
 function UpstreamRow({
   upstream,
+  groups,
   busy,
   menu,
   checked,
@@ -874,6 +918,7 @@ function UpstreamRow({
   onToggle,
 }: {
   upstream: Upstream;
+  groups: Array<{ id: number; name: string }>;
   busy: boolean;
   menu: MenuEntry[];
   checked: boolean;
@@ -904,16 +949,27 @@ function UpstreamRow({
         </div>
       </td>
       <td className="match-cell" data-col="models">
-        {upstream.model_names.length === 0 && upstream.model_prefixes.length === 0 ? (
-          <span className="muted">全部模型</span>
+        {modelMatchItems(upstream).length === 0 ? (
+          <span className="muted">默认候选</span>
         ) : (
-          <span className="model-chip-list">
-            {[...upstream.model_names, ...upstream.model_prefixes].map((name) => (
-              <span key={name} className="model-chip">{name}</span>
-            ))}
-          </span>
+          <ChipList items={modelMatchItems(upstream)} />
         )}
       </td>
+
+      {/* 分组格。漏了这一格表头 9 列、表体 8 列，其后所有单元格整体左移。 */}
+      <td className="match-cell" data-col="groups">
+        {upstream.group_ids.length === 0 ? (
+          <span className="muted">—</span>
+        ) : (
+          <ChipList
+            items={upstream.group_ids.map((id) => ({
+              label: groups.find((group) => group.id === id)?.name ?? `#${id}`,
+              type: "group",
+            }))}
+          />
+        )}
+      </td>
+
       <td className="col-priority" data-col="priority">
         {/* 点数字变输入框，和旧版一致。失焦或回车提交，Esc 放弃。 */}
         {editingPriority ? (
@@ -946,7 +1002,21 @@ function UpstreamRow({
         )}
       </td>
       <td className="col-weight" data-col="weight">
-        <div className="weight-stack">{Math.round(upstream.effective_weight)}</div>
+        {/* 动态权重显示「有效 / 基础」双值；关掉自动权重时只有基础值，
+            此时 effective_weight 不参与路由，拿出来显示会让人误以为它生效。 */}
+        <div className="weight-stack">
+          {upstream.auto_weight_enabled ? (
+            <>
+              <strong>{`${formatWeight(upstream.effective_weight)} / ${formatWeight(upstream.weight)}`}</strong>
+              <span>有效权重 / 基础权重</span>
+            </>
+          ) : (
+            <>
+              <strong>{formatWeight(upstream.weight)}</strong>
+              <span>固定权重</span>
+            </>
+          )}
+        </div>
       </td>
       <td className="col-status" data-col="status">
         <div className="status-stack">

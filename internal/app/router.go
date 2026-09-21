@@ -26,7 +26,8 @@ func NewRouter(state *appstate.State) http.Handler {
 
 	router.Get("/health", handlers.HealthCheck(state))
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+		// 根路径进新控制台；旧版仍可直接访问 /admin。
+		http.Redirect(w, r, "/console", http.StatusSeeOther)
 	})
 	router.Get("/admin", serveAdminHTML)
 	// 新控制台（React）。与 /admin 并存：旧版不动，新版出问题不影响任何人。

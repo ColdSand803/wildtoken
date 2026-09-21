@@ -1,4 +1,17 @@
+import { useEffect, useRef, useState } from "react";
+
 import type { ViewId } from "../App";
+import { setAdminToken } from "../api";
+import {
+  BUILTIN_THEMES,
+  THEME_LABELS,
+  THEME_PACKS,
+  THEME_SWATCHES,
+  applyDensity,
+  applyTheme,
+  currentDensity,
+  currentTheme,
+} from "../theme";
 
 const NAV: Array<{ id: ViewId; label: string }> = [
   { id: "dashboard", label: "看板" },
@@ -8,6 +21,8 @@ const NAV: Array<{ id: ViewId; label: string }> = [
   { id: "groups", label: "分组" },
   { id: "settings", label: "设置" },
 ];
+
+const THEME_IDS = [...BUILTIN_THEMES, ...Object.keys(THEME_PACKS)];
 
 /**
  * 顶栏。类名照抄旧控制台——主题 CSS 里 138 个类选择器，靠的就是这些名字。
@@ -20,6 +35,52 @@ export function Topbar({
   view: ViewId;
   onNavigate: (view: ViewId) => void;
 }) {
+  const [theme, setTheme] = useState(currentTheme);
+  const [density, setDensity] = useState(currentDensity);
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const themeWrapRef = useRef<HTMLDivElement>(null);
+
+  // 点菜单外面或按 Esc 收起，和旧版行为一致。
+  useEffect(() => {
+    if (!themeMenuOpen) return;
+
+    const onPointerDown = (event: MouseEvent) => {
+      if (!themeWrapRef.current?.contains(event.target as Node)) setThemeMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setThemeMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [themeMenuOpen]);
+
+  function chooseTheme(next: string) {
+    applyTheme(next);
+    setTheme(next);
+    setThemeMenuOpen(false);
+  }
+
+  function toggleDensity() {
+    const next = density === "compact" ? "comfortable" : "compact";
+    applyDensity(next);
+    setDensity(next);
+  }
+
+  function logout() {
+    // 清掉令牌后复用 401 那条通路，让 App 弹登录框——不另造一套。
+    setAdminToken("");
+    window.dispatchEvent(
+      new CustomEvent<string>("console:unauthorized", { detail: "已退出，请重新输入管理员令牌。" }),
+    );
+  }
+
+  const compact = density === "compact";
+
   return (
     <nav className="topbar">
       <div className="topbar-brand">
@@ -28,7 +89,7 @@ export function Topbar({
         </span>
         <div className="brand-text">
           <h1>WildToken</h1>
-          <span className="brand-label">Console</span>
+          <span className="brand-label">Admin</span>
         </div>
       </div>
 
@@ -37,7 +98,9 @@ export function Topbar({
           <button
             key={item.id}
             type="button"
-            className="nav-link"
+            /* 高亮认 .nav-link.active——base.css 和每个主题包都只写了这个选择器，
+               光发 aria-selected 的话当前页在任何主题下都不会亮。 */
+            className={view === item.id ? "nav-link active" : "nav-link"}
             role="tab"
             aria-selected={view === item.id}
             data-view={item.id}
@@ -49,11 +112,66 @@ export function Topbar({
       </div>
 
       <div className="topbar-actions">
-        {/* 旧版控制台仍在新标签里可用。探针阶段需要一个明显的回退口，
-            而不是让人自己猜 /admin 还在不在。 */}
-        <a className="secondary ghost nav-logout" href="/admin">
-          旧版
-        </a>
+        {/* 自动刷新指示。旧版默认收起，只在轮询期间露出。 */}
+        <span className="live-indicator" hidden title="自动刷新中">
+          <span className="live-dot" aria-hidden="true" />
+          <span className="live-label">实时</span>
+        </span>
+
+        <button
+          type="button"
+          className="secondary ghost density-toggle"
+          aria-label={compact ? "切换到舒适密度" : "切换到紧凑密度"}
+          title={compact ? "当前：紧凑 · 点击切换" : "当前：舒适 · 点击切换"}
+          onClick={toggleDensity}
+        >
+          <span className="density-toggle-label">{compact ? "紧凑" : "舒适"}</span>
+        </button>
+
+        <div className="theme-menu-wrap" ref={themeWrapRef}>
+          <button
+            type="button"
+            className="secondary ghost theme-toggle"
+            aria-label="选择主题"
+            title="选择主题"
+            aria-haspopup="menu"
+            aria-expanded={themeMenuOpen}
+            onClick={() => setThemeMenuOpen((open) => !open)}
+          >
+            <span className="theme-toggle-icon" aria-hidden="true" />
+          </button>
+          <div className="theme-menu" role="menu" aria-label="主题列表" hidden={!themeMenuOpen}>
+            {THEME_IDS.map((id) => {
+              const swatch = THEME_SWATCHES[id] ?? ["#000000", "#ffffff"];
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={theme === id}
+                  data-theme-choice={id}
+                  onClick={() => chooseTheme(id)}
+                >
+                  <span
+                    className="theme-swatch"
+                    aria-hidden="true"
+                    style={
+                      {
+                        "--swatch-bg": swatch[0],
+                        "--swatch-accent": swatch[1],
+                      } as React.CSSProperties
+                    }
+                  />
+                  <span>{THEME_LABELS[id] ?? id}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <button type="button" className="secondary ghost nav-logout" onClick={logout}>
+          退出
+        </button>
       </div>
     </nav>
   );
