@@ -125,6 +125,10 @@ test("React 组件用的 class 名都在共享 CSS 里定义过", () => {
 test("没有自造的 class", () => {
   const used = usedClasses();
   assert.ok(used.size > 0, "应该能扫到 class 名");
-  // 只是一个宽松的上界，防止无意识膨胀，不是精确值。
-  assert.ok(used.size < 400, `用到的 class 涨到 ${used.size} 个，检查是否在自造样式`);
+  /* 只是一个宽松的上界，防止无意识膨胀，不是精确值。
+
+     上面那条测试已经保证每一个名字都能在共享 CSS 里找到，所以这里只是个
+     次要信号。从 400 抬到 450：日志行对齐旧版时补回了 channel-stack、
+     model-route 一系、status-active 一系，都是旧版真实在用的类。 */
+  assert.ok(used.size < 450, `用到的 class 涨到 ${used.size} 个，检查是否在自造样式`);
 });

@@ -118,9 +118,119 @@ function readSensitiveHidden(): boolean {
 }
 
 /** 遮罩：留首尾各两个字符，中间打点。太短的整串遮掉。 */
-function mask(value: string): string {
-  if (value.length <= 5) return "•".repeat(Math.max(3, value.length));
-  return `${value.slice(0, 2)}${"•".repeat(4)}${value.slice(-2)}`;
+/* 旧版的遮罩就是固定六个星号，不按长度变。自造一个「前两位 + 点 + 后两位」
+   的遮罩反而泄露了长度和首尾字符。 */
+const SENSITIVE_MASK = "******";
+
+function Masked() {
+  return <span className="log-sensitive-value">{SENSITIVE_MASK}</span>;
+}
+
+/**
+ * 渠道格：上下两行。上行 #ID，下行渠道名。
+ *
+ * 写成一行的话，同名不同 ID 的渠道在日志里分不出来；而过滤器按 ID 筛，
+ * 没有 ID 就对不上号。
+ */
+function ChannelStack({
+  log,
+  sensitiveHidden,
+}: {
+  log: { upstream_id: number | null; upstream_name: string | null };
+  sensitiveHidden: boolean;
+}) {
+  const name = (log.upstream_name ?? "").trim();
+  const hidden = sensitiveHidden && Boolean(name);
+
+  if (log.upstream_id === null || log.upstream_id === undefined) {
+    if (!name) return <span className="muted">无（未匹配到渠道）</span>;
+    return (
+      <div className="channel-stack">
+        {hidden ? (
+          <strong>
+            <Masked />
+          </strong>
+        ) : (
+          <strong title={name}>{name}</strong>
+        )}
+        <span className="muted">无 ID</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="channel-stack">
+      <strong title={name ? `#${log.upstream_id} · ${hidden ? SENSITIVE_MASK : name}` : `#${log.upstream_id}`}>
+        {`#${log.upstream_id}`}
+      </strong>
+      {name ? (
+        hidden ? (
+          <span className="muted">
+            <Masked />
+          </span>
+        ) : (
+          <span className="muted" title={name}>
+            {name}
+          </span>
+        )
+      ) : (
+        <span className="muted">无名称</span>
+      )}
+    </div>
+  );
+}
+
+/** 令牌格：名字带上 #ID 作 title，遮罩时整个换成星号。 */
+function TokenCell({
+  log,
+  sensitiveHidden,
+}: {
+  log: { downstream_token_id: number | null; downstream_token_name: string | null };
+  sensitiveHidden: boolean;
+}) {
+  const name = (log.downstream_token_name ?? "").trim();
+  if (!name) return <span className="muted">-</span>;
+  if (sensitiveHidden) return <Masked />;
+  return <span title={`#${log.downstream_token_id ?? "-"}`}>{name}</span>;
+}
+
+/**
+ * 模型格。
+ *
+ * 请求模型和上游模型不同时排成两行路由链——渠道配了模型映射时，只显示
+ * 一个名字会让人分不清到底转发了什么。
+ */
+function ModelCell({ log }: { log: { request_model: string | null; upstream_model: string | null; model: string | null } }) {
+  const requestModel = (log.request_model ?? "").trim();
+  const upstreamModel = (log.upstream_model ?? "").trim();
+  const fallback = (log.model ?? "").trim();
+  const request = requestModel || fallback;
+  const upstream = upstreamModel || (requestModel ? fallback : "");
+
+  if (!request && !upstream) return <span className="muted">-</span>;
+
+  if (!request || !upstream || request === upstream) {
+    const value = request || upstream;
+    return (
+      <span className="model-text model-single" title={value}>
+        {value}
+      </span>
+    );
+  }
+
+  return (
+    <span className="model-route" title={`请求模型：${request}；上游模型：${upstream}`}>
+      <span className="model-route-line">
+        <span className="model-text model-request">{request}</span>
+      </span>
+      <span className="model-route-line model-route-target">
+        <span className="model-route-icon" aria-hidden="true">
+          ↳
+        </span>
+        <span className="model-text model-upstream">{upstream}</span>
+      </span>
+    </span>
+  );
 }
 
 /**
@@ -557,36 +667,50 @@ function ActiveRows({
   return (
     <>
       {active.map((request) => (
-        <tr key={`active-${request.id}`} className="log-row log-row--active">
+        <tr
+          key={`active-${request.id}`}
+          className="log-row log-row--active"
+          title="请求进行中，完成后才会写入日志"
+        >
+          {/* 时间格和已完成的行同形：上行时间、下行注解。写成一个 badge 的话
+              这一列会在两种行之间跳来跳去。 */}
           <td className="time-cell" data-col="time">
-            <span className="badge on">进行中</span>
+            <span>{formatTimestamp(request.started_at)}</span>
+            <span className="muted">进行中</span>
           </td>
           <td className="channel-cell" data-col="channel">
-            {request.upstream_name ? (
-              sensitiveHidden ? mask(request.upstream_name) : request.upstream_name
+            {request.upstream_id === null || request.upstream_id === undefined ? (
+              <span className="muted">路由中…</span>
             ) : (
-              <span className="muted">选择中</span>
+              <ChannelStack log={request} sensitiveHidden={sensitiveHidden} />
             )}
-            {request.attempt > 1 ? (
-              <span className="badge neutral">第 {request.attempt} 次</span>
-            ) : null}
           </td>
           <td className="token-cell" data-col="token">
-            <span className="muted">-</span>
+            <TokenCell log={request} sensitiveHidden={sensitiveHidden} />
           </td>
           <td data-col="client">
-            <span className="badge neutral">{request.client_type}</span>
+            <span className="badge neutral">{request.client_type || "unknown"}</span>
           </td>
           <td className="model-cell" data-col="model">
-            {request.upstream_model ?? request.model ?? <span className="muted">-</span>}
+            <ModelCell log={request} />
           </td>
           {/* 在途行也要占这一格，否则它和已完成的行差一列，整行错位。
               响应强度还没回来，链路自然只有前两段。 */}
           <td className="col-reasoning" data-col="reasoning">
             <ReasoningCell log={request} />
           </td>
+          {/* 重试次数跟在状态旁边，不在渠道格里——它描述的是这次请求的处境，
+              不是某个渠道的属性。 */}
           <td data-col="status">
-            <span className="muted">—</span>
+            <span className="badge neutral status-active">
+              <span className="status-active-dot" aria-hidden="true" />
+              进行中
+            </span>
+            {request.attempt > 1 ? (
+              <span className="badge warn active-attempt" title={`已换过 ${request.attempt} 个渠道`}>
+                {`第 ${request.attempt} 次`}
+              </span>
+            ) : null}
           </td>
           <td className="duration-cell" data-col="duration">
             <span className="latency-metrics">
@@ -619,25 +743,23 @@ function LogRow({
   sensitiveHidden: boolean;
   onOpenDetail: () => void;
 }) {
-  const channel = log.upstream_name ?? "";
-  const token = log.downstream_token_name ?? "";
   return (
-    <tr className="log-row">
+    <tr className="log-row" title={log.error || "点击查看请求详情"}>
       <td className="time-cell" data-col="time">
         <span>{formatTimestamp(log.created_at)}</span>
         <span className="muted">#{log.id}</span>
       </td>
       <td className="channel-cell" data-col="channel">
-        {channel ? (sensitiveHidden ? mask(channel) : channel) : <span className="muted">-</span>}
+        <ChannelStack log={log} sensitiveHidden={sensitiveHidden} />
       </td>
       <td className="token-cell" data-col="token">
-        {token ? (sensitiveHidden ? mask(token) : token) : <span className="muted">-</span>}
+        <TokenCell log={log} sensitiveHidden={sensitiveHidden} />
       </td>
       <td data-col="client">
         <span className="badge neutral">{log.client_type}</span>
       </td>
       <td className="model-cell" data-col="model">
-        {log.upstream_model ?? log.model ?? <span className="muted">-</span>}
+        <ModelCell log={log} />
       </td>
       {/* 漏掉这一格表头 10 列、表体 9 格，其后所有单元格整体左移。 */}
       <td className="col-reasoning" data-col="reasoning">
@@ -685,9 +807,13 @@ function LogRow({
 
 function StatusBadge({ code }: { code: number | null }) {
   if (code === null) return <span className="muted">无响应</span>;
-  const bucket = Math.floor(code / 100);
-  const tone = bucket === 2 ? "on" : bucket === 3 ? "neutral" : "danger";
-  return <span className={`badge ${tone} status-${bucket}xx`}>{code}</span>;
+  /* 1xx 和 6xx+ 走 other，和旧版一致。按百位拼类名会造出 status-1xx 这种
+     CSS 里不存在的名字，那一格就没颜色了。 */
+  if (code >= 200 && code < 300) return <span className="badge on status-2xx">{code}</span>;
+  if (code >= 300 && code < 400) return <span className="badge neutral status-3xx">{code}</span>;
+  if (code >= 400 && code < 500) return <span className="badge danger status-4xx">{code}</span>;
+  if (code >= 500) return <span className="badge danger status-5xx">{code}</span>;
+  return <span className="badge neutral status-other">{code}</span>;
 }
 
 /** 扫列表要的是量级，2500000 这种长度会挤掉别的列。 */

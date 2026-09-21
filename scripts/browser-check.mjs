@@ -1345,6 +1345,39 @@ async function main() {
       );
     });
 
+    /* 渠道格是上下两行：#ID 在上，渠道名在下。写成一行的话，同名不同 ID 的渠道
+       在日志里分不出来。 */
+    /* 不能盲取第一行：表单里的「拉取模型」探的是一个还没存下来的 URL，那条日志
+       本来就没有渠道，显示「无（未匹配到渠道）」是对的。找一行真有渠道的。 */
+    await check("渠道格是 #ID 加渠道名两行", async () => {
+      const stack = await page.evaluate(() => {
+        const node = document.querySelector("table.log-table tbody tr .channel-stack");
+        if (!node) return null;
+        return {
+          id: node.querySelector("strong")?.textContent ?? "",
+          name: node.querySelector("span")?.textContent ?? "",
+        };
+      });
+      assert(stack !== null, "一行 channel-stack 都没有，还是单行");
+      assert(/^#\d+$/.test(stack.id), `上行应是 #ID，实际 ${JSON.stringify(stack.id)}`);
+      assert(stack.name !== "", "下行渠道名为空");
+    });
+
+    await check("遮罩后不泄露长度和首尾字符", async () => {
+      await page.click(".log-toolbar .log-sensitive-toggle");
+      const masked = await page.evaluate(() => {
+        const node = document.querySelector("table.log-table tbody tr .channel-stack");
+        return {
+          channel: node?.querySelector(".log-sensitive-value")?.textContent ?? null,
+          id: node?.querySelector("strong")?.textContent ?? null,
+        };
+      });
+      assertEqual(masked.channel, "******", "渠道名遮罩为固定星号");
+      // ID 不是敏感信息，遮了就没法对号了。
+      assert(/^#\d+$/.test(masked.id ?? ""), `ID 不该被遮：${masked.id}`);
+      await page.click(".log-toolbar .log-sensitive-toggle");
+    });
+
     await check("表头与表体均为 10 列", async () => {
       const head = await page.count("table.log-table thead th");
       const body = await page.evaluate(
@@ -1556,13 +1589,14 @@ async function main() {
         });
       }, seeded.downstreamToken);
 
+      /* 「进行中」在状态格，不在时间格——时间格和已完成的行同形（时间 + 注解）。 */
       const first = await page.waitFor(
         () => {
           const row = document.querySelector("tr.log-row--active");
           if (!row) return false;
-          const badge = row.querySelector("[data-col=time]")?.textContent?.trim();
+          const status = row.querySelector("[data-col=status] .status-active")?.textContent?.trim();
           const elapsed = row.querySelector("[data-col=duration]")?.textContent ?? "";
-          return badge === "进行中" ? elapsed : false;
+          return status === "进行中" ? elapsed : false;
         },
         { label: "在途行", timeout: 10_000 },
       );
@@ -1662,10 +1696,13 @@ async function main() {
           card?.querySelector(".dashboard-rank-name")?.textContent ?? null;
         return { channel: nameIn(cards[0]), model: nameIn(cards[2]) };
       });
-      // 遮罩只管渠道名，模型名不是敏感信息。
-      assert(masked.channel === null || masked.channel.includes("•"), `渠道名没遮：${masked.channel}`);
+      // 遮罩只管渠道名，模型名不是敏感信息。遮罩值和日志页同一个常量。
       assert(
-        masked.model === null || !masked.model.includes("•"),
+        masked.channel === null || masked.channel === "******",
+        `渠道名没遮：${masked.channel}`,
+      );
+      assert(
+        masked.model === null || masked.model !== "******",
         `模型名不该遮：${masked.model}`,
       );
       await page.click(".dashboard-ranking-controls .log-sensitive-toggle");

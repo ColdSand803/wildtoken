@@ -63,11 +63,9 @@ function readRange(): string {
   return raw;
 }
 
-/** 渠道名遮罩，和日志页同一套规则。 */
-function mask(value: string): string {
-  if (value.length <= 5) return "•".repeat(Math.max(3, value.length));
-  return `${value.slice(0, 2)}${"•".repeat(4)}${value.slice(-2)}`;
-}
+/* 和日志页同一套：固定六个星号。按长度变化的遮罩会把名字长度和首尾字符
+   泄露出去，那恰恰是遮罩要藏的东西。 */
+const SENSITIVE_MASK = "******";
 
 function compact(value: number): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
@@ -252,7 +250,7 @@ function RankCard({
           <div className="dashboard-chart-empty">暂无数据</div>
         ) : (
           sorted.map((row) => {
-            const display = maskNames ? mask(row.name) : row.name;
+            const display = maskNames ? SENSITIVE_MASK : row.name;
             return (
               <div
                 key={row.name}
@@ -695,7 +693,7 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                         <td>
                           {log.upstream_name
                             ? maskChannels
-                              ? mask(log.upstream_name)
+                              ? SENSITIVE_MASK
                               : log.upstream_name
                             : "-"}
                         </td>
