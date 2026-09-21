@@ -178,19 +178,32 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
 
   /* 归档渠道走折叠区，不在主列表——和旧版一致。 */
   const active = upstreams.filter((u) => !u.archived);
-  const archived = upstreams.filter((u) => u.archived);
+
+  const matchesQuery = (upstream: Upstream) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return [
+      upstream.name,
+      upstream.base_url,
+      String(upstream.id),
+      ...upstream.model_names,
+      ...upstream.model_prefixes,
+    ]
+      .join(" ")
+      .toLowerCase()
+      .includes(q);
+  };
+
+  /* 归档区只吃搜索词：状态筛选描述的是路由状态，而归档渠道本就不参与
+     路由，拿它去筛只会把折叠区筛成空的。 */
+  const archived = upstreams.filter((u) => u.archived && matchesQuery(u));
 
   const filtered = active
     .filter((u) => {
       if (status === "enabled" && !u.enabled) return false;
       if (status === "disabled" && u.enabled) return false;
       if (status === "effective-zero" && u.effective_weight > 0) return false;
-      const q = query.trim().toLowerCase();
-      if (!q) return true;
-      return [u.name, u.base_url, String(u.id), ...u.model_names, ...u.model_prefixes]
-        .join(" ")
-        .toLowerCase()
-        .includes(q);
+      return matchesQuery(u);
     })
     .sort(compareUpstreams(sort));
 

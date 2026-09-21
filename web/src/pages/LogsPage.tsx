@@ -2,6 +2,15 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { UnauthorizedError, getLogDetail, listLogs, listUpstreams } from "../api";
 import { LogDetailDialog } from "../components/LogDetailDialog";
+import {
+  exactTokens,
+  firstTokenTone,
+  formatCount,
+  formatSeconds,
+  toneByThreshold,
+} from "../logFormat";
+import { reasoningChain } from "../reasoningChain";
+import type { ReasoningSource } from "../reasoningChain";
 import type { ActiveRequest, RequestLog, RequestLogDetail, RequestLogPage } from "../types";
 import { useLogStream } from "../useLogStream";
 import { elapsedMs, formatElapsed, useTicker } from "../useTicker";
@@ -24,34 +33,6 @@ type ColumnKey = (typeof COLUMNS)[number]["key"];
 const COLUMNS_STORAGE_KEY = "wildtoken_log_columns";
 const SENSITIVE_STORAGE_KEY = "wildtoken_log_sensitive_hidden";
 const PAGE_SIZES = [20, 50, 100, 200];
-
-/** 客户端筛选的固定档位，照抄旧版。后三个是控制台探测，不是真实客户端。 */
-/**
- * 思考强度链：请求 → 上游 → 响应。
- *
- * 相邻两步相同就合并——没改写过的链路不该显示成三段一模一样的值。
- */
-interface ReasoningSource {
-  reasoning_effort: string | null;
-  upstream_reasoning_effort: string | null;
-  /** 在途请求还没有这一段。 */
-  response_reasoning_effort?: string | null;
-}
-
-function reasoningChain(log: ReasoningSource): Array<{ label: string; value: string }> {
-  const steps = [
-    { label: "请求强度", value: (log.reasoning_effort ?? "").trim() },
-    { label: "上游强度", value: (log.upstream_reasoning_effort ?? "").trim() },
-    { label: "响应强度", value: (log.response_reasoning_effort ?? "").trim() },
-  ].filter((step) => step.value);
-
-  const chain: Array<{ label: string; value: string }> = [];
-  for (const step of steps) {
-    if (chain.length > 0 && chain[chain.length - 1].value === step.value) continue;
-    chain.push(step);
-  }
-  return chain;
-}
 
 /** 单值平铺，多值用 ↳ 排成路由链，和模型列同一套写法。 */
 function ReasoningCell({ log }: { log: ReasoningSource }) {
@@ -85,6 +66,7 @@ function ReasoningCell({ log }: { log: ReasoningSource }) {
   );
 }
 
+/** 客户端筛选的固定档位。后三个是控制台探测，不是真实客户端。 */
 const CLIENT_TYPES = [
   "codex-desktop",
   "codex-tui",
@@ -186,38 +168,12 @@ function compactText(value: string, maxLength: number): string {
   return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
 }
 
-/** 精确 token 数，给 title 和 aria-label 用。 */
-function exactTokens(name: string, value: number | null): string {
-  const shown = value === null || value === undefined ? "-" : value.toLocaleString("zh-CN");
-  return `${name} ${shown} tokens`;
-}
-
-/** 耗时一律用秒，保留一位小数。毫秒原值在这一列里位数不齐，扫不出快慢。 */
-function formatSeconds(ms: number | null): string {
-  return ms === null || ms === undefined ? "-" : `${(ms / 1000).toFixed(1)}s`;
-}
-
-/** 首字只看绝对值：5 秒内好，10 秒以上差。 */
-function firstTokenTone(ms: number | null): string {
-  if (ms === null || !Number.isFinite(ms)) return "neutral";
-  if (ms < 5000) return "ok";
-  if (ms >= 10000) return "danger";
-  return "warn";
-}
-
 /**
  * 总耗时的评级。四层兜底，顺序照抄旧版。
  *
  * 关键是第一层：非 2xx 优先标红。一个 3 秒就返回 500 的请求，按吞吐算会是
  * 绿的——快失败也是失败。其后依次按输出吞吐、总吞吐、绝对耗时。
  */
-/** 高于 good 算好，低于 fair 算差，中间是警。三处阀值不同但形状一样。 */
-function toneByThreshold(value: number, good: number, fair: number): string {
-  if (value >= good) return "ok";
-  if (value >= fair) return "warn";
-  return "danger";
-}
-
 function durationRating(log: RequestLog): { tone: string; basis: string } {
   const status = log.status_code;
   if (status === null || !Number.isFinite(status)) {
@@ -1005,23 +961,6 @@ function StatusBadge({ code }: { code: number | null }) {
 
 /** 扫列表要的是量级，2500000 这种长度会挤掉别的列。 */
 /* 缩写档位要到 T。只到 M 的话，25 亿 token 会显示成 2500M，还不如不缩。 */
-function formatCount(value: number | null): string {
-  if (value === null) return "-";
-  for (const [suffix, unit] of [
-    ["T", 1e12],
-    ["B", 1e9],
-    ["M", 1e6],
-    ["K", 1e3],
-  ] as const) {
-    if (value >= unit) {
-      const scaled = value / unit;
-      const text = scaled >= 100 || Number.isInteger(scaled) ? String(Math.round(scaled)) : scaled.toFixed(1);
-      return `${text}${suffix}`;
-    }
-  }
-  return String(value);
-}
-
 /**
  * 日志时间：年月日时分秒，浏览器本地时区。
  *
