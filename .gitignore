@@ -46,3 +46,4 @@ Thumbs.db
 # React 控制台的依赖与构建产物（构建在 Docker 阶段或本地 npm run build 产出）
 /web/node_modules/
 /web/dist/
+/web/*.tsbuildinfo

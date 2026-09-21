@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { UnauthorizedError } from "./api";
 import { AdminTokenDialog } from "./components/AdminTokenDialog";
 import { Topbar } from "./components/Topbar";
+import { LogsPage } from "./pages/LogsPage";
 import { UpstreamsPage } from "./pages/UpstreamsPage";
 import { getAdminToken } from "./api";
 
@@ -35,6 +36,8 @@ export function App() {
       <main className="content">
         {view === "upstreams" ? (
           <UpstreamsPage onUnauthorized={handleUnauthorized} />
+        ) : view === "logs" ? (
+          <LogsPage onUnauthorized={handleUnauthorized} />
         ) : (
           <NotImplemented view={view} />
         )}
@@ -65,7 +68,7 @@ function NotImplemented({ view }: { view: ViewId }) {
             <span className="eyebrow">NOT PORTED YET</span>
             <h2>这个视图还没搬到新控制台</h2>
             <p>
-              新控制台目前只实现了渠道页。旧版仍在 <a href="/admin">/admin</a> 上可用。
+              新控制台目前只实现了渠道页和日志页。旧版仍在 <a href="/admin">/admin</a> 上可用。
             </p>
           </div>
         </div>
