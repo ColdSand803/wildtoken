@@ -30,7 +30,9 @@ const ADMIN_TOKEN = "browser-check-token-0123456789ab";
 const CHROME = "google-chrome-stable";
 
 // 假上游。拉取模型、测连接这类动作要真的有个东西应答，否则只能测到失败路径。
-const FAKE_UPSTREAM_PORT = 3106;
+/* 端口交给内核分配。固定端口在上一次还没完全退干净时会 EADDRINUSE，
+   而那和被测的东西没任何关系。 */
+let fakeUpstreamPort = 0;
 const FAKE_MODELS = ["gpt-4o", "gpt-4o-mini", "claude-sonnet-5", "grok-4.5"];
 const FAKE_REPLY = "假上游的回复。";
 /** 请求体里出现这个词，假上游就拖 3 秒再答，留出观测在途行的窗口。 */
@@ -130,6 +132,23 @@ class Page {
   async goto(url) {
     const loaded = new Promise((resolve) => this.cdp.on("Page.loadEventFired", resolve));
     await this.cdp.send("Page.navigate", { url });
+    await loaded;
+  }
+
+  /**
+   * 真的重载一次。
+   *
+   * 不能用 goto 代替：导航到只有 hash 不同的地址是同文档导航，不触发 load
+   * 事件，goto 会一直等下去。
+   */
+  async reload(hash) {
+    if (hash !== undefined) {
+      await this.evaluate((value) => {
+        window.location.hash = value;
+      }, hash);
+    }
+    const loaded = new Promise((resolve) => this.cdp.on("Page.loadEventFired", resolve));
+    await this.cdp.send("Page.reload", { ignoreCache: false });
     await loaded;
   }
 
@@ -369,7 +388,10 @@ function startFakeUpstream() {
   });
   return new Promise((resolve, reject) => {
     server.on("error", reject);
-    server.listen(FAKE_UPSTREAM_PORT, "127.0.0.1", () => resolve(server));
+    server.listen(0, "127.0.0.1", () => {
+      fakeUpstreamPort = server.address().port;
+      resolve(server);
+    });
   });
 }
 
@@ -465,7 +487,7 @@ async function seed() {
     "/api/admin/upstreams/",
     upstreamPayload({
       name: "auto-weight-channel",
-      base_url: `http://127.0.0.1:${FAKE_UPSTREAM_PORT}`,
+      base_url: `http://127.0.0.1:${fakeUpstreamPort}`,
       model_names: ["gpt-4o", "retired-model"],
       model_prefixes: ["claude-"],
       model_mappings: { fast: "gpt-4o-mini" },
@@ -713,7 +735,10 @@ async function main() {
     collecting = true;
     console.log("\n渠道页");
 
+    /* 落地页是用户偏好（默认看板），不是写死的。后面一大段都在渠道页上，
+       显式切过去，别靠“登录完刚好就在这一页”。 */
     await check("渠道表渲染出行", async () => {
+      await gotoView(page, "渠道");
       await page.waitFor(() => document.querySelectorAll("table.upstream-table tbody tr").length >= 2, {
         label: "渠道行",
       });
@@ -2007,6 +2032,62 @@ async function main() {
       assertEqual(navigations, 1, "导航条目数");
     });
 
+    await check("切视图写进地址栏", async () => {
+      await gotoView(page, "令牌");
+      const hash = await page.evaluate(() => location.hash);
+      assertEqual(hash, "#tokens", "地址栏 hash");
+    });
+
+    /* 视图只存在组件 state 里的话，刷新必然回到初始值。这条直接重载页面。 */
+    await check("刷新后停在同一页", async () => {
+      await page.reload("#tokens");
+      await page.waitForSelector("section.view[data-view=tokens] .panel", {
+        label: "令牌页",
+        timeout: 10_000,
+      });
+      const active = await page.evaluate(
+        () => document.querySelector(".topbar-nav .nav-link.active")?.textContent?.trim() ?? null,
+      );
+      assertEqual(active, "令牌", "刷新后的当前视图");
+    });
+
+    await check("浏览器后退回上一页", async () => {
+      await gotoView(page, "分组");
+      await page.evaluate(() => history.back());
+      await page.waitFor(
+        () =>
+          document.querySelector(".topbar-nav .nav-link.active")?.textContent?.trim() === "令牌",
+        { label: "后退到令牌页" },
+      );
+    });
+
+    /* 地址栏没锚点时走默认首页偏好，而不是写死的某一页。 */
+    await check("无锚点时走默认首页偏好", async () => {
+      await page.evaluate(() => {
+        localStorage.setItem("wildtoken_default_home", "groups");
+        // 清掉锚点，否则走不到偏好那条分支。
+        history.replaceState(null, "", location.pathname);
+      });
+      await page.reload();
+      await page.waitForSelector("section.view[data-view=groups] .panel", {
+        label: "分组页",
+        timeout: 10_000,
+      });
+      // 落地后地址栏要被补上，否则再刷新一次又是无锚点。
+      const hash = await page.evaluate(() => location.hash);
+      assertEqual(hash, "#groups", "落地后的 hash");
+
+      await page.evaluate(() => {
+        localStorage.removeItem("wildtoken_default_home");
+        history.replaceState(null, "", location.pathname);
+      });
+      await page.reload();
+      await page.waitForSelector("section.view[data-view=dashboard] .panel", {
+        label: "看板页（兜底）",
+        timeout: 10_000,
+      });
+    });
+
     // ── 命令面板 ────────────────────────────────────────────
     console.log("\n命令面板");
 
@@ -2116,6 +2197,8 @@ async function main() {
     cdp?.close();
     chrome?.kill("SIGKILL");
     server?.kill("SIGKILL");
+    // Go 侧的连接池会持一些 keep-alive，只 close 的话进程要等它们超时才能退。
+    fakeUpstream?.closeAllConnections?.();
     fakeUpstream?.close();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(profileDir, { recursive: true, force: true });

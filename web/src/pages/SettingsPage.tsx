@@ -25,6 +25,17 @@ import {
 } from "../theme";
 import type { PromptTemplate, RuntimeSettings, SystemInfo } from "../types";
 
+/** 和 App 的路由共用一个键；改完下次打开控制台就落在这一页。 */
+const DEFAULT_HOME_KEY = "wildtoken_default_home";
+
+function readDefaultHome(): string {
+  try {
+    return localStorage.getItem(DEFAULT_HOME_KEY) ?? "dashboard";
+  } catch {
+    return "dashboard";
+  }
+}
+
 /** 数字输入统一走这里：空串当 0，避免 NaN 提交到后端。 */
 function num(raw: string): number {
   const value = Number(raw);
@@ -77,6 +88,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     null,
   );
   const [rotatedToken, setRotatedToken] = useState("");
+  const [defaultHome, setDefaultHome] = useState(readDefaultHome);
   const [refreshingSystem, setRefreshingSystem] = useState(false);
 
   const toast = useToast();
@@ -175,6 +187,15 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     setDensity(next);
   }
 
+  function switchDefaultHome(next: string) {
+    setDefaultHome(next);
+    try {
+      localStorage.setItem(DEFAULT_HOME_KEY, next);
+    } catch {
+      // 存不进去下次打开记不住，不影响当前页面。
+    }
+  }
+
   async function saveTemplate(name: string, prompt: string) {
     const target = editingTemplate?.template;
     try {
@@ -251,6 +272,25 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                 </select>
                 <span className="field-hint">主题与旧控制台共用同一份设置。</span>
               </fieldset>
+
+              {/* 旧版还有一项「日志自动刷新」。新版日志页走 SSE 推送，没有轮询
+                  间隔可调，放一个控制不了任何东西的下拉不如不放。 */}
+              <label className="field">
+                <span className="field-label">默认首页</span>
+                <select
+                  aria-label="默认首页"
+                  value={defaultHome}
+                  onChange={(event) => switchDefaultHome(event.target.value)}
+                >
+                  <option value="dashboard">看板</option>
+                  <option value="upstreams">渠道</option>
+                  <option value="logs">日志</option>
+                  <option value="tokens">令牌</option>
+                  <option value="groups">分组</option>
+                  <option value="settings">设置</option>
+                </select>
+                <span className="field-hint">地址栏带着页面锚点时，仍优先进那一页。</span>
+              </label>
 
               <fieldset className="settings-choice-group">
                 <legend>显示密度</legend>

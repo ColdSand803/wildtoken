@@ -25,8 +25,38 @@ import { getAdminToken } from "./api";
 
 export type ViewId = "dashboard" | "upstreams" | "logs" | "tokens" | "groups" | "settings";
 
+const VIEWS: ViewId[] = ["dashboard", "upstreams", "logs", "tokens", "groups", "settings"];
+
+/** 默认落地页的偏好键，和旧控制台共用。 */
+const DEFAULT_HOME_KEY = "wildtoken_default_home";
+const FALLBACK_VIEW: ViewId = "dashboard";
+
+function isView(value: string | null): value is ViewId {
+  return value !== null && (VIEWS as string[]).includes(value);
+}
+
+function defaultHome(): ViewId {
+  try {
+    const saved = localStorage.getItem(DEFAULT_HOME_KEY);
+    return isView(saved) ? saved : FALLBACK_VIEW;
+  } catch {
+    return FALLBACK_VIEW;
+  }
+}
+
+/**
+ * 当前视图看 URL hash。
+ *
+ * 只存在组件 state 里的话，刷新就回到初始值，浏览器前进后退也不工作，
+ * 而且没办法把某一页发给别人。
+ */
+function viewFromHash(): ViewId {
+  const name = window.location.hash.replace("#", "");
+  return isView(name) ? name : defaultHome();
+}
+
 export function App() {
-  const [view, setView] = useState<ViewId>("upstreams");
+  const [view, setViewState] = useState<ViewId>(viewFromHash);
   const [needsToken, setNeedsToken] = useState(() => getAdminToken() === "");
   const [tokenError, setTokenError] = useState("");
   /* <main> 的 key。自增一次就把当前页重挂载一遍，它自己会重新取数。
@@ -51,6 +81,28 @@ export function App() {
     window.addEventListener("console:unauthorized", onUnauthorized);
     return () => window.removeEventListener("console:unauthorized", onUnauthorized);
   }, [handleUnauthorized]);
+
+  /* 切视图就写 hash，让浏览器历史记住它。写回 state 的活交给下面那个
+     hashchange 监听，这样点导航和按浏览器后退走的是同一条路。 */
+  const setView = useCallback((next: ViewId) => {
+    if (window.location.hash === `#${next}`) {
+      setViewState(next);
+      return;
+    }
+    window.location.hash = next;
+  }, []);
+
+  useEffect(() => {
+    const onHashChange = () => setViewState(viewFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    // 进来时 hash 可能是空的，把当前落地页补回地址栏。
+    if (!isView(window.location.hash.replace("#", ""))) {
+      window.history.replaceState(null, "", `#${view}`);
+    }
+    return () => window.removeEventListener("hashchange", onHashChange);
+    // 只在挂载时跑一次；view 只用于补地址栏的初始值。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /* 只放真的能执行的命令。旧版面板里那些「G D」「R」标签从来没绑过键，
      标一个按下去没反应的快捷键比不标更糟。 */
