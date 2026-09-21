@@ -133,7 +133,16 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
                         {group.is_default ? <span className="badge neutral">默认</span> : null}
                       </span>
                     </td>
-                    <td>{group.description || <span className="muted">-</span>}</td>
+                    {/* 和令牌页同形：desc-cell + muted，空值用破折号，有值带 title。 */}
+                    <td className="desc-cell">
+                      {group.description.trim() ? (
+                        <span className="muted" title={group.description}>
+                          {group.description}
+                        </span>
+                      ) : (
+                        <span className="muted is-empty">—</span>
+                      )}
+                    </td>
                     <td className="numeric">{group.upstream_count}</td>
                     <td className="numeric">{group.token_count}</td>
                     <td className="actions-col">

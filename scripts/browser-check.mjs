@@ -1850,6 +1850,79 @@ async function main() {
       );
     });
 
+    // ── 令牌与分组页的格 ──────────────────────────────────────
+    console.log("\n令牌与分组");
+
+    await check("描述格在 desc-cell 里且文本包在 muted 中", async () => {
+      await gotoView(page, "令牌");
+      await page.waitFor(
+        () => document.querySelector("table tbody tr td.desc-cell") !== null,
+        { label: "描述格", timeout: 10_000 },
+      );
+      const hasMuted = await page.evaluate(
+        () => document.querySelector("table tbody tr td.desc-cell .muted") !== null,
+      );
+      assertEqual(hasMuted, true, "描述文本应包在 muted 里");
+    });
+
+    /* 一串日期看不出快到期了。旧版旁边跟一个徐章说距今多久，那才是重点。 */
+    await check("有效期带距今徐章且不是 UTC 原文", async () => {
+      const created = await page.evaluate(async () => {
+        const admin = localStorage.getItem("wildtoken_admin_token");
+        const soon = new Date(Date.now() + 3 * 24 * 3600 * 1000)
+          .toISOString()
+          .slice(0, 19)
+          .replace("T", " ");
+        const response = await fetch("/api/admin/tokens", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-admin-token": admin },
+          body: JSON.stringify({
+            name: "expiring-token",
+            description: "快到期",
+            enabled: true,
+            expires_at: soon,
+          }),
+        });
+        return response.ok;
+      });
+      assert(created, "建不出带过期时间的令牌");
+
+      // 离开再回来，逼它重新取数。
+      await gotoView(page, "分组");
+      await gotoView(page, "令牌");
+      const expiry = await page.waitFor(
+        () => {
+          const rows = [...document.querySelectorAll("table tbody tr")];
+          const row = rows.find((node) => node.textContent.includes("expiring-token"));
+          const cell = row?.querySelector(".col-expiry .token-expiry");
+          if (!cell) return false;
+          return {
+            time: cell.querySelector(".token-expiry-time")?.textContent ?? "",
+            badge: cell.querySelector(".badge")?.textContent ?? "",
+            tone: cell.querySelector(".badge")?.className ?? "",
+          };
+        },
+        { label: "有效期格", timeout: 10_000 },
+      );
+      assert(expiry.badge.endsWith("后"), `徐章应是「N 天后」，实际 ${expiry.badge}`);
+      // 3 天内算快到期，走 neutral 而不是 on。
+      assert(expiry.tone.includes("neutral"), `徐章色调不对：${expiry.tone}`);
+      // slice(0,16) 的话会留着 "2026-09-21T12:34" 里的 T。
+      assert(!expiry.time.includes("T"), `时间没格式化，还是原文：${expiry.time}`);
+    });
+
+    await check("分组页描述格同形", async () => {
+      await gotoView(page, "分组");
+      const shape = await page.waitFor(
+        () => {
+          const node = document.querySelector("table tbody tr td.desc-cell");
+          return node ? node.innerHTML : false;
+        },
+        { label: "分组描述格", timeout: 10_000 },
+      );
+      assert(shape.includes("muted"), `描述格缺 muted：${shape}`);
+    });
+
     // ── 顶栏 ────────────────────────────────────────────────────────────────
     console.log("\n顶栏");
 

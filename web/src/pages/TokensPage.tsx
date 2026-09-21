@@ -309,6 +309,59 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
   );
 }
 
+/** 描述格。空值用破折号而不是连字符，有值时带 title 供悬停看全文。 */
+function DescriptionCell({ text }: { text: string }) {
+  const value = (text ?? "").trim();
+  return (
+    <td className="desc-cell">
+      {value ? (
+        <span className="muted" title={value}>
+          {value}
+        </span>
+      ) : (
+        <span className="muted is-empty">—</span>
+      )}
+    </td>
+  );
+}
+
+const EXPIRY_SOON_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** 距今多久。旧版分钟/小时/天三档，过期直说已过期。 */
+function expiryDistance(deltaMs: number): string {
+  if (deltaMs <= 0) return "已过期";
+  const minutes = Math.floor(deltaMs / 60_000);
+  if (minutes < 1) return "不到 1 分钟";
+  if (minutes < 60) return `${minutes} 分钟后`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时后`;
+  return `${Math.floor(hours / 24)} 天后`;
+}
+
+/**
+ * 有效期格。
+ *
+ * 后端存的是不带时区标记的 UTC，直接 slice 字符串会把 UTC 当本地时间显示，
+ * 差一个时区。旁边的徐章才是重点：一串日期看不出快到期了。
+ */
+function ExpiryCell({ expiresAt }: { expiresAt: string | null }) {
+  if (!expiresAt) return <span className="muted">永不过期</span>;
+
+  const normalized = expiresAt.includes("T") ? expiresAt : expiresAt.replace(" ", "T");
+  const withZone = /[Z+]|-\d\d:\d\d$/.test(normalized) ? normalized : `${normalized}Z`;
+  const at = new Date(withZone);
+  if (Number.isNaN(at.getTime())) return <span className="muted">—</span>;
+
+  const delta = at.getTime() - Date.now();
+  const tone = delta <= 0 ? "danger" : delta <= EXPIRY_SOON_MS ? "neutral" : "on";
+  return (
+    <div className="token-expiry">
+      <span className="token-expiry-time">{at.toLocaleString("zh-CN", { hour12: false })}</span>
+      <span className={`badge ${tone}`}>{expiryDistance(delta)}</span>
+    </div>
+  );
+}
+
 /** 复制图标。必须是函数：每次调用产新节点，常量节点会被前一行偷走。 */
 const copyGlyph = () => (
   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -346,7 +399,7 @@ function TokenRow({
       <td>
         <strong title={token.name}>{token.name}</strong>
       </td>
-      <td>{token.description || <span className="muted">-</span>}</td>
+      <DescriptionCell text={token.description} />
 
       <td>
         {/* 预览片段本身就是复制按钮：表格已经八列，再塞一个独立按钮会挤掉别的列。 */}
@@ -365,22 +418,16 @@ function TokenRow({
         </button>
       </td>
 
-      <td>
-        <span className="badge neutral">{token.group_name}</span>
-      </td>
+      {/* 纯文本，和旧版一致。做成徐章会和状态列里的徐章抢注意力，
+          而分组只是归属，不是状态。 */}
+      <td>{token.group_name || "default"}</td>
 
       <td className="col-quota">
         <QuotaCell token={token} />
       </td>
 
       <td className="col-expiry">
-        {token.expires_at ? (
-          <span className="token-expiry">
-            <span className="token-expiry-time">{token.expires_at.slice(0, 16)}</span>
-          </span>
-        ) : (
-          <span className="muted">永不过期</span>
-        )}
+        <ExpiryCell expiresAt={token.expires_at} />
       </td>
 
       <td className="col-status">
