@@ -151,6 +151,19 @@ export interface QuotaState {
   exhausted: boolean;
 }
 
+/** 分组。计数由后端给，不用前端聚合。 */
+export interface Group {
+  id: number;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+  upstream_count: number;
+  token_count: number;
+  /** 默认分组不可删除也不可改名——令牌掉进空分组就什么渠道都访问不了。 */
+  is_default: boolean;
+}
+
 export interface APIToken {
   id: number;
   name: string;

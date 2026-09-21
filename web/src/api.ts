@@ -5,6 +5,7 @@
 import type {
   APIToken,
   ChannelExportDocument,
+  Group,
   ImportResult,
   RequestLogDetail,
   RequestLogPage,
@@ -122,6 +123,26 @@ export function fetchUpstreamBalance(id: number, provider: "new-api" | "sub2api"
 
 export function listGroups(): Promise<Array<{ id: number; name: string }>> {
   return api<Array<{ id: number; name: string }>>("/api/admin/groups/");
+}
+
+/** 带计数的完整分组列表，分组页用。 */
+export function listGroupsFull(): Promise<Group[]> {
+  return api<Group[]>("/api/admin/groups/");
+}
+
+export function createGroup(payload: { name: string; description: string }): Promise<Group> {
+  return api<Group>("/api/admin/groups/", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateGroup(
+  id: number,
+  payload: { name: string; description: string },
+): Promise<Group> {
+  return api<Group>(`/api/admin/groups/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+}
+
+export function deleteGroup(id: number): Promise<null> {
+  return api<null>(`/api/admin/groups/${id}`, { method: "DELETE" });
 }
 
 export function listTokens(): Promise<APIToken[]> {
