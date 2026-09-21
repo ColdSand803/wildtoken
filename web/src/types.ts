@@ -151,6 +151,31 @@ export interface QuotaState {
   exhausted: boolean;
 }
 
+/** 运行时设置。revision 是乐观锁，保存时原样带回去。 */
+export interface RuntimeSettings {
+  log_body_keep_count: number;
+  log_retention_days: number;
+  log_body_max_bytes: number;
+  max_retries: number;
+  same_upstream_retry_interval_ms: number;
+  auto_weight_failure_penalty: number;
+  auto_weight_success_increment: number;
+  auto_weight_recovery_increment: number;
+  auto_weight_recovery_interval_seconds: number;
+  proxy_enabled: boolean;
+  proxy_url: string;
+  revision: number;
+  updated_at: string;
+}
+
+export interface PromptTemplate {
+  id: number;
+  name: string;
+  prompt: string;
+  created_at: string;
+  updated_at: string;
+}
+
 /** 分组。计数由后端给，不用前端聚合。 */
 export interface Group {
   id: number;

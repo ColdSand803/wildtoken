@@ -7,8 +7,10 @@ import type {
   ChannelExportDocument,
   Group,
   ImportResult,
+  PromptTemplate,
   RequestLogDetail,
   RequestLogPage,
+  RuntimeSettings,
   Upstream,
   UpstreamStats,
 } from "./types";
@@ -143,6 +145,51 @@ export function updateGroup(
 
 export function deleteGroup(id: number): Promise<null> {
   return api<null>(`/api/admin/groups/${id}`, { method: "DELETE" });
+}
+
+export function getSettings(): Promise<RuntimeSettings> {
+  return api<RuntimeSettings>("/api/admin/settings/");
+}
+
+/** 保存设置。revision 要原样带回去，后端靠它拒掉过期的写入。 */
+export function saveSettings(payload: RuntimeSettings): Promise<RuntimeSettings> {
+  return api<RuntimeSettings>("/api/admin/settings/", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+/** 轮换管理员令牌。新值只在响应里出现一次。 */
+export function rotateAdminToken(): Promise<{ token: string }> {
+  return api<{ token: string }>("/api/admin/settings/admin-token/rotate", { method: "POST" });
+}
+
+export function listPromptTemplates(): Promise<PromptTemplate[]> {
+  return api<PromptTemplate[]>("/api/admin/settings/model-test-prompts");
+}
+
+export function createPromptTemplate(payload: {
+  name: string;
+  prompt: string;
+}): Promise<PromptTemplate> {
+  return api<PromptTemplate>("/api/admin/settings/model-test-prompts", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updatePromptTemplate(
+  id: number,
+  payload: { name: string; prompt: string },
+): Promise<PromptTemplate> {
+  return api<PromptTemplate>(`/api/admin/settings/model-test-prompts/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deletePromptTemplate(id: number): Promise<null> {
+  return api<null>(`/api/admin/settings/model-test-prompts/${id}`, { method: "DELETE" });
 }
 
 export function listTokens(): Promise<APIToken[]> {

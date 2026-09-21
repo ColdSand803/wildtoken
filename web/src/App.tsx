@@ -6,6 +6,7 @@ import { ConfirmProvider, ToastProvider } from "./components/feedback";
 import { Topbar } from "./components/Topbar";
 import { GroupsPage } from "./pages/GroupsPage";
 import { LogsPage } from "./pages/LogsPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { TokensPage } from "./pages/TokensPage";
 import { UpstreamsPage } from "./pages/UpstreamsPage";
 import { getAdminToken } from "./api";
@@ -47,6 +48,8 @@ export function App() {
               <TokensPage onUnauthorized={handleUnauthorized} />
             ) : view === "groups" ? (
               <GroupsPage onUnauthorized={handleUnauthorized} />
+            ) : view === "settings" ? (
+              <SettingsPage onUnauthorized={handleUnauthorized} />
             ) : (
               <NotImplemented view={view} />
             )}
