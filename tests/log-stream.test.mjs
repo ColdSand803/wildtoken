@@ -71,13 +71,19 @@ test("在途耗时按收到快照的时刻推算", () => {
   assert.equal(elapsed(1500, 5000, 1000), 0);
 });
 
-test("耗时格式：秒以下带小数，分钟以上不带", () => {
+/* 和旧控制台的 formatActiveElapsed 同一套。这一格每秒刷新，一秒内显毫秒的话
+   会在 850ms 和 1.3s 之间突然换单位，数值跟着跳一个量级，看上去像倒退。 */
+test("耗时格式：一开始就用秒，过分钟补零", () => {
   const format = loadFunction(read("web/src/useTicker.ts"), "formatElapsed");
 
-  assert.equal(format(850), "850ms");
+  assert.equal(format(0), "0.0s");
+  // 0.85 在 toFixed(1) 下是 0.8，不是 0.9——二进制里 0.85 存不准，实际略小。
+  assert.equal(format(850), "0.8s");
   // 小数位是故意的：让数字看得出在动。
   assert.equal(format(2500), "2.5s");
-  assert.equal(format(65_000), "1m5s");
+  // 补零：1m5s 比 1m50s 窄一位，不补的话整列每秒抽一下。
+  assert.equal(format(65_000), "1m05s");
+  assert.equal(format(110_000), "1m50s");
 });
 
 /* 这些常量和旧控制台是一套，两边漂了观感就不一致。 */
