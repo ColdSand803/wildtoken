@@ -462,7 +462,27 @@ async function seed() {
     body: JSON.stringify({ archived: true }),
   });
 
-  await adminPost("/api/admin/tokens", { name: "check-token", description: "验证用", enabled: true });
+  /* 令牌放进 vip，和假上游那个渠道同组——跨组的话路由压根不会选它。 */
+  const token = await adminPost("/api/admin/tokens", {
+    name: "check-token",
+    description: "验证用",
+    enabled: true,
+    group_id: vip.id,
+  });
+
+  /* 真的走一遍网关，存下一条带四份快照的日志。伪造日志行测不出会话视图：
+     它要解析的正是转发时存下来的请求体。 */
+  await fetch(`${ORIGIN}/v1/chat/completions`, {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${token.token}` },
+    body: JSON.stringify({
+      model: "gpt-4o",
+      messages: [
+        { role: "system", content: "你是一个测试助手。" },
+        { role: "user", content: "说一句你好。" },
+      ],
+    }),
+  });
 
   /* 只建一条模板。新版开窗时随机选一条，多于一条的话断言就不确定了。 */
   await adminPost("/api/admin/settings/model-test-prompts", {
@@ -492,6 +512,37 @@ async function openRowMenu(page, nameFragment) {
 /** 在页内等一会儿。等的是渲染，所以让浏览器自己计时而不是在这边 sleep。 */
 function sleepInPage(page, ms) {
   return page.evaluate((delay) => new Promise((resolve) => setTimeout(resolve, delay)), ms);
+}
+
+/* 控制台探测（拉模型、测模型、查余额）也进日志，而且比实际转发晚。靠客户端
+   类型把它们排掉，剩下的才是网关真转发过的那条。 */
+const PROBE_CLIENT_TYPES = ["model-list", "model-test", "balance"];
+
+/** 点开第一条非探测日志的详情。 */
+async function openProxiedLogDetail(page) {
+  const opened = await page.evaluate((probes) => {
+    const row = [...document.querySelectorAll("table tbody tr")].find((node) => {
+      const client = node.querySelector("[data-col=client]")?.textContent?.trim();
+      return client && !probes.includes(client) && node.querySelector("[data-col=detail] button");
+    });
+    if (!row) return false;
+    row.querySelector("[data-col=detail] button").click();
+    return true;
+  }, PROBE_CLIENT_TYPES);
+  if (!opened) throw new Error("日志里没有非探测的请求");
+  await sleep(60);
+}
+
+/** 按导航文案切视图，并等那一页的面板出来。 */
+async function gotoView(page, label) {
+  await page.evaluate((text) => {
+    const button = [...document.querySelectorAll(".topbar-nav .nav-link")].find(
+      (node) => node.textContent.trim() === text,
+    );
+    if (!button) throw new Error(`找不到导航项 ${text}`);
+    button.click();
+  }, label);
+  await page.waitForSelector("section.view .panel", { label: `${label}页` });
 }
 
 async function clickMenuItem(page, label) {
@@ -1158,6 +1209,106 @@ async function main() {
       await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
         label: "编辑对话框关闭",
       });
+    });
+
+    // ── 日志详情与会话视图 ─────────────────────────────────────
+    console.log("\n日志详情");
+
+    await check("日志页有那条真实请求", async () => {
+      await gotoView(page, "日志");
+      const clients = await page.waitFor(
+        () => {
+          const rows = [...document.querySelectorAll("table tbody tr [data-col=client]")];
+          return rows.length > 0 ? rows.map((node) => node.textContent.trim()) : false;
+        },
+        { label: "日志行", timeout: 10_000 },
+      );
+      assert(
+        clients.some((client) => !["model-list", "model-test", "balance"].includes(client)),
+        `只有探测日志：${clients}`,
+      );
+    });
+
+    await check("会话模式把请求体还原成对话", async () => {
+      await openProxiedLogDetail(page);
+      await page.waitForSelector("dialog.log-detail-dialog[open]", { label: "详情窗" });
+      // 模式是落盘的，上一次跑可能留在原始，先摆回会话。
+      await page.click("dialog.log-detail-dialog [data-log-view-mode=conversation]");
+      const roles = await page.waitFor(
+        () => {
+          const list = document.querySelector(
+            "dialog.log-detail-dialog [data-field=downstream_request] .conv-list",
+          );
+          if (!list) return false;
+          return [...list.querySelectorAll(".conv-role-name")].map((node) => node.textContent);
+        },
+        { label: "会话消息", timeout: 10_000 },
+      );
+      assertEqual(roles.join(","), "系统,用户", "下游请求里的角色");
+    });
+
+    await check("响应侧抽出助手回复", async () => {
+      const text = await page.evaluate(
+        () =>
+          document.querySelector(
+            "dialog.log-detail-dialog [data-field=downstream_response] .conv-block--text .conv-block-body",
+          )?.textContent ?? null,
+      );
+      assertEqual(text, FAKE_REPLY, "助手回复");
+    });
+
+    await check("切到原始模式看报文", async () => {
+      await page.click("dialog.log-detail-dialog [data-log-view-mode=raw]");
+      const first = await page.waitFor(
+        () => {
+          const pre = document.querySelector(
+            "dialog.log-detail-dialog [data-field=downstream_request] .log-detail-code-frame pre",
+          );
+          return pre?.textContent?.split("\n")[0] ?? false;
+        },
+        { label: "原始报文" },
+      );
+      assert(first.startsWith("POST /v1/chat/completions"), `报文首行：${first}`);
+      const stored = await page.evaluate(() => localStorage.getItem("wildtoken.logViewMode"));
+      assertEqual(stored, "raw", "查看模式落盘");
+      // 会话节点在原始模式下不该还在。
+      assertEqual(await page.count("dialog.log-detail-dialog .conv-list"), 0, "残留的会话列表");
+    });
+
+    await check("放大查看只突出一节", async () => {
+      await page.evaluate(() => {
+        document
+          .querySelector("dialog.log-detail-dialog [data-field=upstream_request] .log-detail-expand")
+          .click();
+      });
+      const state = await page.evaluate(() => ({
+        grid: document.querySelector("dialog.log-detail-dialog .request-detail-grid")?.className ?? "",
+        focused: [...document.querySelectorAll("dialog.log-detail-dialog .log-detail-section")]
+          .filter((node) => node.classList.contains("is-focused"))
+          .map((node) => node.dataset.field),
+        label: document.querySelector(
+          "dialog.log-detail-dialog [data-field=upstream_request] .log-detail-expand",
+        )?.textContent,
+      }));
+      assert(state.grid.includes("is-focused"), `格子没进放大态：${state.grid}`);
+      assertEqual(state.focused.join(","), "upstream_request", "被放大的节");
+      assertEqual(state.label, "退出放大", "按钮文案");
+    });
+
+    await check("关窗后放大态不残留", async () => {
+      await page.click("dialog.log-detail-dialog .icon-close");
+      await page.waitFor(() => document.querySelector("dialog.log-detail-dialog[open]") === null, {
+        label: "详情窗关闭",
+      });
+      await openProxiedLogDetail(page);
+      await page.waitForSelector("dialog.log-detail-dialog[open]", { label: "详情窗" });
+      assertEqual(
+        await page.count("dialog.log-detail-dialog .log-detail-section.is-focused"),
+        0,
+        "重开后残留的放大节",
+      );
+      await page.click("dialog.log-detail-dialog [data-log-view-mode=conversation]");
+      await page.click("dialog.log-detail-dialog .icon-close");
     });
 
     // ── 顶栏 ────────────────────────────────────────────────────────────────
