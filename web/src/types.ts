@@ -151,6 +151,43 @@ export interface QuotaState {
   exhausted: boolean;
 }
 
+/** 看板概览。字段对着 internal/db/logoverview.go 的 json tag 写。 */
+export interface LogOverview {
+  range: string;
+  range_label: string;
+  total_requests: number;
+  previous_total: number | null;
+  error_requests: number;
+  status_2xx: number;
+  status_4xx: number;
+  status_5xx: number;
+  status_other: number;
+  duration_count: number;
+  avg_duration_ms: number;
+  min_duration_ms: number;
+  max_duration_ms: number;
+  p50_duration_ms: number | null;
+  p95_duration_ms: number | null;
+  p99_duration_ms: number | null;
+  bucket_seconds: number;
+  latency_series: Array<{ bucket_epoch: number; avg_ms: number; count: number }>;
+  request_series: Array<{ bucket_epoch: number; count: number }>;
+}
+
+/** Top 排行。模型和渠道各一组。 */
+export interface TopStats {
+  models: Array<{ name: string; request_count: number; total_tokens: number }>;
+  channels: Array<{ name: string; request_count: number; total_tokens: number }>;
+}
+
+export interface TokenUsage {
+  total_tokens: number;
+  prompt_tokens: number;
+  prompt_cached_tokens: number;
+  request_count: number;
+  all_request_count: number;
+}
+
 /** 运行时设置。revision 是乐观锁，保存时原样带回去。 */
 export interface RuntimeSettings {
   log_body_keep_count: number;

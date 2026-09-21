@@ -4,6 +4,7 @@ import { UnauthorizedError } from "./api";
 import { AdminTokenDialog } from "./components/AdminTokenDialog";
 import { ConfirmProvider, ToastProvider } from "./components/feedback";
 import { Topbar } from "./components/Topbar";
+import { DashboardPage } from "./pages/DashboardPage";
 import { GroupsPage } from "./pages/GroupsPage";
 import { LogsPage } from "./pages/LogsPage";
 import { SettingsPage } from "./pages/SettingsPage";
@@ -50,6 +51,8 @@ export function App() {
               <GroupsPage onUnauthorized={handleUnauthorized} />
             ) : view === "settings" ? (
               <SettingsPage onUnauthorized={handleUnauthorized} />
+            ) : view === "dashboard" ? (
+              <DashboardPage onUnauthorized={handleUnauthorized} />
             ) : (
               <NotImplemented view={view} />
             )}

@@ -7,10 +7,13 @@ import type {
   ChannelExportDocument,
   Group,
   ImportResult,
+  LogOverview,
   PromptTemplate,
   RequestLogDetail,
   RequestLogPage,
   RuntimeSettings,
+  TokenUsage,
+  TopStats,
   Upstream,
   UpstreamStats,
 } from "./types";
@@ -190,6 +193,26 @@ export function updatePromptTemplate(
 
 export function deletePromptTemplate(id: number): Promise<null> {
   return api<null>(`/api/admin/settings/model-test-prompts/${id}`, { method: "DELETE" });
+}
+
+/**
+ * 看板数据。
+ *
+ * 四个接口并发拉：概览、Top 排行、Token 用量、最近失败。
+ * /logs/top 的参数叫 window 而不是 range，且没有多窗口模式。
+ */
+export function fetchDashboard(range: string): Promise<{
+  overview: LogOverview;
+  top: TopStats;
+  usage: TokenUsage;
+  recent: RequestLogPage;
+}> {
+  return Promise.all([
+    api<LogOverview>(`/api/admin/logs/overview?range=${range}`),
+    api<TopStats>(`/api/admin/logs/top?window=${range}&limit=5`),
+    api<TokenUsage>(`/api/admin/logs/token-usage?range=${range}`),
+    api<RequestLogPage>("/api/admin/logs/?limit=20"),
+  ]).then(([overview, top, usage, recent]) => ({ overview, top, usage, recent }));
 }
 
 export function listTokens(): Promise<APIToken[]> {
