@@ -2180,6 +2180,55 @@ async function main() {
       assert(!expiry.time.includes("T"), `时间没格式化，还是原文：${expiry.time}`);
     });
 
+    /* 只给预设下拉的话设不了 1d3h 或某个具体时刻。 */
+    await check("有效期收时长表达式并实时预览", async () => {
+      await gotoView(page, "令牌");
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("button")].find(
+          (node) => node.textContent.trim() === "新增令牌",
+        );
+        button.click();
+      });
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "令牌对话框" });
+
+      const field = "dialog.upstream-dialog[open] .expiry-presets";
+      assertEqual(await page.count(`${field} button`), 4, "快捷档数量");
+
+      await page.fill("dialog.upstream-dialog[open] input[placeholder^='留空则永不过期']", "1d3h");
+      const preview = await page.evaluate(() => {
+        const hints = [...document.querySelectorAll("dialog.upstream-dialog[open] .field-hint")];
+        return hints.map((node) => node.textContent).find((text) => text.startsWith("到期时间")) ?? null;
+      });
+      assert(preview !== null, "没有到期时间预览");
+      assert(!preview.includes("永不过期"), `1d3h 不该算成永不过期：${preview}`);
+    });
+
+    await check("看不懂的有效期不提交", async () => {
+      await page.fill("dialog.upstream-dialog[open] input[placeholder^='留空则永不过期']", "明天");
+      const state = await page.evaluate(() => {
+        const hint = [...document.querySelectorAll("dialog.upstream-dialog[open] .field-hint")].find(
+          (node) => node.className.includes("field-hint-error"),
+        );
+        return hint?.textContent ?? null;
+      });
+      assert(state?.includes("看不懂"), `没报错：${state}`);
+
+      // 填上名字后点保存，对话框应该留着而不是静默存成永不过期。
+      await page.fill("dialog.upstream-dialog[open] input[autocomplete=off]", "bad-expiry");
+      await page.evaluate(() => {
+        document.querySelector("dialog.upstream-dialog[open] button[type=submit]")?.click();
+      });
+      await sleepInPage(page, 300);
+      const stillOpen = await page.evaluate(
+        () => document.querySelector("dialog.upstream-dialog[open]") !== null,
+      );
+      assertEqual(stillOpen, true, "解析失败时对话框应留着");
+      await page.click("dialog.upstream-dialog[open] .icon-close");
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "令牌对话框关闭",
+      });
+    });
+
     await check("分组页描述格同形", async () => {
       await gotoView(page, "分组");
       const shape = await page.waitFor(
