@@ -1335,6 +1335,140 @@ async function main() {
       await page.click("dialog.log-detail-dialog .icon-close");
     });
 
+    // ── 看板页 ──────────────────────────────────────────────
+    console.log("\n看板页");
+
+    await check("四块度量区齐全", async () => {
+      await gotoView(page, "看板");
+      const titles = await page.waitFor(
+        () => {
+          const heads = [
+            ...document.querySelectorAll(".dashboard-layout .dashboard-metric-head h3"),
+          ];
+          return heads.length >= 4 ? heads.map((node) => node.textContent) : false;
+        },
+        { label: "度量区", timeout: 10_000 },
+      );
+      assertEqual(titles.join(","), "核心指标,运行态,Tokens 统计,请求统计", "度量区标题");
+      assertEqual(await page.count(".dashboard-ops.wt-board"), 1, "ops 看板容器");
+      assertEqual(await page.count(".wt-page-body.dashboard-layout"), 1, "页体容器");
+    });
+
+    await check("核心指标读到真数", async () => {
+      const kpis = await page.waitFor(
+        () => {
+          const cards = [...document.querySelectorAll(".dashboard-kpis .dashboard-kpi")];
+          if (cards.length === 0) return false;
+          return Object.fromEntries(
+            cards.map((card) => [
+              card.querySelector(".dashboard-kpi-label")?.textContent,
+              card.querySelector(".dashboard-kpi-value")?.textContent,
+            ]),
+          );
+        },
+        { label: "核心指标", timeout: 10_000 },
+      );
+      // 种子里三个渠道，其中一个已归档——归档的不进分母。
+      assertEqual(kpis["启用渠道"], "2/2", "启用渠道（归档不计）");
+      assert(kpis["请求数"] !== undefined, "请求数卡缺失");
+      assert(kpis["错误率"] !== undefined, "错误率卡缺失");
+    });
+
+    await check("状态分布按四档分段", async () => {
+      const legend = await page.evaluate(() =>
+        [...document.querySelectorAll(".status-legend .status-legend-label")].map(
+          (node) => node.textContent,
+        ),
+      );
+      assertEqual(legend.join(","), "2xx,4xx,5xx,其他", "图例档位");
+      const segs = await page.evaluate(() =>
+        [...document.querySelectorAll(".ops-bar-track .ops-bar-seg")].map((node) => ({
+          tone: node.className.replace("ops-bar-seg ", ""),
+          width: node.style.width,
+        })),
+      );
+      assert(segs.length > 0, "一段都没画出来");
+      assert(
+        segs.every((seg) => seg.width.endsWith("%")),
+        `段宽不是百分比：${JSON.stringify(segs)}`,
+      );
+    });
+
+    await check("四张排行卡且模型排行不被遮罩", async () => {
+      assertEqual(await page.count(".dashboard-rank-grid .dashboard-card"), 4, "排行卡数");
+      const titles = await page.evaluate(() =>
+        [...document.querySelectorAll(".dashboard-rank-grid .dashboard-card-head h3")].map(
+          (node) => node.textContent,
+        ),
+      );
+      assertEqual(
+        titles.join(","),
+        "Top 渠道请求,Top 渠道 Tokens,Top 模型请求,Top 模型 Tokens",
+        "排行卡标题",
+      );
+
+      await page.click(".dashboard-ranking-controls .log-sensitive-toggle");
+      const masked = await page.evaluate(() => {
+        const cards = [...document.querySelectorAll(".dashboard-rank-grid .dashboard-card")];
+        const nameIn = (card) =>
+          card?.querySelector(".dashboard-rank-name")?.textContent ?? null;
+        return { channel: nameIn(cards[0]), model: nameIn(cards[2]) };
+      });
+      // 遮罩只管渠道名，模型名不是敏感信息。
+      assert(masked.channel === null || masked.channel.includes("•"), `渠道名没遮：${masked.channel}`);
+      assert(
+        masked.model === null || !masked.model.includes("•"),
+        `模型名不该遮：${masked.model}`,
+      );
+      await page.click(".dashboard-ranking-controls .log-sensitive-toggle");
+    });
+
+    await check("切档重新取数且落盘", async () => {
+      await page.click("[data-dashboard-range='7d']");
+      const state = await page.waitFor(
+        () => {
+          const meta = document.querySelector(".dashboard-hero .wt-meta")?.textContent ?? "";
+          return meta.includes("7") ? { meta, stored: localStorage.getItem("wildtoken_dashboard_range") } : false;
+        },
+        { label: "范围标签", timeout: 10_000 },
+      );
+      assertEqual(state.stored, "7d", "范围落盘");
+      const pressed = await page.evaluate(
+        () =>
+          document.querySelector("[data-dashboard-range='7d']")?.getAttribute("aria-pressed") ?? null,
+      );
+      assertEqual(pressed, "true", "按下态");
+    });
+
+    /* 自定义区间要额外带 start_date / end_date。没带的话后端直接 400，
+       而界面上只会看到一片破折号。 */
+    await check("自定义区间带上日期才发请求", async () => {
+      await page.click("[data-dashboard-range='custom']");
+      const visible = await page.evaluate(
+        () => document.querySelector(".dashboard-custom-range")?.hasAttribute("hidden") === false,
+      );
+      assertEqual(visible, true, "自定义区展开");
+      // 日期没填齐时应用按钮是禁用的。
+      const disabledBefore = await page.evaluate(
+        () => document.querySelector(".dashboard-apply-custom")?.disabled ?? null,
+      );
+      assertEqual(disabledBefore, true, "未填日期时的应用按钮");
+
+      await page.fill(".dashboard-custom-range input[aria-label='开始日期']", "2020-01-01");
+      await page.fill(".dashboard-custom-range input[aria-label='结束日期']", "2020-01-02");
+      await page.click(".dashboard-apply-custom");
+      const stored = await page.waitFor(
+        () => {
+          const value = localStorage.getItem("wildtoken_dashboard_custom_range");
+          return value ? value : false;
+        },
+        { label: "自定义区间落盘" },
+      );
+      assertEqual(stored, "2020-01-01~2020-01-02", "区间落盘");
+      // 换回一个普通档，别把后续检查留在空区间上。
+      await page.click("[data-dashboard-range='30d']");
+    });
+
     // ── 设置页 ──────────────────────────────────────────────
     console.log("\n设置页");
 

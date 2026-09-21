@@ -246,16 +246,29 @@ export function deletePromptTemplate(id: number): Promise<null> {
  * 四个接口并发拉：概览、Top 排行、Token 用量、最近失败。
  * /logs/top 的参数叫 window 而不是 range，且没有多窗口模式。
  */
-export function fetchDashboard(range: string): Promise<{
+/**
+ * 看板的四个接口并发拉。
+ *
+ * custom 范围要额外带日期；其余档位后端自己算区间。三个日志接口的参数名
+ * 不一样（range / window），这是后端的实情，不是笔误。
+ */
+export function fetchDashboard(
+  range: string,
+  custom?: { start: string; end: string },
+): Promise<{
   overview: LogOverview;
   top: TopStats;
   usage: TokenUsage;
   recent: RequestLogPage;
 }> {
+  const dates =
+    range === "custom" && custom
+      ? `&start_date=${encodeURIComponent(custom.start)}&end_date=${encodeURIComponent(custom.end)}`
+      : "";
   return Promise.all([
-    api<LogOverview>(`/api/admin/logs/overview?range=${range}`),
-    api<TopStats>(`/api/admin/logs/top?window=${range}&limit=5`),
-    api<TokenUsage>(`/api/admin/logs/token-usage?range=${range}`),
+    api<LogOverview>(`/api/admin/logs/overview?range=${range}${dates}`),
+    api<TopStats>(`/api/admin/logs/top?window=${range}&limit=5${dates}`),
+    api<TokenUsage>(`/api/admin/logs/token-usage?range=${range}${dates}`),
     api<RequestLogPage>("/api/admin/logs/?limit=20"),
   ]).then(([overview, top, usage, recent]) => ({ overview, top, usage, recent }));
 }
