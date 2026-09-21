@@ -1469,6 +1469,71 @@ async function main() {
       await page.click(".log-toolbar .log-sensitive-toggle");
     });
 
+    /* 这一列的重点是颜色：CSS 里 ok/warn/danger 各有规则。写死成 neutral 的话
+       数字照样显示，只是永远是灰的——扫一眼看不出哪条慢。 */
+    await check("响应性能列带评级色调且用秒", async () => {
+      const cells = await page.waitFor(
+        () => {
+          const rows = [...document.querySelectorAll("table.log-table tbody tr")];
+          const found = rows
+            .map((row) => {
+              const first = row.querySelector(".first-token-time");
+              const total = row.querySelector(".duration-time");
+              if (!first || !total) return null;
+              return {
+                firstClass: first.className,
+                firstText: first.textContent ?? "",
+                totalClass: total.className,
+                totalText: total.textContent ?? "",
+                totalTitle: total.getAttribute("title") ?? "",
+              };
+            })
+            .filter(Boolean);
+          return found.length > 0 ? found : false;
+        },
+        { label: "响应性能格", timeout: 10_000 },
+      );
+
+      // 数值用秒：要么是破折号，要么是 0.3s 这种形式，不能是 312ms。
+      for (const cell of cells) {
+        assert(
+          cell.totalText === "-" || /^\d+\.\ds$/.test(cell.totalText),
+          `总耗时不是秒格式：${cell.totalText}`,
+        );
+        assert(
+          cell.firstText === "-" || /^\d+\.\ds$/.test(cell.firstText),
+          `首字不是秒格式：${cell.firstText}`,
+        );
+      }
+
+      // 至少有一行拿到了非 neutral 的评级，否则等于色调根本没生效。
+      const toned = cells.filter((cell) => !cell.totalClass.includes("neutral"));
+      assert(toned.length > 0, `所有行的总耗时都是 neutral：${cells.length} 行`);
+      // title 要说清楚凭什么判的。
+      assert(
+        toned[0].totalTitle.includes("总耗时") && toned[0].totalTitle.includes("判定"),
+        `title 没说明判定依据：${toned[0].totalTitle}`,
+      );
+    });
+
+    /* 非 2xx 优先标红。一个 3 秒就返回 500 的请求，按吞吐算会是绿的——
+       快失败也是失败。 */
+    await check("失败请求的总耗时标红", async () => {
+      const rows = await page.evaluate(() =>
+        [...document.querySelectorAll("table.log-table tbody tr")]
+          .map((row) => ({
+            status: row.querySelector("[data-col=status]")?.textContent?.trim() ?? "",
+            tone: row.querySelector(".duration-time")?.className ?? "",
+          }))
+          .filter((row) => /^[45]\d\d$/.test(row.status)),
+      );
+      if (rows.length === 0) return; // 这一页没失败请求，不强求。
+      assert(
+        rows.every((row) => row.tone.includes("danger")),
+        `失败请求没标红：${JSON.stringify(rows)}`,
+      );
+    });
+
     await check("表头与表体均为 10 列", async () => {
       const head = await page.count("table.log-table thead th");
       const body = await page.evaluate(

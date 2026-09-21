@@ -180,6 +180,65 @@ function ChannelStack({
   );
 }
 
+/** 耗时一律用秒，保留一位小数。毫秒原值在这一列里位数不齐，扫不出快慢。 */
+function formatSeconds(ms: number | null): string {
+  return ms === null || ms === undefined ? "-" : `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** 首字只看绝对值：5 秒内好，10 秒以上差。 */
+function firstTokenTone(ms: number | null): string {
+  if (ms === null || !Number.isFinite(ms)) return "neutral";
+  if (ms < 5000) return "ok";
+  if (ms >= 10000) return "danger";
+  return "warn";
+}
+
+/**
+ * 总耗时的评级。四层兜底，顺序照抄旧版。
+ *
+ * 关键是第一层：非 2xx 优先标红。一个 3 秒就返回 500 的请求，按吞吐算会是
+ * 绿的——快失败也是失败。其后依次按输出吞吐、总吞吐、绝对耗时。
+ */
+function durationRating(log: RequestLog): { tone: string; basis: string } {
+  const status = log.status_code;
+  if (status === null || !Number.isFinite(status)) {
+    return { tone: "danger", basis: "请求无响应或状态码缺失" };
+  }
+  if (status < 200 || status >= 300) {
+    return { tone: "danger", basis: `HTTP ${status} 错误，优先标红` };
+  }
+
+  const duration = log.duration_ms;
+  if (duration === null || !Number.isFinite(duration) || duration <= 0) {
+    return { tone: "neutral", basis: "总耗时无数据" };
+  }
+
+  const completion = log.completion_tokens;
+  if (completion !== null && Number.isFinite(completion) && completion > 0) {
+    const rate = completion / (duration / 1000);
+    const shown = rate.toFixed(1).replace(/\.0$/, "");
+    return {
+      tone: rate >= 20 ? "ok" : rate >= 8 ? "warn" : "danger",
+      basis: `按全程输出吞吐 ${shown} t/s 判定`,
+    };
+  }
+
+  const total = log.total_tokens;
+  if (total !== null && Number.isFinite(total) && total > 0) {
+    const rate = total / (duration / 1000);
+    const shown = rate.toFixed(1).replace(/\.0$/, "");
+    return {
+      tone: rate >= 80 ? "ok" : rate >= 20 ? "warn" : "danger",
+      basis: `按总吞吐 ${shown} t/s 判定`,
+    };
+  }
+
+  return {
+    tone: duration < 30000 ? "ok" : duration < 60000 ? "warn" : "danger",
+    basis: "无 token 数据，按绝对耗时兜底判定",
+  };
+}
+
 /** 令牌格：名字带上 #ID 作 title，遮罩时整个换成星号。 */
 function TokenCell({
   log,
@@ -768,19 +827,22 @@ function LogRow({
       <td data-col="status">
         <StatusBadge code={log.status_code} />
       </td>
+      {/* 色调不能写死成 neutral——CSS 里 ok/warn/danger 各有规则，写死了这一列
+          就永远是灰的，扫一眼看不出哪条慢。 */}
       <td className="duration-cell" data-col="duration">
         <span className="latency-metrics">
           <span className="latency-metric">
             <small>首字</small>
-            <span className="first-token-time neutral">
-              {log.first_token_ms === null ? "-" : `${log.first_token_ms}ms`}
+            <span
+              className={`first-token-time ${firstTokenTone(log.first_token_ms)}`}
+              title={`首字耗时 ${formatSeconds(log.first_token_ms)}`}
+            >
+              {formatSeconds(log.first_token_ms)}
             </span>
           </span>
           <span className="latency-metric">
             <small>耗时</small>
-            <span className="duration-time neutral">
-              {log.duration_ms === null ? "-" : formatElapsed(log.duration_ms)}
-            </span>
+            <DurationTime log={log} />
           </span>
         </span>
       </td>
@@ -802,6 +864,16 @@ function LogRow({
         </button>
       </td>
     </tr>
+  );
+}
+
+function DurationTime({ log }: { log: RequestLog }) {
+  const label = formatSeconds(log.duration_ms);
+  const rating = durationRating(log);
+  return (
+    <span className={`duration-time ${rating.tone}`} title={`总耗时 ${label} · ${rating.basis}`}>
+      {label}
+    </span>
   );
 }
 
