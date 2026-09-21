@@ -191,9 +191,23 @@ export interface LogOverview {
 }
 
 /** Top 排行。模型和渠道各一组。 */
+/** 排行项。数值字段就叫 count——请求榜是次数，Tokens 榜是 token 数。 */
+export interface TopItem {
+  name: string;
+  count: number;
+  /** 渠道榜按 upstream_id 分组时带上。 */
+  id?: number;
+  avg_duration_ms?: number;
+  error_rate?: number;
+}
+
+/* 四个榜是四个独立数组，不是同一组数据换个字段排序。 */
 export interface TopStats {
-  models: Array<{ name: string; request_count: number; total_tokens: number }>;
-  channels: Array<{ name: string; request_count: number; total_tokens: number }>;
+  window: string;
+  models: TopItem[];
+  channels: TopItem[];
+  model_tokens: TopItem[];
+  channel_tokens: TopItem[];
 }
 
 export interface TokenUsage {

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+
+import { useDialog } from "../useDialog";
 
 import {
   UnauthorizedError,
@@ -196,7 +198,8 @@ function GroupDialog({
   onSubmit: (name: string, description: string) => void;
   onClose: () => void;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
+  /* 不传 onClose：旧版的分组框故意不支持点遮罩关闭。 */
+  const ref = useDialog(open);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
 
@@ -205,13 +208,6 @@ function GroupDialog({
     setName(group?.name ?? "");
     setDescription(group?.description ?? "");
   }, [open, group]);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
-  }, [open]);
 
   return (
     <dialog className="upstream-dialog dialog--drawer" ref={ref} onCancel={onClose}>
@@ -223,43 +219,93 @@ function GroupDialog({
           onSubmit(name.trim(), description.trim());
         }}
       >
-        <div className="modal-head">
+        <div className="modal-head upstream-modal-head">
           <div>
             <h2>{group ? `编辑分组 #${group.id}` : "新增分组"}</h2>
             <p>分组决定一个令牌能访问哪些渠道。</p>
           </div>
-          <button type="button" className="secondary ghost" onClick={onClose} aria-label="关闭">
-            ×
-          </button>
+          {/* 和其他抽屉同形：icon-close 加 SVG，不是一个字符×。 */}
+          <div className="modal-head-actions">
+            <button
+              type="button"
+              className="secondary ghost icon-close"
+              aria-label="关闭"
+              title="关闭"
+              onClick={onClose}
+            >
+              <svg className="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 4l8 8M12 4L4 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        <div className="form-grid">
-          <label className="field">
-            <span className="field-label">名称</span>
-            <input
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              required
-              autoComplete="off"
-              /* 默认分组改名会让依赖它的代码找不到目标，后端也会拒。 */
-              disabled={group?.is_default}
-            />
-            {group?.is_default ? (
-              <span className="field-hint">默认分组不能改名。</span>
-            ) : null}
-          </label>
+        {/* 三段：头、可滚动的正文、钉底的页脚。缺中间那层的话，满高抽屉里
+            按钮不钉底。 */}
+        <div className="upstream-dialog-body">
+          <section className="form-section">
+            <div className="form-section-head">
+              <div>
+                <h3>基础信息</h3>
+                <p>名称在令牌和渠道两边都按它引用，建后尽量不改。</p>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label className="field span-2">
+                <span className="field-label">名称</span>
+                <input
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  required
+                  maxLength={60}
+                  autoComplete="off"
+                  /* 默认分组改名会让依赖它的代码找不到目标，后端也会拒。 */
+                  disabled={group?.is_default}
+                />
+                <span className="field-hint">
+                  {group?.is_default
+                    ? "默认分组不能改名：没指定分组的令牌和渠道都落在这里。"
+                    : "只有同分组的令牌能路由到该分组下的渠道。"}
+                </span>
+              </label>
 
-          <label className="field">
-            <span className="field-label">描述</span>
-            <input
-              value={description}
-              onChange={(event) => setDescription(event.target.value)}
-              autoComplete="off"
-            />
-          </label>
+              <label className="field span-2">
+                <span className="field-label">描述（可选）</span>
+                <input
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  maxLength={200}
+                  placeholder="这个分组用来做什么"
+                  autoComplete="off"
+                />
+              </label>
+            </div>
+          </section>
+
+          {group ? (
+            <section className="form-section">
+              <div className="form-section-head">
+                <div>
+                  <h3>引用情况</h3>
+                  <p>删除前先看这里：还有令牌挂在上面的话，它们会无处可去。</p>
+                </div>
+              </div>
+              <div className="form-grid">
+                <div className="field">
+                  <span className="field-label">渠道</span>
+                  <strong>{group.upstream_count}</strong>
+                </div>
+                <div className="field">
+                  <span className="field-label">令牌</span>
+                  <strong>{group.token_count}</strong>
+                </div>
+              </div>
+            </section>
+          ) : null}
         </div>
 
-        <div className="modal-actions">
+        {/* modal-footer 而不是 modal-actions：面板的第三行是钉底的。 */}
+        <div className="modal-footer">
           <button type="button" className="secondary" onClick={onClose}>
             取消
           </button>

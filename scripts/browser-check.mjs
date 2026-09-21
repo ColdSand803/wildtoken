@@ -400,6 +400,9 @@ async function launchChrome(profileDir) {
     CHROME,
     [
       "--headless=new",
+      /* 显式定视口。默认是 800×600——这个宽度永远落在 max-width:1100px 的媒体
+         查询里，等于一直在验证窄屏布局，而控制台实际跑在宽屏上。 */
+      "--window-size=1600,900",
       "--disable-gpu",
       "--no-first-run",
       "--no-default-browser-check",
@@ -1640,6 +1643,80 @@ async function main() {
       });
     });
 
+    /* 标准报文写法：从 curl -v 或浏览器网络面板拷出来直接粘。重点测两件事——
+       值里的冒号不能被切，回显要是每行一条而不是 JSON。 */
+    await check("Header 收报文写法且回显成行", async () => {
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "编辑");
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
+      await page.evaluate(() => {
+        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
+        details.open = true;
+        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        // 第二条的值里带冒号，只能按第一个切。
+        setter.call(areas[0], "X-Tenant: acme\nX-Origin: https://a.example:8443/v1");
+        areas[0].dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await page.evaluate(() => {
+        document.querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]").click();
+      });
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "编辑对话框关闭",
+        timeout: 10_000,
+      });
+
+      const stored = await page.evaluate(async () => {
+        const admin = localStorage.getItem("wildtoken_admin_token");
+        const list = await (
+          await fetch("/api/admin/upstreams/", { headers: { "x-admin-token": admin } })
+        ).json();
+        return list.find((item) => item.name.includes("auto-weight"))?.extra_headers ?? null;
+      });
+      assertEqual(stored["x-tenant"], "acme", "第一条落库");
+      assertEqual(
+        stored["x-origin"],
+        "https://a.example:8443/v1",
+        "值里的冒号不该被切断",
+      );
+
+      // 重新打开：回显要是每行一条，不是 JSON。
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "编辑");
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
+      const shown = await page.evaluate(() => {
+        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
+        details.open = true;
+        return document.querySelectorAll("dialog.upstream-dialog[open] details textarea")[0].value;
+      });
+      assert(!shown.includes("{"), `回显成了 JSON：${shown}`);
+      assert(shown.includes("x-tenant: acme"), `回显不是报文写法：${shown}`);
+    });
+
+    await check("仍然收旧的 JSON 写法", async () => {
+      await page.evaluate(() => {
+        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        setter.call(areas[0], '{"X-Legacy":"kept"}');
+        areas[0].dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await page.evaluate(() => {
+        document.querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]").click();
+      });
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "编辑对话框关闭",
+        timeout: 10_000,
+      });
+      const stored = await page.evaluate(async () => {
+        const admin = localStorage.getItem("wildtoken_admin_token");
+        const list = await (
+          await fetch("/api/admin/upstreams/", { headers: { "x-admin-token": admin } })
+        ).json();
+        return list.find((item) => item.name.includes("auto-weight"))?.extra_headers ?? null;
+      });
+      assertEqual(stored["x-legacy"], "kept", "JSON 写法仍然能存");
+    });
+
     await check("Header 不是合法 JSON 就不保存", async () => {
       await openRowMenu(page, "auto-weight");
       await clickMenuItem(page, "编辑");
@@ -1662,12 +1739,13 @@ async function main() {
         () => document.querySelector("dialog.upstream-dialog[open]") !== null,
       );
       assertEqual(stillOpen, true, "解析失败时对话框应留着");
+      // 以 { 开头会走 JSON 分支，文案是「看起来是 JSON 但解析失败」。
       const toasted = await page.evaluate(() =>
         [...document.querySelectorAll(".toast")].some((node) =>
-          node.textContent.includes("Header 覆盖"),
+          node.textContent.includes("解析失败"),
         ),
       );
-      assertEqual(toasted, true, "应提示 Header 解析失败");
+      assertEqual(toasted, true, "应提示解析失败");
       await page.click("dialog.upstream-dialog[open] .icon-close");
       await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
         label: "编辑对话框关闭",
@@ -2114,19 +2192,36 @@ async function main() {
     // ── 看板页 ──────────────────────────────────────────────
     console.log("\n看板页");
 
-    await check("四块度量区齐全", async () => {
+    await check("指标卡打散成一片", async () => {
       await gotoView(page, "看板");
-      const titles = await page.waitFor(
+      const flat = await page.waitFor(
         () => {
-          const heads = [
-            ...document.querySelectorAll(".dashboard-layout .dashboard-metric-head h3"),
-          ];
-          return heads.length >= 4 ? heads.map((node) => node.textContent) : false;
+          const grid = document.querySelector(".dashboard-kpis--flat");
+          if (!grid) return false;
+          const cards = [...grid.querySelectorAll(".dashboard-kpi")];
+          if (cards.length < 11) return false;
+          return {
+            count: cards.length,
+            labels: cards.map((card) => card.querySelector(".dashboard-kpi-label")?.textContent),
+            columns: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+            // 分区标题和外框都要没了。
+            sections: document.querySelectorAll(".dashboard-layout .dashboard-metric-head").length,
+            boards: document.querySelectorAll(".dashboard-ops.wt-board").length,
+          };
         },
-        { label: "度量区", timeout: 10_000 },
+        { label: "打散的指标网格", timeout: 10_000 },
       );
-      assertEqual(titles.join(","), "核心指标,运行态,Tokens 统计,请求统计", "度量区标题");
-      assertEqual(await page.count(".dashboard-ops.wt-board"), 1, "ops 看板容器");
+      assertEqual(flat.count, 11, "四区共 11 张卡全进同一网格");
+      assertEqual(flat.sections, 0, "分区标题要去掉");
+      assertEqual(flat.boards, 0, "分区外框要去掉");
+      assert(
+        flat.columns >= 4 && flat.columns <= 6,
+        `每行应 4–6 列，实际 ${flat.columns}`,
+      );
+      // 四个区的卡一张不能丢。
+      for (const label of ["请求数", "错误率", "启用渠道", "Tokens", "缓存率", "活跃流", "清理任务"]) {
+        assert(flat.labels.includes(label), `丢了卡片：${label}`);
+      }
       assertEqual(await page.count(".wt-page-body.dashboard-layout"), 1, "页体容器");
     });
 
@@ -2190,6 +2285,44 @@ async function main() {
         "排行卡标题",
       );
 
+      /* 排行项的数值字段叫 count。按 request_count / total_tokens 取到 undefined，
+         整面板会渲染成 NaN——要盯真数，不能只看行在不在。 */
+      const rankValues = await page.waitFor(
+        () => {
+          const nodes = [...document.querySelectorAll(".dashboard-rank-count")];
+          if (nodes.length === 0) return false;
+          return nodes.map((node) => node.textContent);
+        },
+        { label: "排行数值", timeout: 15_000 },
+      );
+      for (const value of rankValues) {
+        assert(!/nan/i.test(value), `排行值是 NaN：${value}`);
+        assert(/[0-9]/.test(value), `排行值不是数：${value}`);
+      }
+      // 四个榜是四组独立数据：Tokens 榜的量级应远大于请求次数。
+      const perCard = await page.evaluate(() =>
+        [...document.querySelectorAll(".dashboard-rank-grid .dashboard-card")].map(
+          (card) => card.querySelector(".dashboard-rank-count")?.textContent ?? "",
+        ),
+      );
+      assert(
+        perCard[1] !== perCard[0] || perCard[1] === "",
+        `Tokens 榜和请求榜数值完全一致，可能喟错了数组：${perCard.join(" / ")}`,
+      );
+
+      // 屏蔽按钮只留图标，说明走 aria-label。
+      const eye = await page.evaluate(() => {
+        const btn = document.querySelector(".dashboard-ranking-controls .log-sensitive-toggle");
+        return {
+          text: btn.textContent.trim(),
+          label: btn.getAttribute("aria-label"),
+          svg: btn.querySelectorAll("svg").length,
+        };
+      });
+      assertEqual(eye.text, "", "按钮不该有文案");
+      assertEqual(eye.svg, 1, "要有眼睛图标");
+      assert(eye.label && eye.label.includes("渠道名"), `aria-label 缺失：${eye.label}`);
+
       await page.click(".dashboard-ranking-controls .log-sensitive-toggle");
       const masked = await page.evaluate(() => {
         const cards = [...document.querySelectorAll(".dashboard-rank-grid .dashboard-card")];
@@ -2213,7 +2346,8 @@ async function main() {
       await page.click("[data-dashboard-range='7d']");
       const state = await page.waitFor(
         () => {
-          const meta = document.querySelector(".dashboard-hero .wt-meta")?.textContent ?? "";
+          // 打散后 dashboard-hero 没了，时间范围标签看状态分布卡那一个。
+          const meta = document.querySelector(".dashboard-insight .wt-meta")?.textContent ?? "";
           return meta.includes("7") ? { meta, stored: localStorage.getItem("wildtoken_dashboard_range") } : false;
         },
         { label: "范围标签", timeout: 10_000 },
@@ -2364,6 +2498,43 @@ async function main() {
         () => document.querySelector("table tbody tr td.desc-cell .muted") !== null,
       );
       assertEqual(hasMuted, true, "描述文本应包在 muted 里");
+    });
+
+    /* 预览是前 4 后 4，≤ 8 全显。比对真的明文而不是看格式像不像——否则
+       截错位置也能“看着对”。 */
+    await check("令牌预览前4后4", async () => {
+      await gotoView(page, "令牌");
+      const rows = await page.waitFor(
+        async () => {
+          const codes = [...document.querySelectorAll("table tbody tr .token-preview-code")];
+          if (codes.length === 0) return false;
+          const admin = localStorage.getItem("wildtoken_admin_token");
+          const list = await (
+            await fetch("/api/admin/tokens/", { headers: { "x-admin-token": admin } })
+          ).json();
+          const items = Array.isArray(list) ? list : (list.items ?? []);
+          if (items.length === 0) return false;
+          return items.slice(0, codes.length).map((item, index) => ({
+            plain: item.token ?? "",
+            shown: codes[index].textContent,
+          }));
+        },
+        { label: "令牌预览", timeout: 10_000 },
+      );
+
+      let checkedLong = 0;
+      for (const row of rows) {
+        if (!row.plain) continue;
+        const chars = [...row.plain];
+        if (chars.length <= 8) {
+          assertEqual(row.shown, row.plain, "不超八位应全显");
+          continue;
+        }
+        const want = `${chars.slice(0, 4).join("")}\u2026${chars.slice(-4).join("")}`;
+        assertEqual(row.shown, want, `预览应为前4后4：${row.plain}`);
+        checkedLong += 1;
+      }
+      assert(checkedLong > 0, "没有一条长令牌可比对，断言等于没跑");
     });
 
     /* 后端严格解码，多一个字段整个请求就 400。走界面真建一条，并核对限额

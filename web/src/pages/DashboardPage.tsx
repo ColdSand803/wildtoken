@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useState } from "react";
 
 import { UnauthorizedError, fetchDashboard, getSystemInfo, listUpstreams } from "../api";
-import type { LogOverview, RequestLog, SystemInfo, TokenUsage, TopStats } from "../types";
+import type { LogOverview, RequestLog, SystemInfo, TokenUsage, TopItem, TopStats } from "../types";
 
 /* 时间档。值直接进 query，必须是后端 parseDashboardRange 认的词。
 
@@ -110,33 +110,6 @@ function Kpi({
   );
 }
 
-function MetricSection({
-  className,
-  title,
-  sub,
-  meta,
-  children,
-}: {
-  className: string;
-  title: string;
-  sub: string;
-  meta?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className={`dashboard-metric-section wt-section ${className}`}>
-      <div className="dashboard-metric-head wt-section-head">
-        <div className="wt-section-copy">
-          <h3>{title}</h3>
-          <p className="dashboard-card-sub wt-sub">{sub}</p>
-        </div>
-        {meta ? <span className="dashboard-card-meta wt-meta">{meta}</span> : null}
-      </div>
-      {children}
-    </section>
-  );
-}
-
 /** 延迟趋势。JSX 的 <svg> 走 createElementNS，属性齐全且真的会渲染。 */
 function Sparkline({ values }: { values: number[] }) {
   const gradientId = useId();
@@ -218,25 +191,27 @@ function StatusBar({ overview }: { overview: LogOverview }) {
   );
 }
 
-type RankRow = { name: string; request_count: number; total_tokens: number };
-
-/** 排行卡。按哪个字段排由 metric 决定，两种用法共用一张卡。 */
+/**
+ * 排行卡。
+ *
+ * 数值字段就叫 count——请求榜和 Tokens 榜是接口返回的**两组独立数据**，
+ * 不是同一组换个字段排序。按 request_count / total_tokens 取到的是 undefined，
+ * 算出来全是 NaN。
+ */
 function RankCard({
   title,
   meta,
   rows,
-  metric,
   maskNames,
 }: {
   title: string;
   meta: string;
-  rows: RankRow[];
-  metric: "requests" | "tokens";
+  rows: TopItem[];
   maskNames: boolean;
 }) {
-  const valueOf = (row: RankRow) =>
-    metric === "requests" ? row.request_count : row.total_tokens;
-  const sorted = [...rows].sort((a, b) => valueOf(b) - valueOf(a));
+  // 后端已经排好序，这里不再排；只防一下非法值。
+  const valueOf = (row: TopItem) => (Number.isFinite(row.count) ? row.count : 0);
+  const sorted = rows;
   const max = Math.max(...sorted.map(valueOf), 1);
 
   return (
@@ -451,14 +426,10 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
         ) : null}
 
         <div className="wt-page-body dashboard-layout">
-          <MetricSection
-            className="dashboard-hero"
-            title="核心指标"
-            sub="按所选时间范围统计"
-            meta={rangeLabel}
-          >
-            <div className="dashboard-kpis wt-metric-grid kpi-flip">
-              <Kpi
+          {/* 四个度量区打散成一片：去掉标题和外框，卡片直接进同一个网格。
+              每张卡自带标签和注解，分组标题只是多一层边框。 */}
+          <div className="dashboard-kpis wt-metric-grid kpi-flip dashboard-kpis--flat">
+            <Kpi
                 label="请求数"
                 value={compact(total)}
                 hint={total ? `${rangeLabel} · 共 ${total} 条` : `${rangeLabel} · 暂无请求`}
@@ -476,24 +447,28 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
               />
               {/* 归档渠道不计入分母。算进去的话「2/3」看起来像有一个只是被停用，
                   而它其实已经退出路由了。 */}
-              <Kpi
-                label="启用渠道"
-                value={channels ? String(channels.enabled) : "—"}
-                denominator={channels ? `/${channels.total}` : undefined}
-                hint={channels ? `停用 ${channels.total - channels.enabled}` : "暂无渠道"}
-              />
-            </div>
-          </MetricSection>
-
-          <div className="dashboard-ops wt-board">
-            <MetricSection
-              className="dashboard-ops-runtime"
-              title="运行态"
-              sub="当前流、断连、日志写入与清理状态"
-              meta="实时"
-            >
-              <div className="dashboard-window-kpis wt-metric-grid">
-                <Kpi
+            <Kpi
+              label="启用渠道"
+              value={channels ? String(channels.enabled) : "—"}
+              denominator={channels ? `/${channels.total}` : undefined}
+              hint={channels ? `停用 ${channels.total - channels.enabled}` : "暂无渠道"}
+            />
+            <Kpi
+              label="Tokens"
+              value={usage ? compact(usage.total_tokens) : "—"}
+              hint={`${rangeLabel} · 输入 ${compact(usage?.prompt_tokens ?? 0)}`}
+            />
+            <Kpi
+              label="缓存率"
+              value={cacheRate}
+              hint={`命中 ${compact(usage?.prompt_cached_tokens ?? 0)} / 输入 ${compact(usage?.prompt_tokens ?? 0)}`}
+            />
+            <Kpi
+              label="请求（全部）"
+              value={usage ? compact(usage.all_request_count) : "—"}
+              hint={`计入用量 ${compact(usage?.request_count ?? 0)} 条`}
+            />
+            <Kpi
                   label="活跃流"
                   value={compact(metrics?.active_sse_streams ?? 0)}
                   hint="当前 SSE 连接"
@@ -517,55 +492,16 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                       : ""
                   }
                 />
-                <Kpi
-                  label="清理任务"
-                  value={cleanup?.active ? "运行中" : "空闲"}
-                  hint={
-                    cleanup?.active
-                      ? `${compact(cleanup.current_rows_cleared)} 行 / ${compact(cleanup.current_batches)} 批`
-                      : `上次 ${compact(cleanup?.last_rows_cleared ?? 0)} 行 · ${formatDuration(cleanup?.last_duration_ms)}`
-                  }
-                  tone={cleanup?.active ? "tone-warn" : ""}
-                />
-              </div>
-            </MetricSection>
-
-            <div className="dashboard-ops-usage">
-              <MetricSection
-                className="dashboard-ops-tokens"
-                title="Tokens 统计"
-                sub="按请求日志中的 token 用量汇总"
-                meta={rangeLabel}
-              >
-                <div className="dashboard-window-kpis wt-metric-grid">
-                  <Kpi
-                    label="Tokens"
-                    value={usage ? compact(usage.total_tokens) : "—"}
-                    hint={`${rangeLabel} · 输入 ${compact(usage?.prompt_tokens ?? 0)}`}
-                  />
-                  <Kpi
-                    label="缓存率"
-                    value={cacheRate}
-                    hint={`命中 ${compact(usage?.prompt_cached_tokens ?? 0)} / 输入 ${compact(usage?.prompt_tokens ?? 0)}`}
-                  />
-                </div>
-              </MetricSection>
-
-              <MetricSection
-                className="dashboard-ops-requests"
-                title="请求统计"
-                sub="按全部请求日志条数汇总"
-                meta={rangeLabel}
-              >
-                <div className="dashboard-window-kpis wt-metric-grid">
-                  <Kpi
-                    label="请求"
-                    value={usage ? compact(usage.all_request_count) : "—"}
-                    hint={`计入用量 ${compact(usage?.request_count ?? 0)} 条`}
-                  />
-                </div>
-              </MetricSection>
-            </div>
+            <Kpi
+              label="清理任务"
+              value={cleanup?.active ? "运行中" : "空闲"}
+              hint={
+                cleanup?.active
+                  ? `${compact(cleanup.current_rows_cleared)} 行 / ${compact(cleanup.current_batches)} 批`
+                  : `上次 ${compact(cleanup?.last_rows_cleared ?? 0)} 行 · ${formatDuration(cleanup?.last_duration_ms)}`
+              }
+              tone={cleanup?.active ? "tone-warn" : ""}
+            />
           </div>
 
           <div className="dashboard-grid dashboard-insight">
@@ -609,7 +545,9 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                       : "secondary ghost log-sensitive-toggle"
                   }
                   aria-pressed={maskChannels}
-                  title={maskChannels ? "渠道名已屏蔽" : "点击屏蔽渠道名"}
+                  /* 只留图标，说明走 title 和 aria-label——和日志页的同类按钮一致。 */
+                  aria-label={maskChannels ? "显示渠道名" : "屏蔽渠道名"}
+                  title={maskChannels ? "渠道名已屏蔽，点击显示" : "点击屏蔽渠道名"}
                   onClick={toggleMask}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -619,7 +557,6 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                     />
                     {maskChannels ? <path className="log-sensitive-slash" d="m4 4 16 16" /> : null}
                   </svg>
-                  {maskChannels ? "显示渠道名" : "屏蔽渠道名"}
                 </button>
                 <button type="button" className="secondary" onClick={() => void load()}>
                   刷新
@@ -632,28 +569,25 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                 title="Top 渠道请求"
                 meta={rangeLabel}
                 rows={top?.channels ?? []}
-                metric="requests"
                 maskNames={maskChannels}
               />
+              {/* Tokens 榜走 channel_tokens，不是把请求榜换个字段重排。 */}
               <RankCard
                 title="Top 渠道 Tokens"
                 meta={rangeLabel}
-                rows={top?.channels ?? []}
-                metric="tokens"
+                rows={top?.channel_tokens ?? []}
                 maskNames={maskChannels}
               />
               <RankCard
                 title="Top 模型请求"
                 meta={rangeLabel}
                 rows={top?.models ?? []}
-                metric="requests"
                 maskNames={false}
               />
               <RankCard
                 title="Top 模型 Tokens"
                 meta={rangeLabel}
-                rows={top?.models ?? []}
-                metric="tokens"
+                rows={top?.model_tokens ?? []}
                 maskNames={false}
               />
             </div>

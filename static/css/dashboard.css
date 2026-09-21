@@ -17,6 +17,18 @@
   margin-bottom: 0;
 }
 
+/* 打散后的全量指标：11 张卡不再分区，宽度够就排 6 列，窄了自动减。
+   固定 4 列会在宽屏上拉出三行，最后一行只剩一张。 */
+.dashboard-kpis--flat {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+@media (min-width: 1500px) {
+  .dashboard-kpis--flat {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
 .dashboard-metric-head {
   align-items: flex-start;
   display: flex;
@@ -809,12 +821,12 @@ html[data-theme] .dashboard-date-field input[type="date"],
   margin: 0;
 }
 
+/* 同 .wt-meta：等宽栈没有 500 的真字重，合成出来发虚。 */
 .dashboard-card-meta {
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  font-weight: 400;
   white-space: nowrap;
 }
 

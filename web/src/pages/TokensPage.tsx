@@ -124,7 +124,8 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
   const filtered = tokens.filter((token) => {
     const q = query.trim().toLowerCase();
     if (!q) return true;
-    return [token.name, token.description, token.token_preview, token.group_name]
+    // 按看得见的那串匹配：屏上显示的已经不是后端那个前缀预览了。
+    return [token.name, token.description, tokenPreview(token), token.group_name]
       .join(" ")
       .toLowerCase()
       .includes(q);
@@ -377,6 +378,22 @@ const sealedGlyph = () => (
   </svg>
 );
 
+/**
+ * 预览：前 4 后 4，总长 ≤ 8 直接全显。
+ *
+ * 后端存的 token_preview 只有前缀，分辨不了同前缀的两把钥匙；带上尾部才能在
+ * 列表里一眼区分。明文拿不到时（开明文保存之前建的行）退回后端那个。
+ *
+ * 用 Array.from 而不是 slice：按码元切会把超出 BMP 的字符斬成半个。
+ */
+function tokenPreview(token: APIToken): string {
+  if (!token.token) return token.token_preview;
+
+  const chars = Array.from(token.token);
+  if (chars.length <= 8) return token.token;
+  return `${chars.slice(0, 4).join("")}…${chars.slice(-4).join("")}`;
+}
+
 function TokenRow({
   token,
   busy,
@@ -411,7 +428,7 @@ function TokenRow({
           title={sealed ? SEALED_TITLE : "复制完整令牌"}
           onClick={onCopy}
         >
-          <code className="token-preview-code">{token.token_preview}</code>
+          <code className="token-preview-code">{tokenPreview(token)}</code>
           <span className="token-preview-icon" aria-hidden="true">
             {sealed ? sealedGlyph() : copyGlyph()}
           </span>

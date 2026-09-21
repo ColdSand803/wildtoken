@@ -89,41 +89,83 @@ const NON_OVERRIDABLE_HEADERS = new Set([
 /** RFC 7230 的 token 字符集。 */
 const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
 
-/** Header 覆盖是 JSON 对象，和旧控制台同一种写法。 */
-function parseHeaderJSON(value: string): Record<string, string> {
-  const trimmed = value.trim();
-  if (!trimmed) return {};
+/** 逐条校验并归一。两种语法共用这一层。 */
+function addHeader(result: Record<string, string>, name: string, value: string): void {
+  if (!HEADER_NAME_PATTERN.test(name)) throw new Error(`Header 名无效：${name || "（空）"}`);
+  // 控制字符会把一个头拆成两个（响应拆分）。
+  if (/[\x00-\x08\x0a-\x1f\x7f]/.test(value)) {
+    throw new Error(`Header ${name} 的值包含非法控制字符。`);
+  }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(trimmed);
-  } catch (err) {
-    throw new Error(`Header 覆盖不是合法 JSON：${err instanceof Error ? err.message : String(err)}`);
+  const normalized = name.toLowerCase();
+  if (NON_OVERRIDABLE_HEADERS.has(normalized)) {
+    throw new Error(`Header ${name} 属于传输或内部路由头，不能覆盖。`);
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("Header 覆盖必须是由 Header 名和字符串值组成的 JSON 对象。");
+  // 名字对 HTTP 来说不区大小写，写两遍只是后一个默默赢了。
+  if (Object.hasOwn(result, normalized)) {
+    throw new Error(`Header 名大小写重复：${name}`);
   }
+  result[normalized] = value;
+}
+
+/**
+ * Header 覆盖：标准 HTTP 报文写法，每行一条 `Name: value`。
+ *
+ * 用这个而不是 JSON，是为了从 curl -v、浏览器网络面板、日志详情的报文区
+ * 拷出来能直接粘——那些地方吐出来的本来就是这个形式。
+ *
+ * 仍然收 JSON：老数据和旧控制台都是那个写法，粘进来不应该报错。
+ */
+function parseHeaderLines(value: string): Record<string, string> {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "{}") return {};
 
   const result: Record<string, string> = {};
-  for (const [name, headerValue] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!HEADER_NAME_PATTERN.test(name)) throw new Error(`Header 名无效：${name || "（空）"}`);
-    if (typeof headerValue !== "string") throw new Error(`Header ${name} 的值必须是字符串。`);
-    // 控制字符会把一个头拆成两个（响应拆分）。
-    if (/[\x00-\x08\x0a-\x1f\x7f]/.test(headerValue)) {
-      throw new Error(`Header ${name} 的值包含非法控制字符。`);
-    }
 
-    const normalized = name.toLowerCase();
-    if (NON_OVERRIDABLE_HEADERS.has(normalized)) {
-      throw new Error(`Header ${name} 属于传输或内部路由头，不能覆盖。`);
+  // 以 { 开头当 JSON 试——它不可能是合法的 Header 名。
+  if (trimmed.startsWith("{")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (err) {
+      throw new Error(
+        `看起来是 JSON 但解析失败：${err instanceof Error ? err.message : String(err)}`,
+      );
     }
-    // 名字对 HTTP 来说不区大小写，写两遍只是后一个默默赢了。
-    if (Object.hasOwn(result, normalized)) {
-      throw new Error(`Header 名大小写重复：${name}`);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("JSON 写法必须是由 Header 名和字符串值组成的对象。");
     }
-    result[normalized] = headerValue;
+    for (const [name, headerValue] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof headerValue !== "string") throw new Error(`Header ${name} 的值必须是字符串。`);
+      addHeader(result, name.trim(), headerValue);
+    }
+    return result;
+  }
+
+  for (const raw of trimmed.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    // 粘进来的报文常带着请求行或注释，跳过而不是报错。
+    if (line.startsWith("#") || line.startsWith("//")) continue;
+
+    const colon = line.indexOf(":");
+    if (colon === -1) {
+      throw new Error(`这一行没有冒号，不是 Header：${line}`);
+    }
+    const name = line.slice(0, colon).trim();
+    // 值里可以再有冒号（比如 URL），只按第一个切。
+    const headerValue = line.slice(colon + 1).trim();
+    if (!headerValue) throw new Error(`Header ${name} 没有值。`);
+    addHeader(result, name, headerValue);
   }
   return result;
+}
+
+/** 存的是 map，回显成每行一条。 */
+function joinHeaderLines(headers: Record<string, string>): string {
+  return Object.entries(headers)
+    .map(([name, value]) => `${name}: ${value}`)
+    .join("\n");
 }
 
 interface FormState {
@@ -165,7 +207,7 @@ function emptyForm(): FormState {
     timeoutSeconds: "300",
     enabled: true,
     fixedWeight: false,
-    extraHeaders: "{}",
+    extraHeaders: "",
     effortMappings: "",
     rateLimit: "",
   };
@@ -187,7 +229,7 @@ function formFromUpstream(upstream: Upstream): FormState {
     timeoutSeconds: String(upstream.timeout_seconds),
     enabled: upstream.enabled,
     fixedWeight: !upstream.auto_weight_enabled,
-    extraHeaders: JSON.stringify(upstream.extra_headers ?? {}, null, 2),
+    extraHeaders: joinHeaderLines(upstream.extra_headers ?? {}),
     effortMappings: joinMappingLines(upstream.effort_mappings ?? {}),
     rateLimit: upstream.rate_limit ?? "",
   };
@@ -215,7 +257,7 @@ function payloadFromForm(form: FormState): UpstreamPayload {
     auto_weight_enabled: !form.fixedWeight,
     timeout_seconds: Number(form.timeoutSeconds || 300),
     enabled: form.enabled,
-    extra_headers: parseHeaderJSON(form.extraHeaders),
+    extra_headers: parseHeaderLines(form.extraHeaders),
     rate_limit: form.rateLimit.trim() || null,
     clear_api_key: form.clearApiKey,
     group_ids: form.groupIds,
@@ -382,7 +424,7 @@ export function UpstreamDialog({
 
     let headers: Record<string, string>;
     try {
-      headers = parseHeaderJSON(form.extraHeaders);
+      headers = parseHeaderLines(form.extraHeaders);
     } catch (err) {
       setAdvanced(true);
       toast(err instanceof Error ? err.message : String(err), { tone: "error" });
@@ -744,16 +786,22 @@ export function UpstreamDialog({
             </summary>
 
             <label className="field">
-              <span className="field-label">Header 覆盖（JSON）</span>
+              <span className="field-label">Header 覆盖（可选）</span>
               <textarea
                 rows={5}
                 spellCheck={false}
                 value={form.extraHeaders}
                 onChange={(event) => set("extraHeaders", event.target.value)}
-                placeholder={'{"User-Agent":"WildToken/1.0"}'}
+                placeholder={"User-Agent: WildToken/1.0\nX-Tenant: acme"}
               />
               <span className="field-hint">
-                Header 名大小写不敏感；这里的值最后写入，可覆盖下游请求头和渠道 API Key 生成的认证头。
+                每行一条 <code>名称: 值</code>，就是报文里的写法——从 curl -v、浏览器网络面板
+                或日志详情的报文区拷出来可以直接粘。值里的冒号不用转义（只按第一个切），
+                以 # 或 // 开头的行跳过，仍然兼容旧的 JSON 对象写法。
+              </span>
+              <span className="field-hint">
+                Header 名大小写不敏感；这里的值最后写入，可覆盖下游请求头和渠道 API Key
+                生成的认证头。Host、Content-Length 这类传输头不可覆盖。
               </span>
             </label>
 
