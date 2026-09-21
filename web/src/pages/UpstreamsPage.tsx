@@ -4,24 +4,71 @@ import {
   UnauthorizedError,
   createUpstream,
   deleteUpstream,
+  exportUpstreams,
   fetchUpstreamBalance,
   fetchUpstreamModels,
+  fetchUpstreamStats,
   getUpstream,
+  importUpstreams,
   listGroups,
   listUpstreams,
   setUpstreamArchived,
   setUpstreamEnabled,
+  setUpstreamPriority,
   testUpstream,
   updateUpstream,
 } from "../api";
 import { ActionMenu, MENU_SEPARATOR } from "../components/ActionMenu";
 import type { MenuEntry } from "../components/ActionMenu";
+import { ChannelCard } from "../components/ChannelCard";
+import {
+  ChannelExportDialog,
+  ChannelImportDialog,
+  QuickImportDialog,
+} from "../components/ImportExportDialogs";
 import { UpstreamDialog } from "../components/UpstreamDialog";
 import type { UpstreamPayload } from "../components/UpstreamDialog";
 import { useConfirm, useToast } from "../components/feedback";
-import type { Upstream } from "../types";
+import type { ChannelExportDocument, ImportResult, Upstream, UpstreamStats } from "../types";
 
-type StatusFilter = "" | "enabled" | "disabled";
+type StatusFilter = "" | "enabled" | "disabled" | "effective-zero";
+
+/** 可显隐的列。键名就是 data-col 的值，隐藏靠表格上的 col-hide-{key} 类。 */
+const COLUMNS = [
+  { key: "check", label: "选择" },
+  { key: "id", label: "ID" },
+  { key: "name", label: "渠道名" },
+  { key: "models", label: "模型匹配" },
+  { key: "groups", label: "分组" },
+  { key: "priority", label: "优先级" },
+  { key: "weight", label: "权重" },
+  { key: "status", label: "状态" },
+  { key: "actions", label: "操作" },
+] as const;
+
+type ColumnKey = (typeof COLUMNS)[number]["key"];
+type SortKey = "id" | "name" | "priority" | "status";
+
+const COLUMNS_STORAGE_KEY = "wildtoken_upstream_columns";
+const VIEW_STORAGE_KEY = "wildtoken_upstream_view";
+
+function readColumns(): Record<ColumnKey, boolean> {
+  const fallback = Object.fromEntries(COLUMNS.map((c) => [c.key, true])) as Record<ColumnKey, boolean>;
+  try {
+    const raw = localStorage.getItem(COLUMNS_STORAGE_KEY);
+    if (!raw) return fallback;
+    return { ...fallback, ...(JSON.parse(raw) as Record<string, boolean>) };
+  } catch {
+    // 存储不可用或内容坏了：全部显示。
+    return fallback;
+  }
+}
+
+/** 排序时的状态分档：启用 > 有效权重 0 > 停用，和旧版一致。 */
+function statusRank(upstream: Upstream): number {
+  if (!upstream.enabled) return 2;
+  return upstream.effective_weight <= 0 ? 1 : 0;
+}
 
 /**
  * 渠道页。
@@ -42,6 +89,26 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   // null = 关闭；{ upstream: null } = 新增；{ upstream } = 编辑。
   const [editing, setEditing] = useState<{ upstream: Upstream | null } | null>(null);
   const [saving, setSaving] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "priority", desc: true });
+  const [columns, setColumns] = useState<Record<ColumnKey, boolean>>(readColumns);
+  const [colMenuOpen, setColMenuOpen] = useState(false);
+  // 正在行内编辑优先级的渠道 id。
+  const [editingPriority, setEditingPriority] = useState<number | null>(null);
+  const [view, setView] = useState<"list" | "grid">(() => {
+    try {
+      return localStorage.getItem(VIEW_STORAGE_KEY) === "grid" ? "grid" : "list";
+    } catch {
+      return "list";
+    }
+  });
+  const [stats, setStats] = useState<Record<string, UpstreamStats>>({});
+  const [exportDoc, setExportDoc] = useState<ChannelExportDocument | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [busyDialog, setBusyDialog] = useState(false);
 
   const toast = useToast();
   const confirm = useConfirm();
@@ -69,20 +136,181 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       .catch(() => setGroups([]));
   }, []);
 
+  /* 统计只给卡片视图用，列表视图不请求——省一次没人看的往返。 */
+  useEffect(() => {
+    if (view !== "grid") return;
+    fetchUpstreamStats()
+      .then(setStats)
+      .catch(() => setStats({}));
+  }, [view]);
+
+  function switchView(next: "list" | "grid") {
+    setView(next);
+    try {
+      localStorage.setItem(VIEW_STORAGE_KEY, next);
+    } catch {
+      // 存储不可用时当前页面仍然生效。
+      return;
+    }
+  }
+
   /* 归档渠道走折叠区，不在主列表——和旧版一致。 */
   const active = upstreams.filter((u) => !u.archived);
   const archived = upstreams.filter((u) => u.archived);
 
-  const filtered = active.filter((u) => {
-    if (status === "enabled" && !u.enabled) return false;
-    if (status === "disabled" && u.enabled) return false;
-    const q = query.trim().toLowerCase();
-    if (!q) return true;
-    return [u.name, u.base_url, String(u.id), ...u.model_names, ...u.model_prefixes]
-      .join(" ")
-      .toLowerCase()
-      .includes(q);
-  });
+  const filtered = active
+    .filter((u) => {
+      if (status === "enabled" && !u.enabled) return false;
+      if (status === "disabled" && u.enabled) return false;
+      if (status === "effective-zero" && u.effective_weight > 0) return false;
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      return [u.name, u.base_url, String(u.id), ...u.model_names, ...u.model_prefixes]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    })
+    .sort((a, b) => {
+      let delta: number;
+      switch (sort.key) {
+        case "id":
+          delta = a.id - b.id;
+          break;
+        case "name":
+          delta = a.name.localeCompare(b.name, "zh-CN");
+          break;
+        case "status":
+          delta = statusRank(a) - statusRank(b);
+          break;
+        default:
+          delta = a.priority - b.priority;
+      }
+      if (delta !== 0) return sort.desc ? -delta : delta;
+      /* 次因子不跟主列翻转：按状态排时，同一状态内部永远高优先级在前，
+         和路由实际挑渠道的顺序一致。 */
+      if (sort.key === "status" && a.priority !== b.priority) return b.priority - a.priority;
+      return a.id - b.id;
+    });
+
+  /* 选中集只对当前筛选结果有意义：筛掉的行看不见，批量操作不该动它们。 */
+  const visibleSelected = filtered.filter((u) => selected.has(u.id));
+  const allVisibleSelected = filtered.length > 0 && visibleSelected.length === filtered.length;
+
+  /** 列显隐存 localStorage，和旧版共用一个键，两边切换不丢设置。 */
+  function toggleColumn(key: ColumnKey) {
+    setColumns((current) => {
+      const next = { ...current, [key]: !current[key] };
+      try {
+        localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(next));
+      } catch {
+        // 存储不可用时当前页面仍然生效。
+        return next;
+      }
+      return next;
+    });
+  }
+
+  /** 批量启停。一条失败不应该把剩下的也停下来，所以逐个跑完再报总数。 */
+  async function batchSetEnabled(enabled: boolean) {
+    const targets = visibleSelected.filter((u) => u.enabled !== enabled);
+    if (targets.length === 0) {
+      toast(`选中的渠道已经都是${enabled ? "启用" : "停用"}状态。`);
+      return;
+    }
+    let ok = 0;
+    const failures: string[] = [];
+    for (const upstream of targets) {
+      try {
+        const updated = await setUpstreamEnabled(upstream.id, enabled);
+        setUpstreams((list) => list.map((u) => (u.id === updated.id ? updated : u)));
+        ok += 1;
+      } catch (err) {
+        if (err instanceof UnauthorizedError) {
+          onUnauthorized(err.message);
+          return;
+        }
+        failures.push(upstream.name);
+      }
+    }
+    if (failures.length === 0) {
+      toast(`已${enabled ? "启用" : "停用"} ${ok} 个渠道。`, { tone: "ok" });
+    } else {
+      toast(`${ok} 个成功，${failures.length} 个失败：${failures.join("、")}`, { tone: "error" });
+    }
+  }
+
+  /** 优先级行内编辑提交。值没变就不发请求。 */
+  async function savePriority(upstream: Upstream, raw: string) {
+    setEditingPriority(null);
+    const next = Number(raw);
+    if (!Number.isFinite(next) || next === upstream.priority) return;
+    await mutate(upstream.id, () => setUpstreamPriority(upstream.id, next));
+  }
+
+  /** 导出：有勾选就只导选中的，否则全部。 */
+  async function runExport() {
+    setBusyDialog(true);
+    setExportOpen(true);
+    try {
+      setExportDoc(await exportUpstreams(visibleSelected.map((u) => u.id)));
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`导出失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      setExportOpen(false);
+    } finally {
+      setBusyDialog(false);
+    }
+  }
+
+  async function runImport(doc: ChannelExportDocument, mode: "skip" | "overwrite") {
+    setBusyDialog(true);
+    try {
+      const result = await importUpstreams(doc, mode);
+      setImportResult(result);
+      await reload();
+      const tone = result.failed > 0 ? "warn" : "ok";
+      toast(`新建 ${result.created} · 更新 ${result.updated} · 跳过 ${result.skipped} · 失败 ${result.failed}`, { tone });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`导入失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+    } finally {
+      setBusyDialog(false);
+    }
+  }
+
+  async function runQuickImport(name: string, baseUrl: string, apiKey: string | null) {
+    setBusyDialog(true);
+    try {
+      /* 快速导入只填必填项，其余走后端默认值。模型列表留空，
+         表示接收全部模型——与旧版一致。 */
+      const created = await createUpstream({
+        name,
+        base_url: baseUrl,
+        api_key: apiKey,
+        model_names: [],
+        model_prefixes: [],
+        model_mappings: {},
+        effort_mappings: {},
+        priority: 100,
+        weight: 100,
+        auto_weight_enabled: true,
+        timeout_seconds: 300,
+        enabled: true,
+        extra_headers: {},
+        rate_limit: null,
+        clear_api_key: false,
+        group_ids: [],
+      });
+      setQuickOpen(false);
+      await reload();
+      toast(`渠道 ${created.name} 已创建。`, { tone: "ok" });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`创建失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+    } finally {
+      setBusyDialog(false);
+    }
+  }
 
   async function mutate(id: number, run: () => Promise<Upstream>) {
     setPending(id);
@@ -257,9 +485,92 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
               <option value="">全部</option>
               <option value="enabled">启用</option>
               <option value="disabled">停用</option>
+              <option value="effective-zero">有效权重为 0</option>
             </select>
           </label>
+          {/* 批量条只在有选中时出现，和旧版一致。 */}
+          <div className="toolbar-batch" hidden={visibleSelected.length === 0}>
+            <button type="button" className="secondary" onClick={() => void batchSetEnabled(true)}>
+              批量启用
+            </button>
+            <button type="button" className="secondary" onClick={() => void batchSetEnabled(false)}>
+              批量停用
+            </button>
+          </div>
+
+          <div className="col-menu-wrap">
+            <button
+              type="button"
+              className="secondary ghost col-menu-btn"
+              aria-haspopup="true"
+              aria-expanded={colMenuOpen}
+              onClick={() => setColMenuOpen((open) => !open)}
+            >
+              列
+            </button>
+            <div className="col-menu" hidden={!colMenuOpen} role="menu" aria-label="渠道列显示">
+              {COLUMNS.map((column) => (
+                <label key={column.key}>
+                  <input
+                    type="checkbox"
+                    checked={columns[column.key]}
+                    onChange={() => toggleColumn(column.key)}
+                  />
+                  <span>{column.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="view-toggle-wrap">
+            <button
+              type="button"
+              className="secondary ghost view-toggle-btn"
+              aria-pressed={view === "list"}
+              aria-label="列表视图"
+              title="列表视图"
+              onClick={() => switchView("list")}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <line x1="4" y1="6" x2="20" y2="6" />
+                <line x1="4" y1="12" x2="20" y2="12" />
+                <line x1="4" y1="18" x2="20" y2="18" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="secondary ghost view-toggle-btn"
+              aria-pressed={view === "grid"}
+              aria-label="卡片视图"
+              title="卡片视图"
+              onClick={() => switchView("grid")}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" rx="1" />
+                <rect x="14" y="3" width="7" height="7" rx="1" />
+                <rect x="3" y="14" width="7" height="7" rx="1" />
+                <rect x="14" y="14" width="7" height="7" rx="1" />
+              </svg>
+            </button>
+          </div>
+
           <div className="actions toolbar-actions">
+            <button type="button" className="secondary" onClick={() => void runExport()}>
+              导出
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                setImportResult(null);
+                setImportOpen(true);
+              }}
+            >
+              导入
+            </button>
+            <button type="button" className="secondary" onClick={() => setQuickOpen(true)}>
+              快速导入
+            </button>
             <button type="button" className="secondary" onClick={() => void reload()}>
               刷新
             </button>
@@ -275,27 +586,96 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
           </p>
         ) : null}
 
+        {/* 卡片视图和表格视图二选一。两边用同一份 filtered，筛选和排序不分家。 */}
+        {view === "grid" ? (
+          <div className="upstream-cards-grid">
+            {loading ? (
+              <div className="cards-loading">加载中…</div>
+            ) : filtered.length === 0 ? (
+              <div className="cards-empty">
+                <p>{active.length === 0 ? "暂无渠道" : "无匹配渠道"}</p>
+                <p className="cards-empty-sub">
+                  {active.length === 0
+                    ? "还没有配置上游渠道。创建后即可按优先级与模型规则路由请求。"
+                    : "当前筛选条件下没有结果。可调整搜索词或状态筛选。"}
+                </p>
+              </div>
+            ) : (
+              filtered.map((upstream) => (
+                <ChannelCard
+                  key={upstream.id}
+                  upstream={upstream}
+                  stats={stats[String(upstream.id)] ?? null}
+                  busy={pending === upstream.id}
+                  menu={menuFor(upstream)}
+                  onToggle={() =>
+                    void mutate(upstream.id, () => setUpstreamEnabled(upstream.id, !upstream.enabled))
+                  }
+                />
+              ))
+            )}
+          </div>
+        ) : (
         <div className="table-wrap">
-          <table className="admin-table upstream-table">
+          {/* 列显隐靠表格上的 col-hide-{key} 类，CSS 负责藏对应的 td/th。 */}
+          <table
+            className={[
+              "admin-table",
+              "upstream-table",
+              ...COLUMNS.filter((c) => !columns[c.key]).map((c) => `col-hide-${c.key}`),
+            ].join(" ")}
+          >
             <thead>
               <tr>
-                <th className="col-id" data-col="id">ID</th>
-                <th data-col="name">渠道名</th>
+                <th className="col-check" data-col="check">
+                  <input
+                    type="checkbox"
+                    aria-label="全选当前筛选渠道"
+                    checked={allVisibleSelected}
+                    onChange={(event) =>
+                      setSelected(event.target.checked ? new Set(filtered.map((u) => u.id)) : new Set())
+                    }
+                  />
+                </th>
+                <SortableHeader
+                  label="ID"
+                  sortKey="id"
+                  col="id"
+                  className="col-id"
+                  sort={sort}
+                  onSort={setSort}
+                />
+                <SortableHeader label="渠道名" sortKey="name" col="name" sort={sort} onSort={setSort} />
                 <th data-col="models">模型匹配</th>
-                <th className="col-priority" data-col="priority">优先级</th>
+                <th data-col="groups">分组</th>
+                <SortableHeader
+                  label="优先级"
+                  sortKey="priority"
+                  col="priority"
+                  className="col-priority"
+                  sort={sort}
+                  onSort={setSort}
+                />
                 <th className="col-weight" data-col="weight">权重</th>
-                <th className="col-status" data-col="status">状态</th>
+                <SortableHeader
+                  label="状态"
+                  sortKey="status"
+                  col="status"
+                  className="col-status"
+                  sort={sort}
+                  onSort={setSort}
+                />
                 <th className="col-actions" data-col="actions">操作</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="muted">加载中…</td>
+                  <td colSpan={9} className="muted">加载中…</td>
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="muted">
+                  <td colSpan={9} className="muted">
                     {active.length === 0 ? "暂无渠道" : "无匹配渠道"}
                   </td>
                 </tr>
@@ -306,6 +686,19 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                     upstream={upstream}
                     busy={pending === upstream.id}
                     menu={menuFor(upstream)}
+                    checked={selected.has(upstream.id)}
+                    onCheck={(next) =>
+                      setSelected((current) => {
+                        const copy = new Set(current);
+                        if (next) copy.add(upstream.id);
+                        else copy.delete(upstream.id);
+                        return copy;
+                      })
+                    }
+                    editingPriority={editingPriority === upstream.id}
+                    onPriorityEdit={() => setEditingPriority(upstream.id)}
+                    onPriorityCommit={(raw) => void savePriority(upstream, raw)}
+                    onPriorityCancel={() => setEditingPriority(null)}
                     onToggle={() => void mutate(upstream.id, () => setUpstreamEnabled(upstream.id, !upstream.enabled))}
                   />
                 ))
@@ -313,6 +706,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
             </tbody>
           </table>
         </div>
+        )}
 
         {archived.length > 0 ? (
           <section className="archived-panel">
@@ -389,7 +783,70 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         onSubmit={(payload) => void saveUpstream(payload)}
         onClose={() => setEditing(null)}
       />
+
+      <ChannelExportDialog
+        open={exportOpen}
+        document={exportDoc}
+        onClose={() => {
+          setExportOpen(false);
+          setExportDoc(null);
+        }}
+      />
+
+      <ChannelImportDialog
+        open={importOpen}
+        busy={busyDialog}
+        result={importResult}
+        onImport={(doc, mode) => void runImport(doc, mode)}
+        onClose={() => setImportOpen(false)}
+      />
+
+      <QuickImportDialog
+        open={quickOpen}
+        busy={busyDialog}
+        onSubmit={(name, baseUrl, apiKey) => void runQuickImport(name, baseUrl, apiKey)}
+        onClose={() => setQuickOpen(false)}
+      />
     </section>
+  );
+}
+
+/**
+ * 可排序表头。
+ *
+ * aria-sort 和箭头跟着当前排序状态走，类名照抄旧版的 table-sort-button。
+ * 点同一列翻转方向，点别的列从降序开始。
+ */
+function SortableHeader({
+  label,
+  sortKey,
+  col,
+  className,
+  sort,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  col: string;
+  className?: string;
+  sort: { key: SortKey; desc: boolean };
+  onSort: (next: { key: SortKey; desc: boolean }) => void;
+}) {
+  const activeSort = sort.key === sortKey;
+  return (
+    <th
+      className={className}
+      data-col={col}
+      aria-sort={activeSort ? (sort.desc ? "descending" : "ascending") : "none"}
+    >
+      <button
+        type="button"
+        className="table-sort-button"
+        onClick={() => onSort({ key: sortKey, desc: activeSort ? !sort.desc : true })}
+      >
+        {label} <span aria-hidden="true">{activeSort ? (sort.desc ? "↓" : "↑") : ""}</span>
+      </button>
+    </th>
   );
 }
 
@@ -408,16 +865,37 @@ function UpstreamRow({
   upstream,
   busy,
   menu,
+  checked,
+  onCheck,
+  editingPriority,
+  onPriorityEdit,
+  onPriorityCommit,
+  onPriorityCancel,
   onToggle,
 }: {
   upstream: Upstream;
   busy: boolean;
   menu: MenuEntry[];
+  checked: boolean;
+  onCheck: (next: boolean) => void;
+  editingPriority: boolean;
+  onPriorityEdit: () => void;
+  onPriorityCommit: (raw: string) => void;
+  onPriorityCancel: () => void;
   onToggle: () => void;
 }) {
   const zeroWeight = upstream.effective_weight <= 0;
   return (
     <tr className={upstream.enabled ? undefined : "row-disabled"}>
+      <td className="col-check" data-col="check">
+        <input
+          type="checkbox"
+          className="upstream-row-check"
+          aria-label={`选择渠道 ${upstream.name}`}
+          checked={checked}
+          onChange={(event) => onCheck(event.target.checked)}
+        />
+      </td>
       <td className="col-id" data-col="id">{upstream.id}</td>
       <td className="name-cell" data-col="name">
         <div className="name-stack">
@@ -436,7 +914,37 @@ function UpstreamRow({
           </span>
         )}
       </td>
-      <td className="col-priority" data-col="priority">{upstream.priority}</td>
+      <td className="col-priority" data-col="priority">
+        {/* 点数字变输入框，和旧版一致。失焦或回车提交，Esc 放弃。 */}
+        {editingPriority ? (
+          <input
+            type="number"
+            className="priority-input"
+            min={0}
+            max={100000}
+            step={1}
+            defaultValue={upstream.priority}
+            autoFocus
+            aria-label={`渠道 ${upstream.name} 的优先级`}
+            onBlur={(event) => onPriorityCommit(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") onPriorityCommit(event.currentTarget.value);
+              else if (event.key === "Escape") onPriorityCancel();
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="priority-value"
+            aria-label={`修改渠道 ${upstream.name} 的优先级`}
+            title="点击修改优先级"
+            disabled={busy}
+            onClick={onPriorityEdit}
+          >
+            {upstream.priority}
+          </button>
+        )}
+      </td>
       <td className="col-weight" data-col="weight">
         <div className="weight-stack">{Math.round(upstream.effective_weight)}</div>
       </td>

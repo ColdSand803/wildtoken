@@ -2,7 +2,7 @@
    wildtoken_admin_token，走 x-admin-token 头。同一个浏览器里两版
    共用一份令牌，切过去不用重新登录。 */
 
-import type { Upstream } from "./types";
+import type { ChannelExportDocument, ImportResult, Upstream, UpstreamStats } from "./types";
 
 const ADMIN_TOKEN_KEY = "wildtoken_admin_token";
 
@@ -116,6 +116,37 @@ export function listGroups(): Promise<Array<{ id: number; name: string }>> {
   return api<Array<{ id: number; name: string }>>("/api/admin/groups/");
 }
 
+/** 卡片视图的统计，一次拿全部渠道——按渠道逐个请求会变成 N 次往返。 */
+export function fetchUpstreamStats(): Promise<Record<string, UpstreamStats>> {
+  return api<Record<string, UpstreamStats>>("/api/admin/upstreams/stats");
+}
+
+/** 导出文档。后端返回的是带 kind/version 的包装，直接存成文件。 */
+export function exportUpstreams(ids?: number[]): Promise<ChannelExportDocument> {
+  return api<ChannelExportDocument>("/api/admin/upstreams/export", {
+    method: "POST",
+    body: JSON.stringify(ids?.length ? { ids } : {}),
+  });
+}
+
+export function importUpstreams(
+  document: ChannelExportDocument,
+  mode: "skip" | "overwrite",
+): Promise<ImportResult> {
+  return api<ImportResult>("/api/admin/upstreams/import", {
+    method: "POST",
+    body: JSON.stringify({ ...document, mode }),
+  });
+}
+
+/** 快速导入：从一段文本里拿 Base URL 和 Key 后，再问上游要模型列表。 */
+export function fetchModelsPreview(baseUrl: string, apiKey: string | null): Promise<{ models: string[] }> {
+  return api<{ models: string[] }>("/api/admin/upstreams/fetch-models", {
+    method: "POST",
+    body: JSON.stringify({ base_url: baseUrl, api_key: apiKey }),
+  });
+}
+
 export function setUpstreamArchived(id: number, archived: boolean): Promise<Upstream> {
   return api<Upstream>(`/api/admin/upstreams/${id}/archived`, {
     method: "PATCH",
@@ -127,5 +158,12 @@ export function setUpstreamEnabled(id: number, enabled: boolean): Promise<Upstre
   return api<Upstream>(`/api/admin/upstreams/${id}/enabled`, {
     method: "PATCH",
     body: JSON.stringify({ enabled }),
+  });
+}
+
+export function setUpstreamPriority(id: number, priority: number): Promise<Upstream> {
+  return api<Upstream>(`/api/admin/upstreams/${id}/priority`, {
+    method: "PATCH",
+    body: JSON.stringify({ priority }),
   });
 }

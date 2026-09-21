@@ -27,6 +27,15 @@ export interface Upstream {
   group_ids: number[];
 }
 
+/** 卡片视图的每渠道统计。一次请求拿全部，按 id 开。 */
+export interface UpstreamStats {
+  sparkline: Array<{ bucket: string; count: number }>;
+  totalRequests: number;
+  cacheHitRate: number;
+  /** 每百万请求的平均 Token 消耗——本项目不存单价，这是成本的代理指标。 */
+  avgTokensPer1M: number;
+}
+
 /* 日志行。指针字段在 Go 那边是 *T，这里就是 T | null——不要写成
    可选属性，否则分不清「字段缺失」和「值为空」。 */
 export interface RequestLog {
@@ -88,4 +97,38 @@ export interface RequestLogPage {
   active_total: number;
   recent_rpm: number;
   recent_tpm: number;
+}
+
+/** 导出文档里的一条渠道。字段和 Go 的 ChannelExportItem 对齐。 */
+export interface ChannelExportItem {
+  name: string;
+  base_url: string;
+  api_key?: string | null;
+  model_names: string[];
+  model_prefixes: string[];
+  model_mappings: Record<string, string>;
+  effort_mappings?: Record<string, string>;
+  priority: number;
+  weight: number;
+  auto_weight_enabled: boolean;
+  enabled: boolean;
+  extra_headers: Record<string, string>;
+  timeout_seconds: number;
+  rate_limit?: string | null;
+  group_ids: number[];
+}
+
+/** 导出/导入的文档包装。kind 和 version 用于拒掉不相干的 JSON。 */
+export interface ChannelExportDocument {
+  kind: string;
+  version: number;
+  channels: ChannelExportItem[];
+}
+
+export interface ImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  items: Array<{ name: string; action: string; message?: string }>;
 }
