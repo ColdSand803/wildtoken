@@ -132,3 +132,11 @@ export interface ImportResult {
   failed: number;
   items: Array<{ name: string; action: string; message?: string }>;
 }
+
+/** 日志详情：列表行加四份快照。身体可能被保留策略清空，所以可为 null。 */
+export interface RequestLogDetail extends RequestLog {
+  downstream_request: unknown;
+  upstream_request: unknown;
+  upstream_response: unknown;
+  downstream_response: unknown;
+}

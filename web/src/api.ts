@@ -2,7 +2,14 @@
    wildtoken_admin_token，走 x-admin-token 头。同一个浏览器里两版
    共用一份令牌，切过去不用重新登录。 */
 
-import type { ChannelExportDocument, ImportResult, Upstream, UpstreamStats } from "./types";
+import type {
+  ChannelExportDocument,
+  ImportResult,
+  RequestLogDetail,
+  RequestLogPage,
+  Upstream,
+  UpstreamStats,
+} from "./types";
 
 const ADMIN_TOKEN_KEY = "wildtoken_admin_token";
 
@@ -114,6 +121,30 @@ export function fetchUpstreamBalance(id: number, provider: "new-api" | "sub2api"
 
 export function listGroups(): Promise<Array<{ id: number; name: string }>> {
   return api<Array<{ id: number; name: string }>>("/api/admin/groups/");
+}
+
+/** 日志详情（含四份快照）。列表里不带身体，点开才拉。 */
+export function getLogDetail(id: number): Promise<RequestLogDetail> {
+  return api<RequestLogDetail>(`/api/admin/logs/${id}`);
+}
+
+/**
+ * 日志列表。
+ *
+ * 游标优先：before_created_at + before_id 才能在持续写入时稳住分页，
+ * 纯 offset 会因为新行插到头部而重复或漏行。
+ */
+export function listLogs(params: {
+  limit: number;
+  beforeCreatedAt?: string;
+  beforeId?: number;
+}): Promise<RequestLogPage> {
+  const search = new URLSearchParams({ limit: String(params.limit) });
+  if (params.beforeCreatedAt && params.beforeId !== undefined) {
+    search.set("before_created_at", params.beforeCreatedAt);
+    search.set("before_id", String(params.beforeId));
+  }
+  return api<RequestLogPage>(`/api/admin/logs/?${search}`);
 }
 
 /** 卡片视图的统计，一次拿全部渠道——按渠道逐个请求会变成 N 次往返。 */
