@@ -193,6 +193,25 @@ class Page {
     await sleep(60);
   }
 
+  /** 带修饰键或指定发送目标的按键。不指定目标就发给 document。 */
+  async pressOn(key, { ctrl = false, target = null } = {}) {
+    const ok = await this.evaluate(
+      (k, useCtrl, selector) => {
+        const node = selector ? document.querySelector(selector) : document;
+        if (!node) return false;
+        node.dispatchEvent(
+          new KeyboardEvent("keydown", { key: k, ctrlKey: useCtrl, bubbles: true, cancelable: true }),
+        );
+        return true;
+      },
+      key,
+      ctrl,
+      target,
+    );
+    if (!ok) throw new Error(`按键发不出去：${target}`);
+    await sleep(80);
+  }
+
   text(selector) {
     return this.evaluate((sel) => document.querySelector(sel)?.textContent?.trim() ?? null, selector);
   }
@@ -507,6 +526,11 @@ async function openRowMenu(page, nameFragment) {
   }, nameFragment);
   if (!opened) throw new Error(`找不到 ${nameFragment} 的行菜单`);
   await sleep(60);
+}
+
+/** 按键的简写，读起来像一个动作而不是一个方法调用。 */
+function pressKey(page, key, options) {
+  return page.pressOn(key, options);
 }
 
 /** 在页内等一会儿。等的是渲染，所以让浏览器自己计时而不是在这边 sleep。 */
@@ -1489,6 +1513,87 @@ async function main() {
     await check("视图切换是客户端路由，没有整页重载", async () => {
       const navigations = await page.evaluate(() => performance.getEntriesByType("navigation").length);
       assertEqual(navigations, 1, "导航条目数");
+    });
+
+    // ── 命令面板 ────────────────────────────────────────────
+    console.log("\n命令面板");
+
+    await check("Ctrl+K 唤起且再按收起", async () => {
+      await pressKey(page, "k", { ctrl: true });
+      await page.waitForSelector("dialog.command-palette-dialog[open]", { label: "命令面板" });
+      await pressKey(page, "k", { ctrl: true });
+      await page.waitFor(() => document.querySelector("dialog.command-palette-dialog[open]") === null, {
+        label: "面板收起",
+      });
+    });
+
+    await check("筛选后只剩匹配项", async () => {
+      await pressKey(page, "k", { ctrl: true });
+      await page.waitForSelector("dialog.command-palette-dialog[open]", { label: "命令面板" });
+      const all = await page.count(".command-palette-item");
+      assert(all >= 10, `命令数太少：${all}`);
+      await page.fill("dialog.command-palette-dialog input", "日志");
+      const titles = await page.evaluate(() =>
+        [...document.querySelectorAll(".command-palette-item-title")].map((n) => n.textContent),
+      );
+      assertEqual(titles.join(","), "切换到日志", "筛选结果");
+    });
+
+    await check("回车执行高亮项", async () => {
+      await pressKey(page, "Enter", { target: "dialog.command-palette-dialog input" });
+      await page.waitFor(() => document.querySelector("dialog.command-palette-dialog[open]") === null, {
+        label: "面板关闭",
+      });
+      await page.waitForSelector("section.view[data-view=logs] .panel", { label: "日志页" });
+      const active = await page.evaluate(
+        () => document.querySelector(".topbar-nav .nav-link.active")?.textContent?.trim() ?? null,
+      );
+      assertEqual(active, "日志", "执行后的当前视图");
+    });
+
+    await check("方向键移动高亮", async () => {
+      await pressKey(page, "k", { ctrl: true });
+      await page.waitForSelector("dialog.command-palette-dialog[open]", { label: "命令面板" });
+      const first = await page.evaluate(
+        () => document.querySelector(".command-palette-item.is-active")?.dataset.commandId ?? null,
+      );
+      await pressKey(page, "ArrowDown", { target: "dialog.command-palette-dialog input" });
+      const second = await page.evaluate(
+        () => document.querySelector(".command-palette-item.is-active")?.dataset.commandId ?? null,
+      );
+      assert(first !== null && second !== null && first !== second, `高亮没动：${first} → ${second}`);
+    });
+
+    await check("切换密度命令真的改了属性", async () => {
+      const before = await page.evaluate(() => document.documentElement.getAttribute("data-density"));
+      await page.evaluate(() => {
+        document.querySelector("[data-command-id=density]").click();
+      });
+      const after = await page.evaluate(() => ({
+        attr: document.documentElement.getAttribute("data-density"),
+        open: document.querySelector("dialog.command-palette-dialog[open]") !== null,
+      }));
+      assert(after.attr !== before, `密度没变，仍是 ${after.attr}`);
+      assertEqual(after.open, false, "执行后面板应关闭");
+    });
+
+    /* 面板开在其他对话框之上时，Esc 只能关最上面那一层。不拦的话一下子
+       关两层，正在看的日志详情一起没了。 */
+    await check("Esc 关面板不连带关底下的对话框", async () => {
+      await gotoView(page, "日志");
+      await openProxiedLogDetail(page);
+      await page.waitForSelector("dialog.log-detail-dialog[open]", { label: "详情窗" });
+      await pressKey(page, "k", { ctrl: true });
+      await page.waitForSelector("dialog.command-palette-dialog[open]", { label: "命令面板" });
+      await pressKey(page, "Escape");
+      await page.waitFor(() => document.querySelector("dialog.command-palette-dialog[open]") === null, {
+        label: "面板关闭",
+      });
+      const detailStillOpen = await page.evaluate(
+        () => document.querySelector("dialog.log-detail-dialog[open]") !== null,
+      );
+      assertEqual(detailStillOpen, true, "详情窗被连带关掉了");
+      await page.click("dialog.log-detail-dialog .icon-close");
     });
 
     // ── 退出 ────────────────────────────────────────────────────────────────
