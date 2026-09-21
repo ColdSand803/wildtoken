@@ -140,3 +140,31 @@ export interface RequestLogDetail extends RequestLog {
   upstream_response: unknown;
   downstream_response: unknown;
 }
+
+/** 额度状态。计数养在令牌行上，不从日志聚合——日志会被保留策略删掉。 */
+export interface QuotaState {
+  used_tokens: number;
+  /** null 表示不限。 */
+  limit_tokens: number | null;
+  limit_expression: string;
+  remaining_tokens: number | null;
+  exhausted: boolean;
+}
+
+export interface APIToken {
+  id: number;
+  name: string;
+  description: string;
+  /** 明文。开启明文保存之前创建的行是 ""，那些恢复不了。 */
+  token: string;
+  token_preview: string;
+  enabled: boolean;
+  /** null 表示永不过期。 */
+  expires_at: string | null;
+  created_at: string;
+  updated_at: string;
+  group_id: number;
+  group_name: string;
+  quota: QuotaState;
+  rate_limit: string | null;
+}

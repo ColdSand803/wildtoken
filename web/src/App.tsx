@@ -5,6 +5,7 @@ import { AdminTokenDialog } from "./components/AdminTokenDialog";
 import { ConfirmProvider, ToastProvider } from "./components/feedback";
 import { Topbar } from "./components/Topbar";
 import { LogsPage } from "./pages/LogsPage";
+import { TokensPage } from "./pages/TokensPage";
 import { UpstreamsPage } from "./pages/UpstreamsPage";
 import { getAdminToken } from "./api";
 
@@ -41,6 +42,8 @@ export function App() {
               <UpstreamsPage onUnauthorized={handleUnauthorized} />
             ) : view === "logs" ? (
               <LogsPage onUnauthorized={handleUnauthorized} />
+            ) : view === "tokens" ? (
+              <TokensPage onUnauthorized={handleUnauthorized} />
             ) : (
               <NotImplemented view={view} />
             )}

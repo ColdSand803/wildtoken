@@ -3,6 +3,7 @@
    共用一份令牌，切过去不用重新登录。 */
 
 import type {
+  APIToken,
   ChannelExportDocument,
   ImportResult,
   RequestLogDetail,
@@ -121,6 +122,34 @@ export function fetchUpstreamBalance(id: number, provider: "new-api" | "sub2api"
 
 export function listGroups(): Promise<Array<{ id: number; name: string }>> {
   return api<Array<{ id: number; name: string }>>("/api/admin/groups/");
+}
+
+export function listTokens(): Promise<APIToken[]> {
+  return api<APIToken[]>("/api/admin/tokens/");
+}
+
+export function createToken(payload: unknown): Promise<APIToken> {
+  return api<APIToken>("/api/admin/tokens/", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateToken(id: number, payload: unknown): Promise<APIToken> {
+  return api<APIToken>(`/api/admin/tokens/${id}`, { method: "PUT", body: JSON.stringify(payload) });
+}
+
+export function deleteToken(id: number): Promise<null> {
+  return api<null>(`/api/admin/tokens/${id}`, { method: "DELETE" });
+}
+
+export function setTokenEnabled(id: number, enabled: boolean): Promise<APIToken> {
+  return api<APIToken>(`/api/admin/tokens/${id}/enabled`, {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+/** 额度用完后手动清零。计数养在令牌行上，不会随日志过期自动回落。 */
+export function resetTokenUsage(id: number): Promise<APIToken> {
+  return api<APIToken>(`/api/admin/tokens/${id}/usage/reset`, { method: "POST" });
 }
 
 /** 日志详情（含四份快照）。列表里不带身体，点开才拉。 */
