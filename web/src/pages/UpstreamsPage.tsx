@@ -341,7 +341,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                         <td className="name-cell">
                           <div className="name-stack">
                             <strong title={upstream.name}>{upstream.name}</strong>
-                            <span className="base-url">{upstream.base_url}</span>
+                            <span className="url-cell-inner">{upstream.base_url}</span>
                           </div>
                         </td>
                         <td className="col-status">
@@ -394,10 +394,12 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
 }
 
 function Summary({ label, value }: { label: string; value: number }) {
+  /* 旧版的摘要格就是 <span><strong>值</strong>标签</span>，内部没有类名——
+     样式靠 .summary-strip > span 定位。自己编 summary-item 那一套一个都不存在。 */
   return (
-    <span className="summary-item">
-      <span className="summary-label">{label}</span>
-      <strong className="summary-value">{value}</strong>
+    <span>
+      <strong>{value}</strong>
+      {label}
     </span>
   );
 }
@@ -420,16 +422,16 @@ function UpstreamRow({
       <td className="name-cell" data-col="name">
         <div className="name-stack">
           <strong title={upstream.name}>{upstream.name}</strong>
-          <span className="base-url">{upstream.base_url}</span>
+          <span className="url-cell-inner">{upstream.base_url}</span>
         </div>
       </td>
       <td className="match-cell" data-col="models">
         {upstream.model_names.length === 0 && upstream.model_prefixes.length === 0 ? (
           <span className="muted">全部模型</span>
         ) : (
-          <span className="model-chips">
+          <span className="model-chip-list">
             {[...upstream.model_names, ...upstream.model_prefixes].map((name) => (
-              <span key={name} className="badge neutral">{name}</span>
+              <span key={name} className="model-chip">{name}</span>
             ))}
           </span>
         )}

@@ -191,9 +191,9 @@ export function UpstreamDialog({
   );
 
   return (
-    <dialog className="wide-dialog" ref={dialogRef} onCancel={onClose}>
+    <dialog className="upstream-dialog" ref={dialogRef} onCancel={onClose}>
       <form
-        className="dialog-form"
+        className="upstream-dialog-panel"
         onSubmit={(event) => {
           event.preventDefault();
           if (!canSubmit || busy) return;
@@ -242,7 +242,7 @@ export function UpstreamDialog({
               autoComplete="off"
             />
             {upstream?.api_key_set ? (
-              <label className="checkbox-field">
+              <label className="field">
                 <input
                   type="checkbox"
                   checked={form.clearApiKey}
@@ -317,7 +317,7 @@ export function UpstreamDialog({
               value={form.weight}
               onChange={(event) => set("weight", event.target.value)}
             />
-            <label className="checkbox-field">
+            <label className="field">
               <input
                 type="checkbox"
                 checked={form.fixedWeight}
@@ -339,7 +339,7 @@ export function UpstreamDialog({
             />
           </label>
 
-          <label className="checkbox-field">
+          <label className="field">
             <input
               type="checkbox"
               checked={form.enabled}

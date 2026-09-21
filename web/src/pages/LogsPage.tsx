@@ -165,8 +165,8 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
 function RatePill({ label, value }: { label: string; value: number | null }) {
   return (
     <span className="log-rate-pill">
-      <span className="log-rate-label">{label}</span>
-      <strong className="log-rate-value">{value ?? "—"}</strong>
+      <span className="log-rate-pill-label">{label}</span>
+      <span className="log-rate-value">{value ?? "—"}</span>
     </span>
   );
 }
