@@ -1,21 +1,37 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import { UnauthorizedError, listUpstreams, setUpstreamArchived, setUpstreamEnabled } from "../api";
+import {
+  UnauthorizedError,
+  createUpstream,
+  deleteUpstream,
+  fetchUpstreamBalance,
+  fetchUpstreamModels,
+  getUpstream,
+  listGroups,
+  listUpstreams,
+  setUpstreamArchived,
+  setUpstreamEnabled,
+  testUpstream,
+  updateUpstream,
+} from "../api";
+import { ActionMenu, MENU_SEPARATOR } from "../components/ActionMenu";
+import type { MenuEntry } from "../components/ActionMenu";
+import { UpstreamDialog } from "../components/UpstreamDialog";
+import type { UpstreamPayload } from "../components/UpstreamDialog";
+import { useConfirm, useToast } from "../components/feedback";
 import type { Upstream } from "../types";
 
 type StatusFilter = "" | "enabled" | "disabled";
 
 /**
- * 渠道页探针。
- *
- * 只做列表、搜索、状态筛选、启停、归档——弹窗和操作菜单那些重交互故意
- * 不做，目的是量出组件化的真实成本，不是一次做完。
+ * 渠道页。
  *
  * 类名照抄旧控制台：主题 CSS 有 138 个类选择器，其中约 38 个由 JS 输出。
  * 照抄这些名字，6215 行主题样式一行不用改。
  */
 export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
   const [upstreams, setUpstreams] = useState<Upstream[]>([]);
+  const [groups, setGroups] = useState<Array<{ id: number; name: string }>>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
@@ -23,25 +39,35 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [pending, setPending] = useState<number | null>(null);
   // 归档区默认收起，和旧版一致。
   const [archivedOpen, setArchivedOpen] = useState(false);
+  // null = 关闭；{ upstream: null } = 新增；{ upstream } = 编辑。
+  const [editing, setEditing] = useState<{ upstream: Upstream | null } | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  const reload = useMemo(
-    () => async () => {
-      try {
-        setUpstreams(await listUpstreams());
-        setError("");
-      } catch (err) {
-        if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-        else setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setLoading(false);
-      }
-    },
-    [onUnauthorized],
-  );
+  const toast = useToast();
+  const confirm = useConfirm();
+
+  const reload = useCallback(async () => {
+    try {
+      setUpstreams(await listUpstreams());
+      setError("");
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setLoading(false);
+    }
+  }, [onUnauthorized]);
 
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  /* 分组只为表单里的多选服务，拿不到不影响列表。 */
+  useEffect(() => {
+    listGroups()
+      .then(setGroups)
+      .catch(() => setGroups([]));
+  }, []);
 
   /* 归档渠道走折叠区，不在主列表——和旧版一致。 */
   const active = upstreams.filter((u) => !u.archived);
@@ -69,6 +95,129 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     } finally {
       setPending(null);
     }
+  }
+
+  /** 跑一个只报结果、不改列表的动作（测连接、拉模型、查余额）。 */
+  async function runAction(id: number, label: string, run: () => Promise<unknown>) {
+    setPending(id);
+    try {
+      await run();
+      toast(`${label}成功。`, { tone: "ok" });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`${label}失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  async function saveUpstream(payload: UpstreamPayload) {
+    const target = editing?.upstream;
+    setSaving(true);
+    try {
+      const saved = target ? await updateUpstream(target.id, payload) : await createUpstream(payload);
+      setEditing(null);
+      await reload();
+      toast(`渠道 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`保存失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  /** 编辑前重拉一次：列表里的那份可能不是最新的。 */
+  async function openEditor(upstream: Upstream) {
+    try {
+      setEditing({ upstream: await getUpstream(upstream.id) });
+    } catch {
+      setEditing({ upstream });
+    }
+  }
+
+  /** 复制：拿完整配置开一个新建表单，名字加后缀。API Key 不会回来，得重填。 */
+  async function duplicate(upstream: Upstream) {
+    const full = await getUpstream(upstream.id).catch(() => upstream);
+    setEditing({ upstream: { ...full, id: 0, name: `${full.name}-copy`, api_key_set: false } });
+  }
+
+  async function removeUpstream(upstream: Upstream) {
+    const confirmed = await confirm({
+      title: "删除渠道？",
+      message: `「${upstream.name}」将被删除。已产生的日志保留，但不再关联到这个渠道。`,
+      confirmLabel: "删除",
+    });
+    if (!confirmed) return;
+
+    /* 先把配置拿到手，删掉之后才能提供「撤销」——后端没有回收站，
+       撤销实际上是用同一份配置重建。API Key 回不来。 */
+    const snapshot = await getUpstream(upstream.id).catch(() => null);
+    try {
+      await deleteUpstream(upstream.id);
+      await reload();
+      toast(`渠道「${upstream.name}」已删除。`, {
+        tone: "ok",
+        durationMs: 9000,
+        actionLabel: snapshot ? "撤销" : undefined,
+        onAction: snapshot
+          ? async () => {
+              const { id: _id, api_key_set: _set, ...rest } = snapshot;
+              await createUpstream(rest);
+              await reload();
+              toast(`已恢复渠道「${snapshot.name}」，API Key 需重新填写。`, { tone: "ok" });
+            }
+          : undefined,
+      });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`删除失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+    }
+  }
+
+  async function copyInfo(upstream: Upstream) {
+    const text = [
+      `名称: ${upstream.name}`,
+      `Base URL: ${upstream.base_url}`,
+      `优先级: ${upstream.priority}`,
+      `权重: ${upstream.weight}`,
+      upstream.model_names.length ? `模型: ${upstream.model_names.join(", ")}` : null,
+      upstream.model_prefixes.length ? `前缀: ${upstream.model_prefixes.join(", ")}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast("渠道信息已复制。", { tone: "ok" });
+    } catch {
+      toast("复制失败：浏览器拒绝了剪贴板访问。", { tone: "error" });
+    }
+  }
+
+  /** 归档渠道的菜单不给测试类动作——对不路由的渠道测连接说明不了任何事。 */
+  function menuFor(upstream: Upstream): MenuEntry[] {
+    if (upstream.archived) {
+      return [
+        { key: "unarchive", label: "恢复", tone: "primary", onSelect: () => void mutate(upstream.id, () => setUpstreamArchived(upstream.id, false)) },
+        { key: "edit", label: "编辑", onSelect: () => void openEditor(upstream) },
+        { key: "copy-info", label: "复制渠道信息", onSelect: () => void copyInfo(upstream) },
+        MENU_SEPARATOR,
+        { key: "delete", label: "删除", tone: "danger", onSelect: () => void removeUpstream(upstream) },
+      ];
+    }
+    return [
+      { key: "test", label: "测试连接", onSelect: () => void runAction(upstream.id, "测试连接", () => testUpstream(upstream.id)) },
+      { key: "models", label: "拉取模型", onSelect: () => void runAction(upstream.id, "拉取模型", () => fetchUpstreamModels(upstream.id)) },
+      { key: "balance", label: "查询 new-api 余额", onSelect: () => void runAction(upstream.id, "查询余额", () => fetchUpstreamBalance(upstream.id, "new-api")) },
+      { key: "balance-sub2api", label: "查询 sub2api 余额", onSelect: () => void runAction(upstream.id, "查询余额", () => fetchUpstreamBalance(upstream.id, "sub2api")) },
+      MENU_SEPARATOR,
+      { key: "edit", label: "编辑", onSelect: () => void openEditor(upstream) },
+      { key: "duplicate", label: "复制渠道", onSelect: () => void duplicate(upstream) },
+      { key: "copy-info", label: "复制渠道信息", onSelect: () => void copyInfo(upstream) },
+      MENU_SEPARATOR,
+      { key: "archive", label: "归档", onSelect: () => void mutate(upstream.id, () => setUpstreamArchived(upstream.id, true)) },
+      { key: "delete", label: "删除", tone: "danger", onSelect: () => void removeUpstream(upstream) },
+    ];
   }
 
   return (
@@ -114,6 +263,9 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
             <button type="button" className="secondary" onClick={() => void reload()}>
               刷新
             </button>
+            <button type="button" onClick={() => setEditing({ upstream: null })}>
+              新增渠道
+            </button>
           </div>
         </div>
 
@@ -153,8 +305,8 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                     key={upstream.id}
                     upstream={upstream}
                     busy={pending === upstream.id}
+                    menu={menuFor(upstream)}
                     onToggle={() => void mutate(upstream.id, () => setUpstreamEnabled(upstream.id, !upstream.enabled))}
-                    onArchive={() => void mutate(upstream.id, () => setUpstreamArchived(upstream.id, true))}
                   />
                 ))
               )}
@@ -199,16 +351,25 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                           </span>
                         </td>
                         <td className="row-actions col-actions">
-                          <button
-                            type="button"
-                            className="secondary"
-                            disabled={pending === upstream.id}
-                            onClick={() =>
-                              void mutate(upstream.id, () => setUpstreamArchived(upstream.id, false))
-                            }
-                          >
-                            恢复
-                          </button>
+                          <ActionMenu
+                            label={`${upstream.name} 的操作菜单`}
+                            entries={menuFor(upstream)}
+                            trigger={({ ref, onClick, expanded }) => (
+                              <button
+                                ref={ref}
+                                type="button"
+                                className="secondary action-menu-trigger"
+                                aria-haspopup="menu"
+                                aria-expanded={expanded}
+                                aria-label={`打开 ${upstream.name} 的操作菜单`}
+                                title="操作"
+                                disabled={pending === upstream.id}
+                                onClick={onClick}
+                              >
+                                <span aria-hidden="true">⋮</span>
+                              </button>
+                            )}
+                          />
                         </td>
                       </tr>
                     ))}
@@ -219,6 +380,15 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
           </section>
         ) : null}
       </section>
+
+      <UpstreamDialog
+        open={editing !== null}
+        upstream={editing?.upstream ?? null}
+        groups={groups}
+        busy={saving}
+        onSubmit={(payload) => void saveUpstream(payload)}
+        onClose={() => setEditing(null)}
+      />
     </section>
   );
 }
@@ -235,13 +405,13 @@ function Summary({ label, value }: { label: string; value: number }) {
 function UpstreamRow({
   upstream,
   busy,
+  menu,
   onToggle,
-  onArchive,
 }: {
   upstream: Upstream;
   busy: boolean;
+  menu: MenuEntry[];
   onToggle: () => void;
-  onArchive: () => void;
 }) {
   const zeroWeight = upstream.effective_weight <= 0;
   return (
@@ -288,9 +458,25 @@ function UpstreamRow({
         </div>
       </td>
       <td className="row-actions col-actions" data-col="actions">
-        <button type="button" className="secondary" disabled={busy} onClick={onArchive}>
-          归档
-        </button>
+        <ActionMenu
+          label={`${upstream.name} 的操作菜单`}
+          entries={menu}
+          trigger={({ ref, onClick, expanded }) => (
+            <button
+              ref={ref}
+              type="button"
+              className="secondary action-menu-trigger"
+              aria-haspopup="menu"
+              aria-expanded={expanded}
+              aria-label={`打开 ${upstream.name} 的操作菜单`}
+              title="操作"
+              disabled={busy}
+              onClick={onClick}
+            >
+              <span aria-hidden="true">⋮</span>
+            </button>
+          )}
+        />
       </td>
     </tr>
   );

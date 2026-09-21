@@ -72,10 +72,16 @@ export function ActionMenu({
   /* useLayoutEffect 而不是 useEffect：菜单要先量到尺寸才能算位置，
      用 useEffect 会先以 (0,0) 画一帧再跳过去，看得见闪。 */
   useLayoutEffect(() => {
+    const menu = menuRef.current;
     if (!open) {
       setPosition(null);
+      if (menu?.matches(":popover-open")) menu.hidePopover();
       return;
     }
+    /* 必须进顶层（top layer）。祖先 .panel 带了 transform，那会把
+       position:fixed 的包含块从视口改成 panel 本身，按视口算的坐标全偏。
+       popover 元素不受祖先 transform 影响——旧控制台也是这么做的。 */
+    if (menu && !menu.matches(":popover-open")) menu.showPopover();
     reposition();
   }, [open, reposition]);
 
@@ -112,11 +118,14 @@ export function ActionMenu({
       {open ? (
         <div
           ref={menuRef}
-          className="action-menu"
+          /* 类名必须是 upstream-action-menu：它自带 display:grid（竖排）、
+             position:fixed 和 168px 宽。写成 .action-menu 会一样式都拿不到，
+             菜单会横向铺开并溢出屏幕。 */
+          className="upstream-action-menu"
           role="menu"
           aria-label={label}
+          popover="manual"
           style={{
-            position: "fixed",
             left: position?.left ?? 0,
             top: position?.top ?? 0,
             // 量到尺寸前先藏着，避免定位前那一帧出现在左上角。

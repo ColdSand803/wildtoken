@@ -70,6 +70,52 @@ export function listUpstreams(): Promise<Upstream[]> {
   return api<Upstream[]>("/api/admin/upstreams/");
 }
 
+export function createUpstream(payload: unknown): Promise<Upstream> {
+  return api<Upstream>("/api/admin/upstreams/", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateUpstream(id: number, payload: unknown): Promise<Upstream> {
+  return api<Upstream>(`/api/admin/upstreams/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteUpstream(id: number): Promise<null> {
+  return api<null>(`/api/admin/upstreams/${id}`, { method: "DELETE" });
+}
+
+/** 返回完整渠道（含 api_key 与否），编辑和复制都需要。 */
+export function getUpstream(id: number): Promise<Upstream> {
+  return api<Upstream>(`/api/admin/upstreams/${id}`);
+}
+
+export function testUpstream(id: number, path = "/v1/models"): Promise<unknown> {
+  return api<unknown>(`/api/admin/upstreams/${id}/test`, {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export function fetchUpstreamModels(id: number): Promise<unknown> {
+  return api<unknown>(`/api/admin/upstreams/${id}/models`, { method: "POST" });
+}
+
+/** new-api 与 sub2api 两种余额接口，路径不同。 */
+export function fetchUpstreamBalance(id: number, provider: "new-api" | "sub2api"): Promise<unknown> {
+  const path = provider === "sub2api"
+    ? `/api/admin/upstreams/${id}/balance/sub2api`
+    : `/api/admin/upstreams/${id}/balance`;
+  return api<unknown>(path, { method: "POST" });
+}
+
+export function listGroups(): Promise<Array<{ id: number; name: string }>> {
+  return api<Array<{ id: number; name: string }>>("/api/admin/groups/");
+}
+
 export function setUpstreamArchived(id: number, archived: boolean): Promise<Upstream> {
   return api<Upstream>(`/api/admin/upstreams/${id}/archived`, {
     method: "PATCH",
