@@ -21,6 +21,8 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("");
   const [pending, setPending] = useState<number | null>(null);
+  // 归档区默认收起，和旧版一致。
+  const [archivedOpen, setArchivedOpen] = useState(false);
 
   const reload = useMemo(
     () => async () => {
@@ -162,43 +164,57 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
 
         {archived.length > 0 ? (
           <section className="archived-panel">
-            <div className="archived-toggle">
+            {/* 默认收起。归档渠道是「暂时不用但不想删」的，日常不该占着视线；
+                展开状态不持久化，刷新回到收起，和旧版一致。 */}
+            <button
+              type="button"
+              className={`archived-toggle${archivedOpen ? " is-open" : ""}`}
+              aria-expanded={archivedOpen}
+              onClick={() => setArchivedOpen((open) => !open)}
+            >
+              <span className="archived-chevron" aria-hidden="true">
+                ▸
+              </span>
               <span className="archived-title">已归档渠道</span>
               <span className="archived-count">{archived.length}</span>
               <span className="archived-hint">不参与路由</span>
-            </div>
-            <div className="table-wrap">
-              <table className="admin-table upstream-table">
-                <tbody>
-                  {archived.map((upstream) => (
-                    <tr key={upstream.id} className="row-archived">
-                      <td className="col-id">{upstream.id}</td>
-                      <td className="name-cell">
-                        <div className="name-stack">
-                          <strong title={upstream.name}>{upstream.name}</strong>
-                          <span className="base-url">{upstream.base_url}</span>
-                        </div>
-                      </td>
-                      <td className="col-status">
-                        <span className="archived-tag">
-                          <span className="archived-tag-dot" aria-hidden="true" />
-                          已归档
-                        </span>
-                      </td>
-                      <td className="col-actions">
-                        <button
-                          type="button"
-                          className="secondary"
-                          disabled={pending === upstream.id}
-                          onClick={() => void mutate(upstream.id, () => setUpstreamArchived(upstream.id, false))}
-                        >
-                          恢复
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            </button>
+            <div className="archived-body" hidden={!archivedOpen}>
+              <div className="table-wrap">
+                <table className="admin-table upstream-table">
+                  <tbody>
+                    {archived.map((upstream) => (
+                      <tr key={upstream.id} className="row-archived">
+                        <td className="col-id">{upstream.id}</td>
+                        <td className="name-cell">
+                          <div className="name-stack">
+                            <strong title={upstream.name}>{upstream.name}</strong>
+                            <span className="base-url">{upstream.base_url}</span>
+                          </div>
+                        </td>
+                        <td className="col-status">
+                          <span className="archived-tag">
+                            <span className="archived-tag-dot" aria-hidden="true" />
+                            已归档
+                          </span>
+                        </td>
+                        <td className="row-actions col-actions">
+                          <button
+                            type="button"
+                            className="secondary"
+                            disabled={pending === upstream.id}
+                            onClick={() =>
+                              void mutate(upstream.id, () => setUpstreamArchived(upstream.id, false))
+                            }
+                          >
+                            恢复
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </section>
         ) : null}

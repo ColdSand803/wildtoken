@@ -1121,6 +1121,14 @@ td.no-match-state {
   color: var(--muted-strong);
 }
 
+/* 归档行的操作列放的是文字按钮（「恢复」），不是主表那个图标按钮。
+   .col-actions 锁死的 56px 是按图标定的，文字会被挤换行，所以这里改回
+   自适应。只限定在归档行，主表的列宽不受影响。 */
+.row-archived .col-actions {
+  min-width: 0;
+  width: auto;
+}
+
 .row-archived:hover {
   color: var(--text);
 }
