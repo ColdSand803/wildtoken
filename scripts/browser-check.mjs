@@ -33,6 +33,8 @@ const CHROME = "google-chrome-stable";
 const FAKE_UPSTREAM_PORT = 3106;
 const FAKE_MODELS = ["gpt-4o", "gpt-4o-mini", "claude-sonnet-5", "grok-4.5"];
 const FAKE_REPLY = "假上游的回复。";
+/** 请求体里出现这个词，假上游就拖 3 秒再答，留出观测在途行的窗口。 */
+const SLOW_MARKER = "__slow__";
 
 // ── CDP ──────────────────────────────────────────────────────────────────────
 
@@ -350,8 +352,20 @@ function startFakeUpstream() {
       response.end(JSON.stringify({ error: { message: `no route for ${path}` } }));
       return;
     }
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify(body));
+
+    /* 请求体里带 SLOW_MARKER 就慢答。在途行只存在于请求未完成的那段时间里，
+       秒回的假上游根本给不出观测窗口。 */
+    let raw = "";
+    request.on("data", (chunk) => {
+      raw += chunk;
+    });
+    request.on("end", () => {
+      const delay = raw.includes(SLOW_MARKER) ? 3000 : 0;
+      setTimeout(() => {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(body));
+      }, delay);
+    });
   });
   return new Promise((resolve, reject) => {
     server.on("error", reject);
@@ -1525,6 +1539,48 @@ async function main() {
         () => performance.getEntriesByType("navigation").length,
       );
       assertEqual(navAfter, navBefore, "期间发生了整页重载");
+    });
+
+    /* 在途行只存在于请求未完成的那几秒里。计时坏掉的话，行会出来但数字
+       冻住，而“出来了”本身不能证明计时活着。 */
+    await check("在途行出现且已用时在走", async () => {
+      // 不等它返回，请求在背景飞着。
+      await page.evaluate((token) => {
+        void fetch("/v1/chat/completions", {
+          method: "POST",
+          headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            model: "gpt-4o",
+            messages: [{ role: "user", content: "__slow__ 在途探活" }],
+          }),
+        });
+      }, seeded.downstreamToken);
+
+      const first = await page.waitFor(
+        () => {
+          const row = document.querySelector("tr.log-row--active");
+          if (!row) return false;
+          const badge = row.querySelector("[data-col=time]")?.textContent?.trim();
+          const elapsed = row.querySelector("[data-col=duration]")?.textContent ?? "";
+          return badge === "进行中" ? elapsed : false;
+        },
+        { label: "在途行", timeout: 10_000 },
+      );
+
+      // 在途行也得是 10 格，否则它和已完成的行错一列。
+      const cells = await page.evaluate(
+        () => document.querySelector("tr.log-row--active")?.children.length ?? 0,
+      );
+      assertEqual(cells, 10, "在途行格数");
+
+      await sleepInPage(page, 1200);
+      const second = await page.evaluate(
+        () => document.querySelector("tr.log-row--active")?.querySelector("[data-col=duration]")
+          ?.textContent ?? null,
+      );
+      /* 请求可能已经结束（行没了），那也算数——说明它确实走完了一轮。
+         只有「行还在且数字一模一样」才是计时死了。 */
+      assert(second === null || second !== first, `已用时冻住在 ${first}`);
     });
 
     // ── 看板页 ──────────────────────────────────────────────
