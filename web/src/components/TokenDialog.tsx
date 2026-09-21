@@ -9,7 +9,8 @@ export interface TokenPayload {
   enabled: boolean;
   expires_at: string | null;
   group_id: number;
-  limit_tokens: number | null;
+  /** “100M”“1B”这类表达式，空串表示不限额。后端负责解析。 */
+  limit_expression: string;
   rate_limit: string | null;
   /** 只在新建时允许，留空由后端生成。 */
   token?: string | null;
@@ -90,15 +91,11 @@ function toUtcStamp(date: Date): string {
   return date.toISOString().slice(0, 19).replace("T", " ");
 }
 
-/** 限额表达式转数字：支持 1000、10k、2.5M 三种写法。 */
-function parseLimit(raw: string): number | null {
-  const text = raw.trim();
-  if (!text) return null;
-  const match = /^(\d+(?:\.\d+)?)\s*([kKmMbB])?$/.exec(text);
-  if (!match) return null;
-  const scale = { k: 1e3, m: 1e6, b: 1e9 }[match[2]?.toLowerCase() ?? ""] ?? 1;
-  return Math.round(Number(match[1]) * scale);
-}
+/* 限额按表达式原样传，不在前端折成数字。
+
+   后端收的是 limit_expression（“100M”“1B”这类字符串），它自己解析并算出
+   最短表达式存回来。前端折成数字再发一个 limit_tokens 字段，会被严格解码
+   直接拒掉：“unknown field limit_tokens”。 */
 
 /* 有效期三态：具体天数 / 永不过期 / 不修改。
    编辑时默认落在 keep——原值是绝对时间，硬塞进「N 天」会在保存时
@@ -137,7 +134,8 @@ export function TokenDialog({
     setDescription(token?.description ?? "");
     setEnabled(token?.enabled ?? true);
     setGroupId(token?.group_id ?? groups[0]?.id ?? 1);
-    setLimit(token?.quota.limit_tokens === null || token === null ? "" : String(token.quota.limit_tokens));
+    // 回填服务端算好的最短表达式，这样不动表单再保存不会改变限额。
+    setLimit(token?.quota.limit_expression ?? "");
     setRateLimit(token?.rate_limit ?? "");
     setCustom("");
     // 编辑时把现有到期时间填回输入框，保存时原样解回去，不动就不会变。
@@ -169,7 +167,7 @@ export function TokenDialog({
                 ? null
                 : toUtcStamp(new Date(parsedExpiry.expiresAtMs)),
             group_id: groupId,
-            limit_tokens: parseLimit(limit),
+            limit_expression: limit.trim(),
             rate_limit: rateLimit.trim() || null,
             ...(token ? {} : { token: custom.trim() || null }),
           });
@@ -220,15 +218,18 @@ export function TokenDialog({
           </label>
 
           <label className="field">
-            <span className="field-label">限额</span>
+            <span className="field-label">限额（可选）</span>
             <input
               value={limit}
               onChange={(e) => setLimit(e.target.value)}
-              placeholder="留空不限，支持 10k / 2.5M"
+              placeholder="留空则不限额，如 100M、1B、1000K"
+              maxLength={24}
               autoComplete="off"
+              spellCheck={false}
             />
             <span className="field-hint">
-              计数养在令牌行上，不随日志过期回落。
+              按累计 token 总量计算，不会自动重置。支持 K/M/B/T 后缀。计数养在令牌行上，
+              不随日志过期回落。
             </span>
           </label>
 

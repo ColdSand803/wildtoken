@@ -146,37 +146,37 @@ function ChannelStack({
     if (!name) return <span className="muted">无（未匹配到渠道）</span>;
     return (
       <div className="channel-stack">
-        {hidden ? (
-          <strong>
-            <Masked />
-          </strong>
-        ) : (
-          <strong title={name}>{name}</strong>
-        )}
+        <strong title={hidden ? undefined : name}>{hidden ? <Masked /> : name}</strong>
         <span className="muted">无 ID</span>
       </div>
     );
   }
 
+  const shown = hidden ? SENSITIVE_MASK : name;
   return (
     <div className="channel-stack">
-      <strong title={name ? `#${log.upstream_id} · ${hidden ? SENSITIVE_MASK : name}` : `#${log.upstream_id}`}>
+      <strong title={name ? `#${log.upstream_id} · ${shown}` : `#${log.upstream_id}`}>
         {`#${log.upstream_id}`}
       </strong>
-      {name ? (
-        hidden ? (
-          <span className="muted">
-            <Masked />
-          </span>
-        ) : (
-          <span className="muted" title={name}>
-            {name}
-          </span>
-        )
-      ) : (
-        <span className="muted">无名称</span>
-      )}
+      <ChannelStackName name={name} hidden={hidden} />
     </div>
+  );
+}
+
+/** 下行：有名字就显（该遮就遮），没名字说清楚是没名而不是空着。 */
+function ChannelStackName({ name, hidden }: { name: string; hidden: boolean }) {
+  if (!name) return <span className="muted">无名称</span>;
+  if (hidden) {
+    return (
+      <span className="muted">
+        <Masked />
+      </span>
+    );
+  }
+  return (
+    <span className="muted" title={name}>
+      {name}
+    </span>
   );
 }
 
@@ -211,6 +211,13 @@ function firstTokenTone(ms: number | null): string {
  * 关键是第一层：非 2xx 优先标红。一个 3 秒就返回 500 的请求，按吞吐算会是
  * 绿的——快失败也是失败。其后依次按输出吞吐、总吞吐、绝对耗时。
  */
+/** 高于 good 算好，低于 fair 算差，中间是警。三处阀值不同但形状一样。 */
+function toneByThreshold(value: number, good: number, fair: number): string {
+  if (value >= good) return "ok";
+  if (value >= fair) return "warn";
+  return "danger";
+}
+
 function durationRating(log: RequestLog): { tone: string; basis: string } {
   const status = log.status_code;
   if (status === null || !Number.isFinite(status)) {
@@ -230,7 +237,7 @@ function durationRating(log: RequestLog): { tone: string; basis: string } {
     const rate = completion / (duration / 1000);
     const shown = rate.toFixed(1).replace(/\.0$/, "");
     return {
-      tone: rate >= 20 ? "ok" : rate >= 8 ? "warn" : "danger",
+      tone: toneByThreshold(rate, 20, 8),
       basis: `按全程输出吞吐 ${shown} t/s 判定`,
     };
   }
@@ -240,13 +247,14 @@ function durationRating(log: RequestLog): { tone: string; basis: string } {
     const rate = total / (duration / 1000);
     const shown = rate.toFixed(1).replace(/\.0$/, "");
     return {
-      tone: rate >= 80 ? "ok" : rate >= 20 ? "warn" : "danger",
+      tone: toneByThreshold(rate, 80, 20),
       basis: `按总吞吐 ${shown} t/s 判定`,
     };
   }
 
+  // 耗时是越小越好，取负值后跟上面两处同形。
   return {
-    tone: duration < 30000 ? "ok" : duration < 60000 ? "warn" : "danger",
+    tone: toneByThreshold(-duration, -30000, -60000),
     basis: "无 token 数据，按绝对耗时兜底判定",
   };
 }
@@ -413,7 +421,10 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
     return merged;
   }, [stream.logs, page?.items, onLatestPage]);
 
-  const active = onLatestPage ? (stream.connected ? stream.active : (page?.active ?? [])) : [];
+  /* 在途集合：只在最新页显示。流连着就以它为准，断了退回快照里的那份。 */
+  const activeFromPage = page?.active ?? [];
+  const activeLatest = stream.connected ? stream.active : activeFromPage;
+  const active = onLatestPage ? activeLatest : [];
   const activeTotal = stream.connected ? stream.activeTotal : (page?.active_total ?? 0);
 
   function toggleColumn(key: ColumnKey) {
@@ -463,18 +474,22 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   return (
     <section className="view" data-view="logs">
       <section className="panel">
+        {/* 速率胶囊在 panel-head 里面，和旧版一致。放到外面的话它吃不到
+            panel-head 的 padding-bottom + margin-bottom，会直接贴着筛选行。
+
+            而且必须是 <p>：CSS 写的是 .panel p.log-rate-pills，换成 div 就没有
+            flex、没有 gap。 */}
         <div className="panel-head">
           <div>
             <span className="eyebrow">REQUEST STREAM</span>
             <h2>使用日志</h2>
             <p>实时请求流与在途请求。</p>
+            <p className="log-rate-pills" aria-live="polite" aria-atomic="true">
+              <RatePill label="RPM" value={stream.rpm ?? page?.recent_rpm ?? null} />
+              <RatePill label="TPM" value={stream.tpm ?? page?.recent_tpm ?? null} />
+              <RatePill label="并发" value={activeTotal} />
+            </p>
           </div>
-        </div>
-
-        <div className="log-rate-pills">
-          <RatePill label="RPM" value={stream.rpm ?? page?.recent_rpm ?? null} />
-          <RatePill label="TPM" value={stream.tpm ?? page?.recent_tpm ?? null} />
-          <RatePill label="并发" value={activeTotal} />
         </div>
 
         <div className="log-toolbar">
@@ -626,24 +641,13 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
             </thead>
             <tbody>
               <ActiveRows active={active} sensitiveHidden={sensitiveHidden} />
-              {loading && logs.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="muted">加载中…</td>
-                </tr>
-              ) : logs.length === 0 && active.length === 0 ? (
-                <tr>
-                  <td colSpan={10} className="muted">暂无请求日志</td>
-                </tr>
-              ) : (
-                logs.map((log) => (
-                  <LogRow
-                    key={log.id}
-                    log={log}
-                    sensitiveHidden={sensitiveHidden}
-                    onOpenDetail={() => void openDetail(log.id)}
-                  />
-                ))
-              )}
+              <LogRows
+                logs={logs}
+                loading={loading}
+                hasActive={active.length > 0}
+                sensitiveHidden={sensitiveHidden}
+                onOpenDetail={openDetail}
+              />
             </tbody>
           </table>
         </div>
@@ -805,6 +809,48 @@ function ActiveRows({
   );
 }
 
+/** 表体三态：加载中、空、有行。在途行单独渲染，所以空态要把它也算上。 */
+function LogRows({
+  logs,
+  loading,
+  hasActive,
+  sensitiveHidden,
+  onOpenDetail,
+}: {
+  logs: RequestLog[];
+  loading: boolean;
+  hasActive: boolean;
+  sensitiveHidden: boolean;
+  onOpenDetail: (id: number) => void;
+}) {
+  if (loading && logs.length === 0) {
+    return (
+      <tr>
+        <td colSpan={10} className="muted">加载中…</td>
+      </tr>
+    );
+  }
+  if (logs.length === 0 && !hasActive) {
+    return (
+      <tr>
+        <td colSpan={10} className="muted">暂无请求日志</td>
+      </tr>
+    );
+  }
+  return (
+    <>
+      {logs.map((log) => (
+        <LogRow
+          key={log.id}
+          log={log}
+          sensitiveHidden={sensitiveHidden}
+          onOpenDetail={() => void onOpenDetail(log.id)}
+        />
+      ))}
+    </>
+  );
+}
+
 function LogRow({
   log,
   sensitiveHidden,
@@ -873,7 +919,13 @@ function LogRow({
       {/* 列里只给量级，精确值放 title 和 aria-label——缩写不该把数字弄丢，
           1.2M 可能是 115 万也可能是 125 万。 */}
       <td className="tokens-cell" data-col="tokens">
-        <span className="token-io" aria-label={`${exactTokens("输入", log.prompt_tokens)}，${exactTokens("输出", log.completion_tokens)}`}>
+        {/* role="img" 配 aria-label：箭头加缩写的组合读屏念不成句，整格当一个
+            整体报读精确值。裸 span 不支持 aria-label。 */}
+        <span
+          className="token-io"
+          role="img"
+          aria-label={`${exactTokens("输入", log.prompt_tokens)}，${exactTokens("输出", log.completion_tokens)}`}
+        >
           <span className="token-io-line token-io-in" title={exactTokens("输入", log.prompt_tokens)}>
             <span className="token-io-arrow" aria-hidden="true">↑</span>
             <b>{formatCount(log.prompt_tokens)}</b>

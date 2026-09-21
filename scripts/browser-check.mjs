@@ -1829,6 +1829,43 @@ async function main() {
       assert(io.inTitle?.startsWith("输入"), `输入行缺 title：${io.inTitle}`);
     });
 
+    /* 速率胶囊那行必须是 <p>：CSS 选择器是 .panel p.log-rate-pills，换成 div
+       那条规则一条都不匹配。量实际间距而不是看标签名。 */
+    await check("速率行与筛选行的间距生效", async () => {
+      const layout = await page.evaluate(() => {
+        const pills = document.querySelector(".log-rate-pills");
+        const toolbar = document.querySelector(".log-toolbar");
+        if (!pills || !toolbar) return null;
+        const style = getComputedStyle(pills);
+        return {
+          tag: pills.tagName,
+          display: style.display,
+          gap: style.gap,
+          marginTop: style.marginTop,
+          // 间距来自 panel-head 的 padding-bottom + margin-bottom，所以必须在它里面。
+          insideHead: pills.closest(".panel-head") !== null,
+          // 胶囊底部到筛选行顶部的实际距离。
+          gapToToolbar: Math.round(
+            toolbar.getBoundingClientRect().top - pills.getBoundingClientRect().bottom,
+          ),
+          pillCount: pills.querySelectorAll(".log-rate-pill").length,
+        };
+      });
+      assert(layout !== null, "速率行或筛选行不在");
+      assertEqual(layout.tag, "P", "速率行必须是 p，否则 CSS 不匹配");
+      assertEqual(layout.display, "flex", "三个胶囊应并排");
+      assertEqual(layout.gap, "6px", "胶囊间距");
+      assertEqual(layout.marginTop, "8px", "速率行上边距");
+      assertEqual(layout.pillCount, 3, "RPM / TPM / 并发");
+      assertEqual(layout.insideHead, true, "速率行要在 panel-head 里，否则吃不到它的下边距");
+      /* panel-head 的 padding-bottom 14 + border 1 + margin-bottom 14 = 29。
+         卡范围而不是精确值：要拦的是「两行贴在一起」，不是边框粗了一像素。 */
+      assert(
+        layout.gapToToolbar >= 24 && layout.gapToToolbar <= 34,
+        `速率行到筛选行的间距 ${layout.gapToToolbar}px 不对`,
+      );
+    });
+
     await check("表头与表体均为 10 列", async () => {
       const head = await page.count("table.log-table thead th");
       const body = await page.evaluate(
@@ -2327,6 +2364,40 @@ async function main() {
         () => document.querySelector("table tbody tr td.desc-cell .muted") !== null,
       );
       assertEqual(hasMuted, true, "描述文本应包在 muted 里");
+    });
+
+    /* 后端严格解码，多一个字段整个请求就 400。走界面真建一条，并核对限额
+       真的落库——只看“对话框关了”的话，限额没存上也看不出来。 */
+    await check("新增令牌能建成且限额落库", async () => {
+      await gotoView(page, "令牌");
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("button")].find(
+          (node) => node.textContent.trim() === "新增令牌",
+        );
+        button.click();
+      });
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "令牌对话框" });
+
+      await page.fill("dialog.upstream-dialog[open] input[autocomplete=off]", "quota-token");
+      await page.fill("dialog.upstream-dialog[open] input[placeholder^='留空则不限额']", "100M");
+      await page.evaluate(() => {
+        document.querySelector("dialog.upstream-dialog[open] button[type=submit]").click();
+      });
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "令牌对话框关闭",
+        timeout: 10_000,
+      });
+
+      const stored = await page.evaluate(async () => {
+        const admin = localStorage.getItem("wildtoken_admin_token");
+        const list = await (
+          await fetch("/api/admin/tokens/", { headers: { "x-admin-token": admin } })
+        ).json();
+        return list.find((item) => item.name === "quota-token")?.quota ?? null;
+      });
+      assert(stored !== null, "令牌没建成");
+      assertEqual(stored.limit_expression, "100M", "限额表达式落库");
+      assertEqual(stored.limit_tokens, 100_000_000, "后端解析出的限额数值");
     });
 
     /* 一串日期看不出快到期了。旧版旁边跟一个徐章说距今多久，那才是重点。 */
