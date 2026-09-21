@@ -27,7 +27,7 @@ export function ChannelExportDialog({
   const json = doc ? JSON.stringify(doc, null, 2) : "";
 
   return (
-    <dialog className="quick-import-dialog" ref={ref} onCancel={onClose}>
+    <dialog className="quick-import-dialog dialog--drawer" ref={ref} onCancel={onClose}>
       <div className="modal-head">
         <div>
           <h2>导出渠道</h2>
@@ -140,7 +140,7 @@ export function ChannelImportDialog({
   }
 
   return (
-    <dialog className="quick-import-dialog" ref={ref} onCancel={onClose}>
+    <dialog className="quick-import-dialog dialog--drawer" ref={ref} onCancel={onClose}>
       <div className="modal-head">
         <div>
           <h2>导入渠道</h2>
@@ -295,7 +295,7 @@ export function QuickImportDialog({
   }
 
   return (
-    <dialog className="quick-import-dialog" ref={ref} onCancel={onClose}>
+    <dialog className="quick-import-dialog dialog--drawer" ref={ref} onCancel={onClose}>
       <div className="modal-head">
         <div>
           <h2>快速导入</h2>

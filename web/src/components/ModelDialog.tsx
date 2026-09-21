@@ -208,7 +208,7 @@ export function ModelDialog({
   const nothingVisible = visibleModels.length === 0 && visibleMappings.length === 0;
 
   return (
-    <dialog className="model-dialog" ref={dialogRef} onCancel={onClose}>
+    <dialog className="model-dialog dialog--drawer" ref={dialogRef} onCancel={onClose}>
       <div className="model-dialog-panel">
         <div className="modal-head">
           <div>

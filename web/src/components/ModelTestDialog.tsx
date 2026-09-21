@@ -185,7 +185,7 @@ export function ModelTestDialog({
   const canSend = model !== "" && templateId !== "" && !sending;
 
   return (
-    <dialog className="upstream-dialog" ref={dialogRef} onCancel={onClose} aria-label="测试模型">
+    <dialog className="upstream-dialog dialog--drawer" ref={dialogRef} onCancel={onClose} aria-label="测试模型">
       <form
         className="upstream-dialog-panel"
         onSubmit={(event) => {

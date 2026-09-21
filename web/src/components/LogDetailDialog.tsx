@@ -234,7 +234,7 @@ export function LogDetailDialog({
   }
 
   return (
-    <dialog className="log-detail-dialog" ref={ref} onCancel={onClose}>
+    <dialog className="log-detail-dialog dialog--drawer" ref={ref} onCancel={onClose}>
       <div className="log-detail-panel">
         <div className="modal-head log-detail-head">
           <div>

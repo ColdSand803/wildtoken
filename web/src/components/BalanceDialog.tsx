@@ -112,7 +112,7 @@ export function BalanceDialog({
   const summary = busy ? "正在查询..." : result ? "查询成功" : failure ? "查询失败" : "";
 
   return (
-    <dialog className="balance-dialog" ref={dialogRef} onCancel={onClose}>
+    <dialog className="balance-dialog dialog--drawer" ref={dialogRef} onCancel={onClose}>
       <div className="balance-panel">
         <div className="modal-head">
           <div>

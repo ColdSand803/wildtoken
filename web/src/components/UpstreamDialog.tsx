@@ -447,7 +447,7 @@ export function UpstreamDialog({
   const selectionCount = form.modelNames.length + Object.keys(form.modelMappings).length;
 
   return (
-    <dialog className="upstream-dialog" ref={dialogRef} onCancel={onClose}>
+    <dialog className="upstream-dialog dialog--drawer" ref={dialogRef} onCancel={onClose}>
       <form
         className="upstream-dialog-panel"
         onSubmit={(event) => {

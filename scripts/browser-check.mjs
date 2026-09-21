@@ -941,6 +941,72 @@ async function main() {
       await page.press("Escape");
     });
 
+    /* 内容型弹窗贴右满高。量几何而不是看类名——类挂上了但 CSS 没加载的话，
+       类名断言照样会过。 */
+    await check("内容型弹窗是右侧抽屉", async () => {
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("button")].find(
+          (node) => node.textContent.trim() === "导出",
+        );
+        button.click();
+      });
+      await page.waitForSelector("dialog.quick-import-dialog[open]", { label: "导出窗" });
+      const box = await page.evaluate(() => {
+        const dialog = document.querySelector("dialog.quick-import-dialog[open]");
+        const rect = dialog.getBoundingClientRect();
+        return {
+          right: Math.round(window.innerWidth - rect.right),
+          top: Math.round(rect.top),
+          fullHeight: Math.round(rect.height) >= window.innerHeight - 2,
+          hasClass: dialog.classList.contains("dialog--drawer"),
+        };
+      });
+      assertEqual(box.hasClass, true, "挂了抽屉类");
+      assert(box.right <= 1, `没贴右边，距右 ${box.right}px`);
+      assertEqual(box.top, 0, "顶部对齐");
+      assertEqual(box.fullHeight, true, "没有满高");
+      await page.evaluate(() => {
+        const dialog = document.querySelector("dialog.quick-import-dialog[open]");
+        dialog.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+        dialog.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await page.waitFor(() => document.querySelector("dialog.quick-import-dialog[open]") === null, {
+        label: "导出窗关闭",
+      });
+    });
+
+    /* 确认框不该变成抽屉——一句话的确认占整面侧边很荒唐。 */
+    await check("确认框仍居中", async () => {
+      // 用主列表的行：归档区那张表没有 data-col，openRowMenu 找不到。
+      await openRowMenu(page, "fixed-weight");
+      await clickMenuItem(page, "删除");
+      await page.waitForSelector("dialog.confirm-dialog[open]", { label: "确认框" });
+      const box = await page.evaluate(() => {
+        const dialog = document.querySelector("dialog.confirm-dialog[open]");
+        const rect = dialog.getBoundingClientRect();
+        const leftGap = rect.left;
+        const rightGap = window.innerWidth - rect.right;
+        return {
+          drawer: dialog.classList.contains("dialog--drawer"),
+          centered: Math.abs(leftGap - rightGap) <= 2,
+          fullHeight: Math.round(rect.height) >= window.innerHeight - 2,
+        };
+      });
+      assertEqual(box.drawer, false, "确认框不该挂抽屉类");
+      assertEqual(box.centered, true, "确认框应水平居中");
+      assertEqual(box.fullHeight, false, "确认框不该满高");
+      // 取消，别真删了。
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("dialog.confirm-dialog[open] button")].find(
+          (node) => node.textContent.trim() === "取消",
+        );
+        button.click();
+      });
+      await page.waitFor(() => document.querySelector("dialog.confirm-dialog[open]") === null, {
+        label: "确认框关闭",
+      });
+    });
+
     /* 点遮罩关窗。旧版十个对话框有这个行为，但登录框、分组框、模型测试窗
        故意没有——后者里面是你刚改过的 prompt。两侧都要测。 */
     await check("点遮罩关导出窗", async () => {
@@ -2506,6 +2572,26 @@ async function main() {
 
     // ── 命令面板 ────────────────────────────────────────────
     console.log("\n命令面板");
+
+    await check("命令面板仍是居中形制", async () => {
+      await pressKey(page, "k", { ctrl: true });
+      await page.waitForSelector("dialog.command-palette-dialog[open]", { label: "命令面板" });
+      const box = await page.evaluate(() => {
+        const dialog = document.querySelector("dialog.command-palette-dialog[open]");
+        const rect = dialog.getBoundingClientRect();
+        return {
+          drawer: dialog.classList.contains("dialog--drawer"),
+          centered: Math.abs(rect.left - (window.innerWidth - rect.right)) <= 2,
+        };
+      });
+      assertEqual(box.drawer, false, "命令面板不该挂抽屉类");
+      assertEqual(box.centered, true, "命令面板应水平居中");
+      await pressKey(page, "Escape");
+      await page.waitFor(
+        () => document.querySelector("dialog.command-palette-dialog[open]") === null,
+        { label: "面板关闭" },
+      );
+    });
 
     await check("Ctrl+K 唤起且再按收起", async () => {
       await pressKey(page, "k", { ctrl: true });

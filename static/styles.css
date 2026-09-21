@@ -11,6 +11,8 @@
 /* After both, so the shared rail geometry wins where they overlap. */
 @import url("./css/console-rail.css");
 @import url("./css/settings.css");
+/* 在共享样式之后：抽屉只接管几何，要盖过居中弹窗的 margin 和圆角。 */
+@import url("./css/drawer.css");
 
 html[data-theme] .token-preview-code,
 html[data-theme] #api-key,

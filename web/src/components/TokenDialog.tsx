@@ -153,7 +153,7 @@ export function TokenDialog({
       : new Date(parsedExpiry.expiresAtMs).toLocaleString("zh-CN", { hour12: false });
 
   return (
-    <dialog className="upstream-dialog" ref={ref} onCancel={onClose}>
+    <dialog className="upstream-dialog dialog--drawer" ref={ref} onCancel={onClose}>
       <form
         className="upstream-dialog-panel"
         onSubmit={(event) => {
