@@ -1451,6 +1451,41 @@ async function main() {
       assertEqual(JSON.stringify(stored), '{"max":"xhigh"}', "落库的思考强度映射");
     });
 
+    /* 后端也拦，但报回来只是一条 400。在这里拦能直接指出是哪一个头。 */
+    await check("不可覆盖的传输头被点名拦下", async () => {
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "编辑");
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
+      await page.evaluate(() => {
+        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
+        details.open = true;
+        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        setter.call(areas[0], '{"Host":"evil.example"}');
+        areas[0].dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await page.evaluate(() => {
+        document.querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]").click();
+      });
+      await sleepInPage(page, 300);
+      const toast = await page.evaluate(() => {
+        const node = [...document.querySelectorAll(".toast")].find((n) =>
+          n.textContent.includes("Host"),
+        );
+        return node?.textContent ?? null;
+      });
+      assert(toast?.includes("不能覆盖"), `没点名 Host：${toast}`);
+      assertEqual(
+        await page.evaluate(() => document.querySelector("dialog.upstream-dialog[open]") !== null),
+        true,
+        "拦下时对话框应留着",
+      );
+      await page.click("dialog.upstream-dialog[open] .icon-close");
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "编辑对话框关闭",
+      });
+    });
+
     await check("Header 不是合法 JSON 就不保存", async () => {
       await openRowMenu(page, "auto-weight");
       await clickMenuItem(page, "编辑");

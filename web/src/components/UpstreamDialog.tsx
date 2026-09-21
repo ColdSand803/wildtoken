@@ -69,6 +69,25 @@ function joinMappingLines(mappings: Record<string, string>): string {
     .join("\n");
 }
 
+/* 传输层和内部路由用的头，覆盖它们会直接弄坏请求。后端也拦，但报回来只是
+   一条 400；在这里拦能直接指出是哪一个头。 */
+const NON_OVERRIDABLE_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "transfer-encoding",
+  "host",
+  "content-length",
+  "te",
+  "trailer",
+  "upgrade",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "x-wildtoken-upstream",
+]);
+
+/** RFC 7230 的 token 字符集。 */
+const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
 /** Header 覆盖是 JSON 对象，和旧控制台同一种写法。 */
 function parseHeaderJSON(value: string): Record<string, string> {
   const trimmed = value.trim();
@@ -86,8 +105,22 @@ function parseHeaderJSON(value: string): Record<string, string> {
 
   const result: Record<string, string> = {};
   for (const [name, headerValue] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!HEADER_NAME_PATTERN.test(name)) throw new Error(`Header 名无效：${name || "（空）"}`);
     if (typeof headerValue !== "string") throw new Error(`Header ${name} 的值必须是字符串。`);
-    result[name] = headerValue;
+    // 控制字符会把一个头拆成两个（响应拆分）。
+    if (/[\x00-\x08\x0a-\x1f\x7f]/.test(headerValue)) {
+      throw new Error(`Header ${name} 的值包含非法控制字符。`);
+    }
+
+    const normalized = name.toLowerCase();
+    if (NON_OVERRIDABLE_HEADERS.has(normalized)) {
+      throw new Error(`Header ${name} 属于传输或内部路由头，不能覆盖。`);
+    }
+    // 名字对 HTTP 来说不区大小写，写两遍只是后一个默默赢了。
+    if (Object.hasOwn(result, normalized)) {
+      throw new Error(`Header 名大小写重复：${name}`);
+    }
+    result[normalized] = headerValue;
   }
   return result;
 }
