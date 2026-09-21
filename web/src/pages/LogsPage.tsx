@@ -636,6 +636,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
                 <th data-col="status">状态码</th>
                 <th data-col="duration">响应性能</th>
                 <th data-col="tokens">Tokens</th>
+                <th data-col="ip">IP</th>
                 <th data-col="detail">详情</th>
               </tr>
             </thead>
@@ -715,10 +716,14 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
 }
 
 function RatePill({ label, value }: { label: string; value: number | null }) {
+  /* 千分位分隔。TPM 常常五六位，不分隔读不出量级。RPM 走同一个组件，
+     不足一千时显示不变。 */
+  const shown =
+    value === null || value === undefined ? "—" : value.toLocaleString("zh-CN");
   return (
     <span className="log-rate-pill">
       <span className="log-rate-pill-label">{label}</span>
-      <span className="log-rate-value">{value ?? "—"}</span>
+      <span className="log-rate-value">{shown}</span>
     </span>
   );
 }
@@ -799,6 +804,16 @@ function ActiveRows({
           </td>
           <td className="tokens-cell" data-col="tokens">
             <span className="muted">-</span>
+          </td>
+          {/* 在途行同样要占这一格。IP 在请求一进来就知道了，不必等完成。 */}
+          <td className="ip-cell" data-col="ip">
+            {request.client_ip ? (
+              <code className="log-ip" title={request.client_ip}>
+                {request.client_ip}
+              </code>
+            ) : (
+              <span className="muted">-</span>
+            )}
           </td>
           <td className="detail-cell" data-col="detail">
             <span className="muted">-</span>
@@ -936,6 +951,16 @@ function LogRow({
           </span>
         </span>
       </td>
+      {/* 建列之前的旧行这一格是 null，显示破折号而不是编一个地址出来。 */}
+      <td className="ip-cell" data-col="ip">
+        {log.client_ip ? (
+          <code className="log-ip" title={log.client_ip}>
+            {log.client_ip}
+          </code>
+        ) : (
+          <span className="muted">-</span>
+        )}
+      </td>
       {/* 这一列是错误信息，不是按钮。放按钮的话，列表里根本看不出错在哪，
           每行都得点开才知道。打开详情靠整行点击。 */}
       <td className="detail-cell" data-col="detail">
@@ -991,10 +1016,22 @@ function formatCount(value: number | null): string {
   return String(value);
 }
 
+/**
+ * 日志时间：年月日时分秒，浏览器本地时区。
+ *
+ * 只给时分秒的话，跨天的两条日志看上去一样；翻历史日志时根本不知道是哪天。
+ * 补位才能对齐成列，toLocaleString 的 zh-CN 不补月份和日的十位。
+ */
 function formatTimestamp(raw: string): string {
   // 后端给的是 UTC 且不带时区标记，补上 Z 才不会被当成本地时间。
   const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
   const withZone = /[Z+]|-\d\d:\d\d$/.test(normalized) ? normalized : `${normalized}Z`;
   const date = new Date(withZone);
-  return Number.isNaN(date.getTime()) ? raw : date.toLocaleTimeString("zh-CN", { hour12: false });
+  if (Number.isNaN(date.getTime())) return raw;
+
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
 }

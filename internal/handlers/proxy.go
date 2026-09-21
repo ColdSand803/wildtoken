@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -189,6 +190,57 @@ func (g *abortLogGuard) setDownstreamToken(tokenID int64, tokenName string) {
 	g.entry.DownstreamTokenName = &tokenName
 }
 
+// clientIP resolves the caller's address for the log row.
+//
+// The deployment runs behind a reverse proxy, so the socket peer is the proxy
+// and the forwarded headers carry the caller. X-Forwarded-For is a list that
+// grows left to right as it crosses hops, so the original client is leftmost.
+//
+// Only the first entry is read and it is length-capped: the header is
+// attacker-influenced even behind a proxy, and an unbounded value would be
+// written verbatim into every log row.
+func clientIP(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		first, _, _ := strings.Cut(forwarded, ",")
+		if address := strings.TrimSpace(first); address != "" {
+			return boundedClientIP(address)
+		}
+	}
+	if real := strings.TrimSpace(r.Header.Get("X-Real-IP")); real != "" {
+		return boundedClientIP(real)
+	}
+	// RemoteAddr carries a port; the port identifies the connection, not the
+	// caller, and differs on every request from the same client.
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return boundedClientIP(host)
+	}
+	return boundedClientIP(r.RemoteAddr)
+}
+
+// maxClientIPChars bounds a header-sourced address. IPv6 with a zone runs to
+// about 45 characters, so this leaves room without allowing a log row to carry
+// an arbitrary payload.
+const maxClientIPChars = 64
+
+func boundedClientIP(address string) string {
+	if len(address) > maxClientIPChars {
+		return address[:maxClientIPChars]
+	}
+	return address
+}
+
+func (g *abortLogGuard) setClientIP(address string) {
+	if address == "" {
+		return
+	}
+	// The in-flight row shows the same column, so both sides get it.
+	g.active.SetClientIP(address)
+	if g.entry == nil {
+		return
+	}
+	g.entry.ClientIP = &address
+}
+
 func (g *abortLogGuard) setClientType(clientType string) {
 	g.active.SetClientType(clientType)
 	if g.entry == nil {
@@ -286,6 +338,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		defer guard.finish()
 		guard.setDownstreamToken(auth.TokenID, auth.TokenName)
 		guard.setClientType(auth.ClientType)
+		guard.setClientIP(clientIP(r))
 
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDownstreamBodyBytes))
 		if err != nil {
@@ -479,12 +532,15 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			&selected.Upstream, proxy.RequestContext{
 				DownstreamTokenID:   config.auth.TokenID,
 				DownstreamTokenName: config.auth.TokenName,
-				ClientType:          config.auth.ClientType,
-				RequestModel:        config.model,
-				ForwardModel:        selected.ForwardModel,
-				Method:              r.Method,
-				Path:                config.path,
-				LogBodyMaxBytes:     logBodyMaxBytes,
+				// The success path builds its own LogEntry from this context, so
+				// the guard's copy never reaches it.
+				ClientIP:        clientIP(r),
+				ClientType:      config.auth.ClientType,
+				RequestModel:    config.model,
+				ForwardModel:    selected.ForwardModel,
+				Method:          r.Method,
+				Path:            config.path,
+				LogBodyMaxBytes: logBodyMaxBytes,
 			}, prepared)
 
 		failed := err != nil || response.Status < 200 || response.Status >= 300

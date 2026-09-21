@@ -97,6 +97,15 @@ class CDP {
     this.#handlers.get(method).push(handler);
   }
 
+  /* 取消订阅。用完不摘的话，后续用例的请求会继续落进旧数组，
+     断言就可能拿到别人的请求。 */
+  off(method, handler) {
+    const list = this.#handlers.get(method);
+    if (!list) return;
+    const index = list.indexOf(handler);
+    if (index !== -1) list.splice(index, 1);
+  }
+
   close() {
     this.#ws.close();
   }
@@ -1944,13 +1953,13 @@ async function main() {
       );
     });
 
-    await check("表头与表体均为 10 列", async () => {
+    await check("表头与表体均为 11 列", async () => {
       const head = await page.count("table.log-table thead th");
       const body = await page.evaluate(
         () => document.querySelector("table.log-table tbody tr")?.children.length ?? 0,
       );
-      assertEqual(head, 10, "表头列数");
-      assertEqual(body, 10, "表体格数");
+      assertEqual(head, 11, "表头列数");
+      assertEqual(body, 11, "表体格数");
       const reasoning = await page.count("table.log-table thead th[data-col=reasoning]");
       assertEqual(reasoning, 1, "思考强度表头");
     });
@@ -2171,7 +2180,7 @@ async function main() {
       const cells = await page.evaluate(
         () => document.querySelector("tr.log-row--active")?.children.length ?? 0,
       );
-      assertEqual(cells, 10, "在途行格数");
+      assertEqual(cells, 11, "在途行格数");
 
       /* 一开始就用秒。一秒内显毫秒的话，这一格会在 312ms 和 1.3s 之间突然
          换单位，逐秒刷新看上去像倒退了。 */
@@ -2187,6 +2196,81 @@ async function main() {
       /* 请求可能已经结束（行没了），那也算数——说明它确实走完了一轮。
          只有「行还在且数字一模一样」才是计时死了。 */
       assert(second === null || second !== first, `已用时冻住在 ${first}`);
+    });
+
+    /* IP 列放在日志段最后：它要新打一条请求，而这条会顶到列表第一行。
+       前面的会话视图等用例都拿第一行，放在它们之前会把它们带歪。 */
+    await check("IP 列落库且排在详情左边", async () => {
+      await gotoView(page, "日志");
+      const layout = await page.evaluate(() => {
+        const heads = [...document.querySelectorAll("table thead th")].map(
+          (node) => node.getAttribute("data-col"),
+        );
+        return { ipIndex: heads.indexOf("ip"), detailIndex: heads.indexOf("detail") };
+      });
+      assert(layout.ipIndex !== -1, "表头没有 IP 列");
+      assertEqual(layout.detailIndex, layout.ipIndex + 1, "IP 应紧靠详情左边");
+
+      /* 从 Node 发而不是浏览器：这一条要指定 X-Forwarded-For，而浏览器对
+         请求头有自己的一套限制，不是可靠的发送端。 */
+      const marker = "198.51.100.7";
+      const forwarded = await fetch(`${ORIGIN}/v1/chat/completions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${seeded.downstreamToken}`,
+          // 两跳：左边是客户端，右边是反代。取左边那个。
+          "x-forwarded-for": `${marker}, 10.0.0.1`,
+        },
+        body: JSON.stringify({
+          model: "gpt-4o",
+          messages: [{ role: "user", content: "IP 列验证" }],
+        }),
+      });
+
+      /* 分两步等，而不是一个条件里同时要求接口和 DOM：合在一起的话，
+         超时只会说“没找到”，分不清是后端没记还是前端没渲染。 */
+      const api = await page.waitFor(
+        async () => {
+          const admin = localStorage.getItem("wildtoken_admin_token");
+          const listed = await (
+            await fetch("/api/admin/logs/?limit=20", { headers: { "x-admin-token": admin } })
+          ).json();
+          const items = listed.items ?? [];
+          const hit = items.find((item) => item.client_ip === "198.51.100.7");
+          return hit ? { id: hit.id, ip: hit.client_ip } : false;
+        },
+        {
+          label: `接口里带 ${marker} 的日志（转发响应 ${forwarded.status}）`,
+          timeout: 20_000,
+        },
+      ).catch(async (err) => {
+        const dump = await page.evaluate(async () => {
+          const admin = localStorage.getItem("wildtoken_admin_token");
+          const listed = await (
+            await fetch("/api/admin/logs/?limit=5", { headers: { "x-admin-token": admin } })
+          ).json();
+          return (listed.items ?? []).map((item) => ({
+            id: item.id,
+            ip: item.client_ip,
+            status: item.status_code,
+            model: item.model,
+          }));
+        });
+        throw new Error(`${err.message}\n最近 5 条：${JSON.stringify(dump)}`);
+      });
+
+      assertEqual(api.ip, marker, "应取 XFF 最左跳，而不是反代地址");
+
+      const shown = await page.waitFor(
+        (logID) => {
+          const cell = document.querySelector(`tr[data-log-id='${logID}'] [data-col='ip']`);
+          return cell ? cell.textContent.trim() : false;
+        },
+        { label: `表里 id=${api.id} 那一行的 IP 格`, timeout: 15_000 },
+        api.id,
+      );
+      assertEqual(shown, marker, "屏上的 IP 要和接口一致");
     });
 
     // ── 看板页 ──────────────────────────────────────────────
@@ -2342,6 +2426,31 @@ async function main() {
       await page.click(".dashboard-ranking-controls .log-sensitive-toggle");
     });
 
+    /* 自定义时间段。量 opacity 而不是看类名：基线规则就是 opacity 0，类挂上了
+       但规则没生效的话，类名断言照样会过。 */
+    await check("自定义时间段真的展开并生效", async () => {
+      await page.click("[data-dashboard-range='custom']");
+      const opened = await page.waitFor(
+        () => {
+          const panel = document.querySelector(".dashboard-custom-range");
+          if (!panel || panel.hidden) return false;
+          const style = getComputedStyle(panel);
+          return Number(style.opacity) > 0.9 ? { opacity: Number(style.opacity) } : false;
+        },
+        { label: "自定义面板展开", timeout: 5000 },
+      );
+      assert(opened.opacity > 0.9, `面板仍然透明：${opened.opacity}`);
+      // 内部元素另有一道同样的门，输入框真看得见才算展开。
+      const inner = await page.evaluate(() => {
+        const node = document.querySelector(".dashboard-custom-range-inner > *");
+        return node ? Number(getComputedStyle(node).opacity) : null;
+      });
+      assert(inner !== null && inner > 0.9, `面板内元素透明：${inner}`);
+
+      // 换回普通档：下一条用例要验“未填日期时按钮禁用”，不能给它留下日期。
+      await page.click("[data-dashboard-range='today']");
+    });
+
     await check("切档重新取数且落盘", async () => {
       await page.click("[data-dashboard-range='7d']");
       const state = await page.waitFor(
@@ -2376,6 +2485,12 @@ async function main() {
 
       await page.fill(".dashboard-custom-range input[aria-label='开始日期']", "2020-01-01");
       await page.fill(".dashboard-custom-range input[aria-label='结束日期']", "2020-01-02");
+
+      /* 订阅要赶在第一次点击之前。应用过一次后状态就不再变，再点一下
+         React 不会重新取数，什么请求也抓不到。 */
+      const requests = [];
+      const collectCustom = (event) => requests.push(event.request.url);
+      cdp.on("Network.requestWillBeSent", collectCustom);
       await page.click(".dashboard-apply-custom");
       const stored = await page.waitFor(
         () => {
@@ -2385,6 +2500,22 @@ async function main() {
         { label: "自定义区间落盘" },
       );
       assertEqual(stored, "2020-01-01~2020-01-02", "区间落盘");
+      await sleepInPage(page, 1200);
+      cdp.off("Network.requestWillBeSent", collectCustom);
+
+      // 落盘了但请求没拼参数的话，只看 localStorage 照样能过。
+
+      const custom = requests.filter((url) => url.includes("range=custom"));
+      assert(custom.length > 0, "没有一个请求带 range=custom");
+      assert(
+        custom.some((url) => url.includes("start_date=2020-01-01")),
+        `请求里没带起始日期：${custom[0]}`,
+      );
+      assert(
+        custom.some((url) => url.includes("end_date=2020-01-02")),
+        `请求里没带结束日期：${custom[0]}`,
+      );
+
       // 换回一个普通档，别把后续检查留在空区间上。
       await page.click("[data-dashboard-range='30d']");
     });
@@ -2530,7 +2661,7 @@ async function main() {
           assertEqual(row.shown, row.plain, "不超八位应全显");
           continue;
         }
-        const want = `${chars.slice(0, 4).join("")}\u2026${chars.slice(-4).join("")}`;
+        const want = `${chars.slice(0, 4).join("")}****${chars.slice(-4).join("")}`;
         assertEqual(row.shown, want, `预览应为前4后4：${row.plain}`);
         checkedLong += 1;
       }

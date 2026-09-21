@@ -52,6 +52,25 @@
   min-width: 160px;
 }
 
+/* IP 列。等宽才能竖着对齐段位，扫一眼看出同网段的请求。
+   IPv6 很长，给个上限并省略，完整值在 title 里。 */
+.ip-cell {
+  max-width: 150px;
+  white-space: nowrap;
+}
+
+.log-ip {
+  color: var(--muted);
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
 .log-error-detail {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

@@ -344,9 +344,13 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
     errorRate === null ? "" : Number(errorRate) >= 10 ? "tone-danger" : Number(errorRate) >= 2 ? "tone-warn" : "";
   const metrics = system?.runtime_metrics;
   const cleanup = metrics?.cleanup;
+  /* 响应总是嵌套的：选了具体时间窗时，服务端把该窗的聚合值塞进 today。
+     按扁平结构取字段全是 undefined，卡片渲染成 NaN。 */
+  // 不叫 window：会遮蔽全局对象。
+  const usageWindow = usage?.today;
   const cacheRate =
-    usage && usage.prompt_tokens > 0
-      ? `${((usage.prompt_cached_tokens / usage.prompt_tokens) * 100).toFixed(1)}%`
+    usageWindow && usageWindow.prompt_tokens > 0
+      ? `${((usageWindow.prompt_cached_tokens / usageWindow.prompt_tokens) * 100).toFixed(1)}%`
       : "—";
 
   return (
@@ -385,7 +389,17 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
               </button>
             </div>
 
-            <div className="dashboard-custom-range" hidden={range !== "custom"}>
+            {/* is-open 是可见性开关，不是装饰：基线规则是 opacity 0，只拿掉 hidden
+                面板仍然全透明，点“自定义”像没反应。内部元素还有同样一道门。 */}
+            <div
+              className={
+                range === "custom"
+                  ? "dashboard-custom-range is-open"
+                  : "dashboard-custom-range"
+              }
+              hidden={range !== "custom"}
+              aria-hidden={range !== "custom"}
+            >
               <div className="dashboard-custom-range-inner">
                 <label className="dashboard-date-field">
                   <span className="dashboard-date-text">开始</span>
@@ -455,18 +469,18 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
             />
             <Kpi
               label="Tokens"
-              value={usage ? compact(usage.total_tokens) : "—"}
-              hint={`${rangeLabel} · 输入 ${compact(usage?.prompt_tokens ?? 0)}`}
+              value={usageWindow ? compact(usageWindow.total_tokens) : "—"}
+              hint={`${rangeLabel} · 输入 ${compact(usageWindow?.prompt_tokens ?? 0)}`}
             />
             <Kpi
               label="缓存率"
               value={cacheRate}
-              hint={`命中 ${compact(usage?.prompt_cached_tokens ?? 0)} / 输入 ${compact(usage?.prompt_tokens ?? 0)}`}
+              hint={`命中 ${compact(usageWindow?.prompt_cached_tokens ?? 0)} / 输入 ${compact(usageWindow?.prompt_tokens ?? 0)}`}
             />
             <Kpi
               label="请求（全部）"
-              value={usage ? compact(usage.all_request_count) : "—"}
-              hint={`计入用量 ${compact(usage?.request_count ?? 0)} 条`}
+              value={usageWindow ? compact(usageWindow.all_request_count) : "—"}
+              hint={`计入用量 ${compact(usageWindow?.request_count ?? 0)} 条`}
             />
             <Kpi
                   label="活跃流"

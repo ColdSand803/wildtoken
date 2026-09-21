@@ -391,7 +391,8 @@ function tokenPreview(token: APIToken): string {
 
   const chars = Array.from(token.token);
   if (chars.length <= 8) return token.token;
-  return `${chars.slice(0, 4).join("")}…${chars.slice(-4).join("")}`;
+  // 固定四个星号，不随真实长度变——变了就把长度泄露出去了。
+  return `${chars.slice(0, 4).join("")}****${chars.slice(-4).join("")}`;
 }
 
 function TokenRow({

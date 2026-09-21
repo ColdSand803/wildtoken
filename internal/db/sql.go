@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS request_logs (
     path                TEXT NOT NULL,
     downstream_token_id INTEGER REFERENCES api_tokens(id) ON DELETE SET NULL,
     downstream_token_name TEXT,
+    -- Client address, as resolved from X-Forwarded-For / X-Real-IP with the
+    -- socket peer as fallback. NULL on rows written before the column existed.
+    client_ip           TEXT,
     client_type         TEXT NOT NULL DEFAULT 'unknown',
     upstream_id         INTEGER REFERENCES upstreams(id) ON DELETE SET NULL,
     upstream_name       TEXT,

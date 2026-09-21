@@ -38,7 +38,7 @@ const (
 // logListColumns is the projection backing RequestLogOut.
 const logListColumns = `id, created_at, method, path,
                 downstream_token_id, downstream_token_name,
-                client_type,
+                client_ip, client_type,
                 upstream_id, upstream_name, model, request_model, upstream_model,
                 reasoning_effort, upstream_reasoning_effort, response_reasoning_effort,
                 stream, status_code,
@@ -207,9 +207,10 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
 	var durationMs, firstTokenMs sql.NullInt64
+	var clientIP sql.NullString
 
 	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Method, &entry.Path,
-		&downstreamTokenID, &downstreamTokenName, &entry.ClientType,
+		&downstreamTokenID, &downstreamTokenName, &clientIP, &entry.ClientType,
 		&upstreamID, &upstreamName, &model, &requestModel, &upstreamModel,
 		&reasoningEffort, &upstreamReasoningEffort, &responseReasoningEffort,
 		&entry.Stream, &statusCode,
@@ -223,6 +224,7 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	entry.DownstreamTokenID = nullInt64Ptr(downstreamTokenID)
 	entry.UpstreamID = nullInt64Ptr(upstreamID)
 	entry.DownstreamTokenName = nullStringPtr(downstreamTokenName)
+	entry.ClientIP = nullStringPtr(clientIP)
 	entry.UpstreamName = nullStringPtr(upstreamName)
 	entry.Model = nullStringPtr(model)
 	entry.RequestModel = nullStringPtr(requestModel)
@@ -299,7 +301,7 @@ func ListLogs(ctx context.Context, database *sql.DB, limit, offset int32,
 func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.RequestLogDetailOut, bool, error) {
 	row := database.QueryRowContext(ctx, `SELECT l.id, l.created_at, l.method, l.path,
               l.downstream_token_id, l.downstream_token_name,
-              l.client_type,
+              l.client_ip, l.client_type,
               l.upstream_id, l.upstream_name, l.model,
               l.request_model, l.upstream_model,
               l.reasoning_effort, l.upstream_reasoning_effort,
@@ -331,9 +333,10 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	var requestSnapshot, upstreamRequestOverride sql.NullString
 	var responseSnapshot, downstreamResponseOverride sql.NullString
 	var upstreamRequestIsOverride, downstreamResponseIsOverride int32
+	var clientIP sql.NullString
 
 	err := row.Scan(&detail.ID, &detail.CreatedAt, &detail.Method, &detail.Path,
-		&downstreamTokenID, &downstreamTokenName, &detail.ClientType,
+		&downstreamTokenID, &downstreamTokenName, &clientIP, &detail.ClientType,
 		&upstreamID, &upstreamName, &model, &requestModel, &upstreamModel,
 		&reasoningEffort, &upstreamReasoningEffort, &responseReasoningEffort,
 		&detail.Stream, &statusCode,
@@ -352,6 +355,7 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	detail.DownstreamTokenID = nullInt64Ptr(downstreamTokenID)
 	detail.UpstreamID = nullInt64Ptr(upstreamID)
 	detail.DownstreamTokenName = nullStringPtr(downstreamTokenName)
+	detail.ClientIP = nullStringPtr(clientIP)
 	detail.UpstreamName = nullStringPtr(upstreamName)
 	detail.Model = nullStringPtr(model)
 	detail.RequestModel = nullStringPtr(requestModel)

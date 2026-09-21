@@ -61,6 +61,8 @@ export interface RequestLog {
   path: string;
   downstream_token_id: number | null;
   downstream_token_name: string | null;
+  /** 建列之前的旧行是 null。*/
+  client_ip: string | null;
   client_type: string;
   upstream_id: number | null;
   upstream_name: string | null;
@@ -92,6 +94,8 @@ export interface ActiveRequest {
   path: string;
   downstream_token_id: number | null;
   downstream_token_name: string | null;
+  /** 建列之前的旧行是 null。*/
+  client_ip: string | null;
   client_type: string;
   upstream_id: number | null;
   upstream_name: string | null;
@@ -210,12 +214,30 @@ export interface TopStats {
   channel_tokens: TopItem[];
 }
 
-export interface TokenUsage {
+export interface TokenUsageWindow {
   total_tokens: number;
   prompt_tokens: number;
   prompt_cached_tokens: number;
+  /** 只统计记录了 token 总量的请求。 */
   request_count: number;
+  /** 全部请求，含报错和没有用量的。 */
   all_request_count: number;
+}
+
+/**
+ * token-usage 接口的响应**总是嵌套的**，没有扁平形态。
+ *
+ * 选了具体时间窗时，服务端把该窗的聚合值塞进 today（不管问的是哪个窗）；
+ * default 档才是五个窗各自有值。按扁平结构取 total_tokens 永远是 undefined。
+ */
+export interface TokenUsage {
+  today: TokenUsageWindow;
+  one_day: TokenUsageWindow;
+  seven_days: TokenUsageWindow;
+  thirty_days: TokenUsageWindow;
+  all_time: TokenUsageWindow;
+  range?: string;
+  range_label?: string;
 }
 
 /** 运行时设置。revision 是乐观锁，保存时原样带回去。 */

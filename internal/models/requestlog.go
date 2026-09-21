@@ -7,12 +7,14 @@ import (
 
 // RequestLogOut is the list representation of a proxied request.
 type RequestLogOut struct {
-	ID                        int64   `json:"id"`
-	CreatedAt                 string  `json:"created_at"`
-	Method                    string  `json:"method"`
-	Path                      string  `json:"path"`
-	DownstreamTokenID         *int64  `json:"downstream_token_id"`
-	DownstreamTokenName       *string `json:"downstream_token_name"`
+	ID                  int64   `json:"id"`
+	CreatedAt           string  `json:"created_at"`
+	Method              string  `json:"method"`
+	Path                string  `json:"path"`
+	DownstreamTokenID   *int64  `json:"downstream_token_id"`
+	DownstreamTokenName *string `json:"downstream_token_name"`
+	// ClientIP is null on rows written before the column existed.
+	ClientIP                  *string `json:"client_ip"`
 	ClientType                string  `json:"client_type"`
 	UpstreamID                *int64  `json:"upstream_id"`
 	UpstreamName              *string `json:"upstream_name"`
@@ -94,6 +96,7 @@ type ActiveRequestOut struct {
 	Path                string  `json:"path"`
 	DownstreamTokenID   *int64  `json:"downstream_token_id"`
 	DownstreamTokenName *string `json:"downstream_token_name"`
+	ClientIP            *string `json:"client_ip"`
 	ClientType          string  `json:"client_type"`
 	UpstreamID          *int64  `json:"upstream_id"`
 	UpstreamName        *string `json:"upstream_name"`

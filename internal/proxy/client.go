@@ -337,12 +337,14 @@ type Deps struct {
 type RequestContext struct {
 	DownstreamTokenID   int64
 	DownstreamTokenName string
-	ClientType          string
-	RequestModel        *string
-	ForwardModel        *string
-	Method              string
-	Path                string
-	LogBodyMaxBytes     int
+	// ClientIP is the caller's address; empty when it could not be resolved.
+	ClientIP        string
+	ClientType      string
+	RequestModel    *string
+	ForwardModel    *string
+	Method          string
+	Path            string
+	LogBodyMaxBytes int
 }
 
 // ProxyRequest forwards a request upstream, streaming SSE bodies as they arrive.
@@ -534,11 +536,20 @@ func baseLogEntry(requestCtx RequestContext, upstream *models.UpstreamRow,
 	tokenName := requestCtx.DownstreamTokenName
 	clientType := requestCtx.ClientType
 
+	// nil rather than a pointer to "": the column means "not known", and an
+	// empty string would render as a blank cell instead of a dash.
+	var clientIP *string
+	if requestCtx.ClientIP != "" {
+		address := requestCtx.ClientIP
+		clientIP = &address
+	}
+
 	return LogEntry{
 		Method:                  requestCtx.Method,
 		Path:                    requestCtx.Path,
 		DownstreamTokenID:       &tokenID,
 		DownstreamTokenName:     &tokenName,
+		ClientIP:                clientIP,
 		ClientType:              &clientType,
 		UpstreamID:              &upstreamID,
 		UpstreamName:            &upstreamName,

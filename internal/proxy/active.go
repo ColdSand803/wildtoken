@@ -47,6 +47,7 @@ type ActiveRequest struct {
 	path                    string
 	downstreamTokenID       *int64
 	downstreamTokenName     *string
+	clientIP                *string
 	clientType              string
 	upstreamID              *int64
 	upstreamName            *string
@@ -157,6 +158,7 @@ func (a *ActiveRequest) snapshotLocked(now time.Time) models.ActiveRequestOut {
 		Path:                    a.path,
 		DownstreamTokenID:       a.downstreamTokenID,
 		DownstreamTokenName:     a.downstreamTokenName,
+		ClientIP:                a.clientIP,
 		ClientType:              a.clientType,
 		UpstreamID:              a.upstreamID,
 		UpstreamName:            a.upstreamName,
@@ -194,6 +196,14 @@ func (a *ActiveRequest) SetDownstreamToken(tokenID int64, tokenName string) {
 		a.downstreamTokenID = &tokenID
 		a.downstreamTokenName = &tokenName
 	})
+}
+
+// SetClientIP records the caller's address.
+func (a *ActiveRequest) SetClientIP(address string) {
+	if address == "" {
+		return
+	}
+	a.update(func() { a.clientIP = &address })
 }
 
 // SetClientType records the detected downstream client.

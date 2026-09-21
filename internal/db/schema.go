@@ -126,6 +126,9 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"prompt_cached_tokens", "INTEGER"},
 		{"cache_creation_tokens", "INTEGER"},
 		{"completion_reasoning_tokens", "INTEGER"},
+		// Client address. NULL on rows written before this column existed, which
+		// the console renders as a dash rather than inventing an address.
+		{"client_ip", "TEXT"},
 	} {
 		if err := ensureColumn(ctx, db, "request_logs", column.name, column.definition); err != nil {
 			return err

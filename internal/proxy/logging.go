@@ -34,10 +34,13 @@ const (
 
 // LogEntry is a structured record of one proxied request.
 type LogEntry struct {
-	Method                    string
-	Path                      string
-	DownstreamTokenID         *int64
-	DownstreamTokenName       *string
+	Method              string
+	Path                string
+	DownstreamTokenID   *int64
+	DownstreamTokenName *string
+	// ClientIP is the caller's address, resolved from the forwarded headers
+	// with the socket peer as fallback. nil when it could not be determined.
+	ClientIP                  *string
 	ClientType                *string
 	UpstreamID                *int64
 	UpstreamName              *string
@@ -383,15 +386,17 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 		responsePayload := encodeSnapshotPair(entry.UpstreamResponse, entry.DownstreamResponse)
 
 		result, err := tx.ExecContext(ctx, `INSERT INTO request_logs
-        (method, path, downstream_token_id, downstream_token_name, client_type,
+        (method, path, downstream_token_id, downstream_token_name, client_ip,
+         client_type,
          upstream_id, upstream_name, model, request_model, upstream_model,
          reasoning_effort, upstream_reasoning_effort, response_reasoning_effort,
          stream, status_code,
          prompt_tokens, completion_tokens, total_tokens,
          prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
          duration_ms, first_token_ms, error, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
+			entry.ClientIP,
 			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,
 			entry.RequestModel, entry.UpstreamModel, entry.ReasoningEffort,
 			entry.UpstreamReasoningEffort,
@@ -453,6 +458,7 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 					Path:                      entry.Path,
 					DownstreamTokenID:         entry.DownstreamTokenID,
 					DownstreamTokenName:       entry.DownstreamTokenName,
+					ClientIP:                  entry.ClientIP,
 					ClientType:                clientType,
 					UpstreamID:                entry.UpstreamID,
 					UpstreamName:              entry.UpstreamName,
