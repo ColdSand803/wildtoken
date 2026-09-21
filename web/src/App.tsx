@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { UnauthorizedError } from "./api";
 import { AdminTokenDialog } from "./components/AdminTokenDialog";
+import { ConfirmProvider, ToastProvider } from "./components/feedback";
 import { Topbar } from "./components/Topbar";
 import { LogsPage } from "./pages/LogsPage";
 import { UpstreamsPage } from "./pages/UpstreamsPage";
@@ -31,27 +32,31 @@ export function App() {
   }, [handleUnauthorized]);
 
   return (
-    <div className="app-shell">
-      <Topbar view={view} onNavigate={setView} />
-      <main className="content">
-        {view === "upstreams" ? (
-          <UpstreamsPage onUnauthorized={handleUnauthorized} />
-        ) : view === "logs" ? (
-          <LogsPage onUnauthorized={handleUnauthorized} />
-        ) : (
-          <NotImplemented view={view} />
-        )}
-      </main>
-      <AdminTokenDialog
-        open={needsToken}
-        error={tokenError}
-        onClose={() => setNeedsToken(false)}
-        onSubmitted={() => {
-          setNeedsToken(false);
-          setTokenError("");
-        }}
-      />
-    </div>
+    <ToastProvider>
+      <ConfirmProvider>
+        <div className="app-shell">
+          <Topbar view={view} onNavigate={setView} />
+          <main className="content">
+            {view === "upstreams" ? (
+              <UpstreamsPage onUnauthorized={handleUnauthorized} />
+            ) : view === "logs" ? (
+              <LogsPage onUnauthorized={handleUnauthorized} />
+            ) : (
+              <NotImplemented view={view} />
+            )}
+          </main>
+          <AdminTokenDialog
+            open={needsToken}
+            error={tokenError}
+            onClose={() => setNeedsToken(false)}
+            onSubmitted={() => {
+              setNeedsToken(false);
+              setTokenError("");
+            }}
+          />
+        </div>
+      </ConfirmProvider>
+    </ToastProvider>
   );
 }
 
