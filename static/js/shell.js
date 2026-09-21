@@ -367,6 +367,9 @@ function switchView(name) {
   if (name === "dashboard") {
     loadDashboardData();
     startDashboardRefresh();
+    if (typeof syncDashboardRangeThumb === "function") {
+      window.requestAnimationFrame(syncDashboardRangeThumb);
+    }
   } else {
     stopDashboardRefresh();
   }

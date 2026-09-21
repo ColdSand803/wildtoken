@@ -1717,8 +1717,12 @@ function setDashboardCustomRangeOpen(open) {
   const finishHide = () => {
     if (el.classList.contains("is-open")) return;
     el.hidden = true;
+    window.requestAnimationFrame(syncDashboardRangeThumb);
   };
-  if (el.hidden && !el.classList.contains("is-open")) return;
+  if (el.hidden && !el.classList.contains("is-open")) {
+    window.requestAnimationFrame(syncDashboardRangeThumb);
+    return;
+  }
   el.setAttribute("aria-hidden", "true");
   el.classList.remove("is-open");
   window.requestAnimationFrame(syncDashboardRangeThumb);
@@ -1737,8 +1741,14 @@ function syncDashboardRangeThumb() {
     if (thumb) thumb.style.opacity = "0";
     return;
   }
-  thumb.style.width = `${active.offsetWidth}px`;
-  thumb.style.height = `${active.offsetHeight}px`;
+  const width = active.offsetWidth;
+  const height = active.offsetHeight;
+  if (!width || !height) {
+    thumb.style.opacity = "0";
+    return;
+  }
+  thumb.style.width = `${width}px`;
+  thumb.style.height = `${height}px`;
   thumb.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
   thumb.style.opacity = "1";
 }
@@ -1751,6 +1761,7 @@ function syncDashboardRangeChips() {
     button.setAttribute("aria-pressed", on ? "true" : "false");
   });
   setDashboardCustomRangeOpen(value === "custom");
+  window.requestAnimationFrame(syncDashboardRangeThumb);
 }
 
 syncDashboardDateMirrors();
