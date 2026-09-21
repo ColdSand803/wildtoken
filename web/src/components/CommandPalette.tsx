@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useDialog } from "../useDialog";
+
 export interface Command {
   id: string;
   title: string;
@@ -19,7 +21,7 @@ export function CommandPalette({ commands }: { commands: Command[] }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const dialogRef = useDialog(open, () => setOpen(false));
   const inputRef = useRef<HTMLInputElement>(null);
 
   const visible = useMemo(() => {
@@ -48,17 +50,12 @@ export function CommandPalette({ commands }: { commands: Command[] }) {
     return () => document.removeEventListener("keydown", onKeyDown, true);
   }, []);
 
+  /* 开窗时清空上一次的搜索词并聚焦。开关本身交给 useDialog。 */
   useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) {
-      setQuery("");
-      setActive(0);
-      dialog.showModal();
-      inputRef.current?.focus();
-    } else if (!open && dialog.open) {
-      dialog.close();
-    }
+    if (!open) return;
+    setQuery("");
+    setActive(0);
+    inputRef.current?.focus();
   }, [open]);
 
   /* 筛完之后高亮可能落在列表外面。夹回最后一项，而不是让回车什么都不做。 */

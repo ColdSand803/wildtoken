@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import {
   UnauthorizedError,
@@ -13,6 +13,7 @@ import {
   updatePromptTemplate,
 } from "../api";
 import { useConfirm, useToast } from "../components/feedback";
+import { useDialog } from "../useDialog";
 import {
   APPEARANCE_EVENT,
   BUILTIN_THEMES,
@@ -758,7 +759,7 @@ function PromptDialog({
   onSubmit: (name: string, prompt: string) => void;
   onClose: () => void;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
+  const ref = useDialog(open, onClose);
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
 
@@ -767,13 +768,6 @@ function PromptDialog({
     setName(template?.name ?? "");
     setPrompt(template?.prompt ?? "");
   }, [open, template]);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
-  }, [open]);
 
   return (
     <dialog className="confirm-dialog" ref={ref} onCancel={onClose} aria-label="Prompt 模板">

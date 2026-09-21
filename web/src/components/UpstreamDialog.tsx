@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { UnauthorizedError, fetchModelsPreview } from "../api";
 import type { Upstream } from "../types";
 import { ModelDialog, parseManualEntry } from "./ModelDialog";
 import type { ModelSelection } from "./ModelDialog";
 import { useToast } from "./feedback";
+import { useDialog } from "../useDialog";
 
 /** 提交给 POST/PUT /api/admin/upstreams 的形状。 */
 export interface UpstreamPayload {
@@ -303,7 +304,7 @@ export function UpstreamDialog({
     null,
   );
   const [fetching, setFetching] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const dialogRef = useDialog(open, onClose);
   const toast = useToast();
 
   /* 每次打开都按当前渠道重置。不重置的话，关掉再开会留着上一个渠道的值。 */
@@ -320,13 +321,6 @@ export function UpstreamDialog({
       ),
     );
   }, [open, upstream]);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
-  }, [open]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }));

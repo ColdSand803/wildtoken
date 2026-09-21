@@ -941,6 +941,51 @@ async function main() {
       await page.press("Escape");
     });
 
+    /* 点遮罩关窗。旧版十个对话框有这个行为，但登录框、分组框、模型测试窗
+       故意没有——后者里面是你刚改过的 prompt。两侧都要测。 */
+    await check("点遮罩关导出窗", async () => {
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("button")].find(
+          (node) => node.textContent.trim() === "导出",
+        );
+        button.click();
+      });
+      await page.waitForSelector("dialog.quick-import-dialog[open]", { label: "导出窗" });
+      // 在 dialog 本体（即遮罩）上完成一次按下→抬起。
+      await page.evaluate(() => {
+        const dialog = document.querySelector("dialog.quick-import-dialog[open]");
+        dialog.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+        dialog.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await page.waitFor(() => document.querySelector("dialog.quick-import-dialog[open]") === null, {
+        label: "导出窗被遮罩关掉",
+      });
+    });
+
+    await check("模型测试窗不被遮罩关掉", async () => {
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "测试模型");
+      await page.waitForSelector("dialog[aria-label=测试模型][open]", { label: "测试窗" });
+      await page.evaluate(() => {
+        const dialog = document.querySelector("dialog[aria-label=测试模型][open]");
+        dialog.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+        dialog.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+      await sleepInPage(page, 300);
+      assertEqual(
+        await page.evaluate(
+          () => document.querySelector("dialog[aria-label=测试模型][open]") !== null,
+        ),
+        true,
+        "里面有改过的 prompt，不该被遮罩关掉",
+      );
+      await page.click("dialog[aria-label=测试模型] .icon-close");
+      await page.waitFor(
+        () => document.querySelector("dialog[aria-label=测试模型][open]") === null,
+        { label: "测试窗关闭" },
+      );
+    });
+
     /* 不带密钥的备份看着完整，导回去每个渠道都要重填。直接比导出文本里
        有没有密钥字段，不看开关勾没勾。 */
     await check("导出默认带密钥，关掉后不带", async () => {

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchUpstreamBalance } from "../api";
 import type { BalanceResult, Upstream } from "../types";
+import { useDialog } from "../useDialog";
 
 export type BalanceProvider = "new-api" | "sub2api";
 
@@ -74,7 +75,7 @@ export function BalanceDialog({
   const [result, setResult] = useState<BalanceResult | null>(null);
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const dialogRef = useDialog(open, onClose);
   /* 每次发起自增。刷新和重开都作废在途的那次——慢的那个回来时不能盖掉
      它输掉竞速的那个新结果。 */
   const queryRef = useRef(0);
@@ -107,13 +108,6 @@ export function BalanceDialog({
     }
     void query();
   }, [open, query]);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
-  }, [open]);
 
   const summary = busy ? "正在查询..." : result ? "查询成功" : failure ? "查询失败" : "";
 

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { APIToken } from "../types";
+import { useDialog } from "../useDialog";
 
 export interface TokenPayload {
   name: string;
@@ -120,7 +121,7 @@ export function TokenDialog({
   onSubmit: (payload: TokenPayload) => void;
   onClose: () => void;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
+  const ref = useDialog(open, onClose);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [enabled, setEnabled] = useState(true);
@@ -142,13 +143,6 @@ export function TokenDialog({
     // 编辑时把现有到期时间填回输入框，保存时原样解回去，不动就不会变。
     setExpires(expiryInputValue(token?.expires_at ?? null));
   }, [open, token, groups]);
-
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
-  }, [open]);
 
   /* 边输边算，看得见结果才敢填 1d3h 这种写法。 */
   const parsedExpiry = parseExpiry(expires, Date.now());

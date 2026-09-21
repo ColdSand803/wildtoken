@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { UnauthorizedError, fetchUpstreamModels, listPromptTemplates, testUpstreamModel } from "../api";
 import type { ModelTestResult, PromptTemplate, Upstream } from "../types";
 import { useToast } from "./feedback";
+import { useDialog } from "../useDialog";
 
 /** 三种下游协议。值是后端认的，标签里的客户端名是它们各自的参照实现。 */
 const PROTOCOLS = [
@@ -91,7 +92,7 @@ export function ModelTestDialog({
   const [result, setResult] = useState<ModelTestResult | null>(null);
   const [sending, setSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const dialogRef = useDialog(open);
   const toast = useToast();
 
   useEffect(() => {
@@ -123,13 +124,6 @@ export function ModelTestDialog({
       cancelled = true;
     };
   }, [open, upstream, toast]);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
-  }, [open]);
 
   function pickTemplate(id: string) {
     setTemplateId(id);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   normalizeSnapshotBody,
@@ -8,6 +8,7 @@ import {
 import type { SnapshotBody } from "../conversation";
 import type { RequestLogDetail } from "../types";
 import { Conversation } from "./Conversation";
+import { useDialog } from "../useDialog";
 
 /** 四份快照的展示顺序，和旧版一致：先请求后响应，先下游后上游。 */
 const SECTIONS = [
@@ -216,14 +217,10 @@ export function LogDetailDialog({
 }) {
   const [mode, setMode] = useState<ViewMode>(readViewMode);
   const [focused, setFocused] = useState<SectionKey | null>(null);
-  const ref = useRef<HTMLDialogElement>(null);
+  const ref = useDialog(open, onClose);
 
+  // 关窗清掉放大状态，下次打开不该带着上一条日志的取景。
   useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
-    // 关窗清掉放大状态，下次打开不该带着上一条日志的取景。
     if (!open) setFocused(null);
   }, [open]);
 

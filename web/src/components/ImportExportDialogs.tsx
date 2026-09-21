@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+
+import { useDialog } from "../useDialog";
 
 import type { ChannelExportDocument, ImportResult } from "../types";
 
@@ -7,18 +9,6 @@ export const CHANNEL_DOCUMENT_KIND = "wildtoken.channels";
 export const CHANNEL_DOCUMENT_VERSION = 1;
 /** 一次导入的条数上限，和后端一致。 */
 const MAX_IMPORT_ENTRIES = 500;
-
-/** 原生 dialog 的开关：showModal 才有焦点陷阱和 Esc。 */
-function useDialog(open: boolean) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = ref.current;
-    if (!dialog) return;
-    if (open && !dialog.open) dialog.showModal();
-    else if (!open && dialog.open) dialog.close();
-  }, [open]);
-  return ref;
-}
 
 export function ChannelExportDialog({
   open,
@@ -33,7 +23,7 @@ export function ChannelExportDialog({
   onToggleKeys: (next: boolean) => void;
   onClose: () => void;
 }) {
-  const ref = useDialog(open);
+  const ref = useDialog(open, onClose);
   const json = doc ? JSON.stringify(doc, null, 2) : "";
 
   return (
@@ -108,7 +98,7 @@ export function ChannelImportDialog({
   onImport: (document: ChannelExportDocument, mode: "skip" | "overwrite") => void;
   onClose: () => void;
 }) {
-  const ref = useDialog(open);
+  const ref = useDialog(open, onClose);
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"skip" | "overwrite">("skip");
   const [parseError, setParseError] = useState("");
@@ -281,7 +271,7 @@ export function QuickImportDialog({
   onSubmit: (name: string, baseUrl: string, apiKey: string | null) => void;
   onClose: () => void;
 }) {
-  const ref = useDialog(open);
+  const ref = useDialog(open, onClose);
   const [raw, setRaw] = useState("");
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useDialog } from "../useDialog";
 
 /** 一次选择的成果：精确模型名，加上「下游名 => 渠道名」的映射。 */
 export interface ModelSelection {
@@ -75,7 +76,7 @@ export function ModelDialog({
   const [filter, setFilter] = useState("");
   const [selectedOnly, setSelectedOnly] = useState(false);
   const [manual, setManual] = useState("");
-  const dialogRef = useRef<HTMLDialogElement>(null);
+  const dialogRef = useDialog(open, onClose);
   const filterRef = useRef<HTMLInputElement>(null);
 
   /* 每次打开重新铺状态。列表是「拉回来的」并上「已经选中的」——已选但这次
@@ -90,17 +91,6 @@ export function ModelDialog({
     setSelectedOnly(false);
     setManual("");
   }, [open, catalog, selection]);
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    if (open && !dialog.open) {
-      dialog.showModal();
-      filterRef.current?.focus();
-    } else if (!open && dialog.open) {
-      dialog.close();
-    }
-  }, [open]);
 
   const available = useMemo(() => new Set(catalog ?? []), [catalog]);
 
