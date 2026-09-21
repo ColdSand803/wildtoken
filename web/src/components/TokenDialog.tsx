@@ -194,102 +194,161 @@ export function TokenDialog({
           </div>
         </div>
 
-        <div className="form-grid">
-          <label className="field">
-            <span className="field-label">名称</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} required autoComplete="off" />
-          </label>
-
-          <label className="field">
-            <span className="field-label">描述</span>
-            <input value={description} onChange={(e) => setDescription(e.target.value)} autoComplete="off" />
-          </label>
-
-          <label className="field">
-            <span className="field-label">分组</span>
-            <select value={groupId} onChange={(e) => setGroupId(Number(e.target.value))}>
-              {groups.map((group) => (
-                <option key={group.id} value={group.id}>
-                  {group.name}
-                </option>
-              ))}
-            </select>
-            <span className="field-hint">令牌只能访问所属分组里的渠道。</span>
-          </label>
-
-          <label className="field">
-            <span className="field-label">限额（可选）</span>
-            <input
-              value={limit}
-              onChange={(e) => setLimit(e.target.value)}
-              placeholder="留空则不限额，如 100M、1B、1000K"
-              maxLength={24}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <span className="field-hint">
-              按累计 token 总量计算，不会自动重置。支持 K/M/B/T 后缀。计数养在令牌行上，
-              不随日志过期回落。
-            </span>
-          </label>
-
-          <label className="field">
-            <span className="field-label">限速</span>
-            <input
-              value={rateLimit}
-              onChange={(e) => setRateLimit(e.target.value)}
-              placeholder="100/m"
-              autoComplete="off"
-            />
-          </label>
-
-          {/* 自由输入加快捷档。只给下拉的话设不了 1d3h 或某个具体时刻。 */}
-          <div className="field">
-            <span className="field-label">有效期（可选）</span>
-            <input
-              value={expires}
-              onChange={(event) => setExpires(event.target.value)}
-              placeholder="留空则永不过期，如 30d、1d3h"
-              maxLength={40}
-              autoComplete="off"
-              spellCheck={false}
-            />
-            <div className="expiry-presets">
-              {EXPIRY_PRESETS.map((preset) => (
-                <button
-                  key={preset.label}
-                  type="button"
-                  className="secondary small"
-                  onClick={() => setExpires(preset.value)}
-                >
-                  {preset.label}
-                </button>
-              ))}
+        {/* 三段：头、可滚动的正文、钉底的页脚。upstream-dialog-panel 本来就是
+            grid-template-rows: auto minmax(0,1fr) auto，缺了中间那层的话，满高抽屉里
+            按钮不钉底，要滚到最下面才够得着。 */}
+        <div className="upstream-dialog-body">
+          <section className="form-section">
+            <div className="form-section-head">
+              <div>
+                <h3>基础信息</h3>
+                <p>名称、描述与所属分组。</p>
+              </div>
             </div>
-            <span className={parsedExpiry.ok ? "field-hint" : "field-hint field-hint-error"}>
-              {parsedExpiry.ok ? `到期时间：${expiryPreview}` : expiryPreview}
-            </span>
-          </div>
+            <div className="form-grid">
+              <label className="field">
+                <span className="field-label">名称</span>
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  required
+                  maxLength={80}
+                  autoComplete="off"
+                />
+              </label>
 
-          {token ? null : (
-            <label className="field">
-              <span className="field-label">自定义令牌</span>
-              <input
-                value={custom}
-                onChange={(e) => setCustom(e.target.value)}
-                placeholder="留空自动生成"
-                autoComplete="off"
-              />
-            </label>
-          )}
+              <label className="field">
+                <span className="field-label">描述</span>
+                <input
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  autoComplete="off"
+                />
+              </label>
 
-          <label className="field">
-            <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-            <span>启用</span>
-          </label>
+              <label className="field span-2">
+                <span className="field-label">分组</span>
+                <select value={groupId} onChange={(e) => setGroupId(Number(e.target.value))}>
+                  {groups.map((group) => (
+                    <option key={group.id} value={group.id}>
+                      {group.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="field-hint">令牌只能访问所属分组里的渠道。</span>
+              </label>
+
+              {token ? null : (
+                <label className="field span-2">
+                  <span className="field-label">自定义令牌（可选）</span>
+                  <input
+                    value={custom}
+                    onChange={(e) => setCustom(e.target.value)}
+                    placeholder="留空自动生成"
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <span className="field-hint">填了就用这个值，创建后不能再改。</span>
+                </label>
+              )}
+            </div>
+          </section>
+
+          <section className="form-section">
+            <div className="form-section-head">
+              <div>
+                <h3>配额与限速</h3>
+                <p>两项都留空就是不限。</p>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label className="field">
+                <span className="field-label">限额（可选）</span>
+                <input
+                  value={limit}
+                  onChange={(e) => setLimit(e.target.value)}
+                  placeholder="留空则不限额，如 100M、1B、1000K"
+                  maxLength={24}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <span className="field-hint">
+                  按累计 token 总量计算，不会自动重置。支持 K/M/B/T 后缀。
+                </span>
+              </label>
+
+              <label className="field">
+                <span className="field-label">限速（可选）</span>
+                <input
+                  value={rateLimit}
+                  onChange={(e) => setRateLimit(e.target.value)}
+                  placeholder="留空则不限速，如 100/m、1000/h"
+                  maxLength={24}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <span className="field-hint">按请求次数限速，单位支持 s/m/h/d。</span>
+              </label>
+            </div>
+          </section>
+
+          <section className="form-section">
+            <div className="form-section-head">
+              <div>
+                <h3>有效期与状态</h3>
+                <p>留空则永不过期。</p>
+              </div>
+            </div>
+            <div className="form-grid">
+              {/* 自由输入加快捷档。只给下拉的话设不了 1d3h 或某个具体时刻。 */}
+              <div className="field span-2">
+                <span className="field-label">有效期（可选）</span>
+                <input
+                  value={expires}
+                  onChange={(event) => setExpires(event.target.value)}
+                  placeholder="留空则永不过期，如 30d、1d3h"
+                  maxLength={40}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <div className="expiry-presets">
+                  {EXPIRY_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      className="secondary small"
+                      onClick={() => setExpires(preset.value)}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+                <span className={parsedExpiry.ok ? "field-hint" : "field-hint field-hint-error"}>
+                  {parsedExpiry.ok ? `到期时间：${expiryPreview}` : expiryPreview}
+                </span>
+              </div>
+
+              {/* 和渠道抽屉同形：toggle-row 带一句说明，不是裸复选框。 */}
+              <div className="toggle-list span-2">
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={enabled}
+                    onChange={(e) => setEnabled(e.target.checked)}
+                  />
+                  <span>
+                    <strong>启用</strong>
+                    <small>停用后这个令牌的请求会被直接拒掉。</small>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </section>
         </div>
 
-        <div className="modal-actions">
+        {/* modal-footer 而不是 modal-actions：面板的第三行是钉底的，满高抽屉里
+            按钮不该跟着正文滚到看不见的地方。 */}
+        <div className="modal-footer">
           <button type="button" className="secondary" onClick={onClose}>
             取消
           </button>

@@ -2378,6 +2378,28 @@ async function main() {
       });
       await page.waitForSelector("dialog.upstream-dialog[open]", { label: "令牌对话框" });
 
+      /* 满高抽屉里页脚要钉底。用 modal-actions 而不是 modal-footer 的话，按钮跟着
+         正文走，字段一多就滚到可视区外面了。 */
+      const layout = await page.evaluate(() => {
+        const dialog = document.querySelector("dialog.upstream-dialog[open]");
+        const body = dialog.querySelector(".upstream-dialog-body");
+        const footer = dialog.querySelector(".modal-footer");
+        if (!body || !footer) return null;
+        const box = dialog.getBoundingClientRect();
+        const foot = footer.getBoundingClientRect();
+        return {
+          sections: dialog.querySelectorAll(".form-section").length,
+          bodyScrolls: getComputedStyle(body).overflow === "auto",
+          footerAtBottom: Math.abs(box.bottom - foot.bottom) <= 2,
+          footerVisible: foot.bottom <= window.innerHeight + 1,
+        };
+      });
+      assert(layout !== null, "缺正文层或页脚层");
+      assertEqual(layout.sections, 3, "分三节：基础信息 / 配额限速 / 有效期状态");
+      assertEqual(layout.bodyScrolls, true, "正文要能独立滚动");
+      assertEqual(layout.footerAtBottom, true, "页脚要钉在抽屉底部");
+      assertEqual(layout.footerVisible, true, "页脚不能被推出可视区");
+
       await page.fill("dialog.upstream-dialog[open] input[autocomplete=off]", "quota-token");
       await page.fill("dialog.upstream-dialog[open] input[placeholder^='留空则不限额']", "100M");
       await page.evaluate(() => {
