@@ -70,6 +70,9 @@ jobs:
             node --check "$file"
           done < <(find static/js -type f -name '*.js' -print0 | sort -z)
           node --test tests/*.test.mjs
+          # 前端拼的请求体和后端严格解码的结构体对齐。字段对不上时后端只回一句
+          # 400，界面上看不出是哪个字段——已经这样坏过三次。
+          node scripts/payload-contract.mjs
 
   cross-compile:
     name: Cross-compile check
