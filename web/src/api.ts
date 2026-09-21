@@ -114,8 +114,8 @@ export function testUpstream(id: number, path = "/v1/models"): Promise<unknown> 
   });
 }
 
-export function fetchUpstreamModels(id: number): Promise<unknown> {
-  return api<unknown>(`/api/admin/upstreams/${id}/models`, { method: "POST" });
+export function fetchUpstreamModels(id: number): Promise<{ models: string[] }> {
+  return api<{ models: string[] }>(`/api/admin/upstreams/${id}/models`, { method: "POST" });
 }
 
 /** new-api 与 sub2api 两种余额接口，路径不同。 */
@@ -290,11 +290,26 @@ export function importUpstreams(
   });
 }
 
-/** 快速导入：从一段文本里拿 Base URL 和 Key 后，再问上游要模型列表。 */
-export function fetchModelsPreview(baseUrl: string, apiKey: string | null): Promise<{ models: string[] }> {
+/**
+ * 问一个还没存下来的 Base URL 要模型列表。
+ *
+ * 快速导入和渠道表单里的「拉取模型」都走这条。表单那边要带上额外请求头和
+ * 超时——有些上游没那个头就不返回模型，不带的话拉回来的列表和实际路由时看
+ * 到的不是同一份。
+ */
+export function fetchModelsPreview(
+  baseUrl: string,
+  apiKey: string | null,
+  options: { extraHeaders?: Record<string, string>; timeoutSeconds?: number } = {},
+): Promise<{ models: string[] }> {
   return api<{ models: string[] }>("/api/admin/upstreams/fetch-models", {
     method: "POST",
-    body: JSON.stringify({ base_url: baseUrl, api_key: apiKey }),
+    body: JSON.stringify({
+      base_url: baseUrl,
+      api_key: apiKey,
+      extra_headers: options.extraHeaders ?? {},
+      timeout_seconds: options.timeoutSeconds ?? null,
+    }),
   });
 }
 

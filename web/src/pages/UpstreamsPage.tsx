@@ -26,6 +26,8 @@ import {
   ChannelImportDialog,
   QuickImportDialog,
 } from "../components/ImportExportDialogs";
+import { ModelDialog } from "../components/ModelDialog";
+import type { ModelSelection } from "../components/ModelDialog";
 import { UpstreamDialog } from "../components/UpstreamDialog";
 import type { UpstreamPayload } from "../components/UpstreamDialog";
 import { useConfirm, useToast } from "../components/feedback";
@@ -109,6 +111,12 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
   const [busyDialog, setBusyDialog] = useState(false);
+  /* 模型选择器。catalog 和 selection 必须跟着这一个对象走：它们是弹窗重置
+     效应的依赖，每次渲染新造一份的话每敲一下键盘都会把已选清回去。 */
+  const [picker, setPicker] = useState<
+    { upstream: Upstream; catalog: string[] | null; selection: ModelSelection } | null
+  >(null);
+  const [pickerSaving, setPickerSaving] = useState(false);
 
   const toast = useToast();
   const confirm = useConfirm();
@@ -355,6 +363,72 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     }
   }
 
+  /**
+   * 拉取上游模型列表，然后开选择器。
+   *
+   * 旧版就是这个顺序：拉到什么就拿什么作为候选，当前已选一并带进去。先重拉
+   * 一次渠道，因为保存是整体替换，拿陈旧快照当底会把别人刚改的字段覆回去。
+   */
+  async function openModelPicker(upstream: Upstream) {
+    setPending(upstream.id);
+    try {
+      const fresh = await getUpstream(upstream.id).catch(() => upstream);
+      const result = await fetchUpstreamModels(upstream.id);
+      setPicker({
+        upstream: fresh,
+        catalog: result.models,
+        selection: { names: fresh.model_names, mappings: fresh.model_mappings || {} },
+      });
+      toast(`已拉取 ${result.models.length} 个模型。`, { tone: "ok" });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+    } finally {
+      setPending(null);
+    }
+  }
+
+  /**
+   * 把选择写回渠道。
+   *
+   * 这个弹窗只改模型，但 PUT 是整体替换：不带的字段会被后端按默认值写回去，
+   * 也就是被清空。除了模型本身，其余全部原样回填。
+   */
+  async function saveModelSelection(next: ModelSelection) {
+    if (!picker) return;
+    const target = picker.upstream;
+    setPickerSaving(true);
+    try {
+      await updateUpstream(target.id, {
+        name: target.name,
+        base_url: target.base_url,
+        // null 加不清除，意思是「保持原有 Key」。
+        api_key: null,
+        clear_api_key: false,
+        model_names: next.names,
+        model_prefixes: target.model_prefixes,
+        model_mappings: next.mappings,
+        effort_mappings: target.effort_mappings || {},
+        priority: target.priority,
+        weight: target.weight,
+        auto_weight_enabled: target.auto_weight_enabled,
+        timeout_seconds: target.timeout_seconds,
+        enabled: target.enabled,
+        extra_headers: target.extra_headers || {},
+        rate_limit: target.rate_limit ?? null,
+        group_ids: target.group_ids ?? [],
+      });
+      setPicker(null);
+      await reload();
+      toast(`已保存 ${next.names.length} 个模型到 ${target.name}。`, { tone: "ok" });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`保存模型失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+    } finally {
+      setPickerSaving(false);
+    }
+  }
+
   /** 编辑前重拉一次：列表里的那份可能不是最新的。 */
   async function openEditor(upstream: Upstream) {
     try {
@@ -435,7 +509,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     }
     return [
       { key: "test", label: "测试连接", onSelect: () => void runAction(upstream.id, "测试连接", () => testUpstream(upstream.id)) },
-      { key: "models", label: "拉取模型", onSelect: () => void runAction(upstream.id, "拉取模型", () => fetchUpstreamModels(upstream.id)) },
+      { key: "models", label: "拉取模型", onSelect: () => void openModelPicker(upstream) },
       { key: "balance", label: "查询 new-api 余额", onSelect: () => void runAction(upstream.id, "查询余额", () => fetchUpstreamBalance(upstream.id, "new-api")) },
       { key: "balance-sub2api", label: "查询 sub2api 余额", onSelect: () => void runAction(upstream.id, "查询余额", () => fetchUpstreamBalance(upstream.id, "sub2api")) },
       MENU_SEPARATOR,
@@ -808,6 +882,18 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         onSubmit={(name, baseUrl, apiKey) => void runQuickImport(name, baseUrl, apiKey)}
         onClose={() => setQuickOpen(false)}
       />
+
+      {picker ? (
+        <ModelDialog
+          open
+          channelName={picker.upstream.name}
+          catalog={picker.catalog}
+          selection={picker.selection}
+          busy={pickerSaving}
+          onSave={(next) => void saveModelSelection(next)}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
     </section>
   );
 }

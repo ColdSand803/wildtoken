@@ -17,6 +17,7 @@
 
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,6 +28,10 @@ const PORT = 3105;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const ADMIN_TOKEN = "browser-check-token-0123456789ab";
 const CHROME = "google-chrome-stable";
+
+// 假上游。拉取模型、测连接这类动作要真的有个东西应答，否则只能测到失败路径。
+const FAKE_UPSTREAM_PORT = 3106;
+const FAKE_MODELS = ["gpt-4o", "gpt-4o-mini", "claude-sonnet-5", "grok-4.5"];
 
 // ── CDP ──────────────────────────────────────────────────────────────────────
 
@@ -252,6 +257,27 @@ async function startServer(dataDir) {
   throw new Error(`服务 20 秒内没有就绪：\n${log.join("")}`);
 }
 
+/**
+ * 假上游：只答 GET /v1/models。
+ *
+ * 没它的话渠道指向 api.example.com，拉取永远超时，模型选择器的主路径
+ * 一步都走不到。
+ */
+function startFakeUpstream() {
+  const server = createServer((request, response) => {
+    if (!request.url?.startsWith("/v1/models")) {
+      response.writeHead(404).end("{}");
+      return;
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ object: "list", data: FAKE_MODELS.map((id) => ({ id })) }));
+  });
+  return new Promise((resolve, reject) => {
+    server.on("error", reject);
+    server.listen(FAKE_UPSTREAM_PORT, "127.0.0.1", () => resolve(server));
+  });
+}
+
 async function launchChrome(profileDir) {
   const chrome = spawn(
     CHROME,
@@ -338,11 +364,14 @@ function upstreamPayload(overrides) {
 async function seed() {
   const vip = await adminPost("/api/admin/groups", { name: "vip", description: "高优先级" });
 
+  /* 指向假上游，而且已选了一个假上游不返回的模型——「未返回」那条分支
+     需要这种形状才能测到，它也是真实世界里最容易静默出错的一种。 */
   const auto = await adminPost(
     "/api/admin/upstreams/",
     upstreamPayload({
       name: "auto-weight-channel",
-      model_names: ["gpt-4o", "gpt-4o-mini"],
+      base_url: `http://127.0.0.1:${FAKE_UPSTREAM_PORT}`,
+      model_names: ["gpt-4o", "retired-model"],
       model_prefixes: ["claude-"],
       model_mappings: { fast: "gpt-4o-mini" },
       group_ids: [vip.id],
@@ -374,6 +403,35 @@ async function seed() {
   await adminPost("/api/admin/tokens", { name: "check-token", description: "验证用", enabled: true });
 
   return { vipId: vip.id, autoId: auto.id };
+}
+
+// ── 页面上的常见动作 ──────────────────────────────────────────
+
+/** 按渠道名字片段打开那一行的操作菜单。 */
+async function openRowMenu(page, nameFragment) {
+  const opened = await page.evaluate((fragment) => {
+    const rows = [...document.querySelectorAll("table.upstream-table tbody tr")];
+    const row = rows.find((r) => r.querySelector("[data-col=name]")?.textContent?.includes(fragment));
+    const trigger = row?.querySelector("button.action-menu-trigger");
+    if (!trigger) return false;
+    trigger.click();
+    return true;
+  }, nameFragment);
+  if (!opened) throw new Error(`找不到 ${nameFragment} 的行菜单`);
+  await sleep(60);
+}
+
+async function clickMenuItem(page, label) {
+  const clicked = await page.evaluate((text) => {
+    const item = [...document.querySelectorAll("[role=menu] [role=menuitem]")].find(
+      (button) => button.textContent.trim() === text,
+    );
+    if (!item) return false;
+    item.click();
+    return true;
+  }, label);
+  if (!clicked) throw new Error(`菜单里没有「${label}」`);
+  await sleep(60);
 }
 
 // ── 断言 ─────────────────────────────────────────────────────────────────────
@@ -411,9 +469,11 @@ async function main() {
   let server;
   let chrome;
   let cdp;
+  let fakeUpstream;
 
   try {
     console.log("起服务…");
+    fakeUpstream = await startFakeUpstream();
     server = await startServer(dataDir);
     const seeded = await seed();
 
@@ -556,6 +616,171 @@ async function main() {
       await page.press("Escape");
     });
 
+    // ── 模型选择器 ──────────────────────────────────────────
+    console.log("\n模型选择器");
+
+    await check("菜单拉取模型后开出选择器", async () => {
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "拉取模型");
+      await page.waitForSelector("dialog.model-dialog[open]", { label: "选择器", timeout: 10_000 });
+      const summary = await page.text("dialog.model-dialog .modal-head p");
+      assert(summary?.includes(`上游返回 ${FAKE_MODELS.length}`), `摘要不对：${summary}`);
+      assert(summary?.includes("1 个未由上游返回"), `应数出未返回的：${summary}`);
+    });
+
+    await check("已选但上游没返回的模型标出来", async () => {
+      const marked = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.model-dialog .model-option")]
+          .filter((option) => option.querySelector(".model-option-state"))
+          .map((option) => option.querySelector(".model-option-name")?.textContent),
+      );
+      assertEqual(marked.join(","), "retired-model", "标为未返回的模型");
+    });
+
+    await check("映射单独成行且默认选中", async () => {
+      const mapping = await page.evaluate(() => {
+        const option = document.querySelector("dialog.model-dialog .model-option.is-mapping");
+        return {
+          text: option?.querySelector(".model-option-name")?.textContent ?? null,
+          checked: option?.querySelector("input")?.checked ?? null,
+        };
+      });
+      assertEqual(mapping.text, "fast => gpt-4o-mini", "映射行文本");
+      assertEqual(mapping.checked, true, "映射默认勾选");
+    });
+
+    await check("筛选只留匹配项", async () => {
+      await page.fill("dialog.model-dialog input[type=search]", "mini");
+      const names = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.model-dialog .model-option-name")].map((n) => n.textContent),
+      );
+      assertEqual(names.join(","), "fast => gpt-4o-mini,gpt-4o-mini", "筛选结果");
+    });
+
+    await check("全选只作用于可见项", async () => {
+      await page.click("dialog.model-dialog .model-toolbar-actions button:nth-of-type(1)");
+      await page.fill("dialog.model-dialog input[type=search]", "");
+      const checked = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.model-dialog .model-option")]
+          .filter((option) => option.querySelector("input")?.checked)
+          .map((option) => option.querySelector(".model-option-name")?.textContent),
+      );
+      // 原本选中 gpt-4o / retired-model / 映射，筛出 mini 后全选只该多出 gpt-4o-mini。
+      assert(checked.includes("gpt-4o-mini"), `可见项没被选中：${checked}`);
+      assert(!checked.includes("claude-sonnet-5"), `不可见项被误选：${checked}`);
+    });
+
+    await check("移除未返回只去掉那一个", async () => {
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("dialog.model-dialog .model-toolbar-actions button")]
+          .find((b) => b.textContent.trim() === "移除未返回");
+        if (!button) throw new Error("找不到移除未返回按钮");
+        button.click();
+      });
+      const summary = await page.text("dialog.model-dialog .modal-head p");
+      assert(!summary?.includes("未由上游返回"), `还剩着未返回项：${summary}`);
+    });
+
+    await check("手动输入带箭头的登记为映射", async () => {
+      await page.fill("dialog.model-dialog .model-manual-entry input", "cheap => gpt-4o-mini");
+      await page.click("dialog.model-dialog .model-manual-entry button");
+      const mappings = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.model-dialog .model-option.is-mapping .model-option-name")]
+          .map((n) => n.textContent),
+      );
+      assert(mappings.includes("cheap => gpt-4o-mini"), `映射没登记上：${mappings}`);
+    });
+
+    await check("保存选择后回写到渠道", async () => {
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("dialog.model-dialog .modal-actions button")]
+          .find((b) => b.textContent.trim().startsWith("保存"));
+        if (!button) throw new Error("找不到保存按钮");
+        button.click();
+      });
+      await page.waitFor(() => document.querySelector("dialog.model-dialog[open]") === null, {
+        label: "选择器关闭",
+        timeout: 10_000,
+      });
+      const cell = await page.waitFor(
+        () => {
+          const rows = [...document.querySelectorAll("table.upstream-table tbody tr")];
+          const row = rows.find((r) => r.querySelector("[data-col=name]")?.textContent?.includes("auto-weight"));
+          const text = row?.querySelector("[data-col=models]")?.textContent ?? "";
+          return text.includes("cheap=>gpt-4o-mini") ? text : false;
+        },
+        { label: "模型匹配格更新" },
+      );
+      assert(!cell.includes("retired-model"), `移除的模型还在：${cell}`);
+    });
+
+    /* 第二条入口：渠道编辑表单里的两个按钮。它走的是另一个接口（探一个还没
+       存下来的 Base URL），也不碰服务端，和行菜单那条没有任何共用逻辑。 */
+    await check("编辑表单里管理模型不拉取", async () => {
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "编辑");
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("dialog.upstream-dialog .model-toolbar-actions button")]
+          .find((b) => b.textContent.trim() === "管理模型");
+        if (!button) throw new Error("找不到管理模型按钮");
+        button.click();
+      });
+      await page.waitForSelector("dialog.model-dialog[open]", { label: "选择器" });
+      const summary = await page.text("dialog.model-dialog .modal-head p");
+      assert(summary?.includes("列表"), `没拉取时该报列表数：${summary}`);
+      assert(!summary?.includes("上游返回"), `没拉取却声称上游返回：${summary}`);
+      // 没拉过就没有判断依据，这个按钮不该出现。
+      const hasRemove = await page.evaluate(() =>
+        [...document.querySelectorAll("dialog.model-dialog .model-toolbar-actions button")]
+          .some((b) => b.textContent.trim() === "移除未返回"),
+      );
+      assertEqual(hasRemove, false, "未拉取时的移除未返回按钮");
+    });
+
+    await check("选择器写回表单而不是直接存库", async () => {
+      await page.fill("dialog.model-dialog .model-manual-entry input", "draft-only");
+      await page.click("dialog.model-dialog .model-manual-entry button");
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("dialog.model-dialog .modal-actions button")]
+          .find((b) => b.textContent.trim().startsWith("保存"));
+        button.click();
+      });
+      await page.waitFor(() => document.querySelector("dialog.model-dialog[open]") === null, {
+        label: "选择器关闭",
+      });
+      const textarea = await page.evaluate(
+        () => document.querySelector("dialog.upstream-dialog textarea")?.value ?? "",
+      );
+      assert(textarea.includes("draft-only"), `没写回模型名框：${JSON.stringify(textarea)}`);
+      // 表单没提交，库里不该有这个名字。
+      const stored = await page.evaluate(async () => {
+        const response = await fetch("/api/admin/upstreams/", {
+          headers: { "x-admin-token": localStorage.getItem("wildtoken_admin_token") },
+        });
+        const list = await response.json();
+        return list.some((item) => item.model_names.includes("draft-only"));
+      });
+      assertEqual(stored, false, "未保存的选择不该落库");
+    });
+
+    await check("表单里拉取模型走预览接口", async () => {
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("dialog.upstream-dialog .model-toolbar-actions button")]
+          .find((b) => b.textContent.trim() === "拉取模型");
+        if (!button) throw new Error("找不到拉取模型按钮");
+        button.click();
+      });
+      await page.waitForSelector("dialog.model-dialog[open]", { label: "选择器", timeout: 10_000 });
+      const summary = await page.text("dialog.model-dialog .modal-head p");
+      assert(summary?.includes(`上游返回 ${FAKE_MODELS.length}`), `摘要不对：${summary}`);
+      await page.click("dialog.model-dialog .modal-actions button.secondary");
+      await page.click("dialog.upstream-dialog .modal-actions button.secondary");
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "编辑对话框关闭",
+      });
+    });
+
     // ── 顶栏 ────────────────────────────────────────────────────────────────
     console.log("\n顶栏");
 
@@ -668,6 +893,7 @@ async function main() {
     cdp?.close();
     chrome?.kill("SIGKILL");
     server?.kill("SIGKILL");
+    fakeUpstream?.close();
     rmSync(dataDir, { recursive: true, force: true });
     rmSync(profileDir, { recursive: true, force: true });
   }

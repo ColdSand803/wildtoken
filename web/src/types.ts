@@ -6,6 +6,9 @@ export interface Upstream {
   name: string;
   base_url: string;
   api_key_set: boolean;
+  /* 只有详情接口带回来，列表接口没有。不回显到输入框——只用来探上游，
+     否则编辑渠道时一个已存的 Key 就赤裸摆在界面上。 */
+  api_key?: string | null;
   model_names: string[];
   model_prefixes: string[];
   model_mappings: Record<string, string>;

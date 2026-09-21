@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { UnauthorizedError, fetchModelsPreview } from "../api";
 import type { Upstream } from "../types";
+import { ModelDialog } from "./ModelDialog";
+import type { ModelSelection } from "./ModelDialog";
+import { useToast } from "./feedback";
 
 /** 提交给 POST/PUT /api/admin/upstreams 的形状。 */
 export interface UpstreamPayload {
@@ -156,7 +160,14 @@ export function UpstreamDialog({
 }) {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [advanced, setAdvanced] = useState(false);
+  /* catalog 为 null 表示「没拉取，只是来管理已选」。整块跟着一个对象走，
+     否则它们每次渲染都是新引用，会把选择器里的状态不断重置。 */
+  const [picker, setPicker] = useState<{ catalog: string[] | null; selection: ModelSelection } | null>(
+    null,
+  );
+  const [fetching, setFetching] = useState(false);
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const toast = useToast();
 
   /* 每次打开都按当前渠道重置。不重置的话，关掉再开会留着上一个渠道的值。 */
   useEffect(() => {
@@ -183,6 +194,60 @@ export function UpstreamDialog({
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
+
+  /** 当前表单里的选择，开选择器时带进去。 */
+  function currentSelection(): ModelSelection {
+    return { names: splitList(form.modelNames), mappings: parseMappingLines(form.modelMappings) };
+  }
+
+  /**
+   * 拿哪把 Key 去探上游。
+   *
+   * 输入框留空意思是「保持不变」，此时要用已存的那把；勾了清除就真的不带。
+   * 不这么判的话，编辑一个已配好的渠道时点拉取总是拿不到模型。
+   */
+  function probeApiKey(): string | null {
+    if (form.clearApiKey) return null;
+    return form.apiKey.trim() || upstream?.api_key || null;
+  }
+
+  async function fetchCatalog() {
+    const baseUrl = form.baseUrl.trim();
+    if (!baseUrl) {
+      toast("请先填写 Base URL 再拉取模型。", { tone: "error" });
+      return;
+    }
+    setFetching(true);
+    try {
+      const result = await fetchModelsPreview(baseUrl, probeApiKey(), {
+        extraHeaders: parseMappingLines(form.extraHeaders),
+        timeoutSeconds: Number(form.timeoutSeconds || 300),
+      });
+      setPicker({ catalog: result.models, selection: currentSelection() });
+      toast(`已拉取 ${result.models.length} 个模型。`, { tone: "ok" });
+    } catch (err) {
+      if (!(err instanceof UnauthorizedError)) {
+        toast(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      }
+    } finally {
+      setFetching(false);
+    }
+  }
+
+  /* 选择器只写回表单，不碰服务端——这个渠道可能还没存下来。 */
+  function applySelection(next: ModelSelection) {
+    const mappingText = Object.entries(next.mappings)
+      .map(([key, value]) => `${key}: ${value}`)
+      .join("\n");
+    setForm((current) => ({
+      ...current,
+      modelNames: next.names.join("\n"),
+      modelMappings: mappingText,
+    }));
+    // 映射在高级区里。收着的话刚登记的映射看不见，像没存上。
+    if (mappingText) setAdvanced(true);
+    setPicker(null);
+  }
 
   const title = upstream ? `编辑渠道 #${upstream.id}` : "新增渠道";
   const canSubmit = useMemo(
@@ -253,16 +318,41 @@ export function UpstreamDialog({
             ) : null}
           </label>
 
-          <label className="field">
-            <span className="field-label">模型名（每行一个）</span>
+          {/* 这格不能是 label：里面有按钮，包在 label 里点按钮会连带激活输入框。 */}
+          <div className="field">
+            <div className="model-picker-label-row">
+              <span className="field-label">模型名（每行一个）</span>
+              <span className="model-selection-count">
+                {splitList(form.modelNames).length > 0
+                  ? `${splitList(form.modelNames).length} 项`
+                  : "未选择"}
+              </span>
+            </div>
             <textarea
               rows={3}
               value={form.modelNames}
               onChange={(event) => set("modelNames", event.target.value)}
               placeholder="gpt-4o"
             />
+            <div className="model-toolbar-actions">
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setPicker({ catalog: null, selection: currentSelection() })}
+              >
+                管理模型
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={fetching}
+                onClick={() => void fetchCatalog()}
+              >
+                {fetching ? "拉取中…" : "拉取模型"}
+              </button>
+            </div>
             <span className="field-hint">留空表示接收全部模型。</span>
-          </label>
+          </div>
 
           <label className="field">
             <span className="field-label">模型前缀（每行一个）</span>
@@ -406,6 +496,19 @@ export function UpstreamDialog({
           </button>
         </div>
       </form>
+
+      {/* 嵌在渠道对话框里。两个 modal dialog 叠在 top layer 上，选择器在上面。 */}
+      {picker ? (
+        <ModelDialog
+          open
+          channelName={form.name.trim() || "当前渠道"}
+          catalog={picker.catalog}
+          selection={picker.selection}
+          busy={false}
+          onSave={applySelection}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
     </dialog>
   );
 }
