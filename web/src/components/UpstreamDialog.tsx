@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { UnauthorizedError, fetchModelsPreview } from "../api";
+import { joinMappingLines, parseMappingLines } from "../mappingLines";
 import type { Upstream } from "../types";
 import { ModelDialog, parseManualEntry } from "./ModelDialog";
 import type { ModelSelection } from "./ModelDialog";
@@ -41,33 +42,6 @@ function splitList(value: string): string[] {
     if (trimmed) seen.add(trimmed);
   }
   return [...seen];
-}
-
-/**
- * 每行一条 `键 => 值`，也收 `=` 和 `:`。
- *
- * 三种分隔符都要认：旧控制台显示成 `a => b`，从那边复制过来的内容必须能
- * 原样吃下。只找第一个 `=` 的写法会把 `a => b` 切成 `a` 和 `> b`，而且
- * 不报错——这种错法在界面上完全看不出来。
- */
-function parseMappingLines(value: string, label: string): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const line of value.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const match = trimmed.match(/^(.+?)(?:=>|=|:)(.+)$/);
-    if (!match) throw new Error(`${label}格式错误：${trimmed}`);
-    const key = match[1].trim();
-    const mapped = match[2].trim();
-    if (key && mapped) result[key] = mapped;
-  }
-  return result;
-}
-
-function joinMappingLines(mappings: Record<string, string>): string {
-  return Object.entries(mappings)
-    .map(([key, value]) => `${key} => ${value}`)
-    .join("\n");
 }
 
 /* 传输层和内部路由用的头，覆盖它们会直接弄坏请求。后端也拦，但报回来只是
@@ -244,12 +218,12 @@ function payloadFromForm(form: FormState): UpstreamPayload {
     model_names: form.modelNames,
     model_prefixes: splitList(form.modelPrefixes),
     model_mappings: form.modelMappings,
-    // 思考强度不区分大小写，键转小写存——后端存的也是小写。
+    /* 键转小写存。后端也会抹一次（normalizeEffortMappings），这里先转是为了
+       让编辑框里看到的和存进去的一致。 */
     effort_mappings: Object.fromEntries(
-      Object.entries(parseMappingLines(form.effortMappings, "思考强度映射")).map(([key, value]) => [
-        key.toLowerCase(),
-        value,
-      ]),
+      Object.entries(parseMappingLines(form.effortMappings, "思考强度映射")).map(
+        ([key, value]): [string, string] => [key.toLowerCase(), value],
+      ),
     ),
     priority: Number(form.priority || 100),
     weight: Number(form.weight || 100),

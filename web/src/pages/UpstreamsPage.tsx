@@ -34,6 +34,7 @@ import { ModelTestDialog } from "../components/ModelTestDialog";
 import { UpstreamDialog } from "../components/UpstreamDialog";
 import type { UpstreamPayload } from "../components/UpstreamDialog";
 import { useConfirm, useToast } from "../components/feedback";
+import { compareUpstreams } from "../upstreamSort";
 import type {
   ChannelExportDocument,
   ImportResult,
@@ -76,10 +77,7 @@ function readColumns(): Record<ColumnKey, boolean> {
 }
 
 /** 排序时的状态分档：启用 > 有效权重 0 > 停用，和旧版一致。 */
-function statusRank(upstream: Upstream): number {
-  if (!upstream.enabled) return 2;
-  return upstream.effective_weight <= 0 ? 1 : 0;
-}
+
 
 /**
  * 渠道页。
@@ -194,27 +192,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         .toLowerCase()
         .includes(q);
     })
-    .sort((a, b) => {
-      let delta: number;
-      switch (sort.key) {
-        case "id":
-          delta = a.id - b.id;
-          break;
-        case "name":
-          delta = a.name.localeCompare(b.name, "zh-CN");
-          break;
-        case "status":
-          delta = statusRank(a) - statusRank(b);
-          break;
-        default:
-          delta = a.priority - b.priority;
-      }
-      if (delta !== 0) return sort.desc ? -delta : delta;
-      /* 次因子不跟主列翻转：按状态排时，同一状态内部永远高优先级在前，
-         和路由实际挑渠道的顺序一致。 */
-      if (sort.key === "status" && a.priority !== b.priority) return b.priority - a.priority;
-      return a.id - b.id;
-    });
+    .sort(compareUpstreams(sort));
 
   /* 选中集只对当前筛选结果有意义：筛掉的行看不见，批量操作不该动它们。 */
   const visibleSelected = filtered.filter((u) => selected.has(u.id));
@@ -1047,6 +1025,7 @@ function BaseUrlCell({ upstream }: { upstream: Upstream }) {
           title={openable ? "打开 Base URL" : "不是可打开的 http(s) 地址"}
           disabled={openable === null}
           onClick={() => {
+            // openable 已经过 httpUrlOrNull：只有 http/https 能走到这里。
             if (openable) window.open(openable, "_blank", "noopener,noreferrer");
           }}
         >

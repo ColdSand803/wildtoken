@@ -715,6 +715,10 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   );
 }
 
+/* 占位行要横跨整表。写死字面量的话，加一列就会忘了改——加 IP 列时
+   就漏了，加载态和空态都短一列。 */
+export const LOG_TABLE_COLUMN_COUNT = 11;
+
 function RatePill({ label, value }: { label: string; value: number | null }) {
   /* 千分位分隔。TPM 常常五六位，不分隔读不出量级。RPM 走同一个组件，
      不足一千时显示不变。 */
@@ -841,14 +845,14 @@ function LogRows({
   if (loading && logs.length === 0) {
     return (
       <tr>
-        <td colSpan={10} className="muted">加载中…</td>
+        <td colSpan={LOG_TABLE_COLUMN_COUNT} className="muted">加载中…</td>
       </tr>
     );
   }
   if (logs.length === 0 && !hasActive) {
     return (
       <tr>
-        <td colSpan={10} className="muted">暂无请求日志</td>
+        <td colSpan={LOG_TABLE_COLUMN_COUNT} className="muted">暂无请求日志</td>
       </tr>
     );
   }

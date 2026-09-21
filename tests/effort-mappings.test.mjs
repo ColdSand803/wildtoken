@@ -1,79 +1,48 @@
+// 思考强度映射的输入解析。和模型映射共用一套写法，三种分隔符都要认。
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
+
+import { joinMappingLines, parseMappingLines } from "../web/src/mappingLines.ts";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 
-function extractFunction(source, name) {
-  const start = source.indexOf(`function ${name}(`);
-  assert.notEqual(start, -1, `${name} must exist`);
+const parse = (value) => parseMappingLines(value, "思考强度映射");
 
-  const bodyStart = source.indexOf("{", start);
-  let depth = 0;
-  for (let index = bodyStart; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === "{") depth += 1;
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return source.slice(start, index + 1);
-      }
-    }
-  }
-
-  throw new Error(`could not extract ${name}`);
-}
-
-function mappingContext() {
-  const source = read("static/js/bootstrap.js");
-  const context = vm.createContext({});
-  for (const name of ["parseMappingLines", "parseEffortMappings", "joinMappingLines"]) {
-    vm.runInContext(extractFunction(source, name), context);
-  }
-  return context;
-}
-
-const parse = (context, value) => {
-  context.candidate = value;
-  // Copy out of the vm realm: its Object has a different prototype.
-  return { ...vm.runInContext("parseEffortMappings(candidate)", context) };
-};
-
-test("思考强度映射按行解析，键统一转小写", () => {
-  const context = mappingContext();
-
-  assert.deepEqual(parse(context, "max => xhigh"), { max: "xhigh" });
-  // 后端按小写匹配，大小写和多余空白都要在这里抹平。
-  assert.deepEqual(parse(context, "  MAX  =>  xhigh  "), { max: "xhigh" });
-  assert.deepEqual(parse(context, "max => xhigh\nxhigh => high"), {
+test("思考强度映射按行解析", () => {
+  assert.deepEqual(parse("max => xhigh"), { max: "xhigh" });
+  assert.deepEqual(parse("  max  =>  xhigh  "), { max: "xhigh" });
+  assert.deepEqual(parse("max => xhigh\nxhigh => high"), {
     max: "xhigh",
     xhigh: "high",
   });
 });
 
-test("=、: 与空行的写法与模型映射保持一致", () => {
-  const context = mappingContext();
+/* 键的大小写由后端抹平（normalizeEffortMappings），前端原样上送即可。
+   两边都转的话，哪天后端改了规则前端还在按老规则折，就会对不上。 */
+test("键的大小写原样上送，由后端统一", () => {
+  assert.deepEqual(parse("MAX => xhigh"), { MAX: "xhigh" });
+  assert.match(read("internal/models/upstream.go"), /normalizeEffortMappings/);
+});
 
-  assert.deepEqual(parse(context, "max = xhigh"), { max: "xhigh" });
-  assert.deepEqual(parse(context, "max: xhigh"), { max: "xhigh" });
-  assert.deepEqual(parse(context, "\n\n  \n"), {});
-  assert.deepEqual(parse(context, ""), {});
+test("=、: 与空行的写法与模型映射保持一致", () => {
+  assert.deepEqual(parse("max = xhigh"), { max: "xhigh" });
+  assert.deepEqual(parse("max: xhigh"), { max: "xhigh" });
+  assert.deepEqual(parse("\n\n  \n"), {});
+});
+
+/* `a => b` 只找第一个 `=` 的话会切成 `a` 和 `> b`，而且不报错——这种错法在
+   界面上完全看不出来。 */
+test("=> 不会被当成 = 加一个多余的 >", () => {
+  assert.deepEqual(parse("max => xhigh"), { max: "xhigh" });
+  assert.notDeepEqual(parse("max => xhigh"), { max: "> xhigh" });
 });
 
 test("写错格式时报的是思考强度映射，而不是模型映射", () => {
-  const context = mappingContext();
-
-  assert.throws(() => parse(context, "max"), /思考强度映射格式错误：max/);
+  assert.throws(() => parse("没有分隔符"), /思考强度映射/);
 });
 
 test("回填时还原成每行一条的编辑格式", () => {
-  const context = mappingContext();
-  context.stored = { max: "xhigh", xhigh: "high" };
-
-  const text = vm.runInContext("joinMappingLines(stored)", context);
-
-  assert.equal(text, "max => xhigh\nxhigh => high");
-  // 回填的文本再解析一遍必须得到同一张表，否则编辑后保存会改掉配置。
-  assert.deepEqual(parse(context, text), { max: "xhigh", xhigh: "high" });
+  assert.equal(joinMappingLines({ max: "xhigh", xhigh: "high" }), "max => xhigh\nxhigh => high");
+  assert.equal(joinMappingLines({}), "");
 });

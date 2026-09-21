@@ -59,32 +59,34 @@ test("工具栏保持底端对齐", () => {
 /* 这次修的根因：筛选控件带一行文字标签（「搜索」「状态」），
    把整组撑到约 52px，而按钮只有 34px。标签去掉了，高度才齐。 */
 test("筛选控件不带文字标签", () => {
-  const markup = read("static/admin.html");
-  for (const selector of ["filter-field", "log-filter"]) {
-    // <label class="..."> 和它的 input/select 之间不该有文字。
-    const pattern = new RegExp(
-      `<label class="${selector}[^"]*">\\s*<`, "g",
-    );
-    const bare = [...markup.matchAll(pattern)];
-    const total = [...markup.matchAll(new RegExp(`class="${selector}`, "g"))].length;
-    assert.equal(
-      bare.length,
-      total,
-      `${selector} 有 ${total - bare.length} 个还带着文字标签`,
-    );
+  const pages = ["LogsPage", "UpstreamsPage", "TokensPage"].map((name) =>
+    read(`web/src/pages/${name}.tsx`),
+  );
+
+  for (const source of pages) {
+    for (const selector of ["filter-field", "log-filter"]) {
+      /* <label className="..."> 和它的 input/select 之间不该有文字。
+         允许紧跟注释或元素，不允许裸文本。 */
+      const opens = [...source.matchAll(new RegExp(`<label className="${selector}[^"]*">`, "g"))];
+      for (const open of opens) {
+        const after = source.slice(open.index + open[0].length).trimStart();
+        assert.ok(
+          after.startsWith("<") || after.startsWith("{"),
+          `${selector} 还带着文字标签：${after.slice(0, 40)}`,
+        );
+      }
+    }
   }
 
-  // 每个筛选控件仍要有可访问名称，去掉文字标签不能顺手去掉说明。
-  for (const id of [
-    "upstream-search", "upstream-status-filter",
-    "log-upstream-filter", "log-search", "log-client-filter", "log-status-filter",
-    "token-search",
-  ]) {
-    // input/select 是多行格式，id 不在开标签同一行。按 id 定位，再向两边
-    // 找出所属标签的范围。
-    const idAt = markup.indexOf(`id="${id}"`);
-    assert.notEqual(idAt, -1, `${id} must exist`);
-    const tag = markup.slice(markup.lastIndexOf("<", idAt), markup.indexOf(">", idAt));
-    assert.match(tag, /aria-label=/, `${id} needs an aria-label now the text label is gone`);
+  /* 去掉文字标签不能顺手去掉说明：每个筛选控件仍要有可访问名称。 */
+  for (const source of pages) {
+    const controls = [...source.matchAll(/<(input|select)\b[^>]*>/gs)];
+    for (const control of controls) {
+      const tag = control[0];
+      // 复选框和开关由旁边的文字描述，不强制要求。
+      if (/type="(checkbox|radio)"/.test(tag)) continue;
+      if (!/(filter|search)/i.test(tag)) continue;
+      assert.match(tag, /aria-label=/, `筛选控件缺 aria-label：${tag.slice(0, 60)}`);
+    }
   }
 });
