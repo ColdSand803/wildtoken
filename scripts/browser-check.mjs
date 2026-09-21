@@ -585,10 +585,11 @@ async function openProxiedLogDetail(page) {
   const opened = await page.evaluate((probes) => {
     const row = [...document.querySelectorAll("table tbody tr")].find((node) => {
       const client = node.querySelector("[data-col=client]")?.textContent?.trim();
-      return client && !probes.includes(client) && node.querySelector("[data-col=detail] button");
+      // 整行可点，详情列里是错误信息而不是按钮。
+      return client && !probes.includes(client) && node.dataset.logId;
     });
     if (!row) return false;
-    row.querySelector("[data-col=detail] button").click();
+    row.click();
     return true;
   }, PROBE_CLIENT_TYPES);
   if (!opened) throw new Error("日志里没有非探测的请求");
@@ -1430,6 +1431,11 @@ async function main() {
         },
         { label: "日志行", timeout: 10_000 },
       );
+      // 整行能被键盘达到，否则只能鼠标用。
+      const focusable = await page.evaluate(
+        () => document.querySelector("table.log-table tbody tr.log-row")?.tabIndex ?? -1,
+      );
+      assertEqual(focusable, 0, "日志行的 tabIndex");
       assert(
         clients.some((client) => !["model-list", "model-test", "balance"].includes(client)),
         `只有探测日志：${clients}`,
@@ -1532,6 +1538,40 @@ async function main() {
         rows.every((row) => row.tone.includes("danger")),
         `失败请求没标红：${JSON.stringify(rows)}`,
       );
+    });
+
+    /* 详情列是错误信息，不是按钮。放按钮的话列表里看不出错在哪，
+       每行都得点开才知道。 */
+    await check("详情列直接显示错误信息", async () => {
+      const cells = await page.evaluate(() =>
+        [...document.querySelectorAll("table.log-table tbody tr")].map((row) => ({
+          hasButton: row.querySelector("[data-col=detail] button") !== null,
+          error: row.querySelector("[data-col=detail] .log-error-detail")?.textContent ?? null,
+          title: row.querySelector("[data-col=detail] .log-error-detail")?.getAttribute("title") ?? null,
+        })),
+      );
+      assert(cells.length > 0, "一行都没有");
+      assert(
+        cells.every((cell) => !cell.hasButton),
+        "详情列还是按钮",
+      );
+      const withError = cells.find((cell) => cell.error);
+      if (withError) {
+        // 截断后全文要留在 title 里。
+        assert(withError.title.length >= withError.error.length, "title 没存全文");
+      }
+    });
+
+    await check("Tokens 列的精确值放在 title 里", async () => {
+      const io = await page.evaluate(() => {
+        const node = document.querySelector("table.log-table tbody tr .token-io");
+        return {
+          label: node?.getAttribute("aria-label") ?? null,
+          inTitle: node?.querySelector(".token-io-in")?.getAttribute("title") ?? null,
+        };
+      });
+      assert(io.label?.includes("tokens"), `token-io 缺 aria-label：${io.label}`);
+      assert(io.inTitle?.startsWith("输入"), `输入行缺 title：${io.inTitle}`);
     });
 
     await check("表头与表体均为 10 列", async () => {
@@ -1793,18 +1833,20 @@ async function main() {
     });
 
     await check("核心指标读到真数", async () => {
+      /* 卡片带着「—」占位符立刻就在，等它“存在”等于没等。要等真数据落到。 */
       const kpis = await page.waitFor(
         () => {
           const cards = [...document.querySelectorAll(".dashboard-kpis .dashboard-kpi")];
           if (cards.length === 0) return false;
-          return Object.fromEntries(
+          const entries = Object.fromEntries(
             cards.map((card) => [
               card.querySelector(".dashboard-kpi-label")?.textContent,
               card.querySelector(".dashboard-kpi-value")?.textContent,
             ]),
           );
+          return entries["启用渠道"] && entries["启用渠道"] !== "—" ? entries : false;
         },
-        { label: "核心指标", timeout: 10_000 },
+        { label: "核心指标拿到数据", timeout: 15_000 },
       );
       // 种子里三个渠道，其中一个已归档——归档的不进分母。
       assertEqual(kpis["启用渠道"], "2/2", "启用渠道（归档不计）");
@@ -1813,10 +1855,15 @@ async function main() {
     });
 
     await check("状态分布按四档分段", async () => {
-      const legend = await page.evaluate(() =>
-        [...document.querySelectorAll(".status-legend .status-legend-label")].map(
-          (node) => node.textContent,
-        ),
+      // 同理：图表区先渲染空壳，等图例真的出来。
+      const legend = await page.waitFor(
+        () => {
+          const labels = [...document.querySelectorAll(".status-legend .status-legend-label")].map(
+            (node) => node.textContent,
+          );
+          return labels.length === 4 ? labels : false;
+        },
+        { label: "状态分布图例", timeout: 15_000 },
       );
       assertEqual(legend.join(","), "2xx,4xx,5xx,其他", "图例档位");
       const segs = await page.evaluate(() =>

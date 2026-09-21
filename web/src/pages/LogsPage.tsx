@@ -180,6 +180,18 @@ function ChannelStack({
   );
 }
 
+/** 压掉换行和连续空白，超长截断。错误正文常带堆栈，不压会把行高撑爆。 */
+function compactText(value: string, maxLength: number): string {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+}
+
+/** 精确 token 数，给 title 和 aria-label 用。 */
+function exactTokens(name: string, value: number | null): string {
+  const shown = value === null || value === undefined ? "-" : value.toLocaleString("zh-CN");
+  return `${name} ${shown} tokens`;
+}
+
 /** 耗时一律用秒，保留一位小数。毫秒原值在这一列里位数不齐，扫不出快慢。 */
 function formatSeconds(ms: number | null): string {
   return ms === null || ms === undefined ? "-" : `${(ms / 1000).toFixed(1)}s`;
@@ -803,7 +815,19 @@ function LogRow({
   onOpenDetail: () => void;
 }) {
   return (
-    <tr className="log-row" title={log.error || "点击查看请求详情"}>
+    /* 整行可点。tabIndex 让它能被键盘达到，回车和空格等同点击。 */
+    <tr
+      className="log-row"
+      title={log.error || "点击查看请求详情"}
+      data-log-id={log.id}
+      tabIndex={0}
+      onClick={onOpenDetail}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onOpenDetail();
+      }}
+    >
       <td className="time-cell" data-col="time">
         <span>{formatTimestamp(log.created_at)}</span>
         <span className="muted">#{log.id}</span>
@@ -846,22 +870,30 @@ function LogRow({
           </span>
         </span>
       </td>
+      {/* 列里只给量级，精确值放 title 和 aria-label——缩写不该把数字弄丢，
+          1.2M 可能是 115 万也可能是 125 万。 */}
       <td className="tokens-cell" data-col="tokens">
-        <span className="token-io">
-          <span className="token-io-line token-io-in">
+        <span className="token-io" aria-label={`${exactTokens("输入", log.prompt_tokens)}，${exactTokens("输出", log.completion_tokens)}`}>
+          <span className="token-io-line token-io-in" title={exactTokens("输入", log.prompt_tokens)}>
             <span className="token-io-arrow" aria-hidden="true">↑</span>
             <b>{formatCount(log.prompt_tokens)}</b>
           </span>
-          <span className="token-io-line token-io-out">
+          <span className="token-io-line token-io-out" title={exactTokens("输出", log.completion_tokens)}>
             <span className="token-io-arrow" aria-hidden="true">↓</span>
             <b>{formatCount(log.completion_tokens)}</b>
           </span>
         </span>
       </td>
+      {/* 这一列是错误信息，不是按钮。放按钮的话，列表里根本看不出错在哪，
+          每行都得点开才知道。打开详情靠整行点击。 */}
       <td className="detail-cell" data-col="detail">
-        <button type="button" className="secondary" onClick={onOpenDetail}>
-          {log.error ? "错误" : "查看"}
-        </button>
+        {log.error?.trim() ? (
+          <span className="log-error-detail" title={log.error}>
+            {compactText(log.error, 200)}
+          </span>
+        ) : (
+          <span className="muted">-</span>
+        )}
       </td>
     </tr>
   );
@@ -889,9 +921,12 @@ function StatusBadge({ code }: { code: number | null }) {
 }
 
 /** 扫列表要的是量级，2500000 这种长度会挤掉别的列。 */
+/* 缩写档位要到 T。只到 M 的话，25 亿 token 会显示成 2500M，还不如不缩。 */
 function formatCount(value: number | null): string {
   if (value === null) return "-";
   for (const [suffix, unit] of [
+    ["T", 1e12],
+    ["B", 1e9],
     ["M", 1e6],
     ["K", 1e3],
   ] as const) {
