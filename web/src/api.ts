@@ -14,6 +14,7 @@ import type {
   RequestLogDetail,
   RequestLogPage,
   RuntimeSettings,
+  SystemInfo,
   TokenUsage,
   TopStats,
   Upstream,
@@ -176,16 +177,39 @@ export function getSettings(): Promise<RuntimeSettings> {
 }
 
 /** 保存设置。revision 要原样带回去，后端靠它拒掉过期的写入。 */
+/**
+ * 保存运行时设置。
+ *
+ * 逐字段拼，不能把读回来的整个对象发回去：后端是严格解码，多一个
+ * updated_at 就整请求 400。revision 要原样带上，它是乐观锁。
+ */
 export function saveSettings(payload: RuntimeSettings): Promise<RuntimeSettings> {
   return api<RuntimeSettings>("/api/admin/settings/", {
     method: "PUT",
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      log_body_keep_count: payload.log_body_keep_count,
+      log_retention_days: payload.log_retention_days,
+      log_body_max_bytes: payload.log_body_max_bytes,
+      max_retries: payload.max_retries,
+      same_upstream_retry_interval_ms: payload.same_upstream_retry_interval_ms,
+      auto_weight_failure_penalty: payload.auto_weight_failure_penalty,
+      auto_weight_success_increment: payload.auto_weight_success_increment,
+      auto_weight_recovery_increment: payload.auto_weight_recovery_increment,
+      auto_weight_recovery_interval_seconds: payload.auto_weight_recovery_interval_seconds,
+      proxy_enabled: payload.proxy_enabled,
+      proxy_url: payload.proxy_url,
+      revision: payload.revision,
+    }),
   });
 }
 
 /** 轮换管理员令牌。新值只在响应里出现一次。 */
 export function rotateAdminToken(): Promise<{ token: string }> {
   return api<{ token: string }>("/api/admin/settings/admin-token/rotate", { method: "POST" });
+}
+
+export function getSystemInfo(): Promise<SystemInfo> {
+  return api<SystemInfo>("/api/admin/system");
 }
 
 export function listPromptTemplates(): Promise<PromptTemplate[]> {

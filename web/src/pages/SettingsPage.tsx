@@ -5,6 +5,7 @@ import {
   createPromptTemplate,
   deletePromptTemplate,
   getSettings,
+  getSystemInfo,
   listPromptTemplates,
   rotateAdminToken,
   saveSettings,
@@ -12,10 +13,17 @@ import {
   updatePromptTemplate,
 } from "../api";
 import { useConfirm, useToast } from "../components/feedback";
-import { BUILTIN_THEMES, THEME_LABELS, THEME_PACKS, applyTheme, currentTheme } from "../theme";
-import type { PromptTemplate, RuntimeSettings } from "../types";
-
-const DENSITY_KEY = "wildtoken_density";
+import {
+  APPEARANCE_EVENT,
+  BUILTIN_THEMES,
+  THEME_LABELS,
+  THEME_PACKS,
+  applyDensity,
+  applyTheme,
+  currentDensity,
+  currentTheme,
+} from "../theme";
+import type { PromptTemplate, RuntimeSettings, SystemInfo } from "../types";
 
 /** 数字输入统一走这里：空串当 0，避免 NaN 提交到后端。 */
 function num(raw: string): number {
@@ -23,29 +31,67 @@ function num(raw: string): number {
   return Number.isFinite(value) ? value : 0;
 }
 
+function formatCount(value: number): string {
+  return Number(value || 0).toLocaleString("zh-CN");
+}
+
+function formatBytes(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  if (value >= 1024 * 1024 * 1024) return `${(value / 1024 / 1024 / 1024).toFixed(1)}GB`;
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)}MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)}KB`;
+  return `${value}B`;
+}
+
+function formatUptime(seconds: number | null): string {
+  if (seconds === null || !Number.isFinite(seconds)) return "—";
+  const total = Math.max(0, Math.floor(seconds));
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const rest = total % 60;
+  if (days > 0) return `${days} 天 ${hours} 小时 ${minutes} 分`;
+  if (hours > 0) return `${hours} 小时 ${minutes} 分 ${rest} 秒`;
+  if (minutes > 0) return `${minutes} 分 ${rest} 秒`;
+  return `${rest} 秒`;
+}
+
+function formatDuration(ms: number | null | undefined): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0).replace(/\.0$/, "")}s`;
+}
+
 export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
   const [settings, setSettings] = useState<RuntimeSettings | null>(null);
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
+  const [system, setSystem] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [saving, setSaving] = useState(false);
+  /* 哪一张卡正在保存。三张卡各自一个按钮，但后端是整体写入——标出具体那张，
+     免得点了日志策略却看到代理那边转圈。 */
+  const [savingCard, setSavingCard] = useState<string | null>(null);
   const [theme, setTheme] = useState(currentTheme);
-  const [density, setDensity] = useState(
-    () => document.documentElement.getAttribute("data-density") ?? "comfortable",
-  );
+  const [density, setDensity] = useState(currentDensity);
   const [editingTemplate, setEditingTemplate] = useState<{ template: PromptTemplate | null } | null>(
     null,
   );
   const [rotatedToken, setRotatedToken] = useState("");
+  const [refreshingSystem, setRefreshingSystem] = useState(false);
 
   const toast = useToast();
   const confirm = useConfirm();
 
   const reload = useCallback(async () => {
     try {
-      const [loaded, loadedTemplates] = await Promise.all([getSettings(), listPromptTemplates()]);
+      const [loaded, loadedTemplates, loadedSystem] = await Promise.all([
+        getSettings(),
+        listPromptTemplates(),
+        getSystemInfo(),
+      ]);
       setSettings(loaded);
       setTemplates(loadedTemplates);
+      setSystem(loadedSystem);
       setError("");
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
@@ -59,13 +105,23 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     void reload();
   }, [reload]);
 
+  // 顶栏也能改外观，跟着广播重读，两处显示的不会分叉。
+  useEffect(() => {
+    const sync = () => {
+      setTheme(currentTheme());
+      setDensity(currentDensity());
+    };
+    window.addEventListener(APPEARANCE_EVENT, sync);
+    return () => window.removeEventListener(APPEARANCE_EVENT, sync);
+  }, []);
+
   function patch<K extends keyof RuntimeSettings>(key: K, value: RuntimeSettings[K]) {
     setSettings((current) => (current ? { ...current, [key]: value } : current));
   }
 
-  async function save() {
+  async function save(card: string) {
     if (!settings) return;
-    setSaving(true);
+    setSavingCard(card);
     try {
       /* revision 原样带回去：后端靠它拒掉过期的写入。 */
       setSettings(await saveSettings(settings));
@@ -74,7 +130,19 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else toast(`保存失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
     } finally {
-      setSaving(false);
+      setSavingCard(null);
+    }
+  }
+
+  async function refreshSystem() {
+    setRefreshingSystem(true);
+    try {
+      setSystem(await getSystemInfo());
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`读取运行信息失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+    } finally {
+      setRefreshingSystem(false);
     }
   }
 
@@ -103,14 +171,8 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
   }
 
   function switchDensity(next: string) {
-    document.documentElement.setAttribute("data-density", next);
+    applyDensity(next);
     setDensity(next);
-    try {
-      localStorage.setItem(DENSITY_KEY, next);
-    } catch {
-      // 存储不可用时当前页面仍然生效。
-      return;
-    }
   }
 
   async function saveTemplate(name: string, prompt: string) {
@@ -144,243 +206,451 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     }
   }
 
+  const metrics = system?.runtime_metrics;
+  const cleanup = metrics?.cleanup;
+
   return (
-    <section className="view" data-view="settings">
-      <section className="panel">
+    <section className="view settings-view" data-view="settings">
+      <section className="panel settings-hero">
         <div className="panel-head">
           <div>
-            <span className="eyebrow">RUNTIME</span>
+            <span className="eyebrow">CONSOLE CONTROL</span>
             <h2>设置</h2>
-            <p>运行时行为、外观与模型测试 Prompt。</p>
+            <p>将本机偏好与网关运行策略分别管理；敏感凭证不会在此读取或保存。</p>
           </div>
         </div>
 
         {error ? (
-          <p className="field-hint" role="alert" style={{ color: "var(--danger)" }}>
+          <p className="settings-inline-status" role="alert">
             {error}
           </p>
         ) : null}
 
-        <h3>外观</h3>
-        <div className="form-grid">
-          <label className="field">
-            <span className="field-label">主题</span>
-            <select value={theme} onChange={(event) => switchTheme(event.target.value)}>
-              {[...BUILTIN_THEMES, ...Object.keys(THEME_PACKS)].map((id) => (
-                <option key={id} value={id}>
-                  {THEME_LABELS[id] ?? id}
-                </option>
-              ))}
-            </select>
-            <span className="field-hint">主题与旧控制台共用同一份设置。</span>
-          </label>
-
-          <label className="field">
-            <span className="field-label">密度</span>
-            <select value={density} onChange={(event) => switchDensity(event.target.value)}>
-              <option value="comfortable">舒适</option>
-              <option value="compact">紧凑</option>
-            </select>
-          </label>
-        </div>
-
-        {loading || !settings ? (
-          <p className="muted">加载中…</p>
-        ) : (
-          <>
-            <h3>日志保留</h3>
-            <div className="form-grid">
-              <NumberField
-                label="保留天数"
-                value={settings.log_retention_days}
-                min={1}
-                max={3650}
-                hint="超过这个天数的日志会被清理。"
-                onChange={(v) => patch("log_retention_days", v)}
-              />
-              <NumberField
-                label="保留请求体条数"
-                value={settings.log_body_keep_count}
-                min={1}
-                max={10000}
-                hint="只有最近这么多条会留下请求与响应快照。"
-                onChange={(v) => patch("log_body_keep_count", v)}
-              />
-              <NumberField
-                label="单条请求体上限（字节）"
-                value={settings.log_body_max_bytes}
-                min={0}
-                max={1048576}
-                onChange={(v) => patch("log_body_max_bytes", v)}
-              />
+        <div className="settings-stack">
+          <section className="settings-card">
+            <div className="settings-card-head">
+              <div>
+                <h3>控制台偏好</h3>
+                <p>仅保存在当前浏览器，并立即生效。</p>
+              </div>
+              <span className="settings-local-tag">本地</span>
             </div>
+            <div className="settings-preferences-grid">
+              <fieldset className="settings-choice-group settings-theme-choice-group">
+                <legend>主题</legend>
+                <select
+                  aria-label="主题"
+                  value={theme}
+                  onChange={(event) => switchTheme(event.target.value)}
+                >
+                  {[...BUILTIN_THEMES, ...Object.keys(THEME_PACKS)].map((id) => (
+                    <option key={id} value={id}>
+                      {THEME_LABELS[id] ?? id}
+                    </option>
+                  ))}
+                </select>
+                <span className="field-hint">主题与旧控制台共用同一份设置。</span>
+              </fieldset>
 
-            <h3>重试</h3>
-            <div className="form-grid">
-              <NumberField
-                label="最大重试次数"
-                value={settings.max_retries}
-                min={0}
-                max={5}
-                onChange={(v) => patch("max_retries", v)}
-              />
-              <NumberField
-                label="同渠道重试间隔（毫秒）"
-                value={settings.same_upstream_retry_interval_ms}
-                min={0}
-                max={60000}
-                onChange={(v) => patch("same_upstream_retry_interval_ms", v)}
-              />
+              <fieldset className="settings-choice-group">
+                <legend>显示密度</legend>
+                <div className="segmented-control" aria-label="显示密度">
+                  <button
+                    type="button"
+                    data-density-choice="comfortable"
+                    aria-pressed={density === "comfortable"}
+                    onClick={() => switchDensity("comfortable")}
+                  >
+                    舒适
+                  </button>
+                  <button
+                    type="button"
+                    data-density-choice="compact"
+                    aria-pressed={density === "compact"}
+                    onClick={() => switchDensity("compact")}
+                  >
+                    紧凑
+                  </button>
+                </div>
+              </fieldset>
             </div>
+          </section>
 
-            <h3>自动权重</h3>
-            <div className="form-grid">
-              <NumberField
-                label="失败惩罚"
-                value={settings.auto_weight_failure_penalty}
-                min={0}
-                max={100}
-                onChange={(v) => patch("auto_weight_failure_penalty", v)}
-              />
-              <NumberField
-                label="成功增量"
-                value={settings.auto_weight_success_increment}
-                min={0}
-                max={100}
-                onChange={(v) => patch("auto_weight_success_increment", v)}
-              />
-              <NumberField
-                label="恢复增量"
-                value={settings.auto_weight_recovery_increment}
-                min={0}
-                max={100}
-                onChange={(v) => patch("auto_weight_recovery_increment", v)}
-              />
-              <NumberField
-                label="恢复间隔（秒）"
-                value={settings.auto_weight_recovery_interval_seconds}
-                min={1}
-                max={3600}
-                onChange={(v) => patch("auto_weight_recovery_interval_seconds", v)}
-              />
-            </div>
+          {loading || !settings ? (
+            <p className="settings-loading">加载中…</p>
+          ) : (
+            <>
+              <section className="settings-card">
+                <div className="settings-card-head">
+                  <div>
+                    <h3>日志与存储</h3>
+                    <p>
+                      这些策略由服务端保存，保存后用于新的快照；正文清理通常在一分钟内生效，过期日志按小时删除。
+                    </p>
+                  </div>
+                  <span className="settings-revision">{`修订 ${settings.revision}`}</span>
+                </div>
+                <div className="settings-server-form">
+                  <div className="settings-fields-grid">
+                    <NumberField
+                      label="正文保留数量"
+                      value={settings.log_body_keep_count}
+                      min={1}
+                      max={10000}
+                      hint="每条日志保留的正文快照数量。"
+                      onChange={(v) => patch("log_body_keep_count", v)}
+                    />
+                    <NumberField
+                      label="日志保留天数"
+                      value={settings.log_retention_days}
+                      min={1}
+                      max={3650}
+                      hint="超过期限的日志会在下一轮清理时移除。"
+                      onChange={(v) => patch("log_retention_days", v)}
+                    />
+                    <NumberField
+                      className="span-2"
+                      label="原始正文采集上限（字节）"
+                      value={settings.log_body_max_bytes}
+                      min={0}
+                      max={1048576}
+                      hint="设为 0 时只保留元数据和请求头，不采集正文。"
+                      onChange={(v) => patch("log_body_max_bytes", v)}
+                    />
+                  </div>
+                  <div className="settings-save-row">
+                    <p className="settings-inline-status" role="status">
+                      {`上次更新 ${settings.updated_at}`}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={savingCard !== null}
+                      onClick={() => void save("log")}
+                    >
+                      {savingCard === "log" ? "保存中…" : "保存日志策略"}
+                    </button>
+                  </div>
+                </div>
+              </section>
 
-            <h3>出站代理</h3>
-            <div className="form-grid">
-              <label className="field">
-                <input
-                  type="checkbox"
-                  checked={settings.proxy_enabled}
-                  onChange={(event) => patch("proxy_enabled", event.target.checked)}
-                />
-                <span>启用代理</span>
-              </label>
-              <label className="field">
-                <span className="field-label">代理地址</span>
-                <input
-                  value={settings.proxy_url}
-                  onChange={(event) => patch("proxy_url", event.target.value)}
-                  placeholder="http://127.0.0.1:7890"
-                  autoComplete="off"
-                />
-              </label>
-            </div>
+              <section className="settings-card">
+                <div className="settings-card-head">
+                  <div>
+                    <h3>路由、有效权重与重试</h3>
+                    <p>这些参数由服务端保存，并用于保存后的新请求。</p>
+                  </div>
+                  <span className="settings-readonly-tag">全局</span>
+                </div>
 
-            <div className="modal-actions">
-              <span className="muted">修订号 {settings.revision}</span>
-              <button type="button" disabled={saving} onClick={() => void save()}>
-                {saving ? "保存中…" : "保存设置"}
+                {/* 这四步是路由的全部规则。不写下来的话，下面六个数字看不出彼此的关系。 */}
+                <div className="routing-rule-guide">
+                  <ol className="routing-rule-steps">
+                    <li>
+                      <strong>模型优先</strong>
+                      <span>先保留模型匹配分最高的渠道；显式指定渠道时跳过池内权重选择。</span>
+                    </li>
+                    <li>
+                      <strong>优先级硬分层</strong>
+                      <span>只要最高 priority 组内存在有效权重大于 0 的渠道，就不会使用更低 priority。</span>
+                    </li>
+                    <li>
+                      <strong>同层按权重随机</strong>
+                      <span>未固定权重时按有效权重分流；固定权重时始终按基础权重分流。</span>
+                    </li>
+                    <li>
+                      <strong>降到 0 后切换</strong>
+                      <span>
+                        某一层全部为 0 才回退到下一层。渠道恢复为正数后，高优先级层会立即重新接管流量。
+                      </span>
+                    </li>
+                  </ol>
+                  <p className="routing-rule-detail">
+                    有效权重由基础权重派生，范围为 0 到基础权重。所有上游非 2xx、连接失败、超时、读取失败和
+                    SSE 上游异常都会降低有效权重；正常完成的 2xx 请求会恢复有效权重。有效权重为 0
+                    时退出动态池，经过完整恢复周期后重新参与选择。
+                  </p>
+                  <p className="routing-rule-detail">
+                    自动路由的每次重试都会重新选择渠道。选到不同渠道立即重试；再次选到同一渠道才等待。
+                    显式指定渠道的重试始终等待。一旦下游响应头已经提交，尤其是成功的 SSE
+                    流，后续异常只记失败，不再透明重试。
+                  </p>
+                </div>
+
+                <div className="settings-server-form">
+                  <div className="settings-fields-grid routing-settings-grid">
+                    <NumberField
+                      label="最大重试次数"
+                      value={settings.max_retries}
+                      min={0}
+                      max={5}
+                      hint="额外尝试次数；0 表示不重试。"
+                      onChange={(v) => patch("max_retries", v)}
+                    />
+                    <NumberField
+                      label="同渠道重试间隔（毫秒）"
+                      value={settings.same_upstream_retry_interval_ms}
+                      min={0}
+                      max={60000}
+                      hint="换到不同渠道时不会等待。"
+                      onChange={(v) => patch("same_upstream_retry_interval_ms", v)}
+                    />
+                    <NumberField
+                      label="失败降幅"
+                      value={settings.auto_weight_failure_penalty}
+                      min={0}
+                      max={100}
+                      hint="每次渠道失败都会降低动态有效权重。"
+                      onChange={(v) => patch("auto_weight_failure_penalty", v)}
+                    />
+                    <NumberField
+                      label="成功恢复幅度"
+                      value={settings.auto_weight_success_increment}
+                      min={0}
+                      max={100}
+                      hint="每次正常完成后提高动态有效权重，最高不超过基础权重。"
+                      onChange={(v) => patch("auto_weight_success_increment", v)}
+                    />
+                    <NumberField
+                      label="定时恢复幅度"
+                      value={settings.auto_weight_recovery_increment}
+                      min={0}
+                      max={100}
+                      hint="有效权重为 0 后，每经过一个完整周期恢复一次。"
+                      onChange={(v) => patch("auto_weight_recovery_increment", v)}
+                    />
+                    <NumberField
+                      label="恢复周期（秒）"
+                      value={settings.auto_weight_recovery_interval_seconds}
+                      min={1}
+                      max={3600}
+                      hint="有效权重变化后重新开始计时。"
+                      onChange={(v) => patch("auto_weight_recovery_interval_seconds", v)}
+                    />
+                  </div>
+                  <div className="settings-save-row">
+                    <p className="settings-inline-status" role="status" />
+                    <button
+                      type="button"
+                      disabled={savingCard !== null}
+                      onClick={() => void save("routing")}
+                    >
+                      {savingCard === "routing" ? "保存中…" : "保存路由策略"}
+                    </button>
+                  </div>
+                </div>
+              </section>
+
+              <section className="settings-card">
+                <div className="settings-card-head">
+                  <div>
+                    <h3>出站代理</h3>
+                    <p>
+                      启用后网关向上游发起的请求（转发、渠道探测、模型测试）都会经过该代理；保存后对新建立的连接立即生效。
+                    </p>
+                  </div>
+                  <span className="settings-readonly-tag">全局</span>
+                </div>
+                <div className="settings-server-form">
+                  <div className="settings-fields-grid">
+                    <div className="toggle-list span-2">
+                      <label className="toggle-row">
+                        <input
+                          type="checkbox"
+                          checked={settings.proxy_enabled}
+                          onChange={(event) => patch("proxy_enabled", event.target.checked)}
+                        />
+                        <span>
+                          <strong>启用出站代理</strong>
+                          <small>
+                            关闭时不走此处配置的代理（仍遵循系统 HTTP_PROXY/HTTPS_PROXY 环境变量）。
+                          </small>
+                        </span>
+                      </label>
+                    </div>
+                    <label className="field span-2">
+                      <span className="field-label">代理地址</span>
+                      <input
+                        type="text"
+                        value={settings.proxy_url}
+                        onChange={(event) => patch("proxy_url", event.target.value)}
+                        placeholder="http://127.0.0.1:7890"
+                        spellCheck={false}
+                        autoComplete="off"
+                      />
+                      <span className="field-hint">
+                        支持 http://、https://、socks5:// 与 socks5h://，可带账号密码。启用时必填。
+                      </span>
+                    </label>
+                  </div>
+                  <div className="settings-save-row">
+                    <p className="settings-inline-status" role="status" />
+                    <button
+                      type="button"
+                      disabled={savingCard !== null}
+                      onClick={() => void save("proxy")}
+                    >
+                      {savingCard === "proxy" ? "保存中…" : "保存代理设置"}
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </>
+          )}
+
+          <section className="settings-card">
+            <div className="settings-card-head">
+              <div>
+                <h3>模型测试 Prompt</h3>
+                <p>测试窗口选择的 Prompt 模板；编辑后下次测试立即生效。</p>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setEditingTemplate({ template: null })}
+              >
+                新增 Prompt
               </button>
             </div>
-          </>
-        )}
-      </section>
-
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <span className="eyebrow">SECURITY</span>
-            <h2>管理员令牌</h2>
-            <p>轮换后旧令牌立刻失效，新值只显示一次。</p>
-          </div>
-        </div>
-
-        {rotatedToken ? (
-          <div className="form-grid">
-            <label className="field">
-              <span className="field-label">新令牌</span>
-              <input readOnly value={rotatedToken} />
-              <span className="field-hint">这个值不会再显示，现在就存好。</span>
-            </label>
-          </div>
-        ) : null}
-
-        <div className="modal-actions">
-          <button type="button" className="secondary danger" onClick={() => void rotate()}>
-            轮换管理员令牌
-          </button>
-        </div>
-      </section>
-
-      <section className="panel">
-        <div className="panel-head">
-          <div>
-            <span className="eyebrow">MODEL TEST</span>
-            <h2>Prompt 模板</h2>
-            <p>测试模型时可选的提示词。</p>
-          </div>
-        </div>
-
-        <div className="view-toolbar">
-          <div className="actions toolbar-actions">
-            <button type="button" onClick={() => setEditingTemplate({ template: null })}>
-              新增 Prompt
-            </button>
-          </div>
-        </div>
-
-        <div className="table-wrap">
-          <table className="admin-table">
-            <thead>
-              <tr>
-                <th>名称</th>
-                <th>内容</th>
-                <th className="actions-col">操作</th>
-              </tr>
-            </thead>
-            <tbody>
+            <div className="model-test-template-list" aria-live="polite">
               {templates.length === 0 ? (
-                <tr>
-                  <td colSpan={3} className="muted">暂无 Prompt 模板</td>
-                </tr>
+                <p className="settings-loading">暂无 Prompt。</p>
               ) : (
                 templates.map((template) => (
-                  <tr key={template.id}>
-                    <td>
+                  <div key={template.id} className="model-test-template-item">
+                    <div>
                       <strong>{template.name}</strong>
-                    </td>
-                    <td className="muted">{template.prompt.slice(0, 60)}…</td>
-                    <td className="actions-col">
+                      <p title={template.prompt}>{template.prompt}</p>
+                    </div>
+                    <div className="model-test-template-actions">
                       <button
                         type="button"
-                        className="secondary ghost"
+                        className="secondary small"
                         onClick={() => setEditingTemplate({ template })}
                       >
                         编辑
                       </button>
                       <button
                         type="button"
-                        className="secondary ghost danger"
+                        className="secondary small danger"
                         onClick={() => void removeTemplate(template)}
                       >
                         删除
                       </button>
-                    </td>
-                  </tr>
+                    </div>
+                  </div>
                 ))
               )}
-            </tbody>
-          </table>
+            </div>
+          </section>
+
+          <section className="settings-card settings-readonly">
+            <div className="settings-card-head">
+              <div>
+                <h3>网关默认值</h3>
+                <p>启动时读取的默认上游超时。</p>
+              </div>
+              <span className="settings-readonly-tag">只读</span>
+            </div>
+            <div className="settings-note">
+              <strong>
+                默认上游超时：
+                {system ? `${system.default_upstream_timeout_seconds} 秒` : "由启动配置决定"}
+              </strong>
+              <p>现有渠道均有明确的超时值；请前往「渠道」按渠道管理。本页不提供动态全局超时设置。</p>
+            </div>
+          </section>
+
+          <section className="settings-card settings-security">
+            <div className="settings-card-head">
+              <div>
+                <h3>安全</h3>
+                <p>管理员令牌可由你自行设置；更换后旧令牌会立即失效。</p>
+              </div>
+              <span className="settings-security-mark">敏感操作</span>
+            </div>
+            <div className="settings-action-row">
+              <div>
+                <strong>更换管理员令牌</strong>
+                <p>保存后当前控制台会自动改用新令牌，新值只显示一次。</p>
+              </div>
+              <button type="button" className="danger" onClick={() => void rotate()}>
+                更换令牌
+              </button>
+            </div>
+            {rotatedToken ? (
+              <label className="field">
+                <span className="field-label">新令牌</span>
+                <input readOnly value={rotatedToken} />
+                <span className="field-hint">这个值不会再显示，现在就存好。</span>
+              </label>
+            ) : null}
+          </section>
+
+          <section className="settings-card">
+            <div className="settings-card-head">
+              <div>
+                <h3>运行信息</h3>
+                <p>只展示服务状态与汇总信息，不包含环境路径或秘密。</p>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                disabled={refreshingSystem}
+                onClick={() => void refreshSystem()}
+              >
+                {refreshingSystem ? "刷新中…" : "刷新"}
+              </button>
+            </div>
+            <div className="system-info-grid" aria-live="polite">
+              {!system || !metrics || !cleanup ? (
+                <p className="settings-loading">加载运行信息…</p>
+              ) : (
+                <>
+                  <InfoItem label="服务" value={system.service || "WildToken"} />
+                  <InfoItem label="版本" value={system.version || "—"} />
+                  <InfoItem label="运行时长" value={formatUptime(system.uptime_seconds)} />
+                  <InfoItem label="当前服务器时间" value={system.current_server_time || "—"} />
+                  <InfoItem label="数据库" value={system.database_ok ? "连接正常" : "不可用"} />
+                  <InfoItem label="数据库已分配" value={formatBytes(system.database_allocated_bytes)} />
+                  <InfoItem label="日志总数" value={formatCount(system.total_log_count)} />
+                  <InfoItem label="近 24 小时日志" value={formatCount(system.log_count_24h)} />
+                  <InfoItem
+                    label="启用渠道"
+                    value={`${system.enabled_upstream_count} / ${system.total_upstream_count}`}
+                  />
+                  <InfoItem
+                    label="近 1 分钟成功请求"
+                    value={formatCount(system.recent_one_minute_log_count)}
+                  />
+                  <InfoItem label="活跃 SSE" value={formatCount(metrics.active_sse_streams)} />
+                  <InfoItem
+                    label="10 分钟 SSE 断连"
+                    value={formatCount(metrics.sse_recent_disconnects_10m)}
+                  />
+                  <InfoItem
+                    label="SSE 断连总数"
+                    value={formatCount(metrics.sse_client_disconnects_total)}
+                  />
+                  <InfoItem label="SSE 上游错误" value={formatCount(metrics.sse_upstream_errors_total)} />
+                  <InfoItem label="日志队列" value={formatCount(metrics.log_queue_depth)} />
+                  <InfoItem label="日志写入" value={formatCount(metrics.log_written_total)} />
+                  <InfoItem label="日志写批次" value={formatCount(metrics.log_write_batches_total)} />
+                  <InfoItem label="日志丢弃" value={formatCount(metrics.log_dropped_total)} />
+                  <InfoItem label="日志写失败" value={formatCount(metrics.log_write_failures_total)} />
+                  <InfoItem label="慢 DB 操作" value={formatCount(metrics.slow_db_operations_total)} />
+                  <InfoItem label="清理任务" value={cleanup.active ? "运行中" : "空闲"} />
+                  <InfoItem
+                    label="清理进度"
+                    value={
+                      cleanup.active
+                        ? `${formatCount(cleanup.current_rows_cleared)} 行 / ${formatCount(cleanup.current_batches)} 批`
+                        : `${formatCount(cleanup.last_rows_cleared ?? 0)} 行 · ${formatDuration(cleanup.last_duration_ms)}`
+                    }
+                  />
+                </>
+              )}
+            </div>
+          </section>
         </div>
       </section>
 
@@ -394,12 +664,22 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
   );
 }
 
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="system-info-item">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 function NumberField({
   label,
   value,
   min,
   max,
   hint,
+  className,
   onChange,
 }: {
   label: string;
@@ -407,15 +687,18 @@ function NumberField({
   min: number;
   max: number;
   hint?: string;
+  className?: string;
   onChange: (value: number) => void;
 }) {
   return (
-    <label className="field">
+    <label className={className ? `field ${className}` : "field"}>
       <span className="field-label">{label}</span>
       <input
         type="number"
         min={min}
         max={max}
+        required
+        inputMode="numeric"
         value={value}
         onChange={(event) => onChange(num(event.target.value))}
       />
@@ -453,9 +736,9 @@ function PromptDialog({
   }, [open]);
 
   return (
-    <dialog className="upstream-dialog" ref={ref} onCancel={onClose}>
+    <dialog className="confirm-dialog" ref={ref} onCancel={onClose} aria-label="Prompt 模板">
       <form
-        className="upstream-dialog-panel"
+        className="confirm-panel"
         onSubmit={(event) => {
           event.preventDefault();
           if (!name.trim() || !prompt.trim()) return;
@@ -465,20 +748,44 @@ function PromptDialog({
         <div className="modal-head">
           <div>
             <h2>{template ? `编辑 Prompt #${template.id}` : "新增 Prompt"}</h2>
+            <p>测试窗口会从这些模板中选择。</p>
           </div>
-          <button type="button" className="secondary ghost" onClick={onClose} aria-label="关闭">
-            ×
-          </button>
+          <div className="modal-head-actions">
+            <button
+              type="button"
+              className="secondary ghost icon-close"
+              aria-label="关闭"
+              title="关闭"
+              onClick={onClose}
+            >
+              <svg className="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 4l8 8M12 4L4 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div className="form-grid">
-          <label className="field">
-            <span className="field-label">名称</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} required autoComplete="off" />
+          <label className="field span-2">
+            <span className="field-label">Prompt 名称</span>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              maxLength={80}
+              required
+              placeholder="例如：代码审查"
+              autoComplete="off"
+            />
           </label>
-          <label className="field">
-            <span className="field-label">内容</span>
-            <textarea rows={6} value={prompt} onChange={(e) => setPrompt(e.target.value)} required />
+          <label className="field span-2">
+            <span className="field-label">Prompt 内容</span>
+            <textarea
+              rows={8}
+              maxLength={20000}
+              required
+              value={prompt}
+              onChange={(event) => setPrompt(event.target.value)}
+            />
           </label>
         </div>
 
@@ -487,7 +794,7 @@ function PromptDialog({
             取消
           </button>
           <button type="submit" disabled={!name.trim() || !prompt.trim()}>
-            保存
+            保存 Prompt
           </button>
         </div>
       </form>

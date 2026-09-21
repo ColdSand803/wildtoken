@@ -1311,6 +1311,102 @@ async function main() {
       await page.click("dialog.log-detail-dialog .icon-close");
     });
 
+    // ── 设置页 ──────────────────────────────────────────────
+    console.log("\n设置页");
+
+    await check("八张设置卡齐全", async () => {
+      await gotoView(page, "设置");
+      /* 等满 8 张再比。三张服务端卡要等设置读回来才渲染，只等「大于 0」的话
+         会在只有 5 张时就截下来。 */
+      const titles = await page.waitFor(
+        () => {
+          const heads = [...document.querySelectorAll(".settings-stack .settings-card-head h3")];
+          return heads.length >= 8 ? heads.map((node) => node.textContent) : false;
+        },
+        { label: "设置卡", timeout: 10_000 },
+      );
+      assertEqual(
+        titles.join(","),
+        "控制台偏好,日志与存储,路由、有效权重与重试,出站代理,模型测试 Prompt,网关默认值,安全,运行信息",
+        "设置卡标题",
+      );
+    });
+
+    await check("运行信息读到真数据", async () => {
+      const items = await page.waitFor(
+        () => {
+          const nodes = [...document.querySelectorAll(".system-info-grid .system-info-item")];
+          if (nodes.length === 0) return false;
+          return Object.fromEntries(
+            nodes.map((node) => [
+              node.querySelector("span")?.textContent,
+              node.querySelector("strong")?.textContent,
+            ]),
+          );
+        },
+        { label: "运行信息", timeout: 10_000 },
+      );
+      assertEqual(items["服务"], "WildToken", "服务名");
+      assertEqual(items["数据库"], "连接正常", "数据库状态");
+      // 前面真的走了一遍网关，日志总数不应为 0。
+      assert(items["日志总数"] !== "0", `日志总数为 ${items["日志总数"]}`);
+      assertEqual(items["启用渠道"], "2 / 3", "启用渠道 / 总数");
+    });
+
+    await check("路由规则四步写在字段旁边", async () => {
+      assertEqual(await page.count(".routing-rule-guide .routing-rule-steps li"), 4, "路由规则条数");
+      assertEqual(await page.count(".routing-settings-grid .field"), 6, "路由字段数");
+    });
+
+    await check("保存日志策略后修订号前进", async () => {
+      const before = await page.evaluate(
+        () => document.querySelector(".settings-revision")?.textContent ?? "",
+      );
+      await page.evaluate(() => {
+        const input = document.querySelector(".settings-fields-grid input[type=number]");
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+        setter.call(input, "120");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll(".settings-save-row button")].find((node) =>
+          node.textContent.includes("保存日志策略"),
+        );
+        button.click();
+      });
+      const after = await page.waitFor(
+        (previous) => {
+          const text = document.querySelector(".settings-revision")?.textContent ?? "";
+          return text && text !== previous ? text : false;
+        },
+        { label: "修订号更新", timeout: 10_000 },
+        before,
+      );
+      assert(
+        Number(after.replace(/\D/g, "")) > Number(before.replace(/\D/g, "")),
+        `修订号没前进：${before} → ${after}`,
+      );
+    });
+
+    await check("密度分段控件改 html 属性", async () => {
+      const before = await page.evaluate(() => document.documentElement.getAttribute("data-density"));
+      const target = before === "compact" ? "comfortable" : "compact";
+      await page.click(`.segmented-control [data-density-choice=${target}]`);
+      const state = await page.evaluate(() => ({
+        attr: document.documentElement.getAttribute("data-density"),
+        stored: localStorage.getItem("wildtoken_density"),
+      }));
+      assertEqual(state.attr, target, "html data-density");
+      assertEqual(state.stored, target, "密度落盘");
+    });
+
+    await check("Prompt 模板列出来了", async () => {
+      assert(
+        (await page.count(".model-test-template-list .model-test-template-item")) > 0,
+        "一条 Prompt 模板都没列出",
+      );
+    });
+
     // ── 顶栏 ────────────────────────────────────────────────────────────────
     console.log("\n顶栏");
 

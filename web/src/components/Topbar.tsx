@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ViewId } from "../App";
 import { setAdminToken } from "../api";
 import {
+  APPEARANCE_EVENT,
   BUILTIN_THEMES,
   THEME_LABELS,
   THEME_PACKS,
@@ -39,6 +40,17 @@ export function Topbar({
   const [density, setDensity] = useState(currentDensity);
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const themeWrapRef = useRef<HTMLDivElement>(null);
+
+  /* 设置页也能改外观。不跟着重读的话，这里会拿着旧值，下一次点切换
+     看上去没反应。 */
+  useEffect(() => {
+    const sync = () => {
+      setTheme(currentTheme());
+      setDensity(currentDensity());
+    };
+    window.addEventListener(APPEARANCE_EVENT, sync);
+    return () => window.removeEventListener(APPEARANCE_EVENT, sync);
+  }, []);
 
   // 点菜单外面或按 Esc 收起，和旧版行为一致。
   useEffect(() => {

@@ -45,6 +45,19 @@ export const THEME_SWATCHES: Record<string, [string, string]> = {
 
 export const DENSITY_KEY = "wildtoken_density";
 
+/**
+ * 外观变了就广播一声。
+ *
+ * 主题和密度有两个入口（顶栏和设置页），两边各存一份状态的话，在设置页改完
+ * 回到顶栏，那个按钮还拿着旧值——点一下看上去没反应。真正的状态在
+ * documentElement 上，这条事件只是告诉大家重新去读。
+ */
+export const APPEARANCE_EVENT = "console:appearance";
+
+function announce(): void {
+  window.dispatchEvent(new CustomEvent(APPEARANCE_EVENT));
+}
+
 export function currentDensity(): string {
   return document.documentElement.getAttribute("data-density") === "compact"
     ? "compact"
@@ -60,6 +73,7 @@ export function applyDensity(density: string): void {
   } catch {
     // 存不进去不影响当前页面。
   }
+  announce();
 }
 
 const SAFE_THEME_ID = /^[a-z][a-z0-9-]{0,47}$/;
@@ -133,4 +147,5 @@ export function applyTheme(theme: string): void {
   }
 
   persist(THEME_KEY, resolved);
+  announce();
 }

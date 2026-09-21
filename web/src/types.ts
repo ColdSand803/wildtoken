@@ -216,6 +216,41 @@ export interface PromptTemplate {
   updated_at: string;
 }
 
+/** 运行信息。只有服务状态与汇总计数，不含环境路径或秘密。 */
+export interface SystemInfo {
+  service: string;
+  version: string;
+  default_upstream_timeout_seconds: number;
+  uptime_seconds: number;
+  current_server_time: string;
+  database_ok: boolean;
+  database_allocated_bytes?: number | null;
+  total_log_count: number;
+  log_count_24h: number;
+  enabled_upstream_count: number;
+  total_upstream_count: number;
+  recent_one_minute_log_count: number;
+  runtime_metrics: {
+    active_sse_streams: number;
+    sse_client_disconnects_total: number;
+    sse_recent_disconnects_10m: number;
+    sse_upstream_errors_total: number;
+    log_queue_depth: number;
+    log_written_total: number;
+    log_write_batches_total: number;
+    log_dropped_total: number;
+    log_write_failures_total: number;
+    slow_db_operations_total: number;
+    cleanup: {
+      active: boolean;
+      current_rows_cleared: number;
+      current_batches: number;
+      last_rows_cleared?: number;
+      last_duration_ms?: number | null;
+    };
+  };
+}
+
 /**
  * 余额查询结果。
  *
