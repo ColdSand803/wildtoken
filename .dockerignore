@@ -8,3 +8,5 @@ wildtoken.db*
 *.log
 .wildtoken.bin
 .env
+web/node_modules
+web/dist

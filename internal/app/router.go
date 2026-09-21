@@ -29,6 +29,10 @@ func NewRouter(state *appstate.State) http.Handler {
 		http.Redirect(w, r, "/admin", http.StatusSeeOther)
 	})
 	router.Get("/admin", serveAdminHTML)
+	// 新控制台（React）。与 /admin 并存：旧版不动，新版出问题不影响任何人。
+	router.Get("/console", serveConsoleHTML)
+	router.Mount("/console/assets", noStore(http.StripPrefix("/console/assets",
+		http.FileServer(http.Dir(filepath.Join("web", "dist", "assets"))))))
 	router.Get("/api/themes", handlers.ListPublicThemePacks(state))
 
 	router.Mount("/static", noStore(http.StripPrefix("/static",
@@ -187,6 +191,25 @@ func serveAdminHTML(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
 		w.Write([]byte("Admin page not found"))
+		return
+	}
+	w.Header().Set("content-type", "text/html; charset=utf-8")
+	w.Header().Set("cache-control", noStoreCacheControl)
+	w.Write(html)
+}
+
+// serveConsoleHTML serves the React console from web/dist.
+//
+// The probe's build output lives under web/dist; the bundle's asset paths are
+// already prefixed with /console/ by Vite's base setting. A missing build is
+// reported rather than served as an empty page, because the old console at
+// /admin must keep working either way.
+func serveConsoleHTML(w http.ResponseWriter, r *http.Request) {
+	index := filepath.Join("web", "dist", "index.html")
+	html, err := os.ReadFile(index)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte("Console build not found; run npm run build in web/"))
 		return
 	}
 	w.Header().Set("content-type", "text/html; charset=utf-8")
