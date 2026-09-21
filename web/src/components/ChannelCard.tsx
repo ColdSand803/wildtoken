@@ -1,6 +1,6 @@
 import { ActionMenu } from "./ActionMenu";
 import type { MenuEntry } from "./ActionMenu";
-import type { Upstream, UpstreamStats } from "../types";
+import type { Upstream, UpstreamHealth, UpstreamStats } from "../types";
 
 /** 大数字缩到能扫的长度。旧版 formatMetric 同款。 */
 function formatMetric(value: number): string {
@@ -40,9 +40,65 @@ function Sparkline({ values }: { values: number[] }) {
   );
 }
 
-function MetricTile({ label, value, title }: { label: string; value: string; title?: string }) {
+/** 秒与毫秒分界：健康区的均延迟跟旧版用秒。 */
+function formatSeconds(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/**
+ * 24h 逐小时健康条。
+ *
+ * 每根是一小时，高度按该小时请求量，颜色按错误占比。没有流量的小时不画
+ * ——留白比一根零高的柱更诚实。
+ */
+function HealthBars({ health }: { health: UpstreamHealth | null }) {
+  const buckets = health?.buckets ?? [];
+  if (buckets.length === 0) return <div className="health-bars-empty">24h 无请求</div>;
+
+  const max = Math.max(...buckets.map((bucket) => bucket.total || 0), 1);
   return (
-    <div className="metric-tile" title={title}>
+    <div
+      className="health-bars"
+      role="img"
+      aria-label={`24 小时逐小时健康，共 ${health?.total ?? 0} 请求，失败 ${health?.errors ?? 0}`}
+    >
+      {buckets.map((bucket, index) => {
+        const total = bucket.total || 0;
+        const errors = bucket.errors || 0;
+        const ratio = total > 0 ? errors / total : 1;
+        const tone = ratio === 0 ? "ok" : ratio < 0.5 ? "warn" : "bad";
+        const hour = new Date(bucket.bucket_epoch * 1000);
+        const label =
+          `${String(hour.getHours()).padStart(2, "0")}:00 · ${total} 请求` +
+          (errors > 0 ? ` · 失败 ${errors}` : "");
+        return (
+          <span
+            key={index}
+            className={`health-bar health-bar--${tone}`}
+            style={{ height: `${Math.max(12, Math.round((total / max) * 100))}%` }}
+            title={label}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function MetricTile({
+  label,
+  value,
+  title,
+  wide,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+  wide?: boolean;
+}) {
+  return (
+    <div className={wide ? "metric-tile metric-tile--wide" : "metric-tile"} title={title}>
       <span className="metric-label">{label}</span>
       <span className="metric-value">{value}</span>
     </div>
@@ -58,18 +114,29 @@ function MetricTile({ label, value, title }: { label: string; value: string; tit
 export function ChannelCard({
   upstream,
   stats,
+  health,
   busy,
   menu,
   onToggle,
+  onOpenDetail,
 }: {
   upstream: Upstream;
   stats: UpstreamStats | null;
+  health: UpstreamHealth | null;
   busy: boolean;
   menu: MenuEntry[];
   onToggle: () => void;
+  onOpenDetail: () => void;
 }) {
   const sparkValues = stats?.sparkline.map((point) => point.count) ?? [];
   const sixHourTotal = stats ? formatMetric(sparkValues.reduce((sum, n) => sum + n, 0)) : "—";
+
+  /* 没流量时 success_rate 是 null，不能当 0 用——那会把一个没人用过的渠道
+     标成红色的「在线率 0%」。 */
+  const rate = health?.success_rate ?? null;
+  const successLabel = rate === null ? "—" : `${(rate * 100).toFixed(1)}%`;
+  const successTone = rate === null ? "" : rate >= 0.99 ? " is-ok" : rate >= 0.9 ? " is-warn" : " is-bad";
+  const latencyLabel = !health || health.total === 0 ? "—" : formatSeconds(health.avg_ms);
 
   return (
     <div
@@ -127,16 +194,35 @@ export function ChannelCard({
         <Sparkline values={sparkValues} />
       </div>
 
+      <div className="channel-card-health">
+        <div className="sparkline-header">
+          <span className="sparkline-label">24h 健康</span>
+          <span className="health-summary">
+            <span className={`health-stat${successTone}`} title="24 小时成功率">
+              {`在线率 ${successLabel}`}
+            </span>
+            <span className="health-stat" title="24 小时平均耗时">
+              {`均延迟 ${latencyLabel}`}
+            </span>
+          </span>
+        </div>
+        <HealthBars health={health} />
+      </div>
+
       <div className="channel-card-metrics">
         <MetricTile label="总请求" value={stats ? formatMetric(stats.totalRequests) : "—"} />
         <MetricTile label="缓存命中" value={stats ? `${stats.cacheHitRate.toFixed(1)}%` : "—"} />
         <MetricTile
-          label="平均 Token"
+          label="平均 Token / 千次请求"
           value={stats ? formatMetric(Math.round(stats.avgTokensPer1M)) : "—"}
-          title="本项目不存单价，这里是每百万请求的平均 Token 消耗，作为成本的代理指标"
+          title="项目未存储价格数据，此处为每千次请求的平均 Token 消耗"
+          wide
         />
-        <MetricTile label="有效权重" value={String(Math.round(upstream.effective_weight))} />
       </div>
+
+      <button type="button" className="channel-card-action" onClick={onOpenDetail}>
+        查看详情 →
+      </button>
     </div>
   );
 }

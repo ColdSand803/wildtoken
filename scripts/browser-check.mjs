@@ -764,6 +764,79 @@ async function main() {
       await page.press("Escape");
     });
 
+    // ── 卡片视图 ────────────────────────────────────────────
+    console.log("\n卡片视图");
+
+    // 视图切换是图标按钮，文案在 aria-label 里。
+    await check("切到卡片视图", async () => {
+      await page.click("button[aria-label='卡片视图']");
+      await page.waitForSelector(".channel-card", { label: "渠道卡片", timeout: 10_000 });
+    });
+
+    /* 统计接口返回的是 {"stats":{...}} 而不是裸 map。把整个响应当 map 用的话
+       stats[id] 恒为 undefined，指标全是破折号而且不报错。这条专测那个。 */
+    await check("卡片指标不是一片破折号", async () => {
+      const values = await page.waitFor(
+        () => {
+          const card = [...document.querySelectorAll(".channel-card")].find((node) =>
+            node.textContent.includes("auto-weight"),
+          );
+          if (!card) return false;
+          const tiles = [...card.querySelectorAll(".metric-tile")].map((tile) => ({
+            label: tile.querySelector(".metric-label")?.textContent,
+            value: tile.querySelector(".metric-value")?.textContent,
+          }));
+          return tiles.length > 0 ? tiles : false;
+        },
+        { label: "卡片指标", timeout: 10_000 },
+      );
+      assertEqual(values.length, 3, "指标格数（旧版三格）");
+      const total = values.find((tile) => tile.label === "总请求");
+      assert(total !== undefined, `没有总请求格：${JSON.stringify(values)}`);
+      assert(total.value !== "—", "总请求是破折号，统计没拿到");
+      assert(
+        values.some((tile) => tile.label === "平均 Token / 千次请求"),
+        `平均 Token 格标签不对：${JSON.stringify(values)}`,
+      );
+    });
+
+    await check("24h 健康区渲染出来", async () => {
+      const health = await page.evaluate(() => {
+        const card = [...document.querySelectorAll(".channel-card")].find((node) =>
+          node.textContent.includes("auto-weight"),
+        );
+        const block = card?.querySelector(".channel-card-health");
+        return {
+          exists: block !== null && block !== undefined,
+          stats: [...(block?.querySelectorAll(".health-stat") ?? [])].map((n) => n.textContent),
+          bars: block?.querySelectorAll(".health-bar").length ?? 0,
+          empty: block?.querySelector(".health-bars-empty") !== null,
+        };
+      });
+      assertEqual(health.exists, true, "健康区存在");
+      assertEqual(health.stats.length, 2, "在线率 + 均延迟两项");
+      assert(health.stats[0].startsWith("在线率"), `第一项应是在线率：${health.stats}`);
+      // 种子里走过一遍网关，这个渠道 24h 内有请求，应该有柱而不是空态。
+      assert(health.bars > 0 || health.empty, "健康条既没柱也没空态");
+    });
+
+    await check("查看详情按钮开编辑框", async () => {
+      await page.evaluate(() => {
+        const card = [...document.querySelectorAll(".channel-card")].find((node) =>
+          node.textContent.includes("auto-weight"),
+        );
+        card.querySelector(".channel-card-action").click();
+      });
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
+      await page.click("dialog.upstream-dialog[open] .icon-close");
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "编辑对话框关闭",
+      });
+      // 换回列表视图，后面的检查都按表格写的。
+      await page.click("button[aria-label='列表视图']");
+      await page.waitForSelector("table.upstream-table", { label: "表格视图" });
+    });
+
     // ── 模型选择器 ──────────────────────────────────────────
     console.log("\n模型选择器");
 

@@ -5,6 +5,7 @@ import {
   createUpstream,
   deleteUpstream,
   exportUpstreams,
+  fetchUpstreamHealth,
   fetchUpstreamModels,
   fetchUpstreamStats,
   getUpstream,
@@ -33,7 +34,13 @@ import { ModelTestDialog } from "../components/ModelTestDialog";
 import { UpstreamDialog } from "../components/UpstreamDialog";
 import type { UpstreamPayload } from "../components/UpstreamDialog";
 import { useConfirm, useToast } from "../components/feedback";
-import type { ChannelExportDocument, ImportResult, Upstream, UpstreamStats } from "../types";
+import type {
+  ChannelExportDocument,
+  ImportResult,
+  Upstream,
+  UpstreamHealth,
+  UpstreamStats,
+} from "../types";
 
 type StatusFilter = "" | "enabled" | "disabled" | "effective-zero";
 
@@ -107,6 +114,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     }
   });
   const [stats, setStats] = useState<Record<string, UpstreamStats>>({});
+  const [health, setHealth] = useState<Record<string, UpstreamHealth>>({});
   const [exportDoc, setExportDoc] = useState<ChannelExportDocument | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -148,12 +156,15 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       .catch(() => setGroups([]));
   }, []);
 
-  /* 统计只给卡片视图用，列表视图不请求——省一次没人看的往返。 */
+  /* 统计和健康只给卡片视图用，列表视图不请求——省两次没人看的往返。 */
   useEffect(() => {
     if (view !== "grid") return;
     fetchUpstreamStats()
       .then(setStats)
       .catch(() => setStats({}));
+    fetchUpstreamHealth()
+      .then(setHealth)
+      .catch(() => setHealth({}));
   }, [view]);
 
   function switchView(next: "list" | "grid") {
@@ -687,11 +698,13 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                   key={upstream.id}
                   upstream={upstream}
                   stats={stats[String(upstream.id)] ?? null}
+                  health={health[String(upstream.id)] ?? null}
                   busy={pending === upstream.id}
                   menu={menuFor(upstream)}
                   onToggle={() =>
                     void mutate(upstream.id, () => setUpstreamEnabled(upstream.id, !upstream.enabled))
                   }
+                  onOpenDetail={() => void openEditor(upstream)}
                 />
               ))
             )}

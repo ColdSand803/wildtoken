@@ -18,6 +18,7 @@ import type {
   TokenUsage,
   TopStats,
   Upstream,
+  UpstreamHealth,
   UpstreamStats,
 } from "./types";
 
@@ -340,8 +341,23 @@ export function listLogs(params: {
 }
 
 /** 卡片视图的统计，一次拿全部渠道——按渠道逐个请求会变成 N 次往返。 */
+/**
+ * 卡片视图的每渠道统计。
+ *
+ * 响应是 {"stats": {...}} 而不是裸 map。把整个响应当 map 用的话，stats[id]
+ * 恒为 undefined——指标全是破折号，而且不报错。
+ */
 export function fetchUpstreamStats(): Promise<Record<string, UpstreamStats>> {
-  return api<Record<string, UpstreamStats>>("/api/admin/upstreams/stats");
+  return api<{ stats: Record<string, UpstreamStats> }>("/api/admin/upstreams/stats").then(
+    (payload) => payload.stats ?? {},
+  );
+}
+
+/** 24 小时逐小时健康，同样是一次拿全部。 */
+export function fetchUpstreamHealth(): Promise<Record<string, UpstreamHealth>> {
+  return api<{ entries: Record<string, UpstreamHealth> }>(
+    "/api/admin/upstreams/health?hours=24",
+  ).then((payload) => payload.entries ?? {});
 }
 
 /** 导出文档。后端返回的是带 kind/version 的包装，直接存成文件。 */

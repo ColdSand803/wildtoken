@@ -30,6 +30,19 @@ export interface Upstream {
   group_ids: number[];
 }
 
+/**
+ * 渠道 24 小时健康。
+ *
+ * success_rate 可以是 null——没流量时「成功率」没有定义，不能当 0 用。
+ */
+export interface UpstreamHealth {
+  total: number;
+  errors: number;
+  success_rate: number | null;
+  avg_ms: number;
+  buckets: Array<{ bucket_epoch: number; total: number; errors: number }>;
+}
+
 /** 卡片视图的每渠道统计。一次请求拿全部，按 id 开。 */
 export interface UpstreamStats {
   sparkline: Array<{ bucket: string; count: number }>;
