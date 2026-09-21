@@ -838,6 +838,7 @@ html[data-theme="gojo"] .status[data-tone="error"] {
 
 html[data-theme="gojo"] button:not(:where(
   .nav-link,
+  .archived-toggle,
   .table-sort-button,
   .url-action,
   .priority-value,
@@ -872,6 +873,7 @@ html[data-theme="gojo"] button:not(:where(
 
 html[data-theme="gojo"] button:not(:where(
   .nav-link,
+  .archived-toggle,
   .table-sort-button,
   .url-action,
   .priority-value,
@@ -902,6 +904,7 @@ html[data-theme="gojo"] button:not(:where(
 
 html[data-theme="gojo"] button:not(:where(
   .nav-link,
+  .archived-toggle,
   .table-sort-button,
   .url-action,
   .priority-value,
@@ -926,6 +929,7 @@ html[data-theme="gojo"] button:not(:where(
 
 html[data-theme="gojo"] button:not(:where(
   .nav-link,
+  .archived-toggle,
   .table-sort-button,
   .url-action,
   .priority-value,
@@ -946,6 +950,7 @@ html[data-theme="gojo"] button:not(:where(
 )):disabled,
 html[data-theme="gojo"] button:not(:where(
   .nav-link,
+  .archived-toggle,
   .table-sort-button,
   .url-action,
   .priority-value,

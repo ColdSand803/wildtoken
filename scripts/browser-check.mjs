@@ -946,6 +946,47 @@ async function main() {
       await page.click(".archived-toggle");
     });
 
+    /* 归档开关是个文本折叠控件，不是主操作按钮。gojo / ark 给未列白的
+       button 刷实心渐变，刷上去就看不清了。量实际背景而不是看类名：
+       白名单漏了类名照样存在，只是规则没命中。 */
+    await check("归档开关各主题下都不被刷实心", async () => {
+      /* 走界面上的主题菜单，不是直接改 data-theme：主题包是运行时插的
+         <link>，只改属性的话 CSS 根本没加载，断言会全绿但什么也没测到。 */
+      for (const theme of ["gojo", "ark"]) {
+        await page.click(".theme-toggle");
+        await page.click(`[data-theme-choice=${theme}]`);
+
+        // 先确认主题包真的生效了，否则后面那条断言没意义。
+        const loaded = await page.waitFor(
+          (name) => {
+            if (document.documentElement.getAttribute("data-theme") !== name) return false;
+            const link = [...document.querySelectorAll("link[rel=stylesheet]")].find((node) =>
+              node.href.includes(`/theme-packs/${name}/`),
+            );
+            // sheet.cssRules 能读到，说明它下载并解析完了。
+            return link?.sheet?.cssRules?.length ? true : false;
+          },
+          { label: `${theme} 主题包加载`, timeout: 10_000 },
+          theme,
+        );
+        assertEqual(loaded, true, `${theme} 主题包没加载`);
+
+        const painted = await page.evaluate(() => {
+          const style = getComputedStyle(document.querySelector(".archived-toggle"));
+          return { image: style.backgroundImage, color: style.backgroundColor };
+        });
+        assertEqual(painted.image, "none", `${theme} 主题下被刷了渐变`);
+        assert(
+          /rgba\(0, 0, 0, 0\)|transparent/.test(painted.color),
+          `${theme} 主题下有底色：${painted.color}`,
+        );
+      }
+
+      // 换回默认，别把后续用例留在主题包上。
+      await page.click(".theme-toggle");
+      await page.click("[data-theme-choice=dark]");
+    });
+
     await check("操作菜单能打开", async () => {
       await page.click("table.upstream-table tbody tr button.action-menu-trigger");
       const items = await page.count("[role=menu] [role=menuitem]");
@@ -1964,6 +2005,37 @@ async function main() {
       assertEqual(reasoning, 1, "思考强度表头");
     });
 
+    /* 窄到什么程度要量，不能只看 CSS 里的数字；同时要确认时间戳没因为变窄
+       而折成两行——折行比宽一点难看得多。 */
+    await check("时间与渠道列不占宽且不折行", async () => {
+      const measured = await page.waitFor(
+        () => {
+          const row = document.querySelector("table.log-table tbody tr");
+          const time = row?.querySelector("[data-col=time]");
+          const channel = row?.querySelector("[data-col=channel]");
+          if (!time || !channel) return false;
+          const stamp = time.querySelector("span");
+          const style = getComputedStyle(stamp);
+          return {
+            timeWidth: Math.round(time.getBoundingClientRect().width),
+            channelWidth: Math.round(channel.getBoundingClientRect().width),
+            // 单行高 ≈ lineHeight；明显高于它就是折了行。
+            stampHeight: Math.round(stamp.getBoundingClientRect().height),
+            lineHeight: Math.round(parseFloat(style.lineHeight) || 0),
+            nowrap: style.whiteSpace,
+          };
+        },
+        { label: "日志表首行", timeout: 10_000 },
+      );
+      assertEqual(measured.nowrap, "nowrap", "时间戳要钉成一行");
+      assert(
+        measured.lineHeight === 0 || measured.stampHeight <= measured.lineHeight + 2,
+        `时间戳折行了：高 ${measured.stampHeight} vs 行高 ${measured.lineHeight}`,
+      );
+      assert(measured.timeWidth <= 190, `时间列 ${measured.timeWidth}px，太宽`);
+      assert(measured.channelWidth <= 210, `渠道列 ${measured.channelWidth}px，太宽`);
+    });
+
     await check("客户端档位是固定清单而不是从当前页凑", async () => {
       const options = await page.evaluate(() => {
         const select = [...document.querySelectorAll(".log-toolbar select")].find((node) =>
@@ -2483,8 +2555,17 @@ async function main() {
       );
       assertEqual(disabledBefore, true, "未填日期时的应用按钮");
 
-      await page.fill(".dashboard-custom-range input[aria-label='开始日期']", "2020-01-01");
-      await page.fill(".dashboard-custom-range input[aria-label='结束日期']", "2020-01-02");
+      /* datetime-local 收的是带时刻的值，纯日期它不认（设进去就是空）。
+         这里故意给同一天的两个时刻，把「时分秒能选」一并验了——旧逻辑下
+         同一天根本表达不出来。 */
+      await page.fill(
+        ".dashboard-custom-range input[aria-label='开始时间']",
+        "2020-01-01T09:30:15",
+      );
+      await page.fill(
+        ".dashboard-custom-range input[aria-label='结束时间']",
+        "2020-01-01T17:45:30",
+      );
 
       /* 订阅要赶在第一次点击之前。应用过一次后状态就不再变，再点一下
          React 不会重新取数，什么请求也抓不到。 */
@@ -2499,7 +2580,7 @@ async function main() {
         },
         { label: "自定义区间落盘" },
       );
-      assertEqual(stored, "2020-01-01~2020-01-02", "区间落盘");
+      assertEqual(stored, "2020-01-01T09:30:15~2020-01-01T17:45:30", "区间落盘");
       await sleepInPage(page, 1200);
       cdp.off("Network.requestWillBeSent", collectCustom);
 
@@ -2508,12 +2589,12 @@ async function main() {
       const custom = requests.filter((url) => url.includes("range=custom"));
       assert(custom.length > 0, "没有一个请求带 range=custom");
       assert(
-        custom.some((url) => url.includes("start_date=2020-01-01")),
-        `请求里没带起始日期：${custom[0]}`,
+        custom.some((url) => url.includes(`start_date=${encodeURIComponent("2020-01-01T09:30:15")}`)),
+        `请求里没带起始时刻：${custom[0]}`,
       );
       assert(
-        custom.some((url) => url.includes("end_date=2020-01-02")),
-        `请求里没带结束日期：${custom[0]}`,
+        custom.some((url) => url.includes(`end_date=${encodeURIComponent("2020-01-01T17:45:30")}`)),
+        `请求里没带结束时刻：${custom[0]}`,
       );
 
       // 换回一个普通档，别把后续检查留在空区间上。

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -729,6 +730,26 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 
 const dashboardDateLayout = "2006-01-02"
 
+// dashboardRangeLayouts accepts a bare date or a wall-clock instant. The date
+// form is kept because that is what the stored console preference holds.
+var dashboardRangeLayouts = []string{
+	"2006-01-02T15:04:05",
+	"2006-01-02T15:04",
+	dashboardDateLayout,
+}
+
+// parseDashboardBound reports whether the value named a whole day, which
+// decides if the upper bound is rounded up to the following midnight.
+func parseDashboardBound(value string) (time.Time, bool, error) {
+	for _, layout := range dashboardRangeLayouts {
+		parsed, err := time.ParseInLocation(layout, value, time.Local)
+		if err == nil {
+			return parsed, layout == dashboardDateLayout, nil
+		}
+	}
+	return time.Time{}, false, errors.New("unrecognised timestamp")
+}
+
 type dashboardRangeSelection struct {
 	Value   string
 	Label   string
@@ -771,23 +792,31 @@ func parseDashboardRange(value, startValue, endValue, fallback string) (dashboar
 			return dashboardRangeSelection{}, apperr.BadRequest(
 				"start_date and end_date are required when range is custom")
 		}
-		startDate, startErr := time.ParseInLocation(dashboardDateLayout, startValue, time.Local)
-		endDate, endErr := time.ParseInLocation(dashboardDateLayout, endValue, time.Local)
+		// Only the upper bound cares whether it named a whole day; a start is
+		// taken at its own midnight either way.
+		startDate, _, startErr := parseDashboardBound(startValue)
+		endDate, endIsWholeDay, endErr := parseDashboardBound(endValue)
 		if startErr != nil || endErr != nil {
 			return dashboardRangeSelection{}, apperr.BadRequest(
-				"start_date and end_date must use YYYY-MM-DD")
+				"start_date and end_date must use YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS]")
 		}
-		if startDate.After(endDate) {
+		// A bare end date means the whole of that day, so the exclusive upper
+		// bound is the following midnight. A precise instant is used as given.
+		endBound := endDate
+		if endIsWholeDay {
+			endBound = endDate.AddDate(0, 0, 1)
+		}
+		if !startDate.Before(endBound) {
 			return dashboardRangeSelection{}, apperr.BadRequest(
-				"start_date must not be after end_date")
+				"start_date must be before end_date")
 		}
-		if endDate.After(startDate.AddDate(0, 0, 365)) {
+		if endBound.After(startDate.AddDate(0, 0, 366)) {
 			return dashboardRangeSelection{}, apperr.BadRequest(
 				"custom date range must not exceed 366 days")
 		}
 		selection.Label = startValue + " 至 " + endValue
 		selection.StartAt = startDate.UTC().Format(models.TimestampFormat)
-		selection.EndAt = endDate.AddDate(0, 0, 1).UTC().Format(models.TimestampFormat)
+		selection.EndAt = endBound.UTC().Format(models.TimestampFormat)
 	}
 	return selection, nil
 }

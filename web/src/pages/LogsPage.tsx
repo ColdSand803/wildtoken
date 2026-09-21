@@ -808,9 +808,9 @@ function ActiveRows({
           {/* 在途行同样要占这一格。IP 在请求一进来就知道了，不必等完成。 */}
           <td className="ip-cell" data-col="ip">
             {request.client_ip ? (
-              <code className="log-ip" title={request.client_ip}>
+              <span className="log-ip" title={request.client_ip}>
                 {request.client_ip}
-              </code>
+              </span>
             ) : (
               <span className="muted">-</span>
             )}
@@ -951,12 +951,14 @@ function LogRow({
           </span>
         </span>
       </td>
-      {/* 建列之前的旧行这一格是 null，显示破折号而不是编一个地址出来。 */}
+      {/* 建列之前的旧行这一格是 null，显示破折号而不是编一个地址出来。
+          用 span 不用 code：主题包给所有 code 元素上了底色和边框，IP 是表格里的
+          一格数据，不是代码片段。 */}
       <td className="ip-cell" data-col="ip">
         {log.client_ip ? (
-          <code className="log-ip" title={log.client_ip}>
+          <span className="log-ip" title={log.client_ip}>
             {log.client_ip}
-          </code>
+          </span>
         ) : (
           <span className="muted">-</span>
         )}

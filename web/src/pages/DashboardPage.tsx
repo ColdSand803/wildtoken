@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchDashboard, getSystemInfo, listUpstreams } from "../api";
 import type { LogOverview, RequestLog, SystemInfo, TokenUsage, TopItem, TopStats } from "../types";
@@ -41,14 +41,28 @@ function writeStored(key: string, value: string): void {
   }
 }
 
+/**
+ * 接受纯日期和带时刻两种。
+ *
+ * datetime-local 没填秒时交的是 YYYY-MM-DDTHH:MM，填了秒才带上 :SS；
+ * 旧的落盘值又是纯日期。三种都要能认，否则老用户的偏好会被当成非法值丢掉。
+ */
 function isDate(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+  return /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2})?)?$/.test(value);
+}
+
+/* 比大小用字典序：这几种写法都是固定宽度的大端格式，字典序和时间序
+   一致。但纯日期和带时刻混着比时要补齐，否则 "2026-08-01" 会排在
+   "2026-08-01T09:00" 前面——那正是我们要的语义（当天零点）。 */
+function sameOrBefore(start: string, end: string): boolean {
+  const pad = (value: string) => (value.includes("T") ? value : `${value}T00:00:00`);
+  return pad(start) <= pad(end);
 }
 
 function readCustomRange(): { start: string; end: string } {
   const saved = readStored(CUSTOM_RANGE_KEY) ?? "";
   const [start, end] = saved.split("~");
-  if (isDate(start) && isDate(end) && start <= end) return { start, end };
+  if (isDate(start) && isDate(end) && sameOrBefore(start, end)) return { start, end };
   return { start: "", end: "" };
 }
 
@@ -321,7 +335,8 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
   }
 
   function applyCustom() {
-    if (!isDate(draft.start) || !isDate(draft.end) || draft.start > draft.end) return;
+    if (!isDate(draft.start) || !isDate(draft.end)) return;
+    if (!sameOrBefore(draft.start, draft.end) || draft.start === draft.end) return;
     setCustom(draft);
     setRange("custom");
     writeStored(RANGE_KEY, "custom");
@@ -346,6 +361,25 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
   const cleanup = metrics?.cleanup;
   /* 响应总是嵌套的：选了具体时间窗时，服务端把该窗的聚合值塞进 today。
      按扁平结构取字段全是 undefined，卡片渲染成 NaN。 */
+  /* 滑块要量选中那个按钮的实际几何。用 layout effect 是为了在浏览器绘制前
+     就定位，否则切档时能看见它从旧位置跳过去。 */
+  const segRef = useRef<HTMLDivElement>(null);
+  const thumbRef = useRef<HTMLSpanElement>(null);
+
+  useLayoutEffect(() => {
+    const thumb = thumbRef.current;
+    const active = segRef.current?.querySelector<HTMLElement>("[data-dashboard-range].is-active");
+    if (!thumb) return;
+    if (!active) {
+      thumb.style.opacity = "0";
+      return;
+    }
+    thumb.style.width = `${active.offsetWidth}px`;
+    thumb.style.height = `${active.offsetHeight}px`;
+    thumb.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+    thumb.style.opacity = "1";
+  }, [range]);
+
   // 不叫 window：会遮蔽全局对象。
   const usageWindow = usage?.today;
   const cacheRate =
@@ -364,13 +398,17 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
           </div>
 
           <div className="dashboard-time-filter wt-toolbar">
-            <div className="wt-seg" role="group" aria-label="看板统计时间范围">
-              <span className="wt-seg-thumb" aria-hidden="true" />
+            <div className="wt-seg" role="group" aria-label="看板统计时间范围" ref={segRef}>
+              {/* 滑块基线是 opacity 0，尺寸和位置全靠脚本算——只放个空 span 的话
+                  它永远不显示。 */}
+              <span className="wt-seg-thumb" aria-hidden="true" ref={thumbRef} />
               {RANGES.map((item) => (
                 <button
                   key={item.key}
                   type="button"
-                  className="wt-seg-btn"
+                  /* is-active 是选中态的唯一凭据：CSS 里没有任何规则看 aria-pressed，
+                     只设无障碍属性的话屏上看不出选中了哪个档。 */
+                  className={range === item.key ? "wt-seg-btn is-active" : "wt-seg-btn"}
                   data-dashboard-range={item.key}
                   aria-pressed={range === item.key}
                   onClick={() => switchRange(item.key)}
@@ -380,7 +418,11 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
               ))}
               <button
                 type="button"
-                className="wt-seg-btn dashboard-custom-chip"
+                className={
+                  range === "custom"
+                    ? "wt-seg-btn dashboard-custom-chip is-active"
+                    : "wt-seg-btn dashboard-custom-chip"
+                }
                 data-dashboard-range="custom"
                 aria-pressed={range === "custom"}
                 onClick={() => switchRange("custom")}
@@ -401,11 +443,13 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
               aria-hidden={range !== "custom"}
             >
               <div className="dashboard-custom-range-inner">
+                {/* step=1 才会出秒位；不给的话控件只到分钟。 */}
                 <label className="dashboard-date-field">
                   <span className="dashboard-date-text">开始</span>
                   <input
-                    type="date"
-                    aria-label="开始日期"
+                    type="datetime-local"
+                    step="1"
+                    aria-label="开始时间"
                     value={draft.start}
                     onChange={(event) => setDraft({ ...draft, start: event.target.value })}
                   />
@@ -414,8 +458,9 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                 <label className="dashboard-date-field">
                   <span className="dashboard-date-text">结束</span>
                   <input
-                    type="date"
-                    aria-label="结束日期"
+                    type="datetime-local"
+                    step="1"
+                    aria-label="结束时间"
                     value={draft.end}
                     onChange={(event) => setDraft({ ...draft, end: event.target.value })}
                   />
@@ -423,7 +468,13 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                 <button
                   type="button"
                   className="secondary dashboard-apply-custom"
-                  disabled={!isDate(draft.start) || !isDate(draft.end) || draft.start > draft.end}
+                  /* 起止相等也不行：空区间选不出任何东西，后端也会 400。 */
+                  disabled={
+                    !isDate(draft.start) ||
+                    !isDate(draft.end) ||
+                    !sameOrBefore(draft.start, draft.end) ||
+                    draft.start === draft.end
+                  }
                   onClick={applyCustom}
                 >
                   应用

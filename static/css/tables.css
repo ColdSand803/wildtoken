@@ -518,18 +518,23 @@ td.no-match-state {
   width: 56px;
 }
 
+/* 下界只按时间戳本身留：它是固定宽度（tabular-nums 加 nowrap），多给的
+   那几十像素只是空白，把后面的列往外挤。 */
 .time-cell {
-  min-width: 168px;
+  min-width: 146px;
 }
 
 .time-cell > span:first-child {
   font-variant-numeric: tabular-nums;
   font-size: var(--text-base);
+  /* 不钉住的话，列一窄日期和时间会拆成两行。 */
+  white-space: nowrap;
 }
 
+/* 渠道名已经是省略号截断，窄一点只是早一点截，不会折行。 */
 .channel-cell {
-  max-width: 220px;
-  min-width: 180px;
+  max-width: 190px;
+  min-width: 148px;
 }
 
 .channel-stack {
