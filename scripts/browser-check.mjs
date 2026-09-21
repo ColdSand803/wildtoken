@@ -1253,6 +1253,82 @@ async function main() {
       );
     });
 
+    await check("表头与表体均为 10 列", async () => {
+      const head = await page.count("table.log-table thead th");
+      const body = await page.evaluate(
+        () => document.querySelector("table.log-table tbody tr")?.children.length ?? 0,
+      );
+      assertEqual(head, 10, "表头列数");
+      assertEqual(body, 10, "表体格数");
+      const reasoning = await page.count("table.log-table thead th[data-col=reasoning]");
+      assertEqual(reasoning, 1, "思考强度表头");
+    });
+
+    await check("客户端档位是固定清单而不是从当前页凑", async () => {
+      const options = await page.evaluate(() => {
+        const select = [...document.querySelectorAll(".log-toolbar select")].find((node) =>
+          node.textContent.includes("全部客户端"),
+        );
+        return [...select.options].map((option) => option.value);
+      });
+      // 当前页肯定没有 channel-test 这类探测，但档位必须在。
+      assert(options.includes("channel-test"), `档位不全：${options}`);
+      assertEqual(options.length, 12, "客户端档位数（含全部）");
+    });
+
+    /* 筛选必须回服务端。前端过滤当前页的话，选 5xx 看到的是「这几十行里的
+       5xx」，翻页每页各筛各的。这里直接盯请求里有没有那个参数。 */
+    await check("筛选发回服务端而不是前端过滤", async () => {
+      const seen = [];
+      const collect = (event) => seen.push(event.request.url);
+      cdp.on("Network.requestWillBeSent", collect);
+
+      await page.evaluate(() => {
+        const select = [...document.querySelectorAll(".log-toolbar select")].find((node) =>
+          node.textContent.includes("全部状态"),
+        );
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+        setter.call(select, "5xx");
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await sleepInPage(page, 600);
+
+      const hit = seen.some((url) => url.includes("/api/admin/logs/") && url.includes("status=5xx"));
+      assert(hit, `没发出带 status=5xx 的请求：${seen.filter((u) => u.includes("logs/")).slice(-3)}`);
+
+      // 换回全部，别把后续检查留在空结果上。
+      await page.evaluate(() => {
+        const select = [...document.querySelectorAll(".log-toolbar select")].find((node) =>
+          node.textContent.includes("全部状态"),
+        );
+        const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
+        setter.call(select, "");
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await sleepInPage(page, 600);
+    });
+
+    await check("搜索框防抖后带上 search 参数", async () => {
+      const seen = [];
+      cdp.on("Network.requestWillBeSent", (event) => seen.push(event.request.url));
+      await page.fill("#log-search", "gpt-4o");
+      await sleepInPage(page, 900);
+      const hits = seen.filter((url) => url.includes("/api/admin/logs/") && url.includes("search="));
+      assert(hits.length > 0, "没发出带 search 的请求");
+      // 防抖生效：六个字符不该打出六次查询。
+      assert(hits.length <= 2, `防抖没生效，发了 ${hits.length} 次`);
+      await page.fill("#log-search", "");
+      await sleepInPage(page, 900);
+    });
+
+    await check("渠道筛选列出全量渠道", async () => {
+      const names = await page.evaluate(() => {
+        const select = document.querySelector(".log-filter-channel select");
+        return [...select.options].map((option) => option.textContent);
+      });
+      assert(names.includes("archived-channel"), `渠道不全：${names}`);
+    });
+
     await check("会话模式把请求体还原成对话", async () => {
       await openProxiedLogDetail(page);
       await page.waitForSelector("dialog.log-detail-dialog[open]", { label: "详情窗" });

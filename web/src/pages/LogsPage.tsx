@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { UnauthorizedError, getLogDetail, listLogs } from "../api";
+import { UnauthorizedError, getLogDetail, listLogs, listUpstreams } from "../api";
 import { LogDetailDialog } from "../components/LogDetailDialog";
 import type { ActiveRequest, RequestLog, RequestLogDetail, RequestLogPage } from "../types";
 import { useLogStream } from "../useLogStream";
@@ -24,6 +24,80 @@ type ColumnKey = (typeof COLUMNS)[number]["key"];
 const COLUMNS_STORAGE_KEY = "wildtoken_log_columns";
 const SENSITIVE_STORAGE_KEY = "wildtoken_log_sensitive_hidden";
 const PAGE_SIZES = [20, 50, 100, 200];
+
+/** 客户端筛选的固定档位，照抄旧版。后三个是控制台探测，不是真实客户端。 */
+/**
+ * 思考强度链：请求 → 上游 → 响应。
+ *
+ * 相邻两步相同就合并——没改写过的链路不该显示成三段一模一样的值。
+ */
+interface ReasoningSource {
+  reasoning_effort: string | null;
+  upstream_reasoning_effort: string | null;
+  /** 在途请求还没有这一段。 */
+  response_reasoning_effort?: string | null;
+}
+
+function reasoningChain(log: ReasoningSource): Array<{ label: string; value: string }> {
+  const steps = [
+    { label: "请求强度", value: (log.reasoning_effort ?? "").trim() },
+    { label: "上游强度", value: (log.upstream_reasoning_effort ?? "").trim() },
+    { label: "响应强度", value: (log.response_reasoning_effort ?? "").trim() },
+  ].filter((step) => step.value);
+
+  const chain: Array<{ label: string; value: string }> = [];
+  for (const step of steps) {
+    if (chain.length > 0 && chain[chain.length - 1].value === step.value) continue;
+    chain.push(step);
+  }
+  return chain;
+}
+
+/** 单值平铺，多值用 ↳ 排成路由链，和模型列同一套写法。 */
+function ReasoningCell({ log }: { log: ReasoningSource }) {
+  const chain = reasoningChain(log);
+  if (chain.length === 0) return <span className="muted">-</span>;
+
+  const title = chain.map((step) => `${step.label}：${step.value}`).join("；");
+  if (chain.length === 1) {
+    return (
+      <span className="model-text model-single" title={chain[0].value}>
+        {chain[0].value}
+      </span>
+    );
+  }
+
+  const [first, ...rest] = chain;
+  return (
+    <span className="model-route" title={title}>
+      <span className="model-route-line">
+        <span className="model-text model-request">{first.value}</span>
+      </span>
+      {rest.map((step, index) => (
+        <span key={index} className="model-route-line model-route-target">
+          <span className="model-route-icon" aria-hidden="true">
+            ↳
+          </span>
+          <span className="model-text model-upstream">{step.value}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+const CLIENT_TYPES = [
+  "codex-desktop",
+  "codex-tui",
+  "codex",
+  "opencode",
+  "claude",
+  "pi",
+  "unknown",
+  "model-test",
+  "channel-test",
+  "model-list",
+  "balance",
+];
 
 function readColumns(): Record<ColumnKey, boolean> {
   const fallback = Object.fromEntries(COLUMNS.map((c) => [c.key, true])) as Record<ColumnKey, boolean>;
@@ -61,6 +135,12 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   const [loading, setLoading] = useState(true);
   const [clientFilter, setClientFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
+  const [upstreamFilter, setUpstreamFilter] = useState("");
+  const [upstreams, setUpstreams] = useState<Array<{ id: number; name: string }>>([]);
+  /* 输入框的实时值和真正拿去查的值分开。每敲一下键都发一次查询的话，
+     输一个模型名会打出十几次全库扫描。 */
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
   const [columns, setColumns] = useState<Record<ColumnKey, boolean>>(readColumns);
   const [colMenuOpen, setColMenuOpen] = useState(false);
   const [sensitiveHidden, setSensitiveHidden] = useState(readSensitiveHidden);
@@ -85,6 +165,10 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
             limit: pageSize,
             beforeCreatedAt: cursor?.created_at,
             beforeId: cursor?.id,
+            search,
+            clientType: clientFilter,
+            status: statusFilter,
+            upstreamId: upstreamFilter,
           }),
         );
         setError("");
@@ -95,12 +179,32 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
         setLoading(false);
       }
     },
-    [onUnauthorized, pageSize],
+    [onUnauthorized, pageSize, search, clientFilter, statusFilter, upstreamFilter],
   );
 
   useEffect(() => {
     void load(cursors.at(-1));
   }, [load, cursors]);
+
+  // 400ms 后才落到真正的查询词。
+  useEffect(() => {
+    const timer = setTimeout(() => setSearch(searchInput), 400);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
+
+  /* 换了筛选条件就回到第一页。旧游标是按旧条件算出来的，留着会把新结果集
+     从一个不属于它的位置截断。 */
+  useEffect(() => {
+    setCursors([]);
+  }, [search, clientFilter, statusFilter, upstreamFilter]);
+
+  /* 渠道下拉要全量渠道，不能从当前页数据里凑——凑出来的话，没出现在这
+     50 行里的渠道就根本选不到。 */
+  useEffect(() => {
+    listUpstreams()
+      .then((list) => setUpstreams(list.map((item) => ({ id: item.id, name: item.name }))))
+      .catch(() => setUpstreams([]));
+  }, []);
 
   const onResync = useCallback(() => {
     if (onLatestPage) void load();
@@ -123,15 +227,10 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
       seen.add(log.id);
       merged.push(log);
     }
-    return merged.filter((log) => {
-      if (clientFilter && log.client_type !== clientFilter) return false;
-      if (statusFilter) {
-        if (statusFilter === "none") return log.status_code === null;
-        return Math.floor((log.status_code ?? 0) / 100) === Number(statusFilter[0]);
-      }
-      return true;
-    });
-  }, [stream.logs, page?.items, clientFilter, statusFilter, onLatestPage]);
+    /* 不在这里再过滤一遍。筛选已经回服务端，前端再筛一次只会把流推来的
+       新行误删——它们没经过查询，但确实属于当前结果集。 */
+    return merged;
+  }, [stream.logs, page?.items, onLatestPage]);
 
   const active = onLatestPage ? (stream.connected ? stream.active : (page?.active ?? [])) : [];
   const activeTotal = stream.connected ? stream.activeTotal : (page?.active_total ?? 0);
@@ -198,6 +297,33 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
         </div>
 
         <div className="log-toolbar">
+          <label className="log-filter log-filter-channel">
+            <select
+              aria-label="按渠道筛选日志"
+              value={upstreamFilter}
+              onChange={(event) => setUpstreamFilter(event.target.value)}
+            >
+              <option value="">全部渠道</option>
+              {upstreams.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="log-filter">
+            <input
+              type="search"
+              id="log-search"
+              autoComplete="off"
+              placeholder="模型、渠道、令牌、状态码…"
+              aria-label="搜索日志"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+            />
+          </label>
+
           <label className="log-filter">
             <select
               aria-label="按客户端筛选日志"
@@ -205,7 +331,9 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
               onChange={(event) => setClientFilter(event.target.value)}
             >
               <option value="">全部客户端</option>
-              {[...new Set(logs.map((log) => log.client_type))].sort().map((type) => (
+              {/* 固定清单，和旧版一致。从当前页数据里凑的话，没出现在这几十行
+                  里的客户端就根本选不到。 */}
+              {CLIENT_TYPES.map((type) => (
                 <option key={type} value={type}>
                   {type}
                 </option>
@@ -259,7 +387,10 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
             onClick={toggleSensitive}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z" />
+              <path
+                className="log-sensitive-eye"
+                d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"
+              />
               <circle cx="12" cy="12" r="3" />
               {sensitiveHidden ? <line className="log-sensitive-slash" x1="3" y1="3" x2="21" y2="21" /> : null}
             </svg>
@@ -284,9 +415,9 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
 
         {/* 翻到旧页时新日志不插进列表，用提示条告知并给一键回到最新。 */}
         <div className="log-new-entries-notice" hidden={!missedNew}>
-          <p>有新的日志写入。</p>
+          <p role="status" aria-live="polite">有新的请求日志。</p>
           <button type="button" className="secondary" onClick={goLatest}>
-            回到最新
+            返回最新
           </button>
         </div>
 
@@ -305,6 +436,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
                 <th data-col="token">令牌</th>
                 <th data-col="client">客户端</th>
                 <th data-col="model">模型</th>
+                <th className="col-reasoning" data-col="reasoning">思考强度</th>
                 <th data-col="status">状态码</th>
                 <th data-col="duration">响应性能</th>
                 <th data-col="tokens">Tokens</th>
@@ -315,11 +447,11 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
               <ActiveRows active={active} sensitiveHidden={sensitiveHidden} />
               {loading && logs.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="muted">加载中…</td>
+                  <td colSpan={10} className="muted">加载中…</td>
                 </tr>
               ) : logs.length === 0 && active.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="muted">暂无请求日志</td>
+                  <td colSpan={10} className="muted">暂无请求日志</td>
                 </tr>
               ) : (
                 logs.map((log) => (
@@ -335,7 +467,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
           </table>
         </div>
 
-        <div className="pager">
+        <div className="pager log-pager">
           <div className="pager-meta">
             <span className="pager-meta-text">第 {cursors.length + 1} 页</span>
             <label className="pager-size-field">
@@ -448,6 +580,11 @@ function ActiveRows({
           <td className="model-cell" data-col="model">
             {request.upstream_model ?? request.model ?? <span className="muted">-</span>}
           </td>
+          {/* 在途行也要占这一格，否则它和已完成的行差一列，整行错位。
+              响应强度还没回来，链路自然只有前两段。 */}
+          <td className="col-reasoning" data-col="reasoning">
+            <ReasoningCell log={request} />
+          </td>
           <td data-col="status">
             <span className="muted">—</span>
           </td>
@@ -501,6 +638,10 @@ function LogRow({
       </td>
       <td className="model-cell" data-col="model">
         {log.upstream_model ?? log.model ?? <span className="muted">-</span>}
+      </td>
+      {/* 漏掉这一格表头 10 列、表体 9 格，其后所有单元格整体左移。 */}
+      <td className="col-reasoning" data-col="reasoning">
+        <ReasoningCell log={log} />
       </td>
       <td data-col="status">
         <StatusBadge code={log.status_code} />

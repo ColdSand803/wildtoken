@@ -312,17 +312,31 @@ export function getLogDetail(id: number): Promise<RequestLogDetail> {
  * 游标优先：before_created_at + before_id 才能在持续写入时稳住分页，
  * 纯 offset 会因为新行插到头部而重复或漏行。
  */
+/**
+ * 取一页日志。
+ *
+ * 筛选全部回服务端。在前端过滤当前页的话，选 5xx 看到的是「这 50 行里的
+ * 5xx」而不是全库的，翻页时每页各筛各的，分页计数也对不上。
+ */
 export function listLogs(params: {
   limit: number;
   beforeCreatedAt?: string;
   beforeId?: number;
+  search?: string;
+  clientType?: string;
+  status?: string;
+  upstreamId?: string;
 }): Promise<RequestLogPage> {
-  const search = new URLSearchParams({ limit: String(params.limit) });
+  const query = new URLSearchParams({ limit: String(params.limit) });
   if (params.beforeCreatedAt && params.beforeId !== undefined) {
-    search.set("before_created_at", params.beforeCreatedAt);
-    search.set("before_id", String(params.beforeId));
+    query.set("before_created_at", params.beforeCreatedAt);
+    query.set("before_id", String(params.beforeId));
   }
-  return api<RequestLogPage>(`/api/admin/logs/?${search}`);
+  if (params.search?.trim()) query.set("search", params.search.trim());
+  if (params.clientType) query.set("client_type", params.clientType);
+  if (params.status) query.set("status", params.status);
+  if (params.upstreamId) query.set("upstream_id", params.upstreamId);
+  return api<RequestLogPage>(`/api/admin/logs/?${query}`);
 }
 
 /** 卡片视图的统计，一次拿全部渠道——按渠道逐个请求会变成 N 次往返。 */
