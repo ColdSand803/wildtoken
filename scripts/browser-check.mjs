@@ -410,7 +410,9 @@ async function launchChrome(profileDir) {
       "--remote-debugging-port=0",
       "about:blank",
     ],
-    { stdio: ["ignore", "ignore", "ignore"] },
+    /* 自成进程组。Chrome 会 fork 出 renderer / GPU 等子进程，只杀父 PID 的话
+       它们还在往配置目录里写，删一半又被重建。 */
+    { stdio: ["ignore", "ignore", "ignore"], detached: true },
   );
 
   const portFile = join(profileDir, "DevToolsActivePort");
@@ -654,6 +656,70 @@ async function main() {
   let chrome;
   let cdp;
   let fakeUpstream;
+
+  /* 收拾现场。要能重入：finally 和信号处理可能都会叫到它。 */
+  let cleaned = false;
+  const killChrome = () => {
+    if (!chrome?.pid) return;
+    try {
+      // 负号 = 整组。detached 起的，组 id 就是它自己的 pid。
+      process.kill(-chrome.pid, "SIGKILL");
+    } catch {
+      // 已经没了就算了。
+      chrome.kill("SIGKILL");
+    }
+  };
+
+  const stopProcesses = () => {
+    cdp?.close();
+    killChrome();
+    server?.kill("SIGKILL");
+    // Go 侧的连接池会持一些 keep-alive，只 close 的话进程要等它们超时才能退。
+    fakeUpstream?.closeAllConnections?.();
+    fakeUpstream?.close();
+  };
+
+  const removeDirs = () => {
+    rmSync(dataDir, { recursive: true, force: true });
+    rmSync(profileDir, { recursive: true, force: true });
+  };
+
+  /** 信号路径：只能同步做，尽力而为。 */
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    stopProcesses();
+    removeDirs();
+  };
+
+  /**
+   * 正常路径：等 Chrome 真的退了再删它的配置目录。
+   *
+   * SIGKILL 是异步的，紧跟着 rmSync 会赶在 Chrome 写完最后几个文件之前，
+   * 删一半又被重建，每跑一次漏一点。
+   */
+  const cleanupAndWait = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    const exited = chrome
+      ? new Promise((resolve) => {
+          chrome.once("exit", resolve);
+          setTimeout(resolve, 3000);
+        })
+      : Promise.resolve();
+    stopProcesses();
+    await exited;
+    removeDirs();
+  };
+
+  /* 被外部超时杀掉时 finally 不会跑——持续集成里这是常态。不接这两个信号
+     的话，每超时一次就漏一份 Chrome 配置目录和一个临时库，实测放了 138M。 */
+  for (const signal of ["SIGINT", "SIGTERM"]) {
+    process.once(signal, () => {
+      cleanup();
+      process.exit(1);
+    });
+  }
 
   try {
     console.log("起服务…");
@@ -2194,14 +2260,7 @@ async function main() {
 
     void seeded;
   } finally {
-    cdp?.close();
-    chrome?.kill("SIGKILL");
-    server?.kill("SIGKILL");
-    // Go 侧的连接池会持一些 keep-alive，只 close 的话进程要等它们超时才能退。
-    fakeUpstream?.closeAllConnections?.();
-    fakeUpstream?.close();
-    rmSync(dataDir, { recursive: true, force: true });
-    rmSync(profileDir, { recursive: true, force: true });
+    await cleanupAndWait();
   }
 
   const failed = results.filter((r) => !r.ok);
