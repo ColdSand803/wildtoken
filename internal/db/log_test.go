@@ -158,6 +158,56 @@ func TestGetLogDetailResolvesOverridesAgainstCanonicalSnapshots(t *testing.T) {
 	}
 }
 
+func TestGetLogSnapshotResolvesEachFieldLikeTheDetail(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+
+	for _, stmt := range []string{
+		`INSERT INTO request_logs (id, method, path, client_type, stream)
+            VALUES (1, 'POST', '/v1/responses', 'codex', 0)`,
+		`INSERT INTO request_logs (id, method, path, client_type, stream)
+            VALUES (2, 'POST', '/v1/responses', 'codex', 0)`,
+		`INSERT INTO request_log_payloads
+            (request_log_id, request_snapshot, upstream_request_override, upstream_request_is_override,
+             response_snapshot, downstream_response_override, downstream_response_is_override)
+            VALUES (1, '{"body":{"text":"req"}}', '{"body":{"text":"up"}}', 1,
+                    '{"body":{"text":"res"}}', NULL, 1)`,
+	} {
+		if _, err := database.Exec(stmt); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+
+	want := map[LogSnapshotField]string{
+		LogSnapshotDownstreamRequest:  `{"body":{"text":"req"}}`,
+		LogSnapshotUpstreamRequest:    `{"body":{"text":"up"}}`,
+		LogSnapshotUpstreamResponse:   `{"body":{"text":"res"}}`,
+		LogSnapshotDownstreamResponse: "",
+	}
+	for field, expected := range want {
+		snapshot, ok, err := GetLogSnapshot(ctx, database, 1, field)
+		if err != nil || !ok {
+			t.Fatalf("%s: err=%v ok=%v", field, err, ok)
+		}
+		if string(snapshot) != expected {
+			t.Errorf("%s = %q, want %q", field, snapshot, expected)
+		}
+	}
+
+	// A log without a payload row is found, with nothing to show.
+	snapshot, ok, err := GetLogSnapshot(ctx, database, 2, LogSnapshotDownstreamRequest)
+	if err != nil || !ok || snapshot != nil {
+		t.Errorf("payload-less log: snapshot=%q ok=%v err=%v", snapshot, ok, err)
+	}
+
+	if _, ok, err := GetLogSnapshot(ctx, database, 404, LogSnapshotDownstreamRequest); err != nil || ok {
+		t.Errorf("missing log: ok=%v err=%v", ok, err)
+	}
+	if _, ok := ParseLogSnapshotField("headers"); ok {
+		t.Error("unknown field parsed")
+	}
+}
+
 func TestTopLogStatsRanksModelsAndChannels(t *testing.T) {
 	database := memoryDB(t)
 	ctx := context.Background()

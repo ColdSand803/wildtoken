@@ -210,7 +210,7 @@ function GroupDialog({
   }, [open, group]);
 
   return (
-    <dialog className="upstream-dialog dialog--drawer" ref={ref} onCancel={onClose}>
+    <dialog className="upstream-dialog group-dialog dialog--drawer" ref={ref} onCancel={onClose}>
       <form
         className="upstream-dialog-panel"
         onSubmit={(event) => {

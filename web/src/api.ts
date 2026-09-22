@@ -9,9 +9,9 @@ import type {
   Group,
   ImportResult,
   LogOverview,
+  LogSnapshotField,
   ModelTestResult,
   PromptTemplate,
-  RequestLogDetail,
   RequestLogPage,
   RuntimeSettings,
   SystemInfo,
@@ -302,9 +302,9 @@ export function resetTokenUsage(id: number): Promise<APIToken> {
   return api<APIToken>(`/api/admin/tokens/${id}/usage/reset`, { method: "POST" });
 }
 
-/** 日志详情（含四份快照）。列表里不带身体，点开才拉。 */
-export function getLogDetail(id: number): Promise<RequestLogDetail> {
-  return api<RequestLogDetail>(`/api/admin/logs/${id}`);
+/** 一份快照。元信息列表行里已经有了，报文按页签逐份拉，没存过的返回 null。 */
+export function getLogSnapshot(id: number, field: LogSnapshotField): Promise<unknown> {
+  return api<unknown>(`/api/admin/logs/${id}/snapshots/${field}`);
 }
 
 /**

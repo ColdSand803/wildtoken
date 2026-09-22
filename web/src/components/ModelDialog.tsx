@@ -210,7 +210,7 @@ export function ModelDialog({
   return (
     <dialog className="model-dialog dialog--drawer" ref={dialogRef} onCancel={onClose}>
       <div className="model-dialog-panel">
-        <div className="modal-head">
+        <div className="modal-head upstream-modal-head">
           <div>
             <h2>{`选择模型：${channelName}`}</h2>
             <p>{summary}</p>
@@ -230,123 +230,125 @@ export function ModelDialog({
           </div>
         </div>
 
-        <div className="model-toolbar">
-          <label className="field">
-            <span className="field-label">筛选</span>
-            <input
-              ref={filterRef}
-              type="search"
-              autoComplete="off"
-              placeholder="搜索模型"
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-            />
-          </label>
-          <div className="model-toolbar-actions">
-            <label className="model-selected-toggle">
-              <input
-                type="checkbox"
-                checked={selectedOnly}
-                onChange={(event) => setSelectedOnly(event.target.checked)}
-              />
-              <span>仅看已选</span>
-            </label>
-            <button type="button" className="secondary" onClick={() => selectVisible(true)}>
-              全选
-            </button>
-            {/* 没拉过就不该出现——「未返回」在那种状态下没有依据。 */}
-            {catalog === null ? null : (
-              <button
-                type="button"
-                className="secondary"
-                disabled={unavailable.length === 0}
-                title={
-                  unavailable.length > 0
-                    ? `移除 ${unavailable.length} 个不在本次拉取列表中的已选模型`
-                    : "没有需要移除的未返回模型"
-                }
-                onClick={removeUnavailable}
-              >
-                移除未返回
-              </button>
-            )}
-            <button type="button" className="secondary" onClick={() => selectVisible(false)}>
-              清空
-            </button>
-          </div>
-        </div>
-
-        <div className="model-manual-entry">
-          <div className="model-manual-entry-body">
+        <div className="upstream-dialog-body">
+          <div className="model-toolbar">
             <label className="field">
-              <span className="field-label">模型名 / 映射</span>
+              <span className="field-label">筛选</span>
               <input
-                type="text"
-                spellCheck={false}
-                placeholder="gpt-5.5 gpt-5.6-sol 或 gpt-5.5 => grok-4.5"
-                value={manual}
-                onChange={(event) => setManual(event.target.value)}
-                onKeyDown={(event) => {
-                  // 单行输入框：回车是「添加」，不是提交整个对话框。
-                  if (event.key !== "Enter") return;
-                  event.preventDefault();
-                  addManual();
-                }}
+                ref={filterRef}
+                type="search"
+                autoComplete="off"
+                placeholder="搜索模型"
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
               />
             </label>
-            <button type="button" className="secondary" onClick={addManual}>
-              添加到选择
-            </button>
+            <div className="model-toolbar-actions">
+              <label className="model-selected-toggle">
+                <input
+                  type="checkbox"
+                  checked={selectedOnly}
+                  onChange={(event) => setSelectedOnly(event.target.checked)}
+                />
+                <span>仅看已选</span>
+              </label>
+              <button type="button" className="secondary" onClick={() => selectVisible(true)}>
+                全选
+              </button>
+              {/* 没拉过就不该出现——「未返回」在那种状态下没有依据。 */}
+              {catalog === null ? null : (
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={unavailable.length === 0}
+                  title={
+                    unavailable.length > 0
+                      ? `移除 ${unavailable.length} 个不在本次拉取列表中的已选模型`
+                      : "没有需要移除的未返回模型"
+                  }
+                  onClick={removeUnavailable}
+                >
+                  移除未返回
+                </button>
+              )}
+              <button type="button" className="secondary" onClick={() => selectVisible(false)}>
+                清空
+              </button>
+            </div>
+          </div>
+
+          <div className="model-manual-entry">
+            <div className="model-manual-entry-body">
+              <label className="field">
+                <span className="field-label">模型名 / 映射</span>
+                <input
+                  type="text"
+                  spellCheck={false}
+                  placeholder="gpt-5.5 gpt-5.6-sol 或 gpt-5.5 => grok-4.5"
+                  value={manual}
+                  onChange={(event) => setManual(event.target.value)}
+                  onKeyDown={(event) => {
+                    // 单行输入框：回车是「添加」，不是提交整个对话框。
+                    if (event.key !== "Enter") return;
+                    event.preventDefault();
+                    addManual();
+                  }}
+                />
+              </label>
+              <button type="button" className="secondary" onClick={addManual}>
+                添加到选择
+              </button>
+            </div>
+          </div>
+
+          <div className="model-options">
+            {nothingVisible ? (
+              <div className="empty">{selectedOnly ? "尚未选择匹配的模型。" : "没有匹配的模型。"}</div>
+            ) : (
+              <>
+                {visibleMappings.map(([downstream, upstream]) => {
+                  const text = `${downstream} => ${upstream}`;
+                  const picked = selectedMappings.has(downstream);
+                  return (
+                    <label
+                      key={`mapping:${downstream}`}
+                      className={picked ? "model-option is-mapping is-selected" : "model-option is-mapping"}
+                      title={text}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={picked}
+                        onChange={(event) => toggleMapping(downstream, event.target.checked)}
+                      />
+                      <span className="model-option-tag">映射</span>
+                      <span className="model-option-name">{text}</span>
+                    </label>
+                  );
+                })}
+                {visibleModels.map((model) => {
+                  const picked = selected.has(model);
+                  const missing = catalog !== null && !available.has(model);
+                  return (
+                    <label
+                      key={`model:${model}`}
+                      className={picked ? "model-option is-selected" : "model-option"}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={picked}
+                        onChange={(event) => toggleModel(model, event.target.checked)}
+                      />
+                      <span className="model-option-name">{model}</span>
+                      {missing ? <span className="model-option-state">未返回</span> : null}
+                    </label>
+                  );
+                })}
+              </>
+            )}
           </div>
         </div>
 
-        <div className="model-options">
-          {nothingVisible ? (
-            <div className="empty">{selectedOnly ? "尚未选择匹配的模型。" : "没有匹配的模型。"}</div>
-          ) : (
-            <>
-              {visibleMappings.map(([downstream, upstream]) => {
-                const text = `${downstream} => ${upstream}`;
-                const picked = selectedMappings.has(downstream);
-                return (
-                  <label
-                    key={`mapping:${downstream}`}
-                    className={picked ? "model-option is-mapping is-selected" : "model-option is-mapping"}
-                    title={text}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={picked}
-                      onChange={(event) => toggleMapping(downstream, event.target.checked)}
-                    />
-                    <span className="model-option-tag">映射</span>
-                    <span className="model-option-name">{text}</span>
-                  </label>
-                );
-              })}
-              {visibleModels.map((model) => {
-                const picked = selected.has(model);
-                const missing = catalog !== null && !available.has(model);
-                return (
-                  <label
-                    key={`model:${model}`}
-                    className={picked ? "model-option is-selected" : "model-option"}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={picked}
-                      onChange={(event) => toggleModel(model, event.target.checked)}
-                    />
-                    <span className="model-option-name">{model}</span>
-                    {missing ? <span className="model-option-state">未返回</span> : null}
-                  </label>
-                );
-              })}
-            </>
-          )}
-        </div>
-
-        <div className="modal-actions">
+        <div className="modal-footer">
           <button type="button" className="secondary" onClick={onClose}>
             取消
           </button>

@@ -114,7 +114,7 @@ export function BalanceDialog({
   return (
     <dialog className="balance-dialog dialog--drawer" ref={dialogRef} onCancel={onClose}>
       <div className="balance-panel">
-        <div className="modal-head">
+        <div className="modal-head upstream-modal-head">
           <div>
             <h2>{`${provider} 余额：${upstream?.name ?? ""}`}</h2>
             <p>{summary}</p>
@@ -147,7 +147,7 @@ export function BalanceDialog({
           </div>
         </div>
 
-        <div className="balance-body">
+        <div className="balance-body upstream-dialog-body">
           {result ? <Result result={result} provider={provider} /> : null}
           {failure ? <p className="muted">{failure}</p> : null}
         </div>

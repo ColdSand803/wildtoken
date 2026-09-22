@@ -392,6 +392,75 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	return detail, true, nil
 }
 
+// LogSnapshotField names one of the four captured payloads.
+type LogSnapshotField string
+
+const (
+	LogSnapshotDownstreamRequest  LogSnapshotField = "downstream_request"
+	LogSnapshotUpstreamRequest    LogSnapshotField = "upstream_request"
+	LogSnapshotUpstreamResponse   LogSnapshotField = "upstream_response"
+	LogSnapshotDownstreamResponse LogSnapshotField = "downstream_response"
+)
+
+// ParseLogSnapshotField maps a URL segment onto a field, or ok=false.
+func ParseLogSnapshotField(name string) (LogSnapshotField, bool) {
+	switch field := LogSnapshotField(name); field {
+	case LogSnapshotDownstreamRequest, LogSnapshotUpstreamRequest,
+		LogSnapshotUpstreamResponse, LogSnapshotDownstreamResponse:
+		return field, true
+	}
+	return "", false
+}
+
+// GetLogSnapshot returns one captured payload, or ok=false when the log is
+// missing. A log without that payload is found with a nil snapshot.
+//
+// The console opens a log with its metadata already in hand and fetches each
+// payload as the reader asks for it, so this reads only the columns that
+// payload needs instead of the whole payload row.
+func GetLogSnapshot(ctx context.Context, database *sql.DB, logID int64, field LogSnapshotField) (json.RawMessage, bool, error) {
+	// The override columns pair with their canonical snapshot the same way
+	// GetLogDetail resolves them; the canonical fields carry no override.
+	var canonical, override, isOverride string
+	switch field {
+	case LogSnapshotDownstreamRequest:
+		canonical = "p.request_snapshot"
+	case LogSnapshotUpstreamRequest:
+		canonical, override, isOverride = "p.request_snapshot",
+			"p.upstream_request_override", "p.upstream_request_is_override"
+	case LogSnapshotUpstreamResponse:
+		canonical = "p.response_snapshot"
+	case LogSnapshotDownstreamResponse:
+		canonical, override, isOverride = "p.response_snapshot",
+			"p.downstream_response_override", "p.downstream_response_is_override"
+	default:
+		return nil, false, apperr.BadRequest("unknown snapshot field")
+	}
+	if override == "" {
+		override, isOverride = "NULL", "0"
+	}
+
+	row := database.QueryRowContext(ctx, `SELECT `+canonical+`, `+override+`,
+              COALESCE(`+isOverride+`, 0)
+       FROM request_logs AS l
+       LEFT JOIN request_log_payloads AS p ON p.request_log_id = l.id
+       WHERE l.id = ?`, logID)
+
+	var stored, storedOverride sql.NullString
+	var overridden int32
+	err := row.Scan(&stored, &storedOverride, &overridden)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, apperr.Database(err)
+	}
+	if overridden != 0 {
+		stored = storedOverride
+	}
+	return decodeSnapshot(stored), true, nil
+}
+
 // decodeSnapshot returns the stored JSON, or nil when it is absent or corrupt.
 // A stored snapshot that no longer parses is treated as missing rather than
 // failing the whole request.

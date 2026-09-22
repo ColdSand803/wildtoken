@@ -940,6 +940,36 @@ func AdminGetLogDetail(state *appstate.State) http.HandlerFunc {
 	}
 }
 
+// AdminGetLogSnapshot returns one captured payload of a log, or null when
+// that payload was never stored.
+func AdminGetLogSnapshot(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathID(r)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		field, ok := db.ParseLogSnapshotField(chi.URLParam(r, "field"))
+		if !ok {
+			apperr.WriteError(w, apperr.BadRequest("unknown snapshot field"))
+			return
+		}
+		snapshot, found, err := db.GetLogSnapshot(r.Context(), state.DB, id, field)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		if !found {
+			apperr.WriteError(w, apperr.NotFound("request log not found"))
+			return
+		}
+		if snapshot == nil {
+			snapshot = json.RawMessage("null")
+		}
+		apperr.WriteJSON(w, http.StatusOK, snapshot)
+	}
+}
+
 // AdminUpstreamHealthHistory reports per-channel hourly success rate and
 // latency over the trailing hours (default 24), for the channel cards' mini
 // health trend.
