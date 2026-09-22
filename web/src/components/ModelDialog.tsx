@@ -43,19 +43,6 @@ export function parseManualEntry(value: string): { names: string[]; mappings: Re
 }
 
 /**
- * parseManualEntry 的反向：把选择回填成每行一条。
- *
- * 映射排在前面，和旧版预览一致：它们改写请求，比单纯的名字匹配更需要被看见。
- * 分隔符固定 `=>`，读起来方向明确。
- */
-export function joinModelLines(names: string[], mappings: Record<string, string>): string {
-  return [
-    ...Object.entries(mappings).map(([key, value]) => `${key} => ${value}`),
-    ...names,
-  ].join("\n");
-}
-
-/**
  * 模型选择器。
  *
  * catalog 是这次从上游拉回来的列表，null 表示没拉——两种状态要分开，因为

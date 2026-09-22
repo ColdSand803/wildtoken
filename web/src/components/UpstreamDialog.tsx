@@ -3,10 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { UnauthorizedError, fetchModelsPreview } from "../api";
 import { joinMappingLines, parseMappingLines } from "../mappingLines";
 import type { Upstream } from "../types";
-import { ModelDialog, joinModelLines, parseManualEntry } from "./ModelDialog";
+import { ModelDialog } from "./ModelDialog";
 import type { ModelSelection } from "./ModelDialog";
 import { useToast } from "./feedback";
 import { useDialog } from "../useDialog";
+
+/** 芯片预览最多显示几项，多的折成 +N。照抄旧版 FORM_MODEL_PREVIEW_LIMIT。 */
+const PREVIEW_LIMIT = 6;
 
 /** 提交给 POST/PUT /api/admin/upstreams 的形状。 */
 export interface UpstreamPayload {
@@ -145,8 +148,11 @@ interface FormState {
   apiKey: string;
   clearApiKey: boolean;
   groupIds: number[];
-  /** 模型名与映射，每行一条，文本就是唯一的真相；提交时才解析。 */
-  models: string;
+  modelNames: string[];
+  /** 手动添加输入框里还没提交的文本，只收模型名。 */
+  manual: string;
+  /** 模型映射，每行一条 `a => b`，文本就是真相，提交时才解析。 */
+  modelMappings: string;
   modelPrefixes: string;
   priority: string;
   weight: string;
@@ -167,7 +173,9 @@ function emptyForm(): FormState {
     apiKey: "",
     clearApiKey: false,
     groupIds: [DEFAULT_GROUP_ID],
-    models: "",
+    modelNames: [],
+    manual: "",
+    modelMappings: "",
     modelPrefixes: "",
     priority: "100",
     weight: "100",
@@ -188,7 +196,9 @@ function formFromUpstream(upstream: Upstream): FormState {
     apiKey: upstream.api_key ?? "",
     clearApiKey: false,
     groupIds: upstream.group_ids.length > 0 ? upstream.group_ids : [DEFAULT_GROUP_ID],
-    models: joinModelLines(upstream.model_names, upstream.model_mappings ?? {}),
+    modelNames: upstream.model_names,
+    manual: "",
+    modelMappings: joinMappingLines(upstream.model_mappings ?? {}),
     modelPrefixes: upstream.model_prefixes.join(","),
     priority: String(upstream.priority),
     weight: String(upstream.weight),
@@ -203,14 +213,13 @@ function formFromUpstream(upstream: Upstream): FormState {
 
 /** 抛出的错误由调用方接住展示。解析失败不该变成一次半截的保存。 */
 function payloadFromForm(form: FormState): UpstreamPayload {
-  const models = parseManualEntry(form.models);
   return {
     name: form.name.trim(),
     base_url: form.baseUrl.trim(),
     api_key: form.apiKey.trim() || null,
-    model_names: models.names,
+    model_names: form.modelNames,
     model_prefixes: splitList(form.modelPrefixes),
-    model_mappings: models.mappings,
+    model_mappings: parseMappingLines(form.modelMappings, "模型映射"),
     /* 键转小写存。后端也会抹一次（normalizeEffortMappings），这里先转是为了
        让编辑框里看到的和存进去的一致。 */
     effort_mappings: Object.fromEntries(
@@ -232,6 +241,48 @@ function payloadFromForm(form: FormState): UpstreamPayload {
 }
 
 /** 已选模型与映射的芯片预览，每个都能就地摘掉。 */
+/** 已选模型名的芯片预览，每个都能就地摘掉。映射不在这里，它有自己的文本框。 */
+function SelectionPreview({
+  names,
+  onRemove,
+}: {
+  names: string[];
+  onRemove: (name: string) => void;
+}) {
+  if (names.length === 0) {
+    return (
+      <div className="model-selection-preview" aria-live="polite">
+        <span className="model-selection-empty">未配置精确模型</span>
+      </div>
+    );
+  }
+
+  const visible = names.slice(0, PREVIEW_LIMIT);
+  const hidden = names.length - visible.length;
+
+  return (
+    <div className="model-selection-preview" aria-live="polite">
+      {visible.map((name) => (
+        <span key={name} className="model-selection-chip" title={name}>
+          <span className="model-selection-chip-name">{name}</span>
+          <button
+            type="button"
+            className="model-selection-remove"
+            aria-label={`移除模型 ${name}`}
+            title={`移除模型 ${name}`}
+            onClick={() => onRemove(name)}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {hidden > 0 ? (
+        <span className="model-selection-more" title={`还有 ${hidden} 项`}>{`+${hidden}`}</span>
+      ) : null}
+    </div>
+  );
+}
+
 export function UpstreamDialog({
   open,
   upstream,
@@ -277,9 +328,51 @@ export function UpstreamDialog({
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
 
-  /** 当前文本框里的选择，开选择器时带进去。 */
+  /**
+   * 把手动输入框里的模型名并进列表。
+   *
+   * 保存时也要先走一遍：框里还留着字就点保存，那些字应该算数，而不是被
+   * 悄悄丢掉。只收名字；映射有自己的文本框，写到这里的 `=>` 不认。
+   */
+  function commitManual(current: FormState): FormState {
+    const names = current.manual
+      .split(/[\s,，]+/)
+      .map((name) => name.trim())
+      .filter((name) => name && !name.includes("=>"));
+    if (names.length === 0) return current;
+    return {
+      ...current,
+      modelNames: [...new Set([...current.modelNames, ...names])],
+      manual: "",
+    };
+  }
+
+  function addManual() {
+    setForm((current) => {
+      const next = commitManual(current);
+      if (next === current) return current;
+      const added = next.modelNames.length - current.modelNames.length;
+      toast(added > 0 ? `已添加 ${added} 项，保存渠道后生效。` : "输入的模型名都已在列表中。", {
+        tone: added > 0 ? "ok" : "neutral",
+      });
+      return next;
+    });
+  }
+
+  /**
+   * 当前表单里的选择，开选择器时带进去。
+   *
+   * 映射文本解不开的行这里不报错，直接丢——选择器只是个参考，真正的校验
+   * 在保存时。
+   */
   function currentSelection(state: FormState): ModelSelection {
-    return parseManualEntry(state.models);
+    let mappings: Record<string, string> = {};
+    try {
+      mappings = parseMappingLines(state.modelMappings, "模型映射");
+    } catch {
+      // 解不开就当没有。
+    }
+    return { names: state.modelNames, mappings };
   }
 
   /**
@@ -333,22 +426,29 @@ export function UpstreamDialog({
     setPicker({ catalog: null, selection: currentSelection(form) });
   }
 
-  /* 选择器只写回文本框，不碰服务端——这个渠道可能还没存下来。 */
+  /* 选择器只写回表单，不碰服务端——这个渠道可能还没存下来。
+     名字进列表，映射回填到它自己的文本框。 */
   function applySelection(next: ModelSelection) {
-    set("models", joinModelLines(next.names, next.mappings));
+    setForm((current) => ({
+      ...current,
+      modelNames: next.names,
+      modelMappings: joinMappingLines(next.mappings),
+    }));
     setPicker(null);
   }
 
   function submit() {
+    const committed = commitManual(form);
     let payload: UpstreamPayload;
     try {
-      payload = payloadFromForm(form);
+      payload = payloadFromForm(committed);
     } catch (err) {
       // 解析失败的两项都在高级区，收着的话看不到错在哪。
       setAdvanced(true);
       toast(err instanceof Error ? err.message : String(err), { tone: "error" });
       return;
     }
+    setForm(committed);
     onSubmit(payload);
   }
 
@@ -358,10 +458,7 @@ export function UpstreamDialog({
     () => form.name.trim() !== "" && form.baseUrl.trim() !== "",
     [form.name, form.baseUrl],
   );
-  const selectionCount = useMemo(() => {
-    const parsed = parseManualEntry(form.models);
-    return parsed.names.length + Object.keys(parsed.mappings).length;
-  }, [form.models]);
+  const selectionCount = form.modelNames.length;
 
   return (
     <dialog className="upstream-dialog dialog--drawer" ref={dialogRef} onCancel={onClose}>
@@ -507,23 +604,63 @@ export function UpstreamDialog({
               </div>
             </div>
             <div className="form-grid">
-              <label className="field span-2">
+              <div className="field span-2">
                 <div className="model-picker-label-row">
-                  <span className="field-label">模型名与映射</span>
+                  <span className="field-label">模型名</span>
                   <span className="model-selection-count">
-                    {selectionCount > 0 ? `${selectionCount} 项` : "未配置"}
+                    {selectionCount > 0 ? `${selectionCount} 项` : "未选择"}
                   </span>
                 </div>
+                <div className="model-picker" aria-label="已选模型">
+                  <SelectionPreview
+                    names={form.modelNames}
+                    onRemove={(name) =>
+                      set(
+                        "modelNames",
+                        form.modelNames.filter((item) => item !== name),
+                      )
+                    }
+                  />
+                </div>
+                <div className="model-manual-entry">
+                  <div className="model-manual-entry-body">
+                    <label className="field">
+                      <span className="field-label">手动添加</span>
+                      <input
+                        type="text"
+                        spellCheck={false}
+                        placeholder="gpt-5.5 claude-sonnet-5"
+                        value={form.manual}
+                        onChange={(event) => set("manual", event.target.value)}
+                        onKeyDown={(event) => {
+                          // 回车是「添加」，不是提交整个表单。
+                          if (event.key !== "Enter") return;
+                          event.preventDefault();
+                          addManual();
+                        }}
+                      />
+                    </label>
+                    <button type="button" className="secondary" onClick={addManual}>
+                      添加
+                    </button>
+                  </div>
+                </div>
+                <span className="field-hint">
+                  精确匹配所选模型；也可以只配置模型前缀。多个模型名用空白分隔，回车快速添加。
+                </span>
+              </div>
+
+              <label className="field span-2">
+                <span className="field-label">模型映射</span>
                 <textarea
-                  rows={6}
+                  rows={4}
                   spellCheck={false}
-                  value={form.models}
-                  onChange={(event) => set("models", event.target.value)}
-                  placeholder={"gpt-5.5 => grok-4.5\nclaude-sonnet-5\ngpt-4o"}
+                  value={form.modelMappings}
+                  onChange={(event) => set("modelMappings", event.target.value)}
+                  placeholder={"gpt-5.5 => grok-4.5\nfast => gpt-4o-mini"}
                 />
                 <span className="field-hint">
-                  每行一条。写模型名就是精确匹配；写成「下游 =&gt; 渠道」则登记为映射，命中后把请求里的
-                  模型名替换为渠道模型名。右上角可从上游拉列表勾选，结果会回填到这里。
+                  每行一条「下游 =&gt; 渠道」，命中下游名后把请求里的模型名替换为渠道模型名。
                 </span>
               </label>
 
