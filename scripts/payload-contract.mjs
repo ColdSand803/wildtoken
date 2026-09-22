@@ -90,6 +90,28 @@ function tsKeys(source, marker, { after = "{" } = {}) {
 const api = read("web/src/api.ts");
 const upstreamDialog = read("web/src/components/UpstreamDialog.tsx");
 const tokenDialog = read("web/src/components/TokenDialog.tsx");
+const tokensPage = read("web/src/pages/TokensPage.tsx");
+
+/**
+ * 编辑令牌时实际发出去的键。
+ *
+ * 页面把 TokenPayload 剔掉几个字段再发，所以不能直接拿 TokenPayload 比；
+ * 从解构里把剔除列表读出来，再从 TokenPayload 减掉。
+ */
+function tokenUpdateKeys() {
+  const all = tsKeys(tokenDialog, "export interface TokenPayload");
+
+  /* 没找到剔除解构就当成“原样发”。不能抛异常：那样改回原样发的时候
+     脚本是崩而不是报“多了一个字段”，反而看不出真因。 */
+  const omit = /const \{([^}]*)\} = payload;/.exec(tokensPage);
+  if (!omit) return all;
+
+  // 形如 `enabled: _enabled, ...updatePayload`，取重命名前的原键。
+  for (const match of omit[1].matchAll(/([a-z_][a-z0-9_]*)\s*:\s*_/gi)) {
+    all.delete(match[1]);
+  }
+  return all;
+}
 
 const models = {
   upstream: read("internal/models/upstream.go"),
@@ -113,6 +135,14 @@ const contracts = [
     name: "令牌创建 APITokenIn",
     keys: tsKeys(tokenDialog, "export interface TokenPayload"),
     fields: goFields(models.token, "APITokenIn"),
+    allowMissing: new Set(["token"]),
+  },
+  {
+    /* 创建和更新收两个不同的结构体。只比创建的话，编辑时多发的字段
+       正好漏掉——enabled 就是这样漏过去的。 */
+    name: "令牌更新 APITokenUpdateIn",
+    keys: tokenUpdateKeys(),
+    fields: goFields(models.token, "APITokenUpdateIn"),
     allowMissing: new Set(["token"]),
   },
   {

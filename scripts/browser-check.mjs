@@ -2805,6 +2805,70 @@ async function main() {
       assertEqual(stored.limit_tokens, 100_000_000, "后端解析出的限额数值");
     });
 
+    /* 创建和更新收两个不同的结构体：更新不收 enabled（启用状态走开关接口）。
+       把新建的载荷原样发去会被严格解码拒掉整个请求。走界面真改一次，
+       并核对改动真的落库——只看“对话框关了”的话，400 也看不出来。 */
+    await check("编辑令牌能保存且改动落库", async () => {
+      await gotoView(page, "令牌");
+      /* 令牌表是 token-table，行里也没有 data-col，openRowMenu 那套选择器
+         （upstream-table + data-col=name）在这里定位不到。 */
+      const menuOpened = await page.waitFor(
+        () => {
+          const row = [...document.querySelectorAll("table.token-table tbody tr")].find((node) =>
+            node.textContent.includes("quota-token"),
+          );
+          const trigger = row?.querySelector("button.action-menu-trigger");
+          if (!trigger) return false;
+          trigger.click();
+          return true;
+        },
+        { label: "quota-token 的行菜单", timeout: 10_000 },
+      );
+      assertEqual(menuOpened, true, "没找到 quota-token 的行");
+      await sleepInPage(page, 80);
+      await clickMenuItem(page, "编辑");
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
+
+      // 按字段标签找，不按位置：加一个字段就会把下标错开。
+      await page.evaluate(() => {
+        const field = [...document.querySelectorAll("dialog.upstream-dialog[open] .field")].find(
+          (node) => node.querySelector(".field-label")?.textContent === "描述",
+        );
+        const input = field.querySelector("input");
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+        setter.call(input, "编辑后的描述");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await page.evaluate(() => {
+        document.querySelector("dialog.upstream-dialog[open] button[type=submit]").click();
+      });
+
+      const closed = await page
+        .waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+          label: "编辑对话框关闭",
+          timeout: 10_000,
+        })
+        .catch(() => false);
+      if (!closed) {
+        const toast = await page.evaluate(
+          () => [...document.querySelectorAll(".toast")].map((n) => n.textContent).join(" | "),
+        );
+        throw new Error(`保存没成功，提示：${toast}`);
+      }
+
+      const saved = await page.evaluate(async () => {
+        const admin = localStorage.getItem("wildtoken_admin_token");
+        const list = await (
+          await fetch("/api/admin/tokens/", { headers: { "x-admin-token": admin } })
+        ).json();
+        return list.find((item) => item.name === "quota-token") ?? null;
+      });
+      assert(saved !== null, "令牌不见了");
+      assertEqual(saved.description, "编辑后的描述", "描述没落库");
+      // 限额不在这次编辑里，不该被顺手清掉。
+      assertEqual(saved.quota.limit_expression, "100M", "编辑把限额弄丢了");
+    });
+
     /* 一串日期看不出快到期了。旧版旁边跟一个徐章说距今多久，那才是重点。 */
     await check("有效期带距今徐章且不是 UTC 原文", async () => {
       const created = await page.evaluate(async () => {

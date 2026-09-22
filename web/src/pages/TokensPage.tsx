@@ -145,7 +145,12 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
     const target = editing?.token;
     setSaving(true);
     try {
-      const saved = target ? await updateToken(target.id, payload) : await createToken(payload);
+      /* 更新不收 enabled：启用状态走独立的开关接口，发过去会被严格解码
+         拒掉整个请求（unknown field "enabled"）。新建才要带。 */
+      const { enabled: _enabled, ...updatePayload } = payload;
+      const saved = target
+        ? await updateToken(target.id, updatePayload)
+        : await createToken(payload);
       setEditing(null);
       await reload();
       toast(`令牌 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
