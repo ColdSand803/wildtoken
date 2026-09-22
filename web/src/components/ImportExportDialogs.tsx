@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 import { useDialog } from "../useDialog";
+import { copyText } from "../clipboard";
 
 import type { ChannelExportDocument, ImportResult } from "../types";
 
@@ -9,6 +11,58 @@ export const CHANNEL_DOCUMENT_KIND = "wildtoken.channels";
 export const CHANNEL_DOCUMENT_VERSION = 1;
 /** 一次导入的条数上限，和后端一致。 */
 const MAX_IMPORT_ENTRIES = 500;
+
+/** 导入导出共用头部、滚动正文和固定底栏。 */
+function TransferDialog({
+  open,
+  title,
+  description,
+  onClose,
+  children,
+  actions,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  onClose: () => void;
+  children: ReactNode;
+  actions: ReactNode;
+}) {
+  const ref = useDialog(open, onClose);
+
+  // 初始焦点留给文本框，打开后可直接粘贴。
+  useEffect(() => {
+    if (open) ref.current?.querySelector("textarea")?.focus();
+  }, [open]);
+
+  return (
+    <dialog className="quick-import-dialog dialog--drawer" ref={ref} onCancel={onClose} aria-label={title}>
+      <div className="quick-import-panel">
+        <div className="modal-head upstream-modal-head">
+          <div>
+            <h2>{title}</h2>
+            <p>{description}</p>
+          </div>
+          <div className="modal-head-actions">
+            <button
+              type="button"
+              className="secondary ghost icon-close"
+              aria-label="关闭"
+              title="关闭"
+              onClick={onClose}
+            >
+              <svg className="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 4l8 8M12 4L4 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div className="upstream-dialog-body">{children}</div>
+        <div className="modal-footer">{actions}</div>
+      </div>
+    </dialog>
+  );
+}
 
 export function ChannelExportDialog({
   open,
@@ -23,21 +77,48 @@ export function ChannelExportDialog({
   onToggleKeys: (next: boolean) => void;
   onClose: () => void;
 }) {
-  const ref = useDialog(open, onClose);
   const json = doc ? JSON.stringify(doc, null, 2) : "";
 
   return (
-    <dialog className="quick-import-dialog dialog--drawer" ref={ref} onCancel={onClose}>
-      <div className="modal-head">
-        <div>
-          <h2>导出渠道</h2>
-          <p>
-            {doc
-              ? `${doc.channels.length} 个渠道。导出为 JSON，包含模型、映射、优先级、权重与 Header 覆盖。`
-              : "准备中…"}
-          </p>
-        </div>
-      </div>
+    <TransferDialog
+      open={open}
+      title="导出渠道"
+      description={
+        doc
+          ? `${doc.channels.length} 个渠道。导出为 JSON，包含模型、映射、优先级、权重与 Header 覆盖。`
+          : "准备中…"
+      }
+      onClose={onClose}
+      actions={
+        <>
+          <button type="button" className="secondary" onClick={onClose}>
+            关闭
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void copyText(json)}
+          >
+            复制
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              /* Blob + 临时链接下载。用 data: URL 在大文档上会被浏览器拦。 */
+              const blob = new Blob([json], { type: "application/json" });
+              const url = URL.createObjectURL(blob);
+              const link = window.document.createElement("a");
+              link.href = url;
+              link.download = `wildtoken-channels-${new Date().toISOString().slice(0, 10)}.json`;
+              link.click();
+              URL.revokeObjectURL(url);
+            }}
+          >
+            下载
+          </button>
+        </>
+      }
+    >
       {/* 默认带密钥。不带密钥的备份看着完整，导回去每个渠道都要重填。 */}
       <div className="toggle-list">
         <label className="toggle-row">
@@ -54,34 +135,7 @@ export function ChannelExportDialog({
       </div>
 
       <textarea readOnly rows={14} value={json} aria-label="导出的渠道 JSON" />
-      <div className="modal-actions">
-        <button type="button" className="secondary" onClick={onClose}>
-          关闭
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => void navigator.clipboard.writeText(json)}
-        >
-          复制
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            /* Blob + 临时链接下载。用 data: URL 在大文档上会被浏览器拦。 */
-            const blob = new Blob([json], { type: "application/json" });
-            const url = URL.createObjectURL(blob);
-            const link = window.document.createElement("a");
-            link.href = url;
-            link.download = `wildtoken-channels-${new Date().toISOString().slice(0, 10)}.json`;
-            link.click();
-            URL.revokeObjectURL(url);
-          }}
-        >
-          下载
-        </button>
-      </div>
-    </dialog>
+    </TransferDialog>
   );
 }
 
@@ -98,7 +152,6 @@ export function ChannelImportDialog({
   onImport: (document: ChannelExportDocument, mode: "skip" | "overwrite") => void;
   onClose: () => void;
 }) {
-  const ref = useDialog(open, onClose);
   const [text, setText] = useState("");
   const [mode, setMode] = useState<"skip" | "overwrite">("skip");
   const [parseError, setParseError] = useState("");
@@ -140,14 +193,29 @@ export function ChannelImportDialog({
   }
 
   return (
-    <dialog className="quick-import-dialog dialog--drawer" ref={ref} onCancel={onClose}>
-      <div className="modal-head">
-        <div>
-          <h2>导入渠道</h2>
-          <p>粘贴导出的 JSON，或选择文件。</p>
-        </div>
-      </div>
-
+    <TransferDialog
+      open={open}
+      title="导入渠道"
+      description="粘贴导出的 JSON，或选择文件。"
+      onClose={onClose}
+      actions={
+        <>
+          <button type="button" className="secondary" onClick={onClose}>
+            关闭
+          </button>
+          <button
+            type="button"
+            disabled={busy || text.trim() === ""}
+            onClick={() => {
+              const doc = parse();
+              if (doc) onImport(doc, mode);
+            }}
+          >
+            {busy ? "导入中…" : "导入"}
+          </button>
+        </>
+      }
+    >
       <label className="field">
         <span className="field-label">选择文件</span>
         <input
@@ -208,23 +276,7 @@ export function ChannelImportDialog({
           ) : null}
         </div>
       ) : null}
-
-      <div className="modal-actions">
-        <button type="button" className="secondary" onClick={onClose}>
-          关闭
-        </button>
-        <button
-          type="button"
-          disabled={busy || text.trim() === ""}
-          onClick={() => {
-            const doc = parse();
-            if (doc) onImport(doc, mode);
-          }}
-        >
-          {busy ? "导入中…" : "导入"}
-        </button>
-      </div>
-    </dialog>
+    </TransferDialog>
   );
 }
 
@@ -271,7 +323,6 @@ export function QuickImportDialog({
   onSubmit: (name: string, baseUrl: string, apiKey: string | null) => void;
   onClose: () => void;
 }) {
-  const ref = useDialog(open, onClose);
   const [raw, setRaw] = useState("");
   const [name, setName] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -295,14 +346,26 @@ export function QuickImportDialog({
   }
 
   return (
-    <dialog className="quick-import-dialog dialog--drawer" ref={ref} onCancel={onClose}>
-      <div className="modal-head">
-        <div>
-          <h2>快速导入</h2>
-          <p>粘贴一段包含 Base URL 和 API Key 的文本，自动识别。</p>
-        </div>
-      </div>
-
+    <TransferDialog
+      open={open}
+      title="快速导入"
+      description="粘贴一段包含 Base URL 和 API Key 的文本，自动识别。"
+      onClose={onClose}
+      actions={
+        <>
+          <button type="button" className="secondary" onClick={onClose}>
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={busy || !name.trim() || !baseUrl.trim()}
+            onClick={() => onSubmit(name.trim(), baseUrl.trim(), apiKey.trim() || null)}
+          >
+            {busy ? "创建中…" : "创建渠道"}
+          </button>
+        </>
+      }
+    >
       <label className="field">
         <span className="field-label">原始文本</span>
         <textarea
@@ -345,19 +408,6 @@ export function QuickImportDialog({
           autoComplete="off"
         />
       </label>
-
-      <div className="modal-actions">
-        <button type="button" className="secondary" onClick={onClose}>
-          取消
-        </button>
-        <button
-          type="button"
-          disabled={busy || !name.trim() || !baseUrl.trim()}
-          onClick={() => onSubmit(name.trim(), baseUrl.trim(), apiKey.trim() || null)}
-        >
-          {busy ? "创建中…" : "创建渠道"}
-        </button>
-      </div>
-    </dialog>
+    </TransferDialog>
   );
 }

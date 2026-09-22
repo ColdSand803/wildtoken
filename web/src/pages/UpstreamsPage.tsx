@@ -18,6 +18,7 @@ import {
   testUpstream,
   updateUpstream,
 } from "../api";
+import { copyText } from "../clipboard";
 import { ActionMenu, MENU_SEPARATOR } from "../components/ActionMenu";
 import type { MenuEntry } from "../components/ActionMenu";
 import { BalanceDialog } from "../components/BalanceDialog";
@@ -360,12 +361,15 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
 
   async function saveUpstream(payload: UpstreamPayload) {
     const target = editing?.upstream;
+    /* 克隆塞进来的是 id 0 的草稿：按新建保存，而不是 PUT /upstreams/0
+       （后端对 0 查不到行，回 404，克隆就永远存不下）。 */
+    const isEdit = target != null && target.id > 0;
     setSaving(true);
     try {
-      const saved = target ? await updateUpstream(target.id, payload) : await createUpstream(payload);
+      const saved = isEdit ? await updateUpstream(target.id, payload) : await createUpstream(payload);
       setEditing(null);
       await reload();
-      toast(`渠道 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
+      toast(`渠道 ${saved.name} 已${isEdit ? "保存" : "创建"}。`, { tone: "ok" });
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else toast(`保存失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
@@ -500,7 +504,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       .filter(Boolean)
       .join("\n");
     try {
-      await navigator.clipboard.writeText(text);
+      await copyText(text);
       toast("渠道信息已复制。", { tone: "ok" });
     } catch {
       toast("复制失败：浏览器拒绝了剪贴板访问。", { tone: "error" });
@@ -1008,7 +1012,7 @@ function BaseUrlCell({ upstream }: { upstream: Upstream }) {
 
   async function copy() {
     try {
-      await navigator.clipboard.writeText(upstream.base_url);
+      await copyText(upstream.base_url);
       toast("Base URL 已复制。", { tone: "ok" });
     } catch {
       toast("复制失败：浏览器拒绝了剪贴板访问。", { tone: "error" });
@@ -1038,8 +1042,11 @@ function BaseUrlCell({ upstream }: { upstream: Upstream }) {
           title={openable ? "打开 Base URL" : "不是可打开的 http(s) 地址"}
           disabled={openable === null}
           onClick={() => {
-            // openable 已经过 httpUrlOrNull：只有 http/https 能走到这里。
-            if (openable) window.open(openable, "_blank", "noopener,noreferrer");
+            /* 只放行 http/https：httpUrlOrNull 已经过一道，这里再卡一道协议，
+               不让任何非白名单协议的地址进新标签。 */
+            const url = httpUrlOrNull(upstream.base_url);
+            if (!url || !/^https?:\/\//i.test(url)) return;
+            window.open(url, "_blank", "noopener,noreferrer");
           }}
         >
           <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">

@@ -6,8 +6,8 @@ export interface Upstream {
   name: string;
   base_url: string;
   api_key_set: boolean;
-  /* 只有详情接口带回来，列表接口没有。不回显到输入框——只用来探上游，
-     否则编辑渠道时一个已存的 Key 就赤裸摆在界面上。 */
+  /* 只有详情接口带回来，列表接口没有。编辑渠道时明文回显到输入框，
+     便于核对当前用的是哪把 Key；探上游也用它。 */
   api_key?: string | null;
   model_names: string[];
   model_prefixes: string[];
@@ -153,13 +153,12 @@ export interface ImportResult {
   items: Array<{ name: string; action: string; message?: string }>;
 }
 
-/** 日志详情：列表行加四份快照。身体可能被保留策略清空，所以可为 null。 */
-export interface RequestLogDetail extends RequestLog {
-  downstream_request: unknown;
-  upstream_request: unknown;
-  upstream_response: unknown;
-  downstream_response: unknown;
-}
+/** 一条日志的四份快照。详情窗按页签逐份拉，正文可能被保留策略清空。 */
+export type LogSnapshotField =
+  | "downstream_request"
+  | "upstream_request"
+  | "upstream_response"
+  | "downstream_response";
 
 /** 额度状态。计数养在令牌行上，不从日志聚合——日志会被保留策略删掉。 */
 export interface QuotaState {

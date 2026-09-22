@@ -191,7 +191,8 @@ function formFromUpstream(upstream: Upstream): FormState {
   return {
     name: upstream.name,
     baseUrl: upstream.base_url,
-    apiKey: "",
+    /* 详情接口会把密钥带回来，直接回显：编辑渠道时要能核对当前用的是哪把 Key。 */
+    apiKey: upstream.api_key ?? "",
     clearApiKey: false,
     groupIds: upstream.group_ids.length > 0 ? upstream.group_ids : [DEFAULT_GROUP_ID],
     modelNames: upstream.model_names,
@@ -455,7 +456,8 @@ export function UpstreamDialog({
     onSubmit(payload);
   }
 
-  const title = upstream ? `编辑渠道 #${upstream.id}` : "新增渠道";
+  /* 克隆进来的草稿 id 为 0，按新增对待——标题不该写「编辑渠道 #0」。 */
+  const title = upstream && upstream.id > 0 ? `编辑渠道 #${upstream.id}` : "新增渠道";
   const canSubmit = useMemo(
     () => form.name.trim() !== "" && form.baseUrl.trim() !== "",
     [form.name, form.baseUrl],
@@ -528,14 +530,16 @@ export function UpstreamDialog({
               <label className="field span-2">
                 <span className="field-label">API Key</span>
                 <input
-                  type="password"
+                  type="text"
                   value={form.apiKey}
                   onChange={(event) => set("apiKey", event.target.value)}
-                  placeholder={upstream?.api_key_set ? "留空保持不变" : "未配置时留空"}
+                  placeholder="未配置时留空"
                   autoComplete="off"
                   spellCheck={false}
                 />
-                <span className="field-hint">留空保持原有密钥；复制渠道需重新填写。</span>
+                <span className="field-hint">
+                  留空表示不改动；要移除已存密钥请勾选下方的清空。
+                </span>
               </label>
 
               <div className="field span-2">

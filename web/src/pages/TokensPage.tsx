@@ -10,6 +10,7 @@ import {
   setTokenEnabled,
   updateToken,
 } from "../api";
+import { copyText } from "../clipboard";
 import { ActionMenu, MENU_SEPARATOR } from "../components/ActionMenu";
 import type { MenuEntry } from "../components/ActionMenu";
 import { TokenDialog } from "../components/TokenDialog";
@@ -186,7 +187,7 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
       return;
     }
     try {
-      await navigator.clipboard.writeText(token.token);
+      await copyText(token.token);
       setCopiedId(token.id);
       window.setTimeout(() => setCopiedId((id) => (id === token.id ? null : id)), 2000);
       toast("完整令牌已复制。", { tone: "ok" });
