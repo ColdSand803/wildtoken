@@ -365,6 +365,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                     </p>
                     <button
                       type="button"
+                      className="primary"
                       disabled={savingCard !== null}
                       onClick={() => void save("log")}
                     >
@@ -472,6 +473,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                     <p className="settings-inline-status" role="status" />
                     <button
                       type="button"
+                      className="primary"
                       disabled={savingCard !== null}
                       onClick={() => void save("routing")}
                     >
@@ -527,6 +529,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                     <p className="settings-inline-status" role="status" />
                     <button
                       type="button"
+                      className="primary"
                       disabled={savingCard !== null}
                       onClick={() => void save("proxy")}
                     >
@@ -584,21 +587,41 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
             </div>
           </section>
 
-          <section className="settings-card settings-readonly">
+          <section className="settings-card">
             <div className="settings-card-head">
               <div>
                 <h3>网关默认值</h3>
-                <p>启动时读取的默认上游超时。</p>
+                <p>渠道没有自己的超时时用这个值；新建渠道也以它为初始值。</p>
               </div>
-              <span className="settings-readonly-tag">只读</span>
+              <span className="settings-readonly-tag">全局</span>
             </div>
-            <div className="settings-note">
-              <strong>
-                默认上游超时：
-                {system ? `${system.default_upstream_timeout_seconds} 秒` : "由启动配置决定"}
-              </strong>
-              <p>现有渠道均有明确的超时值；请前往「渠道」按渠道管理。本页不提供动态全局超时设置。</p>
-            </div>
+            {settings ? (
+              <div className="settings-server-form">
+                <div className="settings-fields-grid">
+                  <NumberField
+                    label="默认上游超时（秒）"
+                    value={settings.default_upstream_timeout_seconds}
+                    min={0}
+                    max={3600}
+                    hint={`0 表示沿用启动配置（当前 ${
+                      system ? `${system.default_upstream_timeout_seconds} 秒` : "读取中"
+                    }）。保存后立即生效，不用重启。`}
+                    onChange={(v) => patch("default_upstream_timeout_seconds", v)}
+                  />
+                </div>
+                <div className="settings-save-row">
+                  <p className="settings-inline-status" role="status" />
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={savingCard !== null}
+                    onClick={() => void save("timeout")}
+                  >
+                    {savingCard === "timeout" ? "保存中…" : "保存默认超时"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
 
           <section className="settings-card settings-security">
@@ -827,7 +850,7 @@ function PromptDialog({
           <button type="button" className="secondary" onClick={onClose}>
             取消
           </button>
-          <button type="submit" disabled={!name.trim() || !prompt.trim()}>
+          <button type="submit" className="primary" disabled={!name.trim() || !prompt.trim()}>
             保存 Prompt
           </button>
         </div>

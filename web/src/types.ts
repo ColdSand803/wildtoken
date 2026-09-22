@@ -252,6 +252,8 @@ export interface RuntimeSettings {
   auto_weight_recovery_interval_seconds: number;
   proxy_enabled: boolean;
   proxy_url: string;
+  /** 0 表示沿用启动配置（SystemInfo.default_upstream_timeout_seconds）。 */
+  default_upstream_timeout_seconds: number;
   revision: number;
   updated_at: string;
 }

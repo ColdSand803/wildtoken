@@ -184,8 +184,12 @@ type RuntimeSettings struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
-	Revision                          int64  `json:"revision"`
-	UpdatedAt                         string `json:"updated_at"`
+	// DefaultUpstreamTimeoutSeconds is the fallback for channels that leave
+	// their own timeout unset. Zero means "inherit the startup config", so an
+	// operator who never touched it keeps whatever the deployment set.
+	DefaultUpstreamTimeoutSeconds int64  `json:"default_upstream_timeout_seconds"`
+	Revision                      int64  `json:"revision"`
+	UpdatedAt                     string `json:"updated_at"`
 	// DatabaseOverride records that these values came from SQLite rather than
 	// the startup defaults. It is not part of the stored row.
 	DatabaseOverride bool `json:"-"`
@@ -205,6 +209,7 @@ func DefaultRuntimeSettings() RuntimeSettings {
 		AutoWeightRecoveryIntervalSeconds: DefaultAutoWeightRecoveryIntervalSeconds,
 		ProxyEnabled:                      false,
 		ProxyURL:                          "",
+		DefaultUpstreamTimeoutSeconds:     0,
 		Revision:                          0,
 		UpdatedAt:                         "",
 		DatabaseOverride:                  false,
@@ -226,6 +231,8 @@ func (s *RuntimeSettings) Validate() error {
 		{s.AutoWeightSuccessIncrement, 0, 100, "auto_weight_success_increment must be between 0 and 100"},
 		{s.AutoWeightRecoveryIncrement, 0, 100, "auto_weight_recovery_increment must be between 0 and 100"},
 		{s.AutoWeightRecoveryIntervalSeconds, 1, 3600, "auto_weight_recovery_interval_seconds must be between 1 and 3600"},
+		// 0 is "inherit"; anything set must be a sane forwarding timeout.
+		{s.DefaultUpstreamTimeoutSeconds, 0, 3600, "default_upstream_timeout_seconds must be between 0 and 3600"},
 	} {
 		if check.value < check.min || check.value > check.max {
 			return ErrString(check.message)
@@ -277,6 +284,7 @@ type RuntimeSettingsIn struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
+	DefaultUpstreamTimeoutSeconds     int64  `json:"default_upstream_timeout_seconds"`
 	Revision                          int64  `json:"revision"`
 }
 
@@ -296,6 +304,7 @@ func (in *RuntimeSettingsIn) Validate() error {
 	candidate.AutoWeightRecoveryIntervalSeconds = in.AutoWeightRecoveryIntervalSeconds
 	candidate.ProxyEnabled = in.ProxyEnabled
 	candidate.ProxyURL = in.ProxyURL
+	candidate.DefaultUpstreamTimeoutSeconds = in.DefaultUpstreamTimeoutSeconds
 	return candidate.Validate()
 }
 
@@ -311,6 +320,7 @@ type RuntimeSettingsOut struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
+	DefaultUpstreamTimeoutSeconds     int64  `json:"default_upstream_timeout_seconds"`
 	Revision                          int64  `json:"revision"`
 	UpdatedAt                         string `json:"updated_at"`
 	DatabaseOverride                  bool   `json:"database_override"`
@@ -329,6 +339,7 @@ func NewRuntimeSettingsOut(s *RuntimeSettings) RuntimeSettingsOut {
 		AutoWeightRecoveryIntervalSeconds: s.AutoWeightRecoveryIntervalSeconds,
 		ProxyEnabled:                      s.ProxyEnabled,
 		ProxyURL:                          s.ProxyURL,
+		DefaultUpstreamTimeoutSeconds:     s.DefaultUpstreamTimeoutSeconds,
 		Revision:                          s.Revision,
 		UpdatedAt:                         s.UpdatedAt,
 		DatabaseOverride:                  s.DatabaseOverride,

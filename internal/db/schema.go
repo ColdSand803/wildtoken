@@ -180,6 +180,8 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"auto_weight_recovery_interval_seconds", "INTEGER NOT NULL DEFAULT 60 CHECK (auto_weight_recovery_interval_seconds BETWEEN 1 AND 3600)"},
 		{"proxy_enabled", "INTEGER NOT NULL DEFAULT 0 CHECK (proxy_enabled IN (0, 1))"},
 		{"proxy_url", "TEXT NOT NULL DEFAULT ''"},
+		// 0 means "inherit the startup config"; existing rows keep behaving as before.
+		{"default_upstream_timeout_seconds", "INTEGER NOT NULL DEFAULT 0 CHECK (default_upstream_timeout_seconds BETWEEN 0 AND 3600)"},
 	} {
 		if err := ensureColumn(ctx, db, "runtime_settings", column.name, column.definition); err != nil {
 			return err

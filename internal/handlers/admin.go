@@ -310,8 +310,10 @@ func AdminSystemInfo(state *appstate.State) http.HandlerFunc {
 
 		settings := state.Runtime.Get()
 		apperr.WriteJSON(w, http.StatusOK, models.SystemInfoOut{
-			Service:                       "WildToken",
-			Version:                       Version,
+			Service: "WildToken",
+			Version: Version,
+			// The startup value, not the effective one: the console shows this as
+			// what "inherit" means next to the editable runtime override.
 			DefaultUpstreamTimeoutSeconds: state.Settings.Upstream.DefaultTimeoutSeconds,
 			UptimeSeconds:                 uint64(time.Since(state.StartedAt).Seconds()),
 			CurrentServerTime:             time.Now().Format(time.RFC3339),

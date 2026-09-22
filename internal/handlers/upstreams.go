@@ -552,7 +552,7 @@ func AdminCreateUpstream(state *appstate.State) http.HandlerFunc {
 		}
 
 		created, err := db.CreateUpstream(r.Context(), state.DB, &input,
-			state.Settings.Upstream.DefaultTimeoutSeconds)
+			state.EffectiveUpstreamTimeoutSeconds())
 		if err != nil {
 			if isUniqueViolation(err) {
 				apperr.WriteError(w, apperr.BadRequest("upstream name already exists"))
@@ -1193,7 +1193,7 @@ func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		timeout := state.Settings.Upstream.DefaultTimeoutSeconds
+		timeout := state.EffectiveUpstreamTimeoutSeconds()
 		if input.TimeoutSeconds != nil {
 			timeout = *input.TimeoutSeconds
 		}
@@ -1678,7 +1678,7 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 				result.Updated++
 			} else {
 				// Create new
-				_, err := db.CreateUpstream(ctx, state.DB, &input, state.Settings.Upstream.DefaultTimeoutSeconds)
+				_, err := db.CreateUpstream(ctx, state.DB, &input, state.EffectiveUpstreamTimeoutSeconds())
 				if err != nil {
 					msg := "create failed: " + err.Error()
 					result.Items = append(result.Items, models.ImportResultItem{

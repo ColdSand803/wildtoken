@@ -178,6 +178,7 @@ const runtimeSettingsColumns = `log_body_keep_count, log_retention_days, log_bod
     auto_weight_failure_penalty, auto_weight_success_increment,
     auto_weight_recovery_increment, auto_weight_recovery_interval_seconds,
     proxy_enabled, proxy_url,
+    default_upstream_timeout_seconds,
     revision, updated_at`
 
 func scanRuntimeSettings(row interface{ Scan(...any) error }) (models.RuntimeSettings, error) {
@@ -188,6 +189,7 @@ func scanRuntimeSettings(row interface{ Scan(...any) error }) (models.RuntimeSet
 		&settings.AutoWeightSuccessIncrement, &settings.AutoWeightRecoveryIncrement,
 		&settings.AutoWeightRecoveryIntervalSeconds,
 		&settings.ProxyEnabled, &settings.ProxyURL,
+		&settings.DefaultUpstreamTimeoutSeconds,
 		&settings.Revision, &settings.UpdatedAt)
 	return settings, err
 }
@@ -221,6 +223,7 @@ func UpdateRuntimeSettings(ctx context.Context, db *sql.DB, input *models.Runtim
            auto_weight_failure_penalty = ?, auto_weight_success_increment = ?,
            auto_weight_recovery_increment = ?, auto_weight_recovery_interval_seconds = ?,
            proxy_enabled = ?, proxy_url = ?,
+           default_upstream_timeout_seconds = ?,
            revision = revision + 1, updated_at = datetime('now')
        WHERE id = 1 AND revision = ?`,
 		input.LogBodyKeepCount, input.LogRetentionDays, input.LogBodyMaxBytes,
@@ -228,6 +231,7 @@ func UpdateRuntimeSettings(ctx context.Context, db *sql.DB, input *models.Runtim
 		input.AutoWeightFailurePenalty, input.AutoWeightSuccessIncrement,
 		input.AutoWeightRecoveryIncrement, input.AutoWeightRecoveryIntervalSeconds,
 		input.ProxyEnabled, trimSpace(input.ProxyURL),
+		input.DefaultUpstreamTimeoutSeconds,
 		input.Revision)
 	if err != nil {
 		return models.RuntimeSettings{}, apperr.Database(err)
