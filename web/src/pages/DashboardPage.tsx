@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
-import { UnauthorizedError, fetchDashboard, getSystemInfo } from "../api";
-import type { LogOverview, RequestLog, SystemInfo, TokenUsage, TopItem, TopStats } from "../types";
+import { UnauthorizedError, fetchDashboard } from "../api";
+import type { LogOverview, RequestLog, TokenUsage, TopItem, TopStats } from "../types";
 
 /* 时间档。值直接进 query，必须是后端 parseDashboardRange 认的词。
 
@@ -271,7 +271,6 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [overview, setOverview] = useState<LogOverview | null>(null);
   const [top, setTop] = useState<TopStats | null>(null);
   const [usage, setUsage] = useState<TokenUsage | null>(null);
-  const [system, setSystem] = useState<SystemInfo | null>(null);
   const [recent, setRecent] = useState<RequestLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -309,13 +308,6 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
     void load();
   }, [load]);
 
-  /* 运行态不随时间范围变，单独拉一次。 */
-  useEffect(() => {
-    getSystemInfo()
-      .then(setSystem)
-      .catch(() => setSystem(null));
-  }, []);
-
   function switchRange(next: string) {
     setRange(next);
     writeStored(RANGE_KEY, next);
@@ -344,7 +336,6 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
     overview && total > 0 ? ((overview.error_requests / total) * 100).toFixed(1) : null;
   const errorTone =
     errorRate === null ? "" : Number(errorRate) >= 10 ? "tone-danger" : Number(errorRate) >= 2 ? "tone-warn" : "";
-  const metrics = system?.runtime_metrics;
   /* 响应总是嵌套的：选了具体时间窗时，服务端把该窗的聚合值塞进 today。
      按扁平结构取字段全是 undefined，卡片渲染成 NaN。 */
   /* 滑块要量选中那个按钮的实际几何。用 layout effect 是为了在浏览器绘制前
@@ -510,12 +501,6 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
               label="请求（全部）"
               value={usageWindow ? compact(usageWindow.all_request_count) : "—"}
               hint={`计入用量 ${compact(usageWindow?.request_count ?? 0)} 条`}
-            />
-            <Kpi
-              label="活跃流"
-              value={compact(metrics?.active_sse_streams ?? 0)}
-              hint="当前 SSE 连接"
-              tone={(metrics?.active_sse_streams ?? 0) > 0 ? "tone-ok" : ""}
             />
           </div>
 
