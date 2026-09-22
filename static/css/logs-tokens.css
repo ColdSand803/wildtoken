@@ -732,9 +732,9 @@
 
 .conv-fold-all {
   background: transparent;
-  border: 1px solid var(--line);
+  border: 1px solid var(--code-border);
   border-radius: var(--radius-full);
-  color: var(--muted-strong);
+  color: var(--code-muted);
   cursor: pointer;
   flex: 0 0 auto;
   font-size: var(--text-xs);
@@ -757,8 +757,8 @@
 
 /* 角色在左侧窄栏，与内容并排——单独占一行会把短消息的高度翻倍。 */
 .conv-msg {
-  border: 1px solid var(--line-soft);
-  border-left: 3px solid var(--line-strong);
+  border: 1px solid var(--code-border);
+  border-left: 3px solid var(--code-border);
   border-radius: var(--radius);
   display: grid;
   gap: 0 10px;
@@ -775,7 +775,7 @@
 }
 
 /* 角色用左侧色条区分，比整块底色更安静，长会话里不会糊成一片。 */
-.conv-msg--system { border-left-color: var(--muted); }
+.conv-msg--system { border-left-color: var(--code-muted); }
 .conv-msg--user { border-left-color: var(--accent); }
 .conv-msg--assistant { border-left-color: var(--ok); }
 .conv-msg--tool { border-left-color: var(--warn, var(--muted-strong)); }
@@ -790,14 +790,14 @@
 }
 
 .conv-role-name {
-  color: var(--text-secondary);
+  color: var(--code-text);
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
 }
 
 .conv-msg-index {
-  color: var(--muted);
+  color: var(--code-muted);
   font-size: var(--text-xs);
 }
 
@@ -817,7 +817,7 @@
 }
 
 .conv-inline-body {
-  color: var(--text-secondary);
+  color: var(--code-text);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   min-width: 0;
@@ -831,7 +831,7 @@
 }
 
 .conv-block-body {
-  color: var(--text-secondary);
+  color: var(--code-text);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   margin: 0;
@@ -869,7 +869,7 @@
 }
 
 details.conv-block > summary {
-  color: var(--muted-strong);
+  color: var(--code-text);
   cursor: pointer;
   font-size: var(--text-sm);
   line-height: 1.5;
@@ -881,7 +881,7 @@ details.conv-block > summary::-webkit-details-marker { display: none; }
 
 details.conv-block > summary::before {
   content: "▸";
-  color: var(--muted);
+  color: var(--code-muted);
   display: inline-block;
   margin-right: 6px;
 }
@@ -889,25 +889,39 @@ details.conv-block > summary::before {
 details.conv-block[open] > summary::before { content: "▾"; }
 
 .conv-block-tag {
-  background: var(--panel-muted);
+  background: rgb(127 127 127 / 20%);
   border-radius: var(--radius-sm);
-  color: var(--muted-strong);
+  color: var(--code-muted);
   font-size: var(--text-xs);
   padding: 1px 6px;
 }
 
-.conv-block--thinking .conv-block-tag { color: var(--accent); }
-.conv-block--tool-use .conv-block-tag { color: var(--ok-strong); }
-.conv-block--tool-result.is-error .conv-block-tag { color: var(--danger); }
+/* 类型靠底色区分，文字统一用代码区的亮色。
+   拿语义色当文字色的话，浅色主题下那些色是为浅底调的深色，落在这块
+   深底上就看不清了。 */
+.conv-block--thinking .conv-block-tag {
+  background: var(--accent-soft);
+  color: var(--code-text);
+}
+
+.conv-block--tool-use .conv-block-tag {
+  background: var(--ok-soft);
+  color: var(--code-text);
+}
+
+.conv-block--tool-result.is-error .conv-block-tag {
+  background: var(--danger-soft);
+  color: var(--code-text);
+}
 
 .conv-block-meta {
-  color: var(--muted);
+  color: var(--code-muted);
   font-size: var(--text-xs);
 }
 
 .conv-block--image,
 .conv-block--error {
-  color: var(--muted-strong);
+  color: var(--code-muted);
   font-size: var(--text-sm);
 }
 
@@ -915,7 +929,7 @@ details.conv-block[open] > summary::before { content: "▾"; }
 
 .conv-empty,
 .conv-truncated {
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--code-border);
   border-radius: var(--radius);
   display: flex;
   flex-direction: column;
@@ -925,13 +939,13 @@ details.conv-block[open] > summary::before { content: "▾"; }
 
 .conv-empty strong,
 .conv-truncated strong {
-  color: var(--text-secondary);
+  color: var(--code-text);
   font-size: var(--text-sm);
 }
 
 .conv-empty span,
 .conv-truncated span {
-  color: var(--muted);
+  color: var(--code-muted);
   font-size: var(--text-xs);
 }
 
