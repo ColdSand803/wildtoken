@@ -409,6 +409,14 @@
   border-radius: var(--radius) var(--radius) 0 0;
   display: flex;
   gap: 2px;
+  /* 下限 = 自然高：上内边距 8 + 页签 40 - 页签下移的 1 + 底线 1。
+     不能省：条子自己是横向滚动容器，而 CSS Grid 规定「溢出不是 visible 的
+     项，自动最小尺寸算 0」。正文 upstream-dialog-body 是 grid，内容一旦高出
+     滚动区，剩余空间转负，页签那一行就停在 0——条子只剩 padding 加底线共
+     9px，40px 的页签被 align-items: flex-end 顶到条子上沿外，看上去就是整条
+     页签往上跑、被抽屉头部切掉。报文短的元信息页签撑不满滚动区，行还能长到
+     内容高，所以只有报文长的页签犯。 */
+  min-height: 48px;
   overflow-x: auto;
   overscroll-behavior-x: contain;
   padding: 8px 10px 0;

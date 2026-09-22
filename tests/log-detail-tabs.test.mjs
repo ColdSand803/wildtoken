@@ -66,3 +66,18 @@ test("换了日志后，上一条迟到的报文不会盖到新日志上", () =>
   cache = withSnapshot(cache, 2, "upstream_request", { status: "ready", raw: { b: 2 } });
   assert.deepEqual(snapshotsFor(cache, 2).upstream_request, { status: "ready", raw: { b: 2 } });
 });
+
+// 页签条塌成一根线：它是横向滚动容器，又是 grid 的项，CSS Grid 对「溢出不是
+// visible 的项」按零算自动最小尺寸。正文章案一高出滚动区，页签那一行就停在 0，
+// 40px 的页签被 align-items: flex-end 顶到条子上沿外——看着就是整条页签往上跑、
+// 被抽屉头切掉。下限必须在，且至少要和页签自己的 min-height 一样高。
+test("页签条有高度下限，不会在 grid 里塌成一根线", () => {
+  const css = read("static/css/logs-tokens.css");
+
+  const tabHeight = Number(css.match(/\.log-detail-tab\s*\{[^}]*min-height:\s*(\d+)px/)[1]);
+  const bar = css.match(/\.log-detail-tabs\s*\{[^}]*\}/)[0];
+  const barMin = Number(bar.match(/min-height:\s*(\d+)px/)[1]);
+
+  assert.ok(Number.isFinite(barMin), "页签条必须写死 min-height");
+  assert.ok(barMin >= tabHeight + 8, `页签条下限 ${barMin}px 撑不住 ${tabHeight}px 的页签加上内边距`);
+});
