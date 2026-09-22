@@ -102,6 +102,7 @@ export function ChannelExportDialog({
             复制
           </button>
           <button
+            className="primary"
             type="button"
             onClick={() => {
               /* Blob + 临时链接下载。用 data: URL 在大文档上会被浏览器拦。 */
@@ -204,6 +205,7 @@ export function ChannelImportDialog({
             关闭
           </button>
           <button
+            className="primary"
             type="button"
             disabled={busy || text.trim() === ""}
             onClick={() => {
@@ -357,6 +359,7 @@ export function QuickImportDialog({
             取消
           </button>
           <button
+            className="primary"
             type="button"
             disabled={busy || !name.trim() || !baseUrl.trim()}
             onClick={() => onSubmit(name.trim(), baseUrl.trim(), apiKey.trim() || null)}

@@ -314,15 +314,15 @@ textarea {
 
 button {
   align-items: center;
-  background: var(--accent);
-  border: 1px solid transparent;
+  background: var(--panel-muted);
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  box-shadow: 0 0 0 0 transparent;
-  color: var(--accent-on);
+  box-shadow: none;
+  color: var(--text-secondary);
   cursor: pointer;
   display: inline-flex;
   font-size: var(--text-base);
-  font-weight: 600;
+  font-weight: 500;
   gap: 6px;
   justify-content: center;
   letter-spacing: -0.01em;
@@ -338,9 +338,9 @@ button {
 }
 
 button:hover {
-  background: var(--accent-strong);
-  box-shadow: var(--glow-accent);
-  color: var(--accent-on);
+  background: var(--panel-elevated);
+  border-color: var(--line-strong);
+  color: var(--text);
 }
 
 button:disabled {
@@ -350,7 +350,34 @@ button:disabled {
 }
 
 button:disabled:hover {
+  background: var(--panel-muted);
+  border-color: var(--line);
+  box-shadow: none;
+  color: var(--text-secondary);
+}
+
+/* 主操作：提交、确认、新建。一个界面里顶多一两个。
+
+   默认故意是中性的：反过来的话，每加一个自己管状态的控件（页签、分段切换、
+   图标按钮……）都要在这里和三个主题包的 button:not(:where(...)) 白名单里各
+   登记一次。控制台里 106 个按钮只有十几个是主操作。 */
+button.primary {
   background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-on);
+  font-weight: 600;
+}
+
+button.primary:hover {
+  background: var(--accent-strong);
+  border-color: transparent;
+  box-shadow: var(--glow-accent);
+  color: var(--accent-on);
+}
+
+button.primary:disabled:hover {
+  background: var(--accent);
+  border-color: transparent;
   box-shadow: none;
   color: var(--accent-on);
 }

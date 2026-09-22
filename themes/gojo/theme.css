@@ -850,31 +850,7 @@ html[data-theme="gojo"] .status[data-tone="error"] {
    as a primary action. The list is repeated per state rather than factored out
    because :is()/:not() cannot be shared across separate rules. */
 
-html[data-theme="gojo"] button:not(:where(
-  .nav-link,
-  .archived-toggle,
-  .table-sort-button,
-  .url-action,
-  .priority-value,
-  .token-preview-button,
-  .model-selection-remove,
-  .toast-close,
-  .field-action,
-  .action-menu-trigger,
-  .icon-close,
-  .icon-maximize,
-  .icon-refresh,
-  .status-switch,
-  .theme-toggle,
-  .density-toggle,
-  .nav-logout,
-  .log-detail-tab,
-  .log-view-mode-button,
-  .segmented-control > button,
-  .theme-menu button,
-  .select-panel button,
-  .upstream-action-menu button
-)) {
+html[data-theme="gojo"] button.primary {
   background: linear-gradient(180deg, #63dcff 0%, #2fb2dd 52%, #1a86ad 100%);
   border: 1px solid rgb(24 128 165 / 90%);
   border-radius: var(--radius);
@@ -886,31 +862,7 @@ html[data-theme="gojo"] button:not(:where(
   letter-spacing: 0.01em;
 }
 
-html[data-theme="gojo"] button:not(:where(
-  .nav-link,
-  .archived-toggle,
-  .table-sort-button,
-  .url-action,
-  .priority-value,
-  .token-preview-button,
-  .model-selection-remove,
-  .toast-close,
-  .field-action,
-  .action-menu-trigger,
-  .icon-close,
-  .icon-maximize,
-  .icon-refresh,
-  .status-switch,
-  .theme-toggle,
-  .density-toggle,
-  .nav-logout,
-  .log-detail-tab,
-  .log-view-mode-button,
-  .segmented-control > button,
-  .theme-menu button,
-  .select-panel button,
-  .upstream-action-menu button
-)):hover {
+html[data-theme="gojo"] button.primary:hover {
   background: linear-gradient(180deg, #86e8ff 0%, #45c3ea 52%, #2295bd 100%);
   box-shadow:
     inset 0 1px 0 rgb(244 253 255 / 76%),
@@ -918,76 +870,13 @@ html[data-theme="gojo"] button:not(:where(
   color: var(--accent-on);
 }
 
-html[data-theme="gojo"] button:not(:where(
-  .nav-link,
-  .archived-toggle,
-  .table-sort-button,
-  .url-action,
-  .priority-value,
-  .token-preview-button,
-  .model-selection-remove,
-  .toast-close,
-  .field-action,
-  .action-menu-trigger,
-  .icon-close,
-  .icon-maximize,
-  .icon-refresh,
-  .status-switch,
-  .log-detail-tab,
-  .log-view-mode-button,
-  .segmented-control > button,
-  .theme-menu button,
-  .select-panel button,
-  .upstream-action-menu button
-)):active:not(:disabled) {
+html[data-theme="gojo"] button.primary:active:not(:disabled) {
   box-shadow: inset 0 2px 5px rgb(0 0 0 / 34%);
   transform: translateY(1px);
 }
 
-html[data-theme="gojo"] button:not(:where(
-  .nav-link,
-  .archived-toggle,
-  .table-sort-button,
-  .url-action,
-  .priority-value,
-  .token-preview-button,
-  .model-selection-remove,
-  .toast-close,
-  .field-action,
-  .action-menu-trigger,
-  .icon-close,
-  .icon-maximize,
-  .icon-refresh,
-  .status-switch,
-  .log-detail-tab,
-  .log-view-mode-button,
-  .segmented-control > button,
-  .theme-menu button,
-  .select-panel button,
-  .upstream-action-menu button
-)):disabled,
-html[data-theme="gojo"] button:not(:where(
-  .nav-link,
-  .archived-toggle,
-  .table-sort-button,
-  .url-action,
-  .priority-value,
-  .token-preview-button,
-  .model-selection-remove,
-  .toast-close,
-  .field-action,
-  .action-menu-trigger,
-  .icon-close,
-  .icon-maximize,
-  .icon-refresh,
-  .status-switch,
-  .log-detail-tab,
-  .log-view-mode-button,
-  .segmented-control > button,
-  .theme-menu button,
-  .select-panel button,
-  .upstream-action-menu button
-)):disabled:hover {
+html[data-theme="gojo"] button.primary:disabled,
+html[data-theme="gojo"] button.primary:disabled:hover {
   background: rgb(40 47 65 / 82%);
   border-color: rgb(139 156 187 / 22%);
   box-shadow: none;

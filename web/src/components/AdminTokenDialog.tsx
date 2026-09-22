@@ -79,7 +79,7 @@ export function AdminTokenDialog({
           </p>
         ) : null}
         <div className="modal-actions">
-          <button type="submit">进入</button>
+          <button type="submit" className="primary">进入</button>
         </div>
       </form>
     </dialog>

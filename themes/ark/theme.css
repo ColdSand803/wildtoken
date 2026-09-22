@@ -491,30 +491,7 @@ html[data-theme="ark"] button {
   box-shadow: none;
 }
 
-html[data-theme="ark"] button:not(:where(
-  .secondary,
-  .danger,
-  .ghost,
-  .status-switch,
-  .nav-link,
-  .archived-toggle,
-  .table-sort-button,
-  .priority-value,
-  .token-preview-button,
-  .model-selection-remove,
-  .toast-close,
-  .url-action,
-  .icon-close,
-  .icon-maximize,
-  .icon-refresh,
-  .action-menu-trigger,
-  .log-detail-tab,
-  .log-view-mode-button,
-  .segmented-control > button,
-  [role="option"],
-  [role="menuitem"],
-  [role="menuitemradio"]
-)) {
+html[data-theme="ark"] button.primary {
   background: var(--ark-signal);
   border-color: var(--ark-signal);
   box-shadow: 4px 4px 0 #030506;
@@ -524,30 +501,7 @@ html[data-theme="ark"] button:not(:where(
   min-height: var(--control-h);
 }
 
-html[data-theme="ark"] button:not(:where(
-  .secondary,
-  .danger,
-  .ghost,
-  .status-switch,
-  .nav-link,
-  .archived-toggle,
-  .table-sort-button,
-  .priority-value,
-  .token-preview-button,
-  .model-selection-remove,
-  .toast-close,
-  .url-action,
-  .icon-close,
-  .icon-maximize,
-  .icon-refresh,
-  .action-menu-trigger,
-  .log-detail-tab,
-  .log-view-mode-button,
-  .segmented-control > button,
-  [role="option"],
-  [role="menuitem"],
-  [role="menuitemradio"]
-)):hover {
+html[data-theme="ark"] button.primary:hover {
   background: var(--ark-paper);
   border-color: var(--ark-paper);
   box-shadow: 4px 4px 0 #030506, inset 4px 0 0 var(--ark-signal);

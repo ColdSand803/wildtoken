@@ -352,7 +352,7 @@ export function ModelDialog({
           <button type="button" className="secondary" onClick={onClose}>
             取消
           </button>
-          <button type="button" disabled={busy} onClick={save}>
+          <button type="button" className="primary" disabled={busy} onClick={save}>
             {busy ? "保存中…" : "保存选择"}
           </button>
         </div>

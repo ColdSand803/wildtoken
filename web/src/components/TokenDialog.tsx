@@ -288,7 +288,7 @@ export function TokenDialog({
           <button type="button" className="secondary" onClick={onClose}>
             取消
           </button>
-          <button type="submit" disabled={busy || !name.trim()}>
+          <button type="submit" className="primary" disabled={busy || !name.trim()}>
             {busy ? "保存中…" : "保存"}
           </button>
         </div>

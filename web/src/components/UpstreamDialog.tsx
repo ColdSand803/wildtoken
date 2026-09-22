@@ -818,7 +818,7 @@ export function UpstreamDialog({
           <button type="button" className="secondary" onClick={onClose}>
             取消
           </button>
-          <button type="submit" disabled={!canSubmit || busy}>
+          <button type="submit" className="primary" disabled={!canSubmit || busy}>
             {busy ? "保存中…" : "保存渠道"}
           </button>
         </div>

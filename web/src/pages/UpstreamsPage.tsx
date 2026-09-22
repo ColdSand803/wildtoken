@@ -666,7 +666,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
             <button type="button" className="secondary" onClick={() => void reload()}>
               刷新
             </button>
-            <button type="button" onClick={() => setEditing({ upstream: null })}>
+            <button type="button" className="primary" onClick={() => setEditing({ upstream: null })}>
               新增渠道
             </button>
           </div>

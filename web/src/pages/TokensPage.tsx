@@ -249,7 +249,7 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
             <button type="button" className="secondary" onClick={() => void reload()}>
               刷新
             </button>
-            <button type="button" onClick={() => setEditing({ token: null })}>
+            <button type="button" className="primary" onClick={() => setEditing({ token: null })}>
               新增令牌
             </button>
           </div>

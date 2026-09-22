@@ -94,7 +94,7 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
             <button type="button" className="secondary" onClick={() => void reload()}>
               刷新
             </button>
-            <button type="button" onClick={() => setEditing({ group: null })}>
+            <button type="button" className="primary" onClick={() => setEditing({ group: null })}>
               新增分组
             </button>
           </div>
@@ -309,7 +309,7 @@ function GroupDialog({
           <button type="button" className="secondary" onClick={onClose}>
             取消
           </button>
-          <button type="submit" disabled={busy || !name.trim()}>
+          <button type="submit" className="primary" disabled={busy || !name.trim()}>
             {busy ? "保存中…" : "保存"}
           </button>
         </div>

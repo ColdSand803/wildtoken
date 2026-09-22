@@ -303,7 +303,7 @@ export function ModelTestDialog({
           >
             {refreshing ? "刷新中…" : "刷新模型"}
           </button>
-          <button type="submit" disabled={!canSend}>
+          <button type="submit" className="primary" disabled={!canSend}>
             {sending ? "测试中…" : "发送测试"}
           </button>
         </div>
