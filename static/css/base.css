@@ -188,11 +188,13 @@ html[data-theme="light"] {
   --shadow: var(--shadow-sm);
   --glow-accent: 0 0 0 1px rgb(14 116 144 / 14%), 0 0 18px rgb(14 116 144 / 10%);
 
-  --code-frame-bg: #0b1220;
-  --code-bg: #0f172a;
-  --code-text: #e5e7eb;
-  --code-muted: #94a3b8;
-  --code-border: rgb(148 163 184 / 18%);
+  /* 浅色主题的代码区也要是浅的：深色块糊在白底界面上，既不符合主题，
+     也逼着正文和边框去迁就深底。外框比面板略深，块底近白，靠这一档分层。 */
+  --code-frame-bg: #eef2f7;
+  --code-bg: #ffffff;
+  --code-text: #0f172a;
+  --code-muted: #64748b;
+  --code-border: rgb(15 23 42 / 12%);
 
   --row-hover: rgb(14 116 144 / 5%);
   --row-disabled: #f8fafc;

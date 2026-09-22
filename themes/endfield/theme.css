@@ -69,11 +69,11 @@ html[data-theme="endfield"] {
   --shadow: var(--shadow-sm);
   --glow-accent: none;
 
-  --code-frame-bg: #191919;
-  --code-bg: #20201e;
-  --code-text: #f3f3ed;
-  --code-muted: #afafa5;
-  --code-border: #5a5a54;
+  --code-frame-bg: #d9d9d2;
+  --code-bg: #f8f8f4;
+  --code-text: #191919;
+  --code-muted: #5c5c57;
+  --code-border: #b4b4ab;
 
   --row-hover: rgb(255 250 0 / 24%);
   --row-disabled: rgb(217 217 210 / 60%);
