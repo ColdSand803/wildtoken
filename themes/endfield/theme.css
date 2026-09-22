@@ -493,14 +493,14 @@ html[data-theme="endfield"] button {
   min-height: var(--control-h);
 }
 
-html[data-theme="endfield"] button:not(.secondary):not(.danger):not(.ghost):not(.status-switch):not([role="option"]):not([role="menuitem"]):not([role="menuitemradio"]) {
+html[data-theme="endfield"] button:not(.secondary):not(.danger):not(.ghost):not(.log-detail-tab):not(.log-view-mode-button):not(.status-switch):not([role="option"]):not([role="menuitem"]):not([role="menuitemradio"]) {
   background: var(--ef-signal);
   border-color: var(--ef-ink);
   box-shadow: 3px 3px 0 var(--ef-ink);
   color: var(--ef-ink);
 }
 
-html[data-theme="endfield"] button:not(.secondary):not(.danger):not(.ghost):not(.status-switch):not([role="option"]):not([role="menuitem"]):not([role="menuitemradio"]):hover {
+html[data-theme="endfield"] button:not(.secondary):not(.danger):not(.ghost):not(.log-detail-tab):not(.log-view-mode-button):not(.status-switch):not([role="option"]):not([role="menuitem"]):not([role="menuitemradio"]):hover {
   background: var(--ef-paper);
   box-shadow: 3px 3px 0 var(--ef-ink), inset 4px 0 0 var(--ef-signal);
   color: var(--ef-ink);
