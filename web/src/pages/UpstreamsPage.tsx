@@ -35,7 +35,12 @@ import { ModelTestDialog } from "../components/ModelTestDialog";
 import { UpstreamDialog } from "../components/UpstreamDialog";
 import type { UpstreamPayload } from "../components/UpstreamDialog";
 import { useConfirm, useToast } from "../components/feedback";
-import { compareUpstreams } from "../upstreamSort";
+import {
+  UPSTREAM_SORT_KEY,
+  compareUpstreams,
+  readStoredSort,
+} from "../upstreamSort";
+import type { SortKey } from "../upstreamSort";
 import type {
   ChannelExportDocument,
   ImportResult,
@@ -60,7 +65,6 @@ const COLUMNS = [
 ] as const;
 
 type ColumnKey = (typeof COLUMNS)[number]["key"];
-type SortKey = "id" | "name" | "priority" | "status";
 
 const COLUMNS_STORAGE_KEY = "wildtoken_upstream_columns";
 const VIEW_STORAGE_KEY = "wildtoken_upstream_view";
@@ -100,7 +104,18 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [editing, setEditing] = useState<{ upstream: Upstream | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>({ key: "priority", desc: true });
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>(() => readStoredSort(localStorage));
+
+  /* 排序偏好跟着列显隐一起落 localStorage：切页、刷新、换标签页都不丢，换设备
+     归默认。写不进存储时当前页面仍然生效。 */
+  const applySort = useCallback((next: { key: SortKey; desc: boolean }) => {
+    setSort(next);
+    try {
+      localStorage.setItem(UPSTREAM_SORT_KEY, JSON.stringify(next));
+    } catch {
+      // 存储不可用时当前页面仍然生效。
+    }
+  }, []);
   const [columns, setColumns] = useState<Record<ColumnKey, boolean>>(readColumns);
   const [colMenuOpen, setColMenuOpen] = useState(false);
   // 正在行内编辑优先级的渠道 id。
@@ -737,9 +752,9 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                   col="id"
                   className="col-id"
                   sort={sort}
-                  onSort={setSort}
+                  onSort={applySort}
                 />
-                <SortableHeader label="渠道名" sortKey="name" col="name" sort={sort} onSort={setSort} />
+                <SortableHeader label="渠道名" sortKey="name" col="name" sort={sort} onSort={applySort} />
                 <th data-col="models">模型匹配</th>
                 <th data-col="groups">分组</th>
                 <SortableHeader
@@ -748,7 +763,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                   col="priority"
                   className="col-priority"
                   sort={sort}
-                  onSort={setSort}
+                  onSort={applySort}
                 />
                 <th className="col-weight" data-col="weight">权重</th>
                 <SortableHeader
@@ -757,7 +772,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                   col="status"
                   className="col-status"
                   sort={sort}
-                  onSort={setSort}
+                  onSort={applySort}
                 />
                 <th className="col-actions" data-col="actions">操作</th>
               </tr>
