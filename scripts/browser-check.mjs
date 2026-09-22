@@ -1621,24 +1621,38 @@ async function main() {
       assertEqual(checked.join(","), "vip", "已勾分组");
     });
 
-    await check("已选模型渲染成芯片", async () => {
-      const chips = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.upstream-dialog[open] .model-selection-chip-name")].map(
-          (chip) => chip.textContent,
-        ),
+    /* 模型名与映射是一个多行文本框，每行一条，映射写成 `a => b`。
+       高级区是 details，所以 section 里的 textarea 只有这一个。 */
+    const MODELS_TEXTAREA = "dialog.upstream-dialog[open] section.form-section textarea";
+
+    await check("已选模型回填到文本框", async () => {
+      const lines = await page.evaluate(
+        (sel) => document.querySelector(sel).value.split("\n").filter(Boolean),
+        MODELS_TEXTAREA,
       );
-      assert(chips.length > 0, "一个芯片都没有");
-      assert(
-        chips.some((chip) => chip.includes("=>")),
-        `映射没渲染成芯片：${chips}`,
-      );
+      assert(lines.length > 0, "文本框是空的");
+      assert(lines.some((line) => line.includes("=>")), `映射没回填：${lines}`);
+      assert(lines.includes("gpt-4o"), `模型名没回填：${lines}`);
+      // 映射排在前面：它们改写请求，比名字匹配更需要被看见。
+      assert(lines[0].includes("=>"), `映射不在首行：${lines[0]}`);
     });
 
-    await check("芯片可以就地摘掉", async () => {
-      const before = await page.count("dialog.upstream-dialog[open] .model-selection-chip");
-      await page.click("dialog.upstream-dialog[open] .model-selection-remove");
-      const after = await page.count("dialog.upstream-dialog[open] .model-selection-chip");
-      assertEqual(after, before - 1, "摘掉一个后的芯片数");
+    await check("删一行，计数跟着减一", async () => {
+      const before = await page.text("dialog.upstream-dialog[open] .model-selection-count");
+      await page.evaluate((sel) => {
+        const area = document.querySelector(sel);
+        const rest = area.value.split("\n").slice(1).join("\n");
+        // 走 React 的受控输入：直接赋 value 不会触发 onChange。
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        setter.call(area, rest);
+        area.dispatchEvent(new Event("input", { bubbles: true }));
+      }, MODELS_TEXTAREA);
+      const after = await page.text("dialog.upstream-dialog[open] .model-selection-count");
+      assertEqual(
+        parseInt(after, 10),
+        parseInt(before, 10) - 1,
+        `删一行后的计数：${before} → ${after}`,
+      );
     });
 
     /* 第二条入口：渠道编辑表单里的两个按钮。它走的是另一个接口（探一个还没
@@ -1674,12 +1688,11 @@ async function main() {
       await page.waitFor(() => document.querySelector("dialog.model-dialog[open]") === null, {
         label: "选择器关闭",
       });
-      const chips = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.upstream-dialog[open] .model-selection-chip-name")].map(
-          (chip) => chip.textContent,
-        ),
+      const lines = await page.evaluate(
+        (sel) => document.querySelector(sel).value.split("\n"),
+        MODELS_TEXTAREA,
       );
-      assert(chips.includes("draft-only"), `没写回芯片：${chips}`);
+      assert(lines.includes("draft-only"), `没写回文本框：${lines}`);
       // 表单没提交，库里不该有这个名字。
       const stored = await page.evaluate(async () => {
         const response = await fetch("/api/admin/upstreams/", {
