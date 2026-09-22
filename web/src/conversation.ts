@@ -383,39 +383,55 @@ function normalizeSystemPrompt(system: unknown, instructions: unknown): Message 
 /**
  * 把工具调用和它的结果合成一块。
  *
- * 协议上工具调用是两条消息：助手发 tool_use，下一条用户消息里装同 id 的
- * tool_result。agent 长会话里这种配对占了绝大多数——实测中位 234 条消息的会话，
- * 工具调用与结果各 120 个。拆开显示时读者得自己把上下两条对上。
+ * 协议上工具调用至少占两条消息，而且两家写法不一样：
+ *   - Anthropic：一条 user 消息里装下一轮全部 tool_result。
+ *   - OpenAI：一条 assistant 带 N 个 tool_calls，结果分成 N 条连续的 role:tool 消息。
+ * 所以不能只看「紧接着的下一条」，要一直吐完后面只装匹配结果的消息。
  *
- * 只合并「紧接着的下一条」里的结果：隔了别的消息就不碰，免得把不相干的
- * 结果拉到一起。结果消息里剩下的非结果块（比如用户顺手补的一句话）保留在原位。
- * 没有 id 的调用（老协议）不配对，原样留着。
+ * agent 长会话里这种配对占了绝大多数——实测 25 条真实会话里 14703 条消息
+ * 含 6848 次调用。拆开显示时读者得自己把调用和结果对上。
+ *
+ * 遇到带其它内容的消息就停：吸走匹配的结果，剩下的块（比如用户顺手补的
+ * 一句话）原位留着。没有 id 的调用（老协议）不配对。
  */
 export function pairToolCalls(messages: Message[]): Message[] {
   const out: Message[] = [];
 
   for (let i = 0; i < messages.length; i += 1) {
     const message = messages[i];
-    const calls = message.blocks.filter(
-      (block): block is Extract<Block, { kind: "tool_use" }> =>
-        block.kind === "tool_use" && block.id !== null,
-    );
-    if (calls.length === 0) {
+    const pending = new Set<string>();
+    for (const block of message.blocks) {
+      if (block.kind === "tool_use" && block.id !== null) pending.add(block.id);
+    }
+    if (pending.size === 0) {
       out.push(message);
       continue;
     }
 
-    const next = messages[i + 1];
     const results = new Map<string, { isError: boolean; text: string }>();
-    const leftover: Block[] = [];
-    if (next) {
-      const ids = new Set(calls.map((call) => call.id as string));
-      for (const block of next.blocks) {
-        if (block.kind === "tool_result" && block.id !== null && ids.has(block.id) && !results.has(block.id)) {
+    let trailing: Message | null = null;
+    let scan = i + 1;
+
+    while (scan < messages.length && pending.size > 0) {
+      const candidate = messages[scan];
+      const leftover: Block[] = [];
+      let matched = 0;
+
+      for (const block of candidate.blocks) {
+        if (block.kind === "tool_result" && block.id !== null && pending.has(block.id)) {
           results.set(block.id, { isError: block.isError, text: block.text });
+          pending.delete(block.id);
+          matched += 1;
         } else {
           leftover.push(block);
         }
+      }
+
+      if (matched === 0) break;
+      scan += 1;
+      if (leftover.length > 0) {
+        trailing = { role: candidate.role, blocks: leftover };
+        break;
       }
     }
 
@@ -427,11 +443,8 @@ export function pairToolCalls(messages: Message[]): Message[] {
         return { kind: "tool_call", name: block.name, id: block.id, input: block.input, result };
       }),
     });
-
-    if (next && results.size > 0) {
-      i += 1;
-      if (leftover.length > 0) out.push({ role: next.role, blocks: leftover });
-    }
+    if (trailing) out.push(trailing);
+    i = scan - 1;
   }
 
   return out;

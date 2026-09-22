@@ -278,6 +278,63 @@ test("工具调用和紧接着的结果合成一块，其余原样", () => {
   assert.deepEqual(paired[2], { role: "user", blocks: [{ kind: "text", text: "顺手补一句" }] });
 });
 
+/* OpenAI 把 N 个 tool_calls 的结果拆成 N 条连续的 role:tool 消息，每条一个。
+   只看「紧接着的下一条」的话，第二个之后的结果全落单——实测 25 条真实会话里
+   有 26 个调用因此配不上。 */
+test("OpenAI：一条消息多个调用，结果分成多条连续 tool 消息", () => {
+  const paired = pairToolCalls([
+    {
+      role: "assistant",
+      blocks: [
+        { kind: "tool_use", name: "read", id: "c1", input: {} },
+        { kind: "tool_use", name: "read", id: "c2", input: {} },
+        { kind: "tool_use", name: "grep", id: "c3", input: {} },
+      ],
+    },
+    { role: "tool", blocks: [{ kind: "tool_result", id: "c1", isError: false, text: "r1" }] },
+    { role: "tool", blocks: [{ kind: "tool_result", id: "c2", isError: false, text: "r2" }] },
+    { role: "tool", blocks: [{ kind: "tool_result", id: "c3", isError: true, text: "r3" }] },
+    { role: "assistant", blocks: [{ kind: "text", text: "读完了" }] },
+  ]);
+
+  assert.equal(paired.length, 2, "三条 tool 消息全被吸收");
+  assert.deepEqual(
+    paired[0].blocks.map((b) => b.result?.text),
+    ["r1", "r2", "r3"],
+  );
+  assert.equal(paired[0].blocks[2].result.isError, true);
+  assert.equal(paired[1].blocks[0].text, "读完了");
+});
+
+test("连续吸收在遇到别的内容时停下", () => {
+  const paired = pairToolCalls([
+    {
+      role: "assistant",
+      blocks: [
+        { kind: "tool_use", name: "a", id: "c1", input: {} },
+        { kind: "tool_use", name: "b", id: "c2", input: {} },
+      ],
+    },
+    { role: "tool", blocks: [{ kind: "tool_result", id: "c1", isError: false, text: "r1" }] },
+    {
+      role: "user",
+      blocks: [
+        { kind: "tool_result", id: "c2", isError: false, text: "r2" },
+        { kind: "text", text: "另外" },
+      ],
+    },
+    { role: "user", blocks: [{ kind: "text", text: "下一句" }] },
+  ]);
+
+  assert.equal(paired.length, 3);
+  assert.deepEqual(
+    paired[0].blocks.map((b) => b.result?.text),
+    ["r1", "r2"],
+  );
+  assert.deepEqual(paired[1], { role: "user", blocks: [{ kind: "text", text: "另外" }] });
+  assert.equal(paired[2].blocks[0].text, "下一句");
+});
+
 test("结果不在紧接着的下一条里就不配对，调用块标成未记录结果", () => {
   const paired = pairToolCalls([
     { role: "assistant", blocks: [{ kind: "tool_use", name: "read", id: "a", input: {} }] },
