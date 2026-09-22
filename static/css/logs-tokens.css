@@ -749,6 +749,12 @@
   color: var(--accent);
 }
 
+.conv-summary-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
 .conv-list {
   display: flex;
   flex-direction: column;
@@ -907,14 +913,62 @@ details.conv-block[open] > summary::before { content: "▾"; }
   color: var(--code-text);
 }
 
-.conv-block--tool-use .conv-block-tag {
+.conv-block--tool-use .conv-block-tag,
+.conv-block--tool-call .conv-block-tag {
   background: var(--ok-soft);
   color: var(--code-text);
 }
 
-.conv-block--tool-result.is-error .conv-block-tag {
+.conv-block--tool-result.is-error .conv-block-tag,
+.conv-block--tool-call.is-error .conv-block-tag {
   background: var(--danger-soft);
   color: var(--code-text);
+}
+
+/* 系统提示词用中性底：它是背景，不是某一方的发言。 */
+.conv-block--system .conv-block-tag {
+  background: rgb(127 127 127 / 20%);
+  color: var(--code-text);
+}
+
+/* 标题行里的一行预览：收着时也能看出调的是哪个文件、哪条命令。 */
+.conv-tool-input-preview {
+  color: var(--code-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  margin-left: 8px;
+  overflow-wrap: anywhere;
+}
+
+/* 预览和「→ 结果」之间留点距离，否则 `200}→ 结果` 粘成一串。 */
+.conv-tool-input-preview + .conv-block-meta {
+  margin-left: 10px;
+}
+
+/* 展开后入参和结果之间的小标题，不然两段等宽字糊在一起分不清哪段是哪段。 */
+.conv-tool-section {
+  color: var(--code-muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  margin-top: 6px;
+}
+
+.conv-block--tool-call .conv-block-body {
+  background: var(--code-bg);
+  border-radius: var(--radius-sm);
+  margin-top: 3px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px 8px;
+}
+
+/* 结果往往是整个文件转储，封顶高一些。 */
+.conv-block--tool-call .conv-tool-result {
+  max-height: 600px;
+}
+
+.conv-block--tool-call.is-error .conv-tool-result {
+  border-left: 2px solid var(--danger);
 }
 
 .conv-block-meta {

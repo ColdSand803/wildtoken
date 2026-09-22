@@ -1,7 +1,8 @@
+import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { Block, Conversation as Parsed, Message } from "../conversation";
-import { formatByteSize } from "../conversation";
+import { formatByteSize, pairToolCalls } from "../conversation";
 
 const ROLE_LABELS: Record<string, string> = {
   system: "系统",
@@ -15,6 +16,18 @@ function formatCharCount(count: number): string {
   if (count >= 10000) return `${(count / 10000).toFixed(1)} 万字`;
   if (count >= 1000) return `${(count / 1000).toFixed(1)}k 字`;
   return `${count} 字`;
+}
+
+/** 系统提示词超过这个长度就默认收起。实测里它们是 6 万到 9 万字节。 */
+const SYSTEM_FOLD_THRESHOLD = 1500;
+
+/**
+ * 折叠控制：null 是各块按自己的默认值，true/false 是「全部展开 / 全部折叠」。
+ * version 每改一次加一，当 details 的 key 用：open 是初始属性，重新挂载才会重新应用。
+ */
+interface Fold {
+  force: boolean | null;
+  version: number;
 }
 
 /**
@@ -66,22 +79,26 @@ function formatToolInput(input: unknown): string {
 }
 
 /**
- * 折叠块。默认展开：读一段对话不该先点开十几个块。
+ * 折叠块。
  *
- * summary 留着当标签用（「思考」、「调用 Bash」），展开状态下它仍然是有用的
- * 分隔，也让需要时能手动收起来。
+ * 默认开关由调用方定：思考、工具结果这类一条会话里出现几百次的块默认收着，
+ * 否则读一段对话要滚几分钟。summary 留着当标签，收着时也能看出这是什么。
  */
 function CollapsibleBlock({
   className,
   summary,
   body,
+  open,
+  fold,
 }: {
   className: string;
   summary: ReactNode;
   body: string;
+  open: boolean;
+  fold: Fold;
 }) {
   return (
-    <details className={`conv-block ${className}`} open>
+    <details key={fold.version} className={`conv-block ${className}`} open={fold.force ?? open}>
       <summary>{summary}</summary>
       <pre className="conv-block-body">{body}</pre>
     </details>
@@ -98,11 +115,15 @@ function LabelledBlock({
   tag,
   meta,
   body,
+  open,
+  fold,
 }: {
   className: string;
   tag: ReactNode;
   meta?: string;
   body: string;
+  open: boolean;
+  fold: Fold;
 }) {
   if (body && !body.includes("\n")) {
     return (
@@ -119,19 +140,92 @@ function LabelledBlock({
   ) : (
     tag
   );
-  return <CollapsibleBlock className={className} summary={summary} body={body} />;
+  return <CollapsibleBlock className={className} summary={summary} body={body} open={open} fold={fold} />;
 }
 
 function Tag({ children }: { children: ReactNode }) {
   return <span className="conv-block-tag">{children}</span>;
 }
 
-function ConversationBlock({ block }: { block: Block }) {
+/** 入参的一行预览，收着时也能看出调的是哪个文件、哪条命令。 */
+function previewInput(input: unknown): string {
+  const text = formatToolInput(input).replace(/\s+/g, " ").trim();
+  return text.length > 96 ? `${text.slice(0, 96)}…` : text;
+}
+
+/**
+ * 工具调用和它的结果合成一块：标题行是「调了什么 → 结果多大」，展开才看入参全文和结果。
+ * 默认收着：一条 agent 会话里这样的块有上百个。
+ */
+function ToolCallBlock({
+  block,
+  fold,
+}: {
+  block: Extract<Block, { kind: "tool_call" }>;
+  fold: Fold;
+}) {
+  const input = formatToolInput(block.input);
+  const longInput = input.includes("\n") || input.length > 96;
+  const result = block.result ? tidy(block.result.text) : null;
+  const isError = Boolean(block.result?.isError);
+
+  return (
+    <details
+      key={fold.version}
+      className={isError ? "conv-block conv-block--tool-call is-error" : "conv-block conv-block--tool-call"}
+      open={fold.force ?? false}
+    >
+      <summary>
+        <Tag>调用</Tag> {block.name || "工具"}
+        {input ? <span className="conv-tool-input-preview">{previewInput(block.input)}</span> : null}
+        <span className="conv-block-meta">
+          {block.result === null
+            ? "→ 未记录结果"
+            : `→ ${isError ? "报错" : "结果"} ${formatCharCount(result?.length ?? 0)}`}
+        </span>
+      </summary>
+      {longInput ? (
+        <>
+          <div className="conv-tool-section">入参</div>
+          <pre className="conv-block-body">{input}</pre>
+        </>
+      ) : null}
+      {result !== null ? (
+        <>
+          <div className="conv-tool-section">{isError ? "报错" : "结果"}</div>
+          <pre className="conv-block-body conv-tool-result">{result || "(空)"}</pre>
+        </>
+      ) : null}
+    </details>
+  );
+}
+
+function ConversationBlock({ block, role, fold }: { block: Block; role: string; fold: Fold }) {
   switch (block.kind) {
     case "text": {
-      // 正文一律平铺，不折叠。默认展开后，预览摘要会和全文一起显示。
       const text = tidy(block.text);
       if (!text) return null;
+      // 系统提示词动辄几万字，默认收起；标题行露首行，知道是哪套提示词。
+      if (role === "system" && text.length > SYSTEM_FOLD_THRESHOLD) {
+        const firstLine = text.split("\n", 1)[0];
+        return (
+          <CollapsibleBlock
+            className="conv-block--system"
+            summary={
+              <>
+                <Tag>系统提示词</Tag> <span className="conv-block-meta">{formatCharCount(text.length)}</span>
+                <span className="conv-tool-input-preview">
+                  {firstLine.length > 96 ? `${firstLine.slice(0, 96)}…` : firstLine}
+                </span>
+              </>
+            }
+            body={text}
+            open={false}
+            fold={fold}
+          />
+        );
+      }
+      // 正文一律平铺，不折叠。
       return (
         <div className="conv-block conv-block--text">
           <pre className="conv-block-body">{text}</pre>
@@ -147,9 +241,13 @@ function ConversationBlock({ block }: { block: Block }) {
           tag={<Tag>思考</Tag>}
           meta={formatCharCount(text.length)}
           body={text}
+          open={false}
+          fold={fold}
         />
       );
     }
+    case "tool_call":
+      return <ToolCallBlock block={block} fold={fold} />;
     case "tool_use":
       return (
         <LabelledBlock
@@ -160,6 +258,8 @@ function ConversationBlock({ block }: { block: Block }) {
             </>
           }
           body={formatToolInput(block.input)}
+          open={false}
+          fold={fold}
         />
       );
     case "tool_result": {
@@ -170,6 +270,8 @@ function ConversationBlock({ block }: { block: Block }) {
           tag={<Tag>{block.isError ? "工具报错" : "工具结果"}</Tag>}
           meta={formatCharCount(text.length)}
           body={text}
+          open={false}
+          fold={fold}
         />
       );
     }
@@ -183,18 +285,20 @@ function ConversationBlock({ block }: { block: Block }) {
           className="conv-block--other"
           summary={<Tag>{block.label || "其他"}</Tag>}
           body={safeStringify(block.input)}
+          open={false}
+          fold={fold}
         />
       );
   }
 }
 
-function ConversationMessage({ message, index }: { message: Message; index: number }) {
+function ConversationMessage({ message, index, fold }: { message: Message; index: number; fold: Fold }) {
+  const role = String(message.role || "user");
   const blocks = message.blocks
-    .map((block, position) => <ConversationBlock key={position} block={block} />)
+    .map((block, position) => <ConversationBlock key={position} block={block} role={role} fold={fold} />)
     .filter(Boolean);
   if (blocks.every((node) => node === null)) return null;
 
-  const role = String(message.role || "user");
   return (
     /* 角色放在左侧窄栏而不是单独一行：26% 的消息内容只有一两行，一个专门的
        标题行等于把它们的高度翻倍。 */
@@ -229,6 +333,9 @@ export function Conversation({
   capturedLength: number | null;
   truncated: boolean;
 }) {
+  const [fold, setFold] = useState<Fold>({ force: null, version: 0 });
+  const listRef = useRef<HTMLOListElement>(null);
+
   if (!parsed) {
     return (
       <Empty
@@ -238,7 +345,7 @@ export function Conversation({
     );
   }
 
-  const messages = parsed.messages.filter((message) => message.blocks.length > 0);
+  const messages = pairToolCalls(parsed.messages).filter((message) => message.blocks.length > 0);
   if (messages.length === 0) {
     return (
       <Empty
@@ -248,10 +355,21 @@ export function Conversation({
     );
   }
 
+  // 数一下有多少块是收着的，读者才知道「全部展开」会展开什么。
+  let toolCalls = 0;
+  let thoughts = 0;
+  for (const message of messages) {
+    for (const block of message.blocks) {
+      if (block.kind === "tool_call" || block.kind === "tool_use") toolCalls += 1;
+      else if (block.kind === "thinking") thoughts += 1;
+    }
+  }
+
   const summary: string[] = [];
   if (parsed.model) summary.push(parsed.model);
-  summary.push(`${parsed.messages.length} 条消息`);
-  if (parsed.toolCount > 0) summary.push(`${parsed.toolCount} 个工具`);
+  summary.push(`${messages.length} 轮`);
+  if (toolCalls > 0) summary.push(`${toolCalls} 次工具调用`);
+  if (thoughts > 0) summary.push(`${thoughts} 段思考`);
   if (parsed.stopReason) summary.push(`结束原因 ${parsed.stopReason}`);
   if (parsed.stream) summary.push("流式重组");
 
@@ -266,14 +384,33 @@ export function Conversation({
     notice.push(`原始正文 ${original}`);
   }
 
+  function setAll(force: boolean | null) {
+    setFold((current) => ({ force, version: current.version + 1 }));
+  }
+
+  function jumpToEnd() {
+    listRef.current?.lastElementChild?.scrollIntoView({ block: "end" });
+  }
+
   return (
     <>
       <div className="conv-summary">
         <span>{summary.join(" · ")}</span>
+        <span className="conv-summary-actions">
+          <button type="button" className="conv-fold-all" onClick={() => setAll(true)}>
+            全部展开
+          </button>
+          <button type="button" className="conv-fold-all" onClick={() => setAll(false)}>
+            全部折叠
+          </button>
+          <button type="button" className="conv-fold-all" onClick={jumpToEnd}>
+            跳到末尾
+          </button>
+        </span>
       </div>
-      <ol className="conv-list">
+      <ol className="conv-list" ref={listRef}>
         {messages.map((message, index) => (
-          <ConversationMessage key={index} message={message} index={index} />
+          <ConversationMessage key={index} message={message} index={index} fold={fold} />
         ))}
       </ol>
       {incomplete ? (

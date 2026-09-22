@@ -11,6 +11,14 @@ export type Block =
   | { kind: "thinking"; text: string }
   | { kind: "tool_use"; name: string; id: string | null; input: unknown }
   | { kind: "tool_result"; id: string | null; isError: boolean; text: string }
+  /** 解析层不产这个；由 pairToolCalls 把 tool_use 和它的 tool_result 合成一块。 */
+  | {
+      kind: "tool_call";
+      name: string;
+      id: string | null;
+      input: unknown;
+      result: { isError: boolean; text: string } | null;
+    }
   | { kind: "image"; text: string }
   | { kind: "error"; text: string }
   | { kind: "other"; label: string; input: unknown };
@@ -370,6 +378,63 @@ function normalizeSystemPrompt(system: unknown, instructions: unknown): Message 
   if (!source) return null;
   const blocks = normalizeContentBlocks(source);
   return blocks.length > 0 ? { role: "system", blocks } : null;
+}
+
+/**
+ * 把工具调用和它的结果合成一块。
+ *
+ * 协议上工具调用是两条消息：助手发 tool_use，下一条用户消息里装同 id 的
+ * tool_result。agent 长会话里这种配对占了绝大多数——实测中位 234 条消息的会话，
+ * 工具调用与结果各 120 个。拆开显示时读者得自己把上下两条对上。
+ *
+ * 只合并「紧接着的下一条」里的结果：隔了别的消息就不碰，免得把不相干的
+ * 结果拉到一起。结果消息里剩下的非结果块（比如用户顺手补的一句话）保留在原位。
+ * 没有 id 的调用（老协议）不配对，原样留着。
+ */
+export function pairToolCalls(messages: Message[]): Message[] {
+  const out: Message[] = [];
+
+  for (let i = 0; i < messages.length; i += 1) {
+    const message = messages[i];
+    const calls = message.blocks.filter(
+      (block): block is Extract<Block, { kind: "tool_use" }> =>
+        block.kind === "tool_use" && block.id !== null,
+    );
+    if (calls.length === 0) {
+      out.push(message);
+      continue;
+    }
+
+    const next = messages[i + 1];
+    const results = new Map<string, { isError: boolean; text: string }>();
+    const leftover: Block[] = [];
+    if (next) {
+      const ids = new Set(calls.map((call) => call.id as string));
+      for (const block of next.blocks) {
+        if (block.kind === "tool_result" && block.id !== null && ids.has(block.id) && !results.has(block.id)) {
+          results.set(block.id, { isError: block.isError, text: block.text });
+        } else {
+          leftover.push(block);
+        }
+      }
+    }
+
+    out.push({
+      role: message.role,
+      blocks: message.blocks.map((block): Block => {
+        if (block.kind !== "tool_use") return block;
+        const result = block.id === null ? null : (results.get(block.id) ?? null);
+        return { kind: "tool_call", name: block.name, id: block.id, input: block.input, result };
+      }),
+    });
+
+    if (next && results.size > 0) {
+      i += 1;
+      if (leftover.length > 0) out.push({ role: next.role, blocks: leftover });
+    }
+  }
+
+  return out;
 }
 
 /** 返回 null 表示这不是一个能识别的会话请求。 */

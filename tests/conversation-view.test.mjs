@@ -9,6 +9,7 @@ const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf
 /* 直接 import 真实模块（Node 能擦除 TS 类型），而不是在 vm 里跑源码字符串：
    测的就是控制台真正加载的那份代码，也不再需要绕开 realm 原型差异。 */
 import {
+  pairToolCalls,
   parseConversationRequest,
   parseConversationResponse,
 } from "../web/src/conversation.ts";
@@ -240,4 +241,63 @@ test("会话块自身不设最小高度", () => {
   const withMinHeight = convRules.filter((rule) => /min-height/.test(rule));
 
   assert.deepEqual(withMinHeight, [], `会话块不该有最小高度：\n${withMinHeight.join("\n")}`);
+});
+
+/* agent 长会话里工具调用和结果各占一条消息，实测中位 234 条消息的会话有
+   120 对。合成一块后读者不用自己把上下两条对上。 */
+test("工具调用和紧接着的结果合成一块，其余原样", () => {
+  const paired = pairToolCalls([
+    { role: "system", blocks: [{ kind: "text", text: "s" }] },
+    {
+      role: "assistant",
+      blocks: [
+        { kind: "text", text: "看一下" },
+        { kind: "tool_use", name: "read", id: "a", input: { path: "x" } },
+        { kind: "tool_use", name: "grep", id: "b", input: {} },
+      ],
+    },
+    {
+      role: "user",
+      blocks: [
+        { kind: "tool_result", id: "b", isError: true, text: "no match" },
+        { kind: "tool_result", id: "a", isError: false, text: "content" },
+        { kind: "text", text: "顺手补一句" },
+      ],
+    },
+    { role: "assistant", blocks: [{ kind: "text", text: "好" }] },
+  ]);
+
+  assert.equal(paired.length, 4, "结果消息被吞掉，留下的那句话单独成一条");
+  const call = paired[1].blocks;
+  assert.deepEqual(
+    call.map((b) => b.kind),
+    ["text", "tool_call", "tool_call"],
+  );
+  assert.deepEqual(call[1].result, { isError: false, text: "content" }, "按 id 配，不按顺序");
+  assert.deepEqual(call[2].result, { isError: true, text: "no match" });
+  assert.deepEqual(paired[2], { role: "user", blocks: [{ kind: "text", text: "顺手补一句" }] });
+});
+
+test("结果不在紧接着的下一条里就不配对，调用块标成未记录结果", () => {
+  const paired = pairToolCalls([
+    { role: "assistant", blocks: [{ kind: "tool_use", name: "read", id: "a", input: {} }] },
+    { role: "assistant", blocks: [{ kind: "text", text: "中间插了一条" }] },
+    { role: "user", blocks: [{ kind: "tool_result", id: "a", isError: false, text: "late" }] },
+  ]);
+
+  assert.equal(paired.length, 3, "隔了一条的结果不动");
+  assert.equal(paired[0].blocks[0].kind, "tool_call");
+  assert.equal(paired[0].blocks[0].result, null);
+  assert.equal(paired[2].blocks[0].kind, "tool_result", "落单的结果保持原样");
+});
+
+test("没有 id 的调用不配对", () => {
+  const paired = pairToolCalls([
+    { role: "assistant", blocks: [{ kind: "tool_use", name: "old", id: null, input: {} }] },
+    { role: "user", blocks: [{ kind: "tool_result", id: null, isError: false, text: "r" }] },
+  ]);
+  assert.deepEqual(
+    paired.map((m) => m.blocks[0].kind),
+    ["tool_use", "tool_result"],
+  );
 });
