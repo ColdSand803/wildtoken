@@ -1,13 +1,6 @@
 /* ── Responsive ──────────────────────────────────────────── */
 
-/* Between these widths the meta cards are narrow thirds of the row: let the
-   timing line wrap instead of ellipsizing. */
 @media (min-width: 761px) and (max-width: 1100px) {
-  .log-detail-meta-card small {
-    overflow-wrap: anywhere;
-    white-space: normal;
-  }
-
   /* 这个宽度下工具栏还是 flex+wrap（改成 grid 的规则在 760px 那个断点里）。
      搜索框和状态下拉都是固定宽度，加上右侧四个动作按钮，在 800–1000px
      这一档放不下，动作组会被挤到第二行。
@@ -406,10 +399,6 @@
 
   .form-grid,
   .toggle-list,
-  .request-detail-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
   .model-picker,
   .model-manual-entry-body {
     grid-template-columns: minmax(0, 1fr);
@@ -479,32 +468,23 @@
     max-height: min(420px, 48dvh);
   }
 
-  .log-detail-section {
-    min-width: 0;
-  }
-
   .log-detail-head {
     padding: 12px;
   }
 
-  .log-detail-meta {
-    grid-template-columns: minmax(0, 1fr);
+  /* 卡片现在是 display:contents，padding 落在格子上才有意义。 */
+  .log-detail-meta-card > * {
+    padding: 8px 10px;
   }
 
-  .log-detail-meta-card strong,
-  .log-detail-meta-card small {
-    overflow-wrap: anywhere;
-    white-space: normal;
+  .log-detail-tab {
+    padding: 8px 10px;
   }
 
-  .log-detail-sections-head {
+  .log-detail-panel-head {
     align-items: stretch;
-  }
-
-  .log-detail-section > summary {
-    gap: 10px;
-    min-height: 52px;
-    padding: 10px 12px;
+    flex-direction: column;
+    gap: 8px;
   }
 
   .log-detail-code-frame {
@@ -513,17 +493,11 @@
 
   .log-detail-code-frame > pre {
     font-size: 11px;
-    /* Stay in the panel scroll by default; only focused mode nests a scrollbar. */
     max-height: none;
     min-height: 160px;
     padding: 10px;
     white-space: pre-wrap;
     word-break: break-word;
-  }
-
-  .request-detail-grid.is-focused .log-detail-code-frame > pre {
-    max-height: min(56dvh, 420px);
-    min-height: min(40dvh, 280px);
   }
 
   .balance-row {
@@ -634,8 +608,7 @@
     padding: 12px 10px;
   }
 
-  .log-detail-head,
-  .log-detail-meta-card {
+  .log-detail-head {
     padding: 10px;
   }
 
@@ -643,15 +616,6 @@
     grid-auto-flow: row;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto;
-  }
-
-  .log-detail-section > summary {
-    grid-template-columns: minmax(0, 1fr) 26px;
-  }
-
-  .log-detail-summary-state {
-    height: 26px;
-    width: 26px;
   }
 }
 

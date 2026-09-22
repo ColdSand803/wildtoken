@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { UnauthorizedError, getLogDetail, listLogs, listUpstreams } from "../api";
+import { UnauthorizedError, listLogs, listUpstreams } from "../api";
 import { LogDetailDialog } from "../components/LogDetailDialog";
 import {
   exactTokens,
   firstTokenTone,
   formatCount,
   formatSeconds,
+  formatTimestamp,
   toneByThreshold,
 } from "../logFormat";
 import { reasoningChain } from "../reasoningChain";
 import type { ReasoningSource } from "../reasoningChain";
-import type { ActiveRequest, RequestLog, RequestLogDetail, RequestLogPage } from "../types";
+import type { ActiveRequest, RequestLog, RequestLogPage } from "../types";
 import { useLogStream } from "../useLogStream";
 import { elapsedMs, formatElapsed, useTicker } from "../useTicker";
 
@@ -293,9 +294,8 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   /* 游标栈：每翻一页压一个起点，回退时弹出。纯 offset 在持续写入时会
      重复或漏行——新日志插在头部会把后面的整体挤后。 */
   const [cursors, setCursors] = useState<Array<{ created_at: string; id: number }>>([]);
-  const [detailId, setDetailId] = useState<number | null>(null);
-  const [detail, setDetail] = useState<RequestLogDetail | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
+  /* 详情窗直接用列表行：元信息都在行上，报文由窗内按页签拉。 */
+  const [detail, setDetail] = useState<RequestLog | null>(null);
   /* 不在最新页时流推来的新行不能直接插进去——那会和当前游标页混在一起。
      改成提示条，点一下回到最新页。 */
   const [missedNew, setMissedNew] = useState(false);
@@ -407,19 +407,8 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
     });
   }
 
-  async function openDetail(id: number) {
-    setDetailId(id);
-    setDetail(null);
-    setDetailLoading(true);
-    try {
-      setDetail(await getLogDetail(id));
-    } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
-      setDetailId(null);
-    } finally {
-      setDetailLoading(false);
-    }
+  function openDetail(log: RequestLog) {
+    setDetail(log);
   }
 
   function goLatest() {
@@ -658,15 +647,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
         </div>
       </section>
 
-      <LogDetailDialog
-        open={detailId !== null}
-        detail={detail}
-        loading={detailLoading}
-        onClose={() => {
-          setDetailId(null);
-          setDetail(null);
-        }}
-      />
+      <LogDetailDialog open={detail !== null} log={detail} onClose={() => setDetail(null)} />
     </section>
   );
 }
@@ -796,7 +777,7 @@ function LogRows({
   loading: boolean;
   hasActive: boolean;
   sensitiveHidden: boolean;
-  onOpenDetail: (id: number) => void;
+  onOpenDetail: (log: RequestLog) => void;
 }) {
   if (loading && logs.length === 0) {
     return (
@@ -819,7 +800,7 @@ function LogRows({
           key={log.id}
           log={log}
           sensitiveHidden={sensitiveHidden}
-          onOpenDetail={() => void onOpenDetail(log.id)}
+          onOpenDetail={() => onOpenDetail(log)}
         />
       ))}
     </>
@@ -961,22 +942,3 @@ function StatusBadge({ code }: { code: number | null }) {
 
 /** 扫列表要的是量级，2500000 这种长度会挤掉别的列。 */
 /* 缩写档位要到 T。只到 M 的话，25 亿 token 会显示成 2500M，还不如不缩。 */
-/**
- * 日志时间：年月日时分秒，浏览器本地时区。
- *
- * 只给时分秒的话，跨天的两条日志看上去一样；翻历史日志时根本不知道是哪天。
- * 补位才能对齐成列，toLocaleString 的 zh-CN 不补月份和日的十位。
- */
-function formatTimestamp(raw: string): string {
-  // 后端给的是 UTC 且不带时区标记，补上 Z 才不会被当成本地时间。
-  const normalized = raw.includes("T") ? raw : raw.replace(" ", "T");
-  const withZone = /[Z+]|-\d\d:\d\d$/.test(normalized) ? normalized : `${normalized}Z`;
-  const date = new Date(withZone);
-  if (Number.isNaN(date.getTime())) return raw;
-
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
-    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-  );
-}

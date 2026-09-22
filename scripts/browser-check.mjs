@@ -23,6 +23,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 
+import { checkDialogLayouts } from "./dialog-layout-checks.mjs";
+
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PORT = 3105;
 const ORIGIN = `http://127.0.0.1:${PORT}`;
@@ -760,22 +762,31 @@ async function main() {
     });
     /* 带着 URL 才能判断一次失败是不是预期的。loadingFailed 本身只给 requestId。 */
     const urlByRequest = new Map();
-    cdp.on("Network.requestWillBeSent", (event) => urlByRequest.set(event.requestId, event.request.url));
+    /* 收到过响应的请求记在这里。Chrome 对「响应头到了、响应体被丢弃」的请求
+       会补报一条 loadingFailed(ERR_ABORTED)——删除渠道后列表刷新就碰得到。
+       那种请求没有失败，不能算进噪音。 */
+    const responded = new Set();
+    cdp.on("Network.requestWillBeSent", (event) =>
+      urlByRequest.set(event.requestId, event.request),
+    );
     /* 只盯控制台自己的请求。字体走 Google Fonts（和旧版一致），第三方 CDN 抽一下
        就把这条断言打红的话，它会很快被当成噪音忽略。 */
     const ours = (url) => url.startsWith(ORIGIN);
     cdp.on("Network.responseReceived", (event) => {
+      responded.add(event.requestId);
       if (!collecting || event.response.status < 400) return;
       if (!ours(event.response.url)) return;
       noise.requests.push(`${event.response.status} ${event.response.url}`);
     });
     cdp.on("Network.loadingFailed", (event) => {
       if (!collecting) return;
-      const url = urlByRequest.get(event.requestId) ?? "";
+      const request = urlByRequest.get(event.requestId);
+      const url = request?.url ?? "";
       if (!ours(url)) return;
       // 离开日志页时 SSE 连接是被主动 abort 掉的，不算缺陷。
       if (event.canceled && url.includes("/api/admin/logs/stream")) return;
-      noise.requests.push(`失败 ${event.errorText} ${url}`);
+      if (responded.has(event.requestId)) return;
+      noise.requests.push(`失败 ${event.errorText} ${request?.method ?? "?"} ${url}`);
     });
 
     await cdp.send("Runtime.enable");
@@ -992,6 +1003,74 @@ async function main() {
       const items = await page.count("[role=menu] [role=menuitem]");
       assert(items > 0, "菜单项数量为 0");
       await page.press("Escape");
+    });
+
+    /* 克隆是「拿完整配置开一个新建表单」。id 0 的草稿一旦被当成编辑，
+       标题会写成「编辑渠道 #0」，保存就打 PUT /upstreams/0，后端 404。 */
+    await check("克隆对话框按新增打开", async () => {
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "复制渠道");
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "克隆对话框" });
+      const seen = await page.evaluate(() => {
+        const dialog = document.querySelector("dialog.upstream-dialog[open]");
+        const field = [...dialog.querySelectorAll(".field")].find(
+          (node) => node.querySelector(".field-label")?.textContent.trim() === "名称",
+        );
+        return {
+          title: dialog.querySelector(".modal-head h2").textContent.trim(),
+          name: field.querySelector("input").value,
+        };
+      });
+      // 先关窗还原，再断言——断言挂掉也不该把对话框留给后面的检查。
+      await page.click("dialog.upstream-dialog[open] .icon-close");
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "克隆对话框关闭",
+      });
+      assertEqual(seen.title, "新增渠道", `克隆对话框标题：${seen.title}`);
+      assertEqual(seen.name, "auto-weight-channel-copy", `克隆预填的名字：${seen.name}`);
+    });
+
+    await check("克隆渠道能存成新渠道", async () => {
+      await openRowMenu(page, "auto-weight");
+      await clickMenuItem(page, "复制渠道");
+      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "克隆对话框" });
+      await page.click("dialog.upstream-dialog[open] .modal-footer button[type=submit]");
+      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
+        label: "克隆对话框关闭",
+      });
+      // 表格里要真的多出这一行——关掉对话框本身证明不了保存成功。
+      const saved = await page.waitFor(
+        () => {
+          const rows = [...document.querySelectorAll("table.upstream-table tbody tr")];
+          return rows.some((row) =>
+            row.querySelector("[data-col=name]")?.textContent?.includes("-copy"),
+          );
+        },
+        { label: "克隆出的新行", timeout: 10_000 },
+      );
+      assert(saved, "克隆保存后表格里没有新渠道");
+
+      /* 清掉克隆行，后面的检查仍按种子的三条渠道来。走 UI 删除，
+         顺便把确认框这条真路径也走一遍。 */
+      await openRowMenu(page, "-copy");
+      await clickMenuItem(page, "删除");
+      await page.waitForSelector("dialog.confirm-dialog[open]", { label: "确认框" });
+      await page.evaluate(() => {
+        const button = [...document.querySelectorAll("dialog.confirm-dialog[open] button")].find(
+          (node) => node.textContent.trim() === "删除",
+        );
+        button.click();
+      });
+      await page.waitFor(() => document.querySelector("dialog.confirm-dialog[open]") === null, {
+        label: "确认框关闭",
+      });
+      await page.waitFor(
+        () =>
+          ![...document.querySelectorAll("table.upstream-table tbody tr")].some((row) =>
+            row.querySelector("[data-col=name]")?.textContent?.includes("-copy"),
+          ),
+        { label: "克隆行消失", timeout: 10_000 },
+      );
     });
 
     /* 内容型弹窗贴右满高。量几何而不是看类名——类挂上了但 CSS 没加载的话，
@@ -1298,7 +1377,7 @@ async function main() {
 
     await check("保存选择后回写到渠道", async () => {
       await page.evaluate(() => {
-        const button = [...document.querySelectorAll("dialog.model-dialog .modal-actions button")]
+        const button = [...document.querySelectorAll("dialog.model-dialog .modal-footer button")]
           .find((b) => b.textContent.trim().startsWith("保存"));
         if (!button) throw new Error("找不到保存按钮");
         button.click();
@@ -1588,7 +1667,7 @@ async function main() {
       await page.fill("dialog.model-dialog .model-manual-entry input", "draft-only");
       await page.click("dialog.model-dialog .model-manual-entry button");
       await page.evaluate(() => {
-        const button = [...document.querySelectorAll("dialog.model-dialog .modal-actions button")]
+        const button = [...document.querySelectorAll("dialog.model-dialog .modal-footer button")]
           .find((b) => b.textContent.trim().startsWith("保存"));
         button.click();
       });
@@ -1623,7 +1702,7 @@ async function main() {
       await page.waitForSelector("dialog.model-dialog[open]", { label: "选择器", timeout: 10_000 });
       const summary = await page.text("dialog.model-dialog .modal-head p");
       assert(summary?.includes(`上游返回 ${FAKE_MODELS.length}`), `摘要不对：${summary}`);
-      await page.click("dialog.model-dialog .modal-actions button.secondary");
+      await page.click("dialog.model-dialog .modal-footer button.secondary");
     });
 
     /* 旧控制台把映射显示成 `a => b`。从那边复制过来的内容必须能原样吃下；
@@ -2102,9 +2181,129 @@ async function main() {
     });
 
 
-    await check("会话模式把请求体还原成对话", async () => {
+    await check("打开详情不拉报文，点页签才拉", async () => {
+      const seen = [];
+      const collect = (event) => seen.push(event.request.url);
+      cdp.on("Network.requestWillBeSent", collect);
+      try {
+        await openProxiedLogDetail(page);
+        await page.waitForSelector("dialog.log-detail-dialog[open]", { label: "详情窗" });
+        await sleepInPage(page, 300);
+        const selected = await page.evaluate(
+          () =>
+            document.querySelector("dialog.log-detail-dialog [role=tab][aria-selected=true]")
+              ?.dataset.logTab,
+        );
+        assertEqual(selected, "meta", "默认页签");
+        assertEqual(seen.filter((url) => url.includes("/snapshots/")).length, 0, "打开时就拉了报文");
+
+        await page.click("dialog.log-detail-dialog [data-log-tab=downstream_request]");
+        await page.waitForSelector(
+          "dialog.log-detail-dialog [data-field=downstream_request] .log-detail-code-frame",
+          { label: "下游请求" },
+        );
+        const fetched = seen.filter((url) => url.includes("/snapshots/"));
+        assertEqual(fetched.length, 1, `报文请求数：${fetched}`);
+        assert(fetched[0].endsWith("/snapshots/downstream_request"), `拉错了报文：${fetched[0]}`);
+      } finally {
+        cdp.off("Network.requestWillBeSent", collect);
+      }
+    });
+
+    /* 元信息页签是「左 key 右 value」的一列行。类名挂没挂上证明不了排版，
+       所以量几何：每行 key 都在 value 左边且不重叠，且所有行左右边缘各自对齐。 */
+    await check("元信息是两列表：左表头右内容", async () => {
       await openProxiedLogDetail(page);
       await page.waitForSelector("dialog.log-detail-dialog[open]", { label: "详情窗" });
+      // 上一条检查把页签留在了报文上，元信息面板不在 DOM 里，先显式切回来。
+      await page.click("dialog.log-detail-dialog [data-log-tab=meta]");
+      await page.waitForSelector(".log-detail-tabpanel--meta .log-detail-meta", { label: "元信息面板" });
+      /* 卡片是 display:contents，自身没有盒子，所以量两个格子。 */
+      const rows = await page.evaluate(() => {
+        const panel = document.querySelector(".log-detail-tabpanel--meta .log-detail-meta");
+        if (!panel) return null;
+        return [...panel.querySelectorAll(".log-detail-meta-card")].map((row) => {
+          const labelEl = row.querySelector(".log-detail-meta-label");
+          const valueEl = row.querySelector("strong");
+          const label = labelEl.getBoundingClientRect();
+          const value = valueEl.getBoundingClientRect();
+          return {
+            text: row.textContent,
+            labelLeft: Math.round(label.left),
+            labelRight: Math.round(label.right),
+            valueLeft: Math.round(value.left),
+            valueTop: Math.round(value.top),
+            valueBottom: Math.round(value.bottom),
+            borderTop: getComputedStyle(valueEl).borderTopWidth,
+            /* 竖线与表头底色都在 label 格子上。 */
+            borderRight: getComputedStyle(labelEl).borderRightWidth,
+            labelBg: getComputedStyle(labelEl).backgroundColor,
+            valueBg: getComputedStyle(valueEl).backgroundColor,
+          };
+        });
+      });
+      // 先把状态还原成后续检查预期的样子，断言失败也不至于连锁。
+      await page.click("dialog.log-detail-dialog [data-log-tab=downstream_request]");
+      await page.waitForSelector(
+        "dialog.log-detail-dialog [data-field=downstream_request] .log-detail-code-frame",
+        { label: "下游请求" },
+      );
+      assert(rows !== null, "没有元信息面板");
+      assert(rows.length >= 5, `元信息行数：${rows.length}`);
+      for (const row of rows) {
+        assert(row.labelRight <= row.valueLeft, `key 和 value 重叠：${row.text}`);
+        // 两列连成一块：格子紧邻（中间只有竖线），表头列有底色。
+        assert(row.valueLeft - row.labelRight <= 1, `两列之间有空隙：${row.text}`);
+        assert(parseFloat(row.borderRight) > 0, `没有竖线：${row.text}`);
+        assert(row.labelBg !== row.valueBg, `表头列没有自己的底色：${row.text}`);
+      }
+      // 表头一列、内容一列：两列各自左边缘对齐。
+        assertEqual(new Set(rows.map((row) => row.labelLeft)).size, 1, "key 列左边缘没对齐");
+        assertEqual(new Set(rows.map((row) => row.valueLeft)).size, 1, "value 列左边缘没对齐");
+      for (let i = 1; i < rows.length; i += 1) {
+        assert(rows[i].valueTop >= rows[i - 1].valueBottom, `第 ${i} 行压住了上一行`);
+        assert(parseFloat(rows[i].borderTop) > 0, `第 ${i} 行没有分隔线`);
+      }
+    });
+
+    /* 页签要像「贴在面板上的盖子」，不是一排文字加下划线。量几何：选中项有
+       上/左边框、圆角只在上方、底色与面板一致，且底边盖住接缝。 */
+    await check("选中的页签和面板连成一块", async () => {
+      const seen = await page.evaluate(() => {
+        const tab = document.querySelector(
+          "dialog.log-detail-dialog [role=tab][aria-selected=true]",
+        );
+        const panel = document.querySelector(".log-detail-tabpanel");
+        if (!tab || !panel) return null;
+        const style = getComputedStyle(tab);
+        const panelStyle = getComputedStyle(panel);
+        const tabBox = tab.getBoundingClientRect();
+        const panelBox = panel.getBoundingClientRect();
+        return {
+          topBorder: style.borderTopWidth,
+          leftBorder: style.borderLeftWidth,
+          bottomBorder: style.borderBottomWidth,
+          topRadius: style.borderTopLeftRadius,
+          bottomRadius: style.borderBottomLeftRadius,
+          tabBg: style.backgroundColor,
+          panelBg: panelStyle.backgroundColor,
+          /* 页签底边与面板顶边的距离：贴住时应为 0。 */
+          gap: Math.round(panelBox.top - tabBox.bottom),
+          leftAligned: Math.round(panelBox.left - tabBox.left),
+        };
+      });
+      assert(seen !== null, "找不到选中的页签或面板");
+      assert(parseFloat(seen.topBorder) > 0, "选中页签没有上边框");
+      assert(parseFloat(seen.leftBorder) > 0, "选中页签没有左边框");
+      assertEqual(seen.bottomBorder, "0px", "选中页签不该有下边框");
+      assert(parseFloat(seen.topRadius) > 0, "选中页签上方没有圆角");
+      assertEqual(seen.bottomRadius, "0px", "选中页签下方不该有圆角");
+      assertEqual(seen.tabBg, seen.panelBg, "选中页签底色和面板不一致");
+      assert(seen.gap <= 0, `页签和面板之间有缝：${seen.gap}px`);
+      assertEqual(seen.leftAligned, 0, "页签左边缘和面板没对齐");
+    });
+
+    await check("会话模式把请求体还原成对话", async () => {
       // 模式是落盘的，上一次跑可能留在原始，先摆回会话。
       await page.click("dialog.log-detail-dialog [data-log-view-mode=conversation]");
       const roles = await page.waitFor(
@@ -2121,16 +2320,19 @@ async function main() {
     });
 
     await check("响应侧抽出助手回复", async () => {
-      const text = await page.evaluate(
+      await page.click("dialog.log-detail-dialog [data-log-tab=downstream_response]");
+      const text = await page.waitFor(
         () =>
           document.querySelector(
             "dialog.log-detail-dialog [data-field=downstream_response] .conv-block--text .conv-block-body",
-          )?.textContent ?? null,
+          )?.textContent ?? false,
+        { label: "助手回复", timeout: 10_000 },
       );
       assertEqual(text, FAKE_REPLY, "助手回复");
     });
 
     await check("切到原始模式看报文", async () => {
+      await page.click("dialog.log-detail-dialog [data-log-tab=downstream_request]");
       await page.click("dialog.log-detail-dialog [data-log-view-mode=raw]");
       const first = await page.waitFor(
         () => {
@@ -2148,38 +2350,40 @@ async function main() {
       assertEqual(await page.count("dialog.log-detail-dialog .conv-list"), 0, "残留的会话列表");
     });
 
-    await check("放大查看只突出一节", async () => {
-      await page.evaluate(() => {
-        document
-          .querySelector("dialog.log-detail-dialog [data-field=upstream_request] .log-detail-expand")
-          .click();
-      });
-      const state = await page.evaluate(() => ({
-        grid: document.querySelector("dialog.log-detail-dialog .request-detail-grid")?.className ?? "",
-        focused: [...document.querySelectorAll("dialog.log-detail-dialog .log-detail-section")]
-          .filter((node) => node.classList.contains("is-focused"))
-          .map((node) => node.dataset.field),
-        label: document.querySelector(
-          "dialog.log-detail-dialog [data-field=upstream_request] .log-detail-expand",
-        )?.textContent,
-      }));
-      assert(state.grid.includes("is-focused"), `格子没进放大态：${state.grid}`);
-      assertEqual(state.focused.join(","), "upstream_request", "被放大的节");
-      assertEqual(state.label, "退出放大", "按钮文案");
+    await check("拉过的报文切回来不再请求，且一次只渲染一个面板", async () => {
+      const seen = [];
+      const collect = (event) => seen.push(event.request.url);
+      cdp.on("Network.requestWillBeSent", collect);
+      try {
+        await page.click("dialog.log-detail-dialog [data-log-tab=downstream_response]");
+        await page.waitForSelector(
+          "dialog.log-detail-dialog [data-field=downstream_response] .log-detail-code-frame",
+          { label: "下游响应" },
+        );
+        await sleepInPage(page, 200);
+        assertEqual(seen.filter((url) => url.includes("/snapshots/")).length, 0, "重复请求");
+        assertEqual(await page.count("dialog.log-detail-dialog [role=tabpanel]"), 1, "同时渲染的面板数");
+      } finally {
+        cdp.off("Network.requestWillBeSent", collect);
+      }
     });
 
-    await check("关窗后放大态不残留", async () => {
+    await check("重开详情回到元信息页签", async () => {
       await page.click("dialog.log-detail-dialog .icon-close");
       await page.waitFor(() => document.querySelector("dialog.log-detail-dialog[open]") === null, {
         label: "详情窗关闭",
       });
       await openProxiedLogDetail(page);
       await page.waitForSelector("dialog.log-detail-dialog[open]", { label: "详情窗" });
-      assertEqual(
-        await page.count("dialog.log-detail-dialog .log-detail-section.is-focused"),
-        0,
-        "重开后残留的放大节",
+      const selected = await page.evaluate(
+        () =>
+          document.querySelector("dialog.log-detail-dialog [role=tab][aria-selected=true]")
+            ?.dataset.logTab,
       );
+      assertEqual(selected, "meta", "重开后的页签");
+      assertEqual(await page.count("dialog.log-detail-dialog [data-field]"), 0, "残留的报文面板");
+      // 模式落盘了，摆回会话，别把后面的检查留在原始模式。
+      await page.click("dialog.log-detail-dialog [data-log-tab=downstream_request]");
       await page.click("dialog.log-detail-dialog [data-log-view-mode=conversation]");
       await page.click("dialog.log-detail-dialog .icon-close");
     });
@@ -3216,6 +3420,9 @@ async function main() {
       assertEqual(detailStillOpen, true, "详情窗被连带关掉了");
       await page.click("dialog.log-detail-dialog .icon-close");
     });
+
+    console.log("\n抽屉布局");
+    await checkDialogLayouts({ page, check, gotoView, openRowMenu, clickMenuItem });
 
     // ── 退出 ────────────────────────────────────────────────────────────────
     console.log("\n退出");
