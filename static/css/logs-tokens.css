@@ -468,7 +468,10 @@
   display: grid;
   gap: 12px;
   min-width: 0;
-  overflow: hidden;
+  /* clip 而不是 hidden：hidden 会把面板变成滚动容器，网格里的自动最小高度随之
+     从「内容高」变成 0，面板被压到刚好填满剩余空间，长报文被自己裁掉，外层
+     滚动区以为没什么可滚。clip 只裁圆角，不影响尺寸，滚动落到外层 body。 */
+  overflow: clip;
   /* 内容要离页签条有距离：没这层内边距，工具条会直接贴在页签底下。 */
   padding: 16px;
 }
