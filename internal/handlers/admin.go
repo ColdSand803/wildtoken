@@ -30,7 +30,7 @@ import (
 //
 // The release workflow parses this line to check that a tag matches, so its
 // shape must stay `const Version = "..."`.
-const Version = "0.2.1"
+const Version = "0.2.2"
 
 // maxLogListOffset caps how deep the offset-paged log list may reach.
 const maxLogListOffset int32 = 100_000
@@ -356,8 +356,10 @@ func AdminSystemInfo(state *appstate.State) http.HandlerFunc {
 
 		settings := state.Runtime.Get()
 		apperr.WriteJSON(w, http.StatusOK, models.SystemInfoOut{
-			Service:                       "WildToken",
-			Version:                       Version,
+			Service: "WildToken",
+			Version: Version,
+			// The startup value, not the effective one: the console shows this as
+			// what "inherit" means next to the editable runtime override.
 			DefaultUpstreamTimeoutSeconds: state.Settings.Upstream.DefaultTimeoutSeconds,
 			UptimeSeconds:                 uint64(time.Since(state.StartedAt).Seconds()),
 			CurrentServerTime:             time.Now().Format(time.RFC3339),
@@ -641,22 +643,70 @@ func AdminListLogs(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		// In-flight requests belong to the newest page only, and are left for the
+		// console to filter: they carry the same fields the filters read, and the
+		// stream already hands them over unfiltered.
+		var active []models.ActiveRequestOut
+		var activeTotal int
+		if cursor == nil && offset == 0 {
+			snapshot := state.ActiveRequests.Snapshot()
+			active, activeTotal = snapshot.Requests, snapshot.Total
+		}
+
 		apperr.WriteJSON(w, http.StatusOK, models.RequestLogPage{
-			Items:      items,
-			HasMore:    hasMore,
-			RecentRPM:  recentRate.RequestCount,
-			RecentTPM:  recentRate.TotalTokens,
-			NextCursor: nextCursor,
+			Items:       items,
+			HasMore:     hasMore,
+			Active:      active,
+			ActiveTotal: activeTotal,
+			RecentRPM:   recentRate.RequestCount,
+			RecentTPM:   recentRate.TotalTokens,
+			NextCursor:  nextCursor,
 		})
 	}
 }
 
+// activePollInterval is how often the stream looks for a change to the
+// in-flight set.
+//
+// Nothing is sent when the version has not moved, so an idle gateway costs one
+// comparison a second. The requests are not re-sent to advance their elapsed
+// time either: the console counts that up from what it was given.
+const activePollInterval = time.Second
+
+// writeActiveRequests emits the in-flight set and reports the version it sent.
+func writeActiveRequests(w http.ResponseWriter, flusher http.Flusher,
+	state *appstate.State) uint64 {
+	snapshot := state.ActiveRequests.Snapshot()
+	requests := snapshot.Requests
+	if requests == nil {
+		requests = []models.ActiveRequestOut{}
+	}
+	// total travels with the list because the list is capped: concurrency is
+	// read from the count, not from how many rows fit.
+	encoded, err := json.Marshal(map[string]any{
+		"requests": requests,
+		"total":    snapshot.Total,
+	})
+	if err != nil {
+		// The set is built from plain values, so this cannot fail without a
+		// programming error. An empty set is the safe reading of one.
+		encoded = []byte(`{"requests":[],"total":0}`)
+	}
+	fmt.Fprintf(w, "event: active\ndata: %s\n\n", encoded)
+	flusher.Flush()
+	return snapshot.Version
+}
+
 // AdminStreamLogs streams lightweight list-row events for request logs that
-// have committed to SQLite.
+// have committed to SQLite, plus the set of requests still in flight.
 //
 // The endpoint intentionally does not replay historical rows. A disconnected or
 // lagged client reloads the normal paginated endpoint, which remains the source
 // of truth and keeps cursor pagination stable.
+//
+// In-flight requests are sent as a whole set rather than as per-request events.
+// The set is small and short-lived, and one snapshot cannot leave a console
+// holding a row for a request that ended while it was not listening.
 func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		auth, ok := middleware.AdminAuthFrom(r.Context())
@@ -688,6 +738,12 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
 
+		// The console starts with an empty list, so the opening snapshot is sent
+		// unconditionally; after that only a changed version is worth bytes.
+		sentActiveVersion := writeActiveRequests(w, flusher, state)
+		activePoll := time.NewTicker(activePollInterval)
+		defer activePoll.Stop()
+
 		// A rotation invalidates this stream, so a revoked operator stops
 		// receiving live logs without waiting for their connection to drop.
 		authCheck := time.NewTicker(15 * time.Second)
@@ -715,6 +771,22 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 				fmt.Fprintf(w, "event: log\nid: %d\ndata: %s\n\n", event.Log.ID, encoded)
 				flusher.Flush()
 
+				// A committed row is the one moment the two views are certain to
+				// disagree: the request left the in-flight set before its log was
+				// written, so without this the console shows it twice until the
+				// next poll.
+				if state.ActiveRequests.Version() != sentActiveVersion {
+					sentActiveVersion = writeActiveRequests(w, flusher, state)
+				}
+
+			case <-activePoll.C:
+				if state.Credentials.Version() != auth.CredentialVersion {
+					return
+				}
+				if state.ActiveRequests.Version() != sentActiveVersion {
+					sentActiveVersion = writeActiveRequests(w, flusher, state)
+				}
+
 			case <-authCheck.C:
 				if state.Credentials.Version() != auth.CredentialVersion {
 					return
@@ -729,6 +801,26 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 }
 
 const dashboardDateLayout = "2006-01-02"
+
+// dashboardRangeLayouts accepts a bare date or a wall-clock instant. The date
+// form is kept because that is what the stored console preference holds.
+var dashboardRangeLayouts = []string{
+	"2006-01-02T15:04:05",
+	"2006-01-02T15:04",
+	dashboardDateLayout,
+}
+
+// parseDashboardBound reports whether the value named a whole day, which
+// decides if the upper bound is rounded up to the following midnight.
+func parseDashboardBound(value string) (time.Time, bool, error) {
+	for _, layout := range dashboardRangeLayouts {
+		parsed, err := time.ParseInLocation(layout, value, time.Local)
+		if err == nil {
+			return parsed, layout == dashboardDateLayout, nil
+		}
+	}
+	return time.Time{}, false, errors.New("unrecognised timestamp")
+}
 
 type dashboardRangeSelection struct {
 	Value   string
@@ -772,23 +864,31 @@ func parseDashboardRange(value, startValue, endValue, fallback string) (dashboar
 			return dashboardRangeSelection{}, apperr.BadRequest(
 				"start_date and end_date are required when range is custom")
 		}
-		startDate, startErr := time.ParseInLocation(dashboardDateLayout, startValue, time.Local)
-		endDate, endErr := time.ParseInLocation(dashboardDateLayout, endValue, time.Local)
+		// Only the upper bound cares whether it named a whole day; a start is
+		// taken at its own midnight either way.
+		startDate, _, startErr := parseDashboardBound(startValue)
+		endDate, endIsWholeDay, endErr := parseDashboardBound(endValue)
 		if startErr != nil || endErr != nil {
 			return dashboardRangeSelection{}, apperr.BadRequest(
-				"start_date and end_date must use YYYY-MM-DD")
+				"start_date and end_date must use YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS]")
 		}
-		if startDate.After(endDate) {
+		// A bare end date means the whole of that day, so the exclusive upper
+		// bound is the following midnight. A precise instant is used as given.
+		endBound := endDate
+		if endIsWholeDay {
+			endBound = endDate.AddDate(0, 0, 1)
+		}
+		if !startDate.Before(endBound) {
 			return dashboardRangeSelection{}, apperr.BadRequest(
-				"start_date must not be after end_date")
+				"start_date must be before end_date")
 		}
-		if endDate.After(startDate.AddDate(0, 0, 365)) {
+		if endBound.After(startDate.AddDate(0, 0, 366)) {
 			return dashboardRangeSelection{}, apperr.BadRequest(
 				"custom date range must not exceed 366 days")
 		}
 		selection.Label = startValue + " 至 " + endValue
 		selection.StartAt = startDate.UTC().Format(models.TimestampFormat)
-		selection.EndAt = endDate.AddDate(0, 0, 1).UTC().Format(models.TimestampFormat)
+		selection.EndAt = endBound.UTC().Format(models.TimestampFormat)
 	}
 	return selection, nil
 }
@@ -937,6 +1037,36 @@ func AdminGetLogDetail(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		apperr.WriteJSON(w, http.StatusOK, detail)
+	}
+}
+
+// AdminGetLogSnapshot returns one captured payload of a log, or null when
+// that payload was never stored.
+func AdminGetLogSnapshot(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathID(r)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		field, ok := db.ParseLogSnapshotField(chi.URLParam(r, "field"))
+		if !ok {
+			apperr.WriteError(w, apperr.BadRequest("unknown snapshot field"))
+			return
+		}
+		snapshot, found, err := db.GetLogSnapshot(r.Context(), state.DB, id, field)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		if !found {
+			apperr.WriteError(w, apperr.NotFound("request log not found"))
+			return
+		}
+		if snapshot == nil {
+			snapshot = json.RawMessage("null")
+		}
+		apperr.WriteJSON(w, http.StatusOK, snapshot)
 	}
 }
 

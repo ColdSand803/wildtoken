@@ -1,9 +1,13 @@
+import { h, loadTS, renderStatic, setupDOM } from "./react-harness.mjs";
+import { after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-const adminHtml = read("static/admin.html");
+const ui = setupDOM(); after(() => ui.close());
+const { Topbar } = loadTS("web/src/components/Topbar.tsx");
+const adminHtml = renderStatic(h(Topbar, { view: "dashboard", onNavigate() {} }));
 const components = read("static/css/components.css");
 const packs = {
   "co1dsand-light": read("themes/co1dsand-light/theme.css"),
@@ -51,7 +55,7 @@ test("mask 里是五条独立的笔画中心线，带圆头描边", () => {
   assert.match(group[1], /stroke-linejoin="round"/);
 
   /* 中心线到不了约 1.5% 的墨（剪掉的岔枝、钝笔尖外缘），靠这块补齐。 */
-  assert.match(adminHtml, /<rect class="co1dsand-logo-settle" width="100" height="100" fill="#fff" \/>/);
+  assert.match(adminHtml, /<rect class="co1dsand-logo-settle" width="100" height="100" fill="#fff"(?: \/>|><\/rect>)/);
 });
 
 /* base.css 的 `.brand-mark svg { display: block }` 会让两个 SVG 一起显示，

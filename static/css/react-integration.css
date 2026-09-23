@@ -1,0 +1,49 @@
+/* React adapters for the dev controls; keep theme-specific colors in the packs. */
+.probe-controls, .config-scope-list, .channel-diagnostic-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.log-advanced-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
+.log-advanced-filters label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+.log-advanced-filters input[type=number] { width: 120px; }
+.log-advanced-filters input[type=datetime-local] { min-width: 180px; }
+.log-advanced-filters button { height: var(--control-h); }
+.log-advanced-filters .field-hint { margin-bottom: 6px; }
+.channel-diagnostics { margin: 12px 0 16px; font-size: 13px; }
+.channel-diagnostics p { margin: 6px 0; }
+.channel-diagnostic-badges { font-size: 11px; margin-bottom: 4px; }
+.channel-card.is-selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+.upstream-select-visible input, .probe-controls input { width: auto; }
+.upstream-select-visible { display: flex; gap: 5px; align-items: center; font-size: 12px; }
+.log-timing-bar { display: flex; height: 5px; width: 100%; border-radius: var(--radius-full); }
+.log-timing-segment { min-height: 5px; }
+.timing-prep { background: var(--muted); }
+.timing-headers { background: var(--accent); }
+.timing-first { background: var(--warning, #c68d33); }
+.timing-body { background: var(--success, #399e82); }
+.log-stage-timing { padding: 8px 0; min-width: 100px; }
+.log-stage-timing.is-compact { padding: 4px 0; }
+.log-timing-chips { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; margin-bottom: 8px; }
+.log-failure-stage { color: var(--muted); font-size: 11px; }
+.log-detail-retry-chain { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.retry-chain-items { display: flex; flex-wrap: wrap; gap: 8px; }
+.retry-chain-step.is-current { box-shadow: inset 0 0 0 1px var(--accent); }
+.config-migration-card fieldset, .disaster-recovery-card fieldset { border: 1px solid var(--line); padding: 16px; margin: 16px 0; border-radius: var(--radius-md); min-width: 0; }
+.config-migration-card input[type=checkbox], .disaster-recovery-card input[type=checkbox] { width: auto; }
+.config-import-report, .restore-report { overflow-wrap: anywhere; }
+.restore-pending { border: 1px solid var(--danger); padding: 12px; border-radius: var(--radius-md); }
+.backup-info-grid { display: flex; flex-wrap: wrap; gap: 16px; }
+.backup-info-grid dd { margin: 4px 0; }
+.quota-rate-note { display: block; }
+.dashboard-refresh-choice { display: flex; justify-content: flex-end; gap: 8px; align-items: center; margin: 8px 0; font-size: 12px; }
+.dashboard-refresh-choice select { width: auto; }
+.dashboard-kpi[role=button], .dashboard-rank-row[role=button], .dashboard-error-row { cursor: pointer; }
+.dashboard-kpi[role=button]:focus-visible, .dashboard-rank-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kpi-bg-spark { position: absolute; inset: 35% 0 0; pointer-events: none; overflow: hidden; }
+.kpi-bg-spark .dashboard-chart-empty { display: none; }
+.kpi-bg-spark svg { width: 100%; height: 100%; }
+.dashboard-kpi-value, .dashboard-kpi-label { position: relative; }
+.kpi-trend { font-size: 10px; color: var(--muted); }
+.ops-error-timeline { height: 14px; }
+.wt-hovercard { max-width: min(300px, 100%); white-space: normal; pointer-events: none; z-index: 20; }
+@media (max-width: 640px) { .log-advanced-filters > label { flex: 1 1 140px; } .log-advanced-filters input { width: 100%; min-width: 0; } .config-migration-card .settings-fields-grid, .disaster-recovery-card .settings-fields-grid { grid-template-columns: minmax(0, 1fr); } .config-migration-card .span-2, .disaster-recovery-card .span-2 { grid-column: auto; } }
+@media (prefers-reduced-motion: reduce) { .log-stage-timing *, .kpi-bg-spark * { animation: none !important; transition: none !important; } }
+
+.metrics-endpoint-card code { overflow-wrap: anywhere; }

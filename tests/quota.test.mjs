@@ -1,63 +1,13 @@
+// 令牌限额的展示规则。纯函数直接 import 真实模块跑，剩下的锁在源码契约上。
 import assert from "node:assert/strict";
-import fs from "node:fs";
-import path from "node:path";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
 
-const root = path.resolve(import.meta.dirname, "..");
-const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
+import { formatCount, quotaTone } from "../web/src/tokenFormat.ts";
 
-/** 取出单个顶层函数体，好在不加载整个模块的情况下单独跑它。 */
-function extractFunction(source, name) {
-  const start = source.indexOf(`function ${name}(`);
-  assert.notEqual(start, -1, `${name} 不在源码里`);
-  let depth = 0;
-  for (let i = source.indexOf("{", start); i < source.length; i += 1) {
-    if (source[i] === "{") depth += 1;
-    if (source[i] === "}") {
-      depth -= 1;
-      if (depth === 0) return source.slice(start, i + 1);
-    }
-  }
-  throw new Error(`${name} 的函数体没有闭合`);
-}
-
-function quotaContext(source) {
-  const context = vm.createContext({
-    escapeHtml: (value) => String(value),
-    Number,
-    Math,
-    String,
-    isNaN,
-  });
-  vm.runInContext(extractFunction(source, "formatTokenCount"), context);
-  vm.runInContext(
-    source.slice(source.indexOf("const QUOTA_UNITS"), source.indexOf("function formatTokenCount")),
-    context,
-  );
-  vm.runInContext(extractFunction(source, "formatTokenCount"), context);
-  vm.runInContext(extractFunction(source, "quotaCellMarkup"), context);
-  return context;
-}
-
-test("限额字段名与服务端一致", () => {
-  const source = read("static/js/tokens.js");
-  // 服务端读 limit_expression；名字不一致会被静默忽略，限额就设不上。
-  assert.match(source, /limit_expression: tokenLimitInput\?\.value\.trim\(\) \|\| ""/);
-});
-
-test("令牌表的限额列在表头与行渲染里齐全", () => {
-  const markup = read("static/admin.html");
-  const table = markup.slice(
-    markup.indexOf('<table class="admin-table token-table">'),
-    markup.indexOf('<tbody id="token-rows">'),
-  );
-  assert.match(table, /<th>限额<\/th>/);
-  assert.match(read("static/js/tokens.js"), /class="col-quota">\$\{quotaCellMarkup\(t\)\}/);
-});
+const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 
 test("token 数量缩写成 K/M/B，不在列里堆长数字", () => {
-  const context = quotaContext(read("static/js/tokens.js"));
   for (const [count, want] of [
     [0, "0"],
     [999, "999"],
@@ -68,80 +18,55 @@ test("token 数量缩写成 K/M/B，不在列里堆长数字", () => {
     [100_000_000, "100M"],
     [1_000_000_000, "1B"],
   ]) {
-    const got = vm.runInContext(`formatTokenCount(${count})`, context);
-    assert.equal(got, want, `formatTokenCount(${count})`);
+    assert.equal(formatCount(count), want, `formatCount(${count})`);
   }
 });
 
-test("不限额的令牌只显示已用量，不编造剩余值", () => {
-  const context = quotaContext(read("static/js/tokens.js"));
-  const html = vm.runInContext(
-    'quotaCellMarkup({ quota: { used_tokens: 5000, limit_tokens: null } })',
-    context,
-  );
-  assert.match(html, /5K/);
-  assert.match(html, /不限/);
-  // 没有限额就不该出现第三段数字。
-  assert.doesNotMatch(html, /quota-limit/);
+test("用尽和接近用尽分别标红标黄", () => {
+  assert.equal(quotaTone({ exhausted: false, used: 100, limit: 1000 }), "");
+  assert.equal(quotaTone({ exhausted: false, used: 800, limit: 1000 }), "warn");
+  assert.equal(quotaTone({ exhausted: true, used: 1000, limit: 1000 }), "danger");
 });
 
-test("用尽和接近用尽分别标红标黄", () => {
-  const context = quotaContext(read("static/js/tokens.js"));
+/* exhausted 以服务端为准。自己比大小的话，两边算法一旦漂了，界面会说还有余量
+   而请求已经被拒。 */
+test("服务端说用尽就是用尽，不用比例复核", () => {
+  assert.equal(quotaTone({ exhausted: true, used: 0, limit: 1000 }), "danger");
+});
 
-  const healthy = vm.runInContext(
-    'quotaCellMarkup({ quota: { used_tokens: 100, limit_tokens: 1000, remaining_tokens: 900, exhausted: false } })',
-    context,
-  );
-  assert.doesNotMatch(healthy, /danger|warn/);
+test("没有限额时不编造色调", () => {
+  assert.equal(quotaTone({ exhausted: false, used: 5000, limit: 0 }), "");
+});
 
-  const near = vm.runInContext(
-    'quotaCellMarkup({ quota: { used_tokens: 850, limit_tokens: 1000, remaining_tokens: 150, exhausted: false } })',
-    context,
+test("不限额的令牌只显示已用量，不编造剩余值", () => {
+  const source = read("web/src/pages/TokensPage.tsx");
+  const branch = source.slice(
+    source.indexOf("quota.limit_tokens === null"),
+    source.indexOf("const limit = Number"),
   );
-  assert.match(near, /warn/);
-
-  const exhausted = vm.runInContext(
-    'quotaCellMarkup({ quota: { used_tokens: 1000, limit_tokens: 1000, remaining_tokens: 0, exhausted: true } })',
-    context,
-  );
-  assert.match(exhausted, /danger/);
+  assert.match(branch, /不限/);
+  // 没有限额就不该出现第三段数字。
+  assert.doesNotMatch(branch, /quota-limit/);
 });
 
 test("限额单元格展示服务端给的表达式，与输入框回填一致", () => {
-  const context = quotaContext(read("static/js/tokens.js"));
-  const html = vm.runInContext(
-    'quotaCellMarkup({ quota: { used_tokens: 0, limit_tokens: 100000000, remaining_tokens: 100000000, limit_expression: "100M" } })',
-    context,
-  );
-  // 列里显示 100M，编辑时输入框回填的也是 100M，不动表单再保存不会改变限额。
-  assert.match(html, /100M/);
-  assert.match(read("static/js/tokens.js"), /token\.quota\?\.limit_expression \|\| ""/);
-});
-
-test("新建令牌会清掉上一次的限额残留", () => {
-  const source = read("static/js/tokens.js");
-  assert.match(source, /tokenLimitInput\.value = "";/);
+  // 列里显示什么，编辑时输入框就回填什么，不动表单再保存不会改变限额。
+  assert.match(read("web/src/pages/TokensPage.tsx"), /quota\.limit_expression/);
+  assert.match(read("web/src/components/TokenDialog.tsx"), /limit_expression/);
 });
 
 test("重置用量按钮只出现在设了限额的令牌上", () => {
-  const source = read("static/js/tokens.js");
+  const source = read("web/src/pages/TokensPage.tsx");
   // 不限额的令牌重置计数没有意义，按钮不该出现。
-  assert.match(source, /t\.quota\?\.limit_tokens\s*\n?\s*\?\s*`<button[^`]*data-token-action="reset-usage"/);
-  // 有限额时才渲染，条件为假时渲染空串。
-  assert.match(source, /:\s*""/);
+  assert.match(source, /token\.quota\.limit_tokens[\s\S]{0,200}?reset/i);
 });
 
 test("重置用量走服务端的重置接口，且要二次确认", () => {
-  const source = read("static/js/tokens.js");
-  assert.match(source, /\/api\/admin\/tokens\/\$\{id\}\/usage\/reset/);
-  assert.match(source, /method: "POST"/);
+  assert.match(read("web/src/api.ts"), /\/usage\/reset/);
   // 清零后已用尽的令牌会立刻恢复可用，值得停一下问一次。
-  const branch = source.slice(
-    source.indexOf('=== "reset-usage"'),
-    source.indexOf('=== "enable"'),
-  );
-  assert.match(branch, /requestConfirm/);
-  assert.match(branch, /title: "重置用量"/);
+  const source = read("web/src/pages/TokensPage.tsx");
+  const branch = source.slice(source.indexOf("resetTokenUsage"));
+  assert.match(branch.slice(0, 600), /confirm/i);
 });
 
 test("重置接口在路由里注册过", () => {

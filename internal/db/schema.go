@@ -108,6 +108,12 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// so a row created by an older schema reads as "forward unchanged"
 		// rather than as a JSON parse failure.
 		{"effort_mappings", "TEXT NOT NULL DEFAULT '{}'"},
+		// A channel taken out of routing without being deleted. Archiving sets
+		// enabled = 0 and stashes what it was here, so unarchiving restores that
+		// instead of assuming the channel used to route. NULL means "not
+		// archived", which is also what a fresh column reads as.
+		{"archived", "INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))"},
+		{"archived_prev_enabled", "INTEGER"},
 	} {
 		if err := ensureColumn(ctx, db, "upstreams", column.name, column.definition); err != nil {
 			return err
@@ -146,6 +152,9 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"cost_micros", "INTEGER"},
 		{"cost_currency", "TEXT"},
 		{"pricing_rule_id", "INTEGER"},
+		// Client address. NULL on rows written before this column existed, which
+		// the console renders as a dash rather than inventing an address.
+		{"client_ip", "TEXT"},
 	} {
 		if err := ensureColumn(ctx, db, "request_logs", column.name, column.definition); err != nil {
 			return err
@@ -215,6 +224,8 @@ func Init(ctx context.Context, db *sql.DB) error {
 		{"proxy_url", "TEXT NOT NULL DEFAULT ''"},
 		{"load_balance_strategy", "TEXT NOT NULL DEFAULT 'weighted' " +
 			"CHECK (load_balance_strategy IN ('weighted', 'least_latency'))"},
+		// 0 means "inherit the startup config"; existing rows keep behaving as before.
+		{"default_upstream_timeout_seconds", "INTEGER NOT NULL DEFAULT 0 CHECK (default_upstream_timeout_seconds BETWEEN 0 AND 3600)"},
 	} {
 		if err := ensureColumn(ctx, db, "runtime_settings", column.name, column.definition); err != nil {
 			return err

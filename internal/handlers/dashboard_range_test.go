@@ -29,6 +29,32 @@ func TestParseDashboardRangeBuildsUTCDateBounds(t *testing.T) {
 	}
 }
 
+// A precise instant is used as given: rounding it up to the next midnight
+// would silently widen the window the operator asked for.
+func TestParseDashboardRangeKeepsExplicitTimes(t *testing.T) {
+	selection, err := parseDashboardRange("custom",
+		"2026-08-01T09:30:00", "2026-08-01T17:45:30", "default")
+	if err != nil {
+		t.Fatalf("parse custom range: %v", err)
+	}
+	start := time.Date(2026, time.August, 1, 9, 30, 0, 0, time.Local)
+	end := time.Date(2026, time.August, 1, 17, 45, 30, 0, time.Local)
+	if selection.StartAt != start.UTC().Format(models.TimestampFormat) {
+		t.Errorf("start_at = %q, want %q", selection.StartAt, start.UTC().Format(models.TimestampFormat))
+	}
+	if selection.EndAt != end.UTC().Format(models.TimestampFormat) {
+		t.Errorf("end_at = %q, want %q", selection.EndAt, end.UTC().Format(models.TimestampFormat))
+	}
+}
+
+// Minute precision is what a datetime-local field submits without a step.
+func TestParseDashboardRangeAcceptsMinutePrecision(t *testing.T) {
+	if _, err := parseDashboardRange("custom",
+		"2026-08-01T09:30", "2026-08-01T10:00", "default"); err != nil {
+		t.Fatalf("minute precision rejected: %v", err)
+	}
+}
+
 func TestParseDashboardRangeRejectsInvalidCustomDates(t *testing.T) {
 	testCases := []struct {
 		name  string
@@ -38,7 +64,10 @@ func TestParseDashboardRangeRejectsInvalidCustomDates(t *testing.T) {
 		{name: "missing start", end: "2026-08-01"},
 		{name: "invalid format", start: "2026/08/01", end: "2026-08-01"},
 		{name: "reversed", start: "2026-08-02", end: "2026-08-01"},
-		{name: "too wide", start: "2026-01-01", end: "2027-01-02"},
+		{name: "too wide", start: "2026-01-01", end: "2027-01-03"},
+		// An empty window selects nothing; the operator meant something else.
+		{name: "same instant", start: "2026-08-01T09:00:00", end: "2026-08-01T09:00:00"},
+		{name: "reversed instants", start: "2026-08-01T10:00:00", end: "2026-08-01T09:00:00"},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {

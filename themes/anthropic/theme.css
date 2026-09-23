@@ -117,11 +117,11 @@ html[data-theme="anthropic"] {
   --glow-accent: 0 0 0 1px rgb(217 119 87 / 20%);
 
   /* Code frames — slate ground, ivory ink */
-  --code-frame-bg: #141413;
-  --code-bg: #24241f;
-  --code-text: #f0eee6;
-  --code-muted: #b0aea5;
-  --code-border: rgb(250 249 245 / 14%);
+  --code-frame-bg: #efece2;
+  --code-bg: #fffdf8;
+  --code-text: #141413;
+  --code-muted: #6b6a63;
+  --code-border: rgb(20 20 19 / 14%);
 
   /* Interactive soft surfaces */
   --row-hover: rgb(217 119 87 / 6%);
@@ -156,7 +156,7 @@ html[data-theme="anthropic"] .panel h2 {
 }
 
 /* Keep the RPM pill flat — a quiet clay wash, no gradient. */
-html[data-theme="anthropic"] .panel p.log-rpm {
+html[data-theme="anthropic"] .log-rate-pill {
   background: var(--accent-soft);
 }
 

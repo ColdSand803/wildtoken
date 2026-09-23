@@ -275,9 +275,14 @@ func ReplaceUpstreamGroups(ctx context.Context, tx *sql.Tx, upstreamID int64, gr
 }
 
 // ListEnabledUpstreamsInGroup returns the enabled channels one group can reach.
+//
+// archived = 0 belongs here for the same reason it is in ListEnabledUpstreams:
+// this query feeds routing, and a parked channel must not come back to life
+// through the group path.
 func ListEnabledUpstreamsInGroup(ctx context.Context, database *sql.DB, groupID int64) ([]models.UpstreamRow, error) {
 	return queryUpstreamRows(ctx, database,
 		"SELECT "+upstreamColumns+` FROM upstreams
-         WHERE enabled = 1 AND id IN (SELECT upstream_id FROM upstream_groups WHERE group_id = ?)
+         WHERE enabled = 1 AND archived = 0
+           AND id IN (SELECT upstream_id FROM upstream_groups WHERE group_id = ?)
          ORDER BY priority DESC, id ASC`, groupID)
 }

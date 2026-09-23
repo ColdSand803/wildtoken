@@ -5,8 +5,8 @@ import test from "node:test";
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const manifest = JSON.parse(read("themes/co1dsand-dark/theme.json"));
 const css = read("themes/co1dsand-dark/theme.css");
-const events = read("static/js/events.js");
-const adminHtml = read("static/admin.html");
+const events = read("web/src/theme.ts");
+const adminHtml = read("web/index.html");
 const lightCss = read("themes/co1dsand-light/theme.css");
 
 test("松烟 的清单字段完整且与目录名一致", () => {
@@ -67,9 +67,7 @@ test("松烟 的圆角比默认更克制，字体栈补了中文", () => {
 
 test("松烟 在主题注册表初始化前后都可选", () => {
   const cssHref = "/theme-packs/co1dsand-dark/theme.css";
-  assert.match(
-    events,
-    /\{ id: "co1dsand-dark", label: "松烟", swatch: \["#050505", "#f0f0f0"\], css: "\/theme-packs\/co1dsand-dark\/theme\.css", description: ".*" \}/,
-  );
+  assert.ok(events.includes('"co1dsand-dark": "松烟"'));
+  assert.ok(events.includes(cssHref));
   assert.ok(adminHtml.includes(`"co1dsand-dark": "${cssHref}"`));
 });

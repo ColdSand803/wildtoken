@@ -11,7 +11,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: >-
+    ci-${{ github.workflow }}-${{ github.event.pull_request.number
+    || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -62,14 +64,32 @@ jobs:
       - name: Run Go tests
         run: go test -race ./...
 
-      - name: Check JavaScript syntax
+      - name: Install frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Check and build React console
+        working-directory: web
+        run: |
+          npm run typecheck
+          npm run build
+
+      - name: Run JavaScript tests and API contracts
         shell: bash
         run: |
           set -euo pipefail
-          while IFS= read -r -d '' file; do
-            node --check "$file"
-          done < <(find static/js -type f -name '*.js' -print0 | sort -z)
+          # Each DOM integration test owns one jsdom realm and several tests
+          # exercise global fetch/animation timing, so run files sequentially.
           node --test tests/*.test.mjs
+          node scripts/payload-contract.mjs
+
+      - name: Verify production console assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s web/dist/index.html
+          grep -q '/console/assets/' web/dist/index.html
+          find web/dist/assets -type f -maxdepth 1 | grep -q .
 
   cross-compile:
     name: Cross-compile check
@@ -94,7 +114,8 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           set -euo pipefail
-          GOOS=windows GOARCH=amd64 go build -ldflags "-H=windowsgui" -o /dev/null ./cmd/wildtoken
+          GOOS=windows GOARCH=amd64 \
+            go build -ldflags "-H=windowsgui" -o /dev/null ./cmd/wildtoken
           GOOS=darwin GOARCH=amd64 go build -o /dev/null ./cmd/wildtoken
           GOOS=darwin GOARCH=arm64 go build -o /dev/null ./cmd/wildtoken
           GOOS=linux GOARCH=arm64 go build -o /dev/null ./cmd/wildtoken
@@ -106,7 +127,8 @@ jobs:
     timeout-minutes: 30
     env:
       IMAGE_NAME: wildtoken:ci-${{ github.run_id }}-${{ github.run_attempt }}
-      CONTAINER_NAME: wildtoken-ci-${{ github.run_id }}-${{ github.run_attempt }}
+      CONTAINER_NAME: >-
+        wildtoken-ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -146,19 +168,30 @@ jobs:
 
           grep -q '"status":"ok"' "$RUNNER_TEMP/wildtoken-health.json"
           curl --fail --silent --show-error \
-            http://127.0.0.1:3110/admin \
-            --output "$RUNNER_TEMP/wildtoken-admin.html"
-          grep -q 'WildToken Admin' "$RUNNER_TEMP/wildtoken-admin.html"
+            http://127.0.0.1:3110/console \
+            --output "$RUNNER_TEMP/wildtoken-console.html"
+          grep -q 'WildToken Console' "$RUNNER_TEMP/wildtoken-console.html"
+          # 旧控制台已删；/admin 应该是 404，而不是还能拿到东西。
+          admin_status=$(curl --silent --output /dev/null \
+            --write-out '%{http_code}' http://127.0.0.1:3110/admin)
+          if [ "$admin_status" != "404" ]; then
+            echo "/admin 返回 $admin_status，期望 404"
+            exit 1
+          fi
 
           curl --fail --silent --show-error \
             http://127.0.0.1:3110/theme-packs/ark/theme.css \
             --output "$RUNNER_TEMP/wildtoken-theme.css"
 
+          # 分段拼：整行 JSON 超过行长上限，而单引号串无法用反斜杠折行。
+          token_payload='{"name":"ci-smoke"'
+          token_payload="$token_payload"',"description":"CI contract smoke"'
+          token_payload="$token_payload"',"enabled":true}'
           curl --fail --silent --show-error \
             --request POST \
             --header "x-admin-token: $admin_token" \
             --header 'content-type: application/json' \
-            --data '{"name":"ci-smoke","description":"CI contract smoke","enabled":true}' \
+            --data "$token_payload" \
             http://127.0.0.1:3110/api/admin/tokens \
             --output "$RUNNER_TEMP/wildtoken-token-created.json"
 
@@ -224,7 +257,7 @@ jobs:
           docker image rm --force "$IMAGE_NAME" 2>/dev/null || true
           rm -f \
             "$RUNNER_TEMP/wildtoken-health.json" \
-            "$RUNNER_TEMP/wildtoken-admin.html" \
+            "$RUNNER_TEMP/wildtoken-console.html" \
             "$RUNNER_TEMP/wildtoken-theme.css" \
             "$RUNNER_TEMP/wildtoken-token-created.json" \
             "$RUNNER_TEMP/wildtoken-models-unauthenticated.json" \

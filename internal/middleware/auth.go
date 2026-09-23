@@ -397,6 +397,20 @@ func writeDownstreamError(w http.ResponseWriter, anthropic bool, status int,
 	})
 }
 
+// isPiUserAgent reports the pi coding agent from its user-agent.
+//
+// Matched on a prefix rather than a substring, which every other client here
+// can afford but this one cannot: "pi" is two letters that sit inside copilot,
+// rapidapi, and any number of agents yet to be written. The observed shape is
+// "pi (linux 6.1.0; x64)"; the slash and bare forms are accepted so a future
+// version suffix does not silently stop being recognized.
+func isPiUserAgent(userAgent string) bool {
+	return userAgent == "pi" ||
+		strings.HasPrefix(userAgent, "pi ") ||
+		strings.HasPrefix(userAgent, "pi/") ||
+		strings.HasPrefix(userAgent, "pi-coding-agent")
+}
+
 // DetectClientType labels the caller from its originator and user-agent headers.
 func DetectClientType(r *http.Request, anthropic bool) string {
 	originator := strings.ToLower(r.Header.Get("originator"))
@@ -413,6 +427,10 @@ func DetectClientType(r *http.Request, anthropic bool) string {
 		return "codex-tui"
 	case strings.Contains(userAgent, "opencode"):
 		return "opencode"
+	// Ahead of the Anthropic branch, which keys on the path and the
+	// anthropic-version header rather than on who sent the request: pi speaking
+	// the Messages API is still pi, and was being filed as claude.
+	//
 	case isPiClient(originator, userAgent):
 		return "pi"
 	case strings.Contains(originator, "codex") || strings.Contains(userAgent, "codex"):
@@ -426,7 +444,7 @@ func DetectClientType(r *http.Request, anthropic bool) string {
 
 func isPiClient(originator, userAgent string) bool {
 	for _, value := range []string{originator, userAgent} {
-		if value == "pi" || strings.HasPrefix(value, "pi ") || strings.HasPrefix(value, "pi/") || strings.HasPrefix(value, "pi-") {
+		if isPiUserAgent(value) || strings.HasPrefix(value, "pi-") {
 			return true
 		}
 	}

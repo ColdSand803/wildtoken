@@ -13,6 +13,7 @@ import (
 
 const upstreamColumns = `id, name, base_url, api_key, model_names, model_prefixes,
     model_mappings, effort_mappings, priority, weight, auto_weight_enabled, enabled,
+    archived, archived_prev_enabled,
     extra_headers, timeout_seconds, rate_limit, created_at, updated_at`
 
 func parseJSONArray(value string) ([]string, error) {
@@ -42,7 +43,8 @@ func scanUpstreamRow(row interface{ Scan(...any) error }) (models.UpstreamRow, e
 	err := row.Scan(&upstream.ID, &upstream.Name, &upstream.BaseURL, &apiKey,
 		&upstream.ModelNames, &upstream.ModelPrefixes, &upstream.ModelMappings,
 		&effortMappings, &upstream.Priority, &upstream.Weight,
-		&upstream.AutoWeightEnabled, &upstream.Enabled, &upstream.ExtraHeaders,
+		&upstream.AutoWeightEnabled, &upstream.Enabled, &upstream.Archived,
+		&upstream.ArchivedPrevEnabled, &upstream.ExtraHeaders,
 		&upstream.TimeoutSeconds, &rateLimit, &upstream.CreatedAt, &upstream.UpdatedAt)
 	if err != nil {
 		return upstream, err
@@ -97,6 +99,7 @@ func RowToUpstreamOut(row *models.UpstreamRow) (models.UpstreamOut, error) {
 		Weight:             row.Weight,
 		AutoWeightEnabled:  row.AutoWeightEnabled == 1,
 		Enabled:            row.Enabled == 1,
+		Archived:           row.Archived == 1,
 		ExtraHeaders:       extraHeaders,
 		TimeoutSeconds:     row.TimeoutSeconds,
 		RateLimit:          row.RateLimit,
@@ -155,8 +158,37 @@ func ListUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamOut, error
 }
 
 func ListEnabledUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamRow, error) {
+	// An archived channel must not route, even if some older code path left
+	// enabled at 1. This is the query the proxy picks candidates from.
 	return queryUpstreamRows(ctx, db,
-		"SELECT "+upstreamColumns+" FROM upstreams WHERE enabled = 1 ORDER BY priority DESC, id ASC")
+		"SELECT "+upstreamColumns+" FROM upstreams WHERE enabled = 1 AND archived = 0"+
+			" ORDER BY priority DESC, id ASC")
+}
+
+// SetUpstreamArchived parks a channel out of routing, or puts it back.
+//
+// Parking one turns it off and remembers what it was, so a channel that was
+// already disabled comes back disabled when unarchived. Without the memory,
+// unarchiving would switch on every channel it touched, including ones an
+// operator had taken out of service for their own reasons.
+func SetUpstreamArchived(ctx context.Context, db *sql.DB, id int64, archived bool) (models.UpstreamOut, error) {
+	var query string
+	if archived {
+		query = `UPDATE upstreams
+			SET archived = 1, enabled = 0, archived_prev_enabled = enabled,
+				updated_at = datetime('now')
+			WHERE id = ?`
+	} else {
+		query = `UPDATE upstreams
+			SET archived = 0, enabled = COALESCE(archived_prev_enabled, 0),
+				archived_prev_enabled = NULL,
+				updated_at = datetime('now')
+			WHERE id = ?`
+	}
+	if _, err := db.ExecContext(ctx, query, id); err != nil {
+		return models.UpstreamOut{}, apperr.Database(err)
+	}
+	return reloadUpstreamOut(ctx, db, id)
 }
 
 // ListUpstreamRows returns every channel as a raw row, enabled or not.

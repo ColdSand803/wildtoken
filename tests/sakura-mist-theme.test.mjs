@@ -5,8 +5,8 @@ import test from "node:test";
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const manifest = JSON.parse(read("themes/sakura-mist/theme.json"));
 const css = read("themes/sakura-mist/theme.css");
-const events = read("static/js/events.js");
-const adminHtml = read("static/admin.html");
+const themeModule = read("web/src/theme.ts");
+const consoleHtml = read("web/index.html");
 
 test("Sakura Mist manifest exposes the reference palette", () => {
   assert.deepEqual(manifest, {
@@ -35,11 +35,18 @@ test("Sakura Mist defines scoped, accessible gray-violet tokens", () => {
   assert.match(css, /html\[data-theme="sakura-mist"\] \.aurora\s*\{\s*display: none;/);
 });
 
-test("Sakura Mist is available before and after theme registry initialization", () => {
+/* Registered in two places: the pre-paint script in index.html, which runs
+   before React so the first frame is not the default theme, and the runtime
+   registry behind the theme menu. */
+test("Sakura Mist is registered for both pre-paint and runtime selection", () => {
   const cssHref = "/theme-packs/sakura-mist/theme.css";
-  assert.match(
-    events,
-    /\{ id: "sakura-mist", label: "樱雾灰紫", swatch: \["#ffe3ee", "#535369"\], css: "\/theme-packs\/sakura-mist\/theme\.css", description: "Soft pink surfaces with restrained gray-violet accents\." \}/,
+  assert.ok(
+    themeModule.includes(`"sakura-mist": "${cssHref}"`),
+    "missing runtime pack entry",
   );
-  assert.ok(adminHtml.includes(`"sakura-mist": "${cssHref}"`));
+  assert.ok(
+    themeModule.includes('"sakura-mist": ["#ffe3ee", "#535369"]'),
+    "missing swatch",
+  );
+  assert.ok(consoleHtml.includes(`"sakura-mist": "${cssHref}"`), "missing pre-paint entry");
 });

@@ -305,12 +305,14 @@ button.wt-seg-btn.is-active:focus-visible {
   margin: 0;
 }
 
+/* 字重用 400。等宽栈里 Fira Code 没随包发，实际落到 Consolas/Menlo 这类只有
+   400/700 两个字重的系统字体，要 500 只能让浏览器合成——合成出来的笔画是
+   糊的。letter-spacing 在 11px 上是 0.11px，逼出亚像素定位，同样发虚。 */
 .wt-meta {
   color: var(--muted);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  font-weight: 400;
   white-space: nowrap;
 }
 
@@ -412,25 +414,31 @@ html[data-density="compact"] .wt-seg-btn {
 
 /* ── View toggle buttons ─────────────────────────────────── */
 
+/* 分段控件本身不再画出边框和内边距，由里面的按钮各自承担。
+
+   原来容器带 1px 边框和 2px 内边距，外层要做到和工具栏其他控件一样高
+   （--control-h 34px），内容区就只剩 28px，里面的按钮怎么也到不了 34px
+   ——实测它停在 28px，比旁边的搜索框和列按钮矮一截，看着就是没对齐。
+   按钮自己长到 34px，容器让位，才对得齐。 */
 .view-toggle-wrap {
   display: flex;
   gap: 4px;
   align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 2px;
-  background: var(--panel-subtle);
+  background: none;
+  border: none;
+  padding: 0;
 }
 
 .view-toggle-btn {
-  min-width: 32px;
-  min-height: 32px;
+  /* 和工具栏其他控件同一高度、同一形状：它现在就是一个普通按钮。 */
+  min-width: var(--control-h);
+  min-height: var(--control-h);
   padding: 6px;
-  border: none;
-  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-subtle);
   color: var(--muted);
   cursor: pointer;
-  border-radius: 4px;
   transition: all 150ms ease;
   display: flex;
   align-items: center;

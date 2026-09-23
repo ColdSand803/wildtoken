@@ -5,8 +5,8 @@ import test from "node:test";
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const manifest = JSON.parse(read("themes/gojo/theme.json"));
 const css = read("themes/gojo/theme.css");
-const events = read("static/js/events.js");
-const adminHtml = read("static/admin.html");
+const themeModule = read("web/src/theme.ts");
+const consoleHtml = read("web/index.html");
 
 test("Gojo manifest exposes the Limitless palette", () => {
   assert.deepEqual(manifest, {
@@ -46,13 +46,15 @@ test("Gojo covers every console view with a distinct domain mark", () => {
   assert.equal(new Set(marks).size, views.length);
 });
 
-test("Gojo is available during boot and runtime theme initialization", () => {
+/* The pack has to be registered in two places: the pre-paint script in
+   index.html, which runs before React and prevents a flash of the default
+   theme, and the runtime registry the theme menu reads. Missing either one
+   fails in a way that only shows up in a browser. */
+test("Gojo is registered for both pre-paint and runtime theme selection", () => {
   const cssHref = "/theme-packs/gojo/theme.css";
-  assert.match(
-    events,
-    /\{ id: "gojo", label: "五条悟", swatch: \["#070910", "#63dcff"\], css: "\/theme-packs\/gojo\/theme\.css", description: ".*" \}/,
-  );
-  assert.ok(adminHtml.includes(`gojo: "${cssHref}"`));
+  assert.ok(themeModule.includes(`gojo: "${cssHref}"`), "missing runtime pack entry");
+  assert.ok(themeModule.includes('gojo: ["#070910", "#63dcff"]'), "missing swatch");
+  assert.ok(consoleHtml.includes(`gojo: "${cssHref}"`), "missing pre-paint entry");
 });
 
 test("Gojo keeps the mobile dock stable and honors reduced motion", () => {
@@ -86,18 +88,9 @@ test("Gojo gives the status switch a keyboard focus indicator", () => {
    Left out, the retry-chain step turns solid cyan and the status badge plus
    channel name inside it become unreadable; the log view picker loses its
    segmented look and both halves read as pressed. */
-test("Gojo leaves the retry-chain step out of its primary-action treatment", () => {
-  const selectors = [
-    ...css.matchAll(/html\[data-theme="gojo"\] button:not\(:where\(([\s\S]*?)\)\)/g),
-  ].map(([, body]) => body);
-
-  assert.ok(selectors.length >= 5, "Gojo repeats the list per state; all must be covered");
-  for (const [index, body] of selectors.entries()) {
-    assert.ok(
-      body.includes(".retry-chain-step"),
-      `exclusion list #${index + 1} must spare the retry-chain step`,
-    );
-  }
+test("Gojo paints only explicit primary actions, not retry-chain utility buttons", () => {
+  assert.match(css, /button\.primary\s*\{/);
+  assert.doesNotMatch(css, /button:not\(:where\(/);
 });
 
 test("Gojo renders the log view picker as a themed segmented control", () => {
@@ -105,9 +98,6 @@ test("Gojo renders the log view picker as a themed segmented control", () => {
   assert.match(css, /\.log-view-mode-button\[aria-pressed="true"\][\s\S]*?linear-gradient\(135deg/);
   assert.match(css, /\.log-view-mode-button:focus-visible \{[\s\S]*?box-shadow: var\(--focus-ring\)/);
 
-  const primaryButtonSelectors = [...css.matchAll(/button:not\(:where\(([\s\S]*?)\)\)(?=[^{]*\{)/g)];
-  assert.ok(primaryButtonSelectors.length > 0, "expected Gojo primary-button selectors");
-  for (const [, exclusions] of primaryButtonSelectors) {
-    assert.match(exclusions, /\.log-view-mode-button/, "log mode leaked into the primary-button treatment");
-  }
+  assert.match(css, /button\.primary/);
+  assert.doesNotMatch(css, /button:not\(:where\(/);
 });

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"sort"
 	"strconv"
@@ -210,6 +211,10 @@ func noRouteReason(selector, model *string, groupName string) string {
 // Rust armed this through Drop. Go has no destructor, so every exit path calls
 // either Disarm or one of the logging methods; the handler defers Finish as the
 // backstop for a panic or an early return that forgets.
+//
+// It also carries the request's entry in the in-flight registry. The two track
+// the same facts from the same call sites, so keeping them together is what
+// stops the console's live view from disagreeing with the log it turns into.
 type abortLogGuard struct {
 	logWriter *proxy.LogWriter
 	// startedAt is when the gateway accepted this request. It is both this
@@ -222,9 +227,11 @@ type abortLogGuard struct {
 	// can carry it.
 	requestUID string
 	entry      *proxy.LogEntry
+	active     *proxy.ActiveRequest
 }
 
-func newAbortLogGuard(logWriter *proxy.LogWriter, method, path string) *abortLogGuard {
+func newAbortLogGuard(logWriter *proxy.LogWriter, active *proxy.ActiveRequest,
+	method, path string) *abortLogGuard {
 	status := int32(499)
 	message := "client disconnected before proxy completed"
 	requestUID := newRequestUID()
@@ -232,6 +239,7 @@ func newAbortLogGuard(logWriter *proxy.LogWriter, method, path string) *abortLog
 		logWriter:  logWriter,
 		startedAt:  time.Now(),
 		requestUID: requestUID,
+		active:     active,
 		entry: &proxy.LogEntry{
 			Method:     method,
 			Path:       path,
@@ -266,6 +274,7 @@ func newRequestUID() string {
 }
 
 func (g *abortLogGuard) setModel(model *string) {
+	g.active.SetModel(model)
 	if g.entry == nil {
 		return
 	}
@@ -274,6 +283,7 @@ func (g *abortLogGuard) setModel(model *string) {
 }
 
 func (g *abortLogGuard) setDownstreamToken(tokenID int64, tokenName string) {
+	g.active.SetDownstreamToken(tokenID, tokenName)
 	if g.entry == nil {
 		return
 	}
@@ -290,7 +300,59 @@ func (g *abortLogGuard) setQuotaPeriod(stamp string) {
 	g.entry.QuotaPeriodStamp = stamp
 }
 
+// clientIP resolves the caller's address for the log row.
+//
+// The deployment runs behind a reverse proxy, so the socket peer is the proxy
+// and the forwarded headers carry the caller. X-Forwarded-For is a list that
+// grows left to right as it crosses hops, so the original client is leftmost.
+//
+// Only the first entry is read and it is length-capped: the header is
+// attacker-influenced even behind a proxy, and an unbounded value would be
+// written verbatim into every log row.
+func clientIP(r *http.Request) string {
+	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+		first, _, _ := strings.Cut(forwarded, ",")
+		if address := strings.TrimSpace(first); address != "" {
+			return boundedClientIP(address)
+		}
+	}
+	if real := strings.TrimSpace(r.Header.Get("X-Real-IP")); real != "" {
+		return boundedClientIP(real)
+	}
+	// RemoteAddr carries a port; the port identifies the connection, not the
+	// caller, and differs on every request from the same client.
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		return boundedClientIP(host)
+	}
+	return boundedClientIP(r.RemoteAddr)
+}
+
+// maxClientIPChars bounds a header-sourced address. IPv6 with a zone runs to
+// about 45 characters, so this leaves room without allowing a log row to carry
+// an arbitrary payload.
+const maxClientIPChars = 64
+
+func boundedClientIP(address string) string {
+	if len(address) > maxClientIPChars {
+		return address[:maxClientIPChars]
+	}
+	return address
+}
+
+func (g *abortLogGuard) setClientIP(address string) {
+	if address == "" {
+		return
+	}
+	// The in-flight row shows the same column, so both sides get it.
+	g.active.SetClientIP(address)
+	if g.entry == nil {
+		return
+	}
+	g.entry.ClientIP = &address
+}
+
 func (g *abortLogGuard) setClientType(clientType string) {
+	g.active.SetClientType(clientType)
 	if g.entry == nil {
 		return
 	}
@@ -298,6 +360,7 @@ func (g *abortLogGuard) setClientType(clientType string) {
 }
 
 func (g *abortLogGuard) setUpstream(upstreamID int64, upstreamName string, forwardModel *string) {
+	g.active.SetUpstream(upstreamID, upstreamName, forwardModel)
 	if g.entry == nil {
 		return
 	}
@@ -309,12 +372,23 @@ func (g *abortLogGuard) setUpstream(upstreamID int64, upstreamName string, forwa
 	}
 }
 
-func (g *abortLogGuard) setRequestSnapshots(downstream, upstream json.RawMessage) {
+// setPreparedRequest takes everything the prepared attempt knows: the snapshots
+// for the abort log, and the reasoning efforts for both the abort log and the
+// console's in-flight view.
+//
+// The efforts used to be dropped here. ProxyRequest fills them in on the logs it
+// writes itself, so only the rows this guard produces went without — a client
+// disconnect or a channel whose headers will not build — and the effort those
+// requests ran at was exactly what made them worth reading.
+func (g *abortLogGuard) setPreparedRequest(prepared *proxy.PreparedRequest) {
+	g.active.SetReasoningEffort(prepared.ReasoningEffort, prepared.UpstreamReasoningEffort)
 	if g.entry == nil {
 		return
 	}
-	g.entry.DownstreamRequest = downstream
-	g.entry.UpstreamRequest = upstream
+	g.entry.DownstreamRequest = prepared.DownstreamSnapshot
+	g.entry.UpstreamRequest = prepared.UpstreamSnapshot
+	g.entry.ReasoningEffort = prepared.ReasoningEffort
+	g.entry.UpstreamReasoningEffort = prepared.UpstreamReasoningEffort
 }
 
 // disarm gives up ownership of the log, because the proxy already wrote one.
@@ -334,8 +408,15 @@ func (g *abortLogGuard) logAndDisarm(statusCode int32, message string, stage pro
 	g.logWriter.Schedule(*entry)
 }
 
-// finish writes the default abort log if no other path claimed it.
+// finish releases the in-flight entry and writes the default abort log if no
+// other path claimed it.
+//
+// The release belongs here rather than in disarm, because the handler defers
+// this and disarms before streaming the answer downstream: a streamed response
+// is still in flight until this runs.
 func (g *abortLogGuard) finish() {
+	g.active.Release()
+
 	entry := g.entry
 	g.entry = nil
 	if entry == nil {
@@ -366,11 +447,13 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		// The path after /v1/, for example "chat/completions".
 		path := models.ProxyPath(r.URL.Path)
 
-		guard := newAbortLogGuard(state.LogWriter, r.Method, path)
+		guard := newAbortLogGuard(state.LogWriter,
+			state.ActiveRequests.Begin(r.Method, path), r.Method, path)
 		defer guard.finish()
 		guard.setDownstreamToken(auth.TokenID, auth.TokenName)
 		guard.setClientType(auth.ClientType)
 		guard.setQuotaPeriod(auth.QuotaPeriodStamp)
+		guard.setClientIP(clientIP(r))
 
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDownstreamBodyBytes))
 		if err != nil {
@@ -585,7 +668,7 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			config.guard.logAndDisarm(502, err.Error(), proxy.FailureStageRequestBuild)
 			return nil, err
 		}
-		config.guard.setRequestSnapshots(prepared.DownstreamSnapshot, prepared.UpstreamSnapshot)
+		config.guard.setPreparedRequest(prepared)
 
 		// Whether another attempt could follow is decided before this one runs,
 		// because the streaming path needs to know: holding a 2xx SSE response
@@ -606,6 +689,7 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				AttemptIndex:        int32(attempt),
 				ReceivedAt:          config.guard.startedAt,
 				FailoverEligible:    attempt < maxRetries,
+				ClientIP:            clientIP(r),
 			}, prepared)
 
 		if !shouldFailover(r, response, err) || attempt >= maxRetries {

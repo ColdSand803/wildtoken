@@ -239,8 +239,12 @@ type RuntimeSettings struct {
 	// LoadBalanceStrategy selects how routing picks inside a priority tier. See
 	// the LoadBalance* constants.
 	LoadBalanceStrategy string `json:"load_balance_strategy"`
-	Revision            int64  `json:"revision"`
-	UpdatedAt           string `json:"updated_at"`
+	// DefaultUpstreamTimeoutSeconds is the fallback for channels that leave
+	// their own timeout unset. Zero means "inherit the startup config", so an
+	// operator who never touched it keeps whatever the deployment set.
+	DefaultUpstreamTimeoutSeconds int64  `json:"default_upstream_timeout_seconds"`
+	Revision                      int64  `json:"revision"`
+	UpdatedAt                     string `json:"updated_at"`
 	// DatabaseOverride records that these values came from SQLite rather than
 	// the startup defaults. It is not part of the stored row.
 	DatabaseOverride bool `json:"-"`
@@ -261,6 +265,7 @@ func DefaultRuntimeSettings() RuntimeSettings {
 		ProxyEnabled:                      false,
 		ProxyURL:                          "",
 		LoadBalanceStrategy:               DefaultLoadBalanceStrategy,
+		DefaultUpstreamTimeoutSeconds:     0,
 		Revision:                          0,
 		UpdatedAt:                         "",
 		DatabaseOverride:                  false,
@@ -282,6 +287,8 @@ func (s *RuntimeSettings) Validate() error {
 		{s.AutoWeightSuccessIncrement, 0, 100, "auto_weight_success_increment must be between 0 and 100"},
 		{s.AutoWeightRecoveryIncrement, 0, 100, "auto_weight_recovery_increment must be between 0 and 100"},
 		{s.AutoWeightRecoveryIntervalSeconds, 1, 3600, "auto_weight_recovery_interval_seconds must be between 1 and 3600"},
+		// 0 is "inherit"; anything set must be a sane forwarding timeout.
+		{s.DefaultUpstreamTimeoutSeconds, 0, 3600, "default_upstream_timeout_seconds must be between 0 and 3600"},
 	} {
 		if check.value < check.min || check.value > check.max {
 			return ErrString(check.message)
@@ -345,8 +352,9 @@ type RuntimeSettingsIn struct {
 	// other field, so a caller that omits the strategy resets it to weighted. A
 	// console editing one field must read the current settings and send them back
 	// in full.
-	LoadBalanceStrategy string `json:"load_balance_strategy"`
-	Revision            int64  `json:"revision"`
+	LoadBalanceStrategy           string `json:"load_balance_strategy"`
+	DefaultUpstreamTimeoutSeconds int64  `json:"default_upstream_timeout_seconds"`
+	Revision                      int64  `json:"revision"`
 }
 
 // NormalizedLoadBalanceStrategy resolves an absent strategy to the default.
@@ -374,6 +382,7 @@ func (in *RuntimeSettingsIn) Validate() error {
 	candidate.ProxyEnabled = in.ProxyEnabled
 	candidate.ProxyURL = in.ProxyURL
 	candidate.LoadBalanceStrategy = in.NormalizedLoadBalanceStrategy()
+	candidate.DefaultUpstreamTimeoutSeconds = in.DefaultUpstreamTimeoutSeconds
 	return candidate.Validate()
 }
 
@@ -390,6 +399,7 @@ type RuntimeSettingsOut struct {
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
 	LoadBalanceStrategy               string `json:"load_balance_strategy"`
+	DefaultUpstreamTimeoutSeconds     int64  `json:"default_upstream_timeout_seconds"`
 	Revision                          int64  `json:"revision"`
 	UpdatedAt                         string `json:"updated_at"`
 	DatabaseOverride                  bool   `json:"database_override"`
@@ -409,6 +419,7 @@ func NewRuntimeSettingsOut(s *RuntimeSettings) RuntimeSettingsOut {
 		ProxyEnabled:                      s.ProxyEnabled,
 		ProxyURL:                          s.ProxyURL,
 		LoadBalanceStrategy:               s.LoadBalanceStrategy,
+		DefaultUpstreamTimeoutSeconds:     s.DefaultUpstreamTimeoutSeconds,
 		Revision:                          s.Revision,
 		UpdatedAt:                         s.UpdatedAt,
 		DatabaseOverride:                  s.DatabaseOverride,

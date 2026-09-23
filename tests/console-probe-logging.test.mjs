@@ -16,15 +16,17 @@ function probeClientTypes() {
   return values;
 }
 
-/** The values offered by the log page's client filter. */
+/**
+ * The values offered by the log page's client filter.
+ *
+ * The list is a constant rather than something derived from the loaded page,
+ * so it is read from the source instead of from rendered markup.
+ */
 function clientFilterOptions() {
-  const markup = read("static/admin.html");
-  const start = markup.indexOf('<select id="log-client-filter">');
-  assert.notEqual(start, -1, "the client filter must exist");
-  const select = markup.slice(start, markup.indexOf("</select>", start));
-  return [...select.matchAll(/<option value="([^"]*)"/g)]
-    .map((match) => match[1])
-    .filter(Boolean);
+  const source = read("web/src/pages/LogsPage.tsx");
+  const declared = /const CLIENT_TYPES(?::[^=]+)? = \[([^\]]+)\]/.exec(source);
+  assert.notEqual(declared, null, "the client filter list must exist");
+  return [...declared[1].matchAll(/"([a-z0-9-]+)"/gi)].map((match) => match[1]);
 }
 
 test("every console probe client type is offered by the log page filter", () => {

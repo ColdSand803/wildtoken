@@ -518,18 +518,23 @@ td.no-match-state {
   width: 56px;
 }
 
+/* 下界只按时间戳本身留：它是固定宽度（tabular-nums 加 nowrap），多给的
+   那几十像素只是空白，把后面的列往外挤。 */
 .time-cell {
-  min-width: 168px;
+  min-width: 146px;
 }
 
 .time-cell > span:first-child {
   font-variant-numeric: tabular-nums;
   font-size: var(--text-base);
+  /* 不钉住的话，列一窄日期和时间会拆成两行。 */
+  white-space: nowrap;
 }
 
+/* 渠道名已经是省略号截断，窄一点只是早一点截，不会折行。 */
 .channel-cell {
-  max-width: 220px;
-  min-width: 180px;
+  max-width: 190px;
+  min-width: 148px;
 }
 
 .channel-stack {
@@ -593,26 +598,30 @@ td.no-match-state {
 }
 
 .duration-cell {
-  min-width: 178px;
+  min-width: 116px;
   white-space: nowrap;
 }
 
+/* 两行：首字一行、总耗时一行。标签和值同行，比“标签在上值在下”矮一半。 */
 .latency-metrics {
-  align-items: end;
-  display: flex;
-  gap: 8px;
-}
-
-.latency-metric {
   display: grid;
   gap: 3px;
 }
 
+.latency-metric {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
+}
+
+/* 标签宽度对齐，两行的数值才能成列。 */
 .latency-metric > small {
   color: var(--muted);
+  flex: none;
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
+  min-width: 2.6em;
 }
 
 .first-token-time,
@@ -659,55 +668,9 @@ td.no-match-state {
   color: var(--muted);
 }
 
-.stream-throughput {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: flex-start;
-  margin-top: 7px;
-}
-
-.stream-state {
-  align-items: center;
-  color: var(--text-secondary);
-  display: inline-flex;
-  font-size: 11px;
-  font-weight: 600;
-  gap: 5px;
-}
-
-.stream-state-dot {
-  background: var(--ok);
-  border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--ok-soft);
-  height: 6px;
-  width: 6px;
-}
-
-.throughput-stat {
-  align-items: baseline;
-  display: inline-flex;
-  gap: 4px;
-}
-
-.throughput-stat small {
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 1;
-}
-
-.throughput-stat strong {
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-  font-weight: 650;
-  line-height: 1;
-}
-
+/* 只剩输入输出两行，数值又缩写成了 2.5M 这种长度，不再需要宽列。 */
 .tokens-cell {
-  min-width: 300px;
+  min-width: 84px;
 }
 
 .priority-value {
@@ -1094,4 +1057,98 @@ td.no-match-state {
   font-size: 0.78em;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* ── 已归档渠道 ─────────────────────────────────────────────
+   主表格下方一块可折叠区域。收起时只露标题一行，展开后才看到表格。
+   不碰主表格的样式：这里是另一张表，靠间距和标题行和上面区分。 */
+
+.archived-panel {
+  border-top: 1px solid var(--line-soft);
+  margin-top: 18px;
+}
+
+.archived-toggle {
+  align-items: center;
+  background: none;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 13px;
+  gap: 8px;
+  padding: 10px 2px;
+  width: 100%;
+}
+
+.archived-toggle:hover {
+  color: var(--text);
+}
+
+.archived-toggle:focus-visible {
+  border-radius: var(--radius-sm);
+  outline: 2px solid var(--accent, #3b82f6);
+  outline-offset: 1px;
+}
+
+.archived-chevron {
+  display: inline-block;
+  font-size: 10px;
+  transition: transform 0.15s ease;
+}
+
+.archived-toggle.is-open .archived-chevron {
+  transform: rotate(90deg);
+}
+
+.archived-title {
+  font-weight: 600;
+}
+
+.archived-count {
+  background: var(--panel-subtle);
+  border-radius: 999px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 7px;
+}
+
+.archived-hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: auto;
+}
+
+/* 归档行整行降饱和：眼一扫就过，不会和上面真正在跑的渠道抢注意力。 */
+.row-archived {
+  color: var(--muted-strong);
+}
+
+/* 归档行的操作列放的是文字按钮（「恢复」），不是主表那个图标按钮。
+   .col-actions 锁死的 56px 是按图标定的，文字会被挤换行，所以这里改回
+   自适应。只限定在归档行，主表的列宽不受影响。 */
+.row-archived .col-actions {
+  min-width: 0;
+  width: auto;
+}
+
+.row-archived:hover {
+  color: var(--text);
+}
+
+.archived-tag {
+  align-items: center;
+  color: var(--muted-strong);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 5px;
+}
+
+.archived-tag-dot {
+  background: var(--muted);
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  width: 6px;
 }
