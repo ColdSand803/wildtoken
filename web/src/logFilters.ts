@@ -51,6 +51,21 @@ export function navigateToLogs(filters: LogFilters): void {
   window.location.hash = "logs";
   window.dispatchEvent(new CustomEvent("console:log-filters", { detail: filters }));
 }
+export function saveLogDrilldown(filters: LogFilters): void {
+  try {
+    const cleaned = Object.fromEntries(
+      Object.entries(filters).filter(([, v]) => typeof v === "string" && v.trim() !== "")
+    );
+    if (Object.keys(cleaned).length === 0) {
+      sessionStorage.removeItem(DRILLDOWN_KEY);
+    } else {
+      sessionStorage.setItem(DRILLDOWN_KEY, JSON.stringify(cleaned));
+    }
+  } catch { /* Storage not accessible */ }
+}
+export function clearLogDrilldown(): void {
+  try { sessionStorage.removeItem(DRILLDOWN_KEY); } catch { /* Storage not accessible */ }
+}
 export function readLogDrilldown(): LogFilters {
   try {
     const value: unknown = JSON.parse(sessionStorage.getItem(DRILLDOWN_KEY) ?? "{}");

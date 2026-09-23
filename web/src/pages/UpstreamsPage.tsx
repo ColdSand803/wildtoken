@@ -590,17 +590,6 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
               <option value="effective-zero">有效权重为 0</option>
             </select>
           </label>
-          {/* 批量条只在有选中时出现，和旧版一致。 */}
-          <label className="upstream-select-visible"><input type="checkbox" aria-label="选择当前筛选全部渠道" checked={allVisibleSelected} onChange={(event) => setSelected((current) => { const next = new Set(current); for (const item of filtered) { if (event.target.checked) next.add(item.id); else next.delete(item.id); } return next; })} />已选 {visibleSelected.length}/{filtered.length}</label>
-          <div className="toolbar-batch" hidden={visibleSelected.length === 0}>
-            <button type="button" className="secondary" onClick={() => void batchSetEnabled(true)}>
-              批量启用
-            </button>
-            <button type="button" className="secondary" onClick={() => void batchSetEnabled(false)}>
-              批量停用
-            </button>
-          </div>
-
           <div className="col-menu-wrap">
             <button
               type="button"
@@ -654,6 +643,17 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                 <rect x="3" y="14" width="7" height="7" rx="1" />
                 <rect x="14" y="14" width="7" height="7" rx="1" />
               </svg>
+            </button>
+          </div>
+
+          {/* 批量选择与操作按钮放在卡片视图右侧 */}
+          <label className="upstream-select-visible"><input type="checkbox" aria-label="选择当前筛选全部渠道" checked={allVisibleSelected} onChange={(event) => setSelected((current) => { const next = new Set(current); for (const item of filtered) { if (event.target.checked) next.add(item.id); else next.delete(item.id); } return next; })} />已选 {visibleSelected.length}/{filtered.length}</label>
+          <div className="toolbar-batch" hidden={visibleSelected.length === 0}>
+            <button type="button" className="secondary" onClick={() => void batchSetEnabled(true)}>
+              批量启用
+            </button>
+            <button type="button" className="secondary" onClick={() => void batchSetEnabled(false)}>
+              批量停用
             </button>
           </div>
 

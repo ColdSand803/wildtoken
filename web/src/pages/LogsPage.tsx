@@ -1,4 +1,4 @@
-import { logFilterQuery, matchesLogFilters, readLogDrilldown } from "../logFilters";
+import { clearLogDrilldown, logFilterQuery, matchesLogFilters, readLogDrilldown, saveLogDrilldown } from "../logFilters";
 import type { LogFilters } from "../logFilters";
 import { LogTiming } from "../components/LogTiming";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -314,6 +314,9 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   const filterQuery = logFilterQuery(filters).toString();
   const historical = Boolean(advanced.end && Date.parse(advanced.end) < Date.now() - 2000);
   useEffect(() => {
+    saveLogDrilldown(filters);
+  }, [filters]);
+  useEffect(() => {
     const receive = (event: Event) => {
       const next = (event as CustomEvent<LogFilters>).detail;
       setAdvanced(next); setSearchInput(next.search ?? ""); setSearch(next.search ?? "");
@@ -486,7 +489,14 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
               placeholder="模型、渠道、令牌、状态码…"
               aria-label="搜索日志"
               value={searchInput}
-              onChange={(event) => setSearchInput(event.target.value)}
+              onChange={(event) => {
+                const value = event.target.value;
+                setSearchInput(value);
+                if (!value.trim()) {
+                  setSearch("");
+                  saveLogDrilldown({ ...filters, search: "" });
+                }
+              }}
             />
           </label>
 
@@ -587,7 +597,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
           <label>传输<select aria-label="日志传输方式" value={advanced.stream ?? ""} onChange={(e) => setAdvanced((value) => ({ ...value, stream: e.target.value }))}><option value="">全部</option><option value="true">流式 SSE</option><option value="false">非流式</option></select></label>
           <label>最小耗时（ms）<input aria-label="最小耗时" type="number" min="0" step="1" value={advanced.minDurationMs ?? ""} onChange={(e) => setAdvanced((value) => ({ ...value, minDurationMs: e.target.value }))} /></label>
           <label>令牌 ID<input aria-label="日志令牌 ID" type="number" min="1" value={advanced.tokenId ?? ""} onChange={(e) => setAdvanced((value) => ({ ...value, tokenId: e.target.value }))} /></label>
-          <button type="button" className="secondary" onClick={() => { setAdvanced({}); setRangeStart(""); setRangeEnd(""); setSearchInput(""); setStatusFilter(""); setClientFilter(""); setUpstreamFilter(""); }}>清除筛选</button>
+          <button type="button" className="secondary" onClick={() => { clearLogDrilldown(); setAdvanced({}); setRangeStart(""); setRangeEnd(""); setSearchInput(""); setSearch(""); setStatusFilter(""); setClientFilter(""); setUpstreamFilter(""); }}>清除筛选</button>
           <button type="button" className="secondary" aria-pressed={live} onClick={() => setLive((value) => !value)}>{live ? "暂停实时" : "恢复实时"}</button>
           {advanced.start && advanced.end && <span className="field-hint">{new Date(advanced.start).toLocaleString("zh-CN")} — {new Date(advanced.end).toLocaleString("zh-CN")}{historical ? " · 历史时间窗" : ""}</span>}
         </form>

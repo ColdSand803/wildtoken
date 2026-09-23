@@ -146,13 +146,26 @@ export function ChannelCard({
 
   return (
     <div
-      className={`channel-card${upstream.enabled ? "" : " channel-card--disabled"}${checked ? " is-selected" : ""}`}
+      className={`channel-card${upstream.enabled ? "" : " channel-card--disabled"}${checked ? " channel-card--selected is-selected" : ""}`}
       data-card-upstream-id={upstream.id}
+      onClick={(event) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest("button, input, a, select, textarea, [role='button'], [role='menuitem'], [role='switch']")) {
+          return;
+        }
+        onCheck?.(!checked);
+      }}
     >
       {diagnostics}
       <div className="channel-card-header">
         <div className="channel-card-title">
-          <input type="checkbox" aria-label={`选择渠道 ${upstream.name}`} checked={checked} onChange={(event) => onCheck?.(event.target.checked)} />
+          <input
+            type="checkbox"
+            className="channel-card-check"
+            aria-label={`选择渠道 ${upstream.name}`}
+            checked={checked}
+            onChange={(event) => onCheck?.(event.target.checked)}
+          />
           <span className={`status-dot status-dot--${upstream.enabled ? "live" : "offline"}`} />
           <h3 title={upstream.name}>{upstream.name}</h3>
         </div>

@@ -627,7 +627,78 @@ textarea::placeholder {
    the native control in a full-width padded/bordered box (every theme's
    per-type input override repeats the same background/border, so this must
    win regardless of cascade order). */
-input[type="checkbox"],
+input[type="checkbox"]:not(.channel-card-check) {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: var(--panel-subtle, var(--panel)) !important;
+  border: 1.5px solid var(--line-strong, var(--line)) !important;
+  border-radius: var(--radius-xs, 4px) !important;
+  box-shadow: none !important;
+  box-sizing: border-box !important;
+  cursor: pointer;
+  display: inline-grid;
+  place-content: center;
+  margin: 0;
+  padding: 0 !important;
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  max-width: 16px !important;
+  max-height: 16px !important;
+  outline: none;
+  position: relative;
+  transition: background-color var(--transition, 150ms ease), border-color var(--transition, 150ms ease), box-shadow var(--transition, 150ms ease);
+  vertical-align: middle;
+}
+
+input[type="checkbox"]:not(.channel-card-check):hover:not(:disabled) {
+  border-color: var(--accent) !important;
+  background-color: var(--panel-muted, var(--panel)) !important;
+}
+
+input[type="checkbox"]:not(.channel-card-check):focus-visible {
+  outline: 2px solid var(--focus, var(--accent)) !important;
+  outline-offset: 2px;
+}
+
+input[type="checkbox"]:not(.channel-card-check):checked {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-on, #ffffff);
+}
+
+input[type="checkbox"]:not(.channel-card-check):checked::before {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 4.5px;
+  border-left: 2px solid var(--accent-on, #ffffff);
+  border-bottom: 2px solid var(--accent-on, #ffffff);
+  transform: rotate(-45deg) translate(0.5px, -0.5px);
+}
+
+input[type="checkbox"]:not(.channel-card-check):indeterminate {
+  background-color: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: var(--accent-on, #ffffff);
+}
+
+input[type="checkbox"]:not(.channel-card-check):indeterminate::before {
+  content: "";
+  display: block;
+  width: 8px;
+  height: 2px;
+  background-color: var(--accent-on, #ffffff);
+  border-radius: 1px;
+}
+
+input[type="checkbox"]:not(.channel-card-check):disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-color: var(--line) !important;
+}
+
 input[type="radio"] {
   background: none !important;
   border: none !important;

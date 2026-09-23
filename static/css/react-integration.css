@@ -1,14 +1,16 @@
 /* React adapters for the dev controls; keep theme-specific colors in the packs. */
-.log-advanced-filters, .probe-controls, .config-scope-list, .channel-diagnostic-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.log-advanced-filters { padding: 12px 0; border-top: 1px solid var(--line); }
+.probe-controls, .config-scope-list, .channel-diagnostic-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.log-advanced-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px; padding: 12px 0; border-top: 1px solid var(--line); }
 .log-advanced-filters label { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
 .log-advanced-filters input[type=number] { width: 120px; }
 .log-advanced-filters input[type=datetime-local] { min-width: 180px; }
+.log-advanced-filters button { height: var(--control-h); }
+.log-advanced-filters .field-hint { margin-bottom: 6px; }
 .channel-diagnostics { margin: 12px 0 16px; font-size: 13px; }
 .channel-diagnostics p { margin: 6px 0; }
 .channel-diagnostic-badges { font-size: 11px; margin-bottom: 4px; }
 .channel-card.is-selected { outline: 2px solid var(--accent); outline-offset: -2px; }
-.channel-card-title input[type=checkbox], .upstream-select-visible input, .probe-controls input { width: auto; }
+.upstream-select-visible input, .probe-controls input { width: auto; }
 .upstream-select-visible { display: flex; gap: 5px; align-items: center; font-size: 12px; }
 .log-timing-bar { display: flex; height: 5px; width: 100%; border-radius: var(--radius-full); }
 .log-timing-segment { min-height: 5px; }
