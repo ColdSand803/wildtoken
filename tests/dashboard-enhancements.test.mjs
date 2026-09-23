@@ -6,3 +6,22 @@ test("request background uses counts while latency chart uses sampled duration",
 test("status distribution keeps no-response separate and links buckets to exact log windows", () => { assert.match(page, /count: overview.status_none/); assert.match(page, /错误时间分布/); assert.match(page, /bucket.bucket_epoch \+ overview.bucket_seconds/); assert.match(page, /resolved_start/); assert.match(page, /token|Tokens/); });
 test("request KPI supports keyboard drill-down and same-window comparison", () => { const { Kpi } = loadTS("web/src/pages/DashboardPage.tsx", { expose: ["Kpi"] }); const html = renderStatic(h(Kpi, { label: "请求", value: "10", hint: "window", trend: 50, onClick() {} })); assert.match(html, /role="button"/); assert.match(html, /tabindex="0"/); assert.match(html, /50.0%/); });
 test("each ranking uses its independent backend array and preserves ID based channel filtering", () => { for (const key of ["channels", "channel_tokens", "models", "model_tokens"]) assert.ok(page.includes(`rows={top?.${key} ?? []}`)); assert.match(page, /upstreamId: row.id/); });
+test("dashboard latency and request sparklines render smooth cubic Bezier paths instead of raw jagged lines", () => {
+  const { Sparkline } = loadTS("web/src/pages/DashboardPage.tsx", { expose: ["Sparkline"] });
+  const { smoothSeries, buildSmoothSparkPaths } = loadTS("web/src/sparkline.ts");
+  const raw = [10, 100, 10];
+  const smoothed = smoothSeries(raw, 2);
+  assert.equal(smoothed[0], 10);
+  assert.equal(smoothed[2], 10);
+  assert.ok(smoothed[1] < 100 && smoothed[1] > 10);
+  const coords = [{ x: 0, y: 10 }, { x: 50, y: 30 }, { x: 100, y: 20 }];
+  const paths = buildSmoothSparkPaths(coords, { baselineY: 100, minY: 0, maxY: 100 });
+  assert.match(paths.line, /^M\s+\S+\s+\S+\s+C\s+/);
+  assert.match(paths.area, /Z$/);
+  const latencyHtml = renderStatic(h(Sparkline, { values: [20, 50, 80, 40] }));
+  assert.match(latencyHtml, /class="ops-chart-svg dashboard-spark"/);
+  assert.match(latencyHtml, /<path[^>]+class="spark-morph-line"[^>]+d="M[^"]+C[^"]+"/);
+  const kpiHtml = renderStatic(h(Sparkline, { values: [100, 300, 200, 400], variant: "kpi" }));
+  assert.match(kpiHtml, /class="kpi-bg-spark-svg"/);
+  assert.match(kpiHtml, /<path[^>]+class="spark-morph-line"[^>]+d="M[^"]+C[^"]+"/);
+});

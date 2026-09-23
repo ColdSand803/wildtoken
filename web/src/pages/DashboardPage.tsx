@@ -1,5 +1,6 @@
 import { SegmentBar } from "../components/SegmentBar";
 import { AnimatedNumber, formatChineseUnit } from "../components/AnimatedNumber";
+import { buildSmoothSparkPaths, smoothSeries } from "../sparkline";
 import { navigateToLogs } from "../logFilters";
 import type { LogFilters } from "../logFilters";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
@@ -128,7 +129,7 @@ function Kpi({
 }) {
   return (
     <div className={tone ? `dashboard-kpi ${tone}` : "dashboard-kpi"} title={hint} role={onClick ? "button" : undefined} tabIndex={onClick ? 0 : undefined} onClick={onClick} onKeyDown={(event) => { if (onClick && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); onClick(); } }}>
-      {background && <div className="kpi-bg-spark" aria-hidden="true"><Sparkline values={background} /></div>}
+      {background && <div className="kpi-bg-spark" aria-hidden="true"><Sparkline values={background} variant="kpi" /></div>}
       <div className="dashboard-kpi-value">
         <AnimatedNumber value={value} />
         {rawValue !== undefined && formatChineseUnit(rawValue) && <small className="kpi-approx">≈{formatChineseUnit(rawValue)}</small>}
@@ -139,22 +140,79 @@ function Kpi({
   );
 }
 
-/** 延迟趋势。JSX 的 <svg> 走 createElementNS，属性齐全且真的会渲染。 */
-function Sparkline({ values }: { values: number[] }) {
+/** 延迟趋势与背景趋势曲线。JSX 的 <svg> 走 createElementNS，属性齐全且真的会渲染。 */
+function Sparkline({
+  values,
+  variant = "default",
+}: {
+  values: number[];
+  variant?: "default" | "kpi";
+}) {
   const gradientId = useId();
   if (values.length < 2) return <div className="dashboard-chart-empty">所选范围内暂无请求</div>;
 
+  const smoothed = smoothSeries(values, 2);
+
+  if (variant === "kpi") {
+    // 请求数卡片背景曲线：贴卡片底部，平滑淡雅，动态范围相对自适应
+    const width = 100;
+    const height = 32;
+    const max = Math.max(...smoothed);
+    const min = Math.min(...smoothed);
+    const range = max - min || 1;
+    const coords = smoothed.map((value, index) => ({
+      x: (index / Math.max(smoothed.length - 1, 1)) * width,
+      y: height - 2 - ((value - min) / range) * (height - 6),
+    }));
+    const { line, area } = buildSmoothSparkPaths(coords, {
+      baselineY: height,
+      minY: 2,
+      maxY: height - 2,
+    });
+
+    return (
+      <svg
+        className="kpi-bg-spark-svg"
+        viewBox={`0 0 ${width} ${height}`}
+        preserveAspectRatio="none"
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id={gradientId} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="currentColor" stopOpacity={0.16} />
+            <stop offset="100%" stopColor="currentColor" stopOpacity={0.02} />
+          </linearGradient>
+        </defs>
+        <path className="spark-morph-area" d={area} fill={`url(#${gradientId})`} />
+        <path
+          className="spark-morph-line"
+          d={line}
+          fill="none"
+          stroke="currentColor"
+          strokeOpacity={0.45}
+          strokeWidth="1.2"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    );
+  }
+
+  // 延迟趋势曲线：以 0 为地面，Catmull-Rom 三次贝塞尔平滑，上下留 pad 防裁切
   const width = 320;
   const height = 100;
-  const max = Math.max(...values, 1);
-  const step = width / (values.length - 1);
-  const line = values
-    .map((value, index) => {
-      const x = index * step;
-      const y = height - (value / max) * height;
-      return `${index === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const max = Math.max(...smoothed, 1);
+  const min = Math.min(...smoothed, 0);
+  const span = Math.max(max - min, 1);
+  const pad = 2;
+  const coords = smoothed.map((value, index) => ({
+    x: pad + (index / Math.max(smoothed.length - 1, 1)) * (width - pad * 2),
+    y: height - pad - ((value - min) / span) * (height - pad * 2),
+  }));
+  const { line, area } = buildSmoothSparkPaths(coords, {
+    baselineY: height,
+    minY: 2,
+    maxY: height - 2,
+  });
 
   return (
     <svg
@@ -171,10 +229,17 @@ function Sparkline({ values }: { values: number[] }) {
       </defs>
       <path
         className="spark-morph-area"
-        d={`${line} L${width} ${height} L0 ${height} Z`}
+        d={area}
         fill={`url(#${gradientId})`}
       />
-      <path className="spark-morph-line" d={line} fill="none" stroke="currentColor" />
+      <path
+        className="spark-morph-line"
+        d={line}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        vectorEffect="non-scaling-stroke"
+      />
     </svg>
   );
 }
