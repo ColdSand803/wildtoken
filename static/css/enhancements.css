@@ -158,9 +158,19 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   position: relative;
 }
 
+/* 列菜单按钮。和筛选控件一样带边框和底色：原来走 button.ghost，
+   边框和背景全透明，视觉盒子塌成一条文字，紧挨着带底色的筛选框
+   看着就矮一截。用户要的是「看起来」对齐，不是边界框数字相等。 */
 .col-menu-btn {
-  min-height: 32px;
+  background: var(--panel-muted);
+  border: 1px solid var(--line);
+  min-height: var(--control-h);
   min-width: 48px;
+}
+
+.col-menu-btn:hover {
+  background: var(--panel-subtle);
+  border-color: var(--line-strong);
 }
 
 .col-menu {

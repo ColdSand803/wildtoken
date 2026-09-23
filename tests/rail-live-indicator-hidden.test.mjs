@@ -52,9 +52,5 @@ test("状态行的默认隐藏仍由 [hidden] 承担", () => {
     /\.live-indicator\[hidden\] \{\n\s*display: none;/,
     "enhancements.css 必须保留 .live-indicator[hidden] 的隐藏",
   );
-  assert.match(
-    read("static/js/shell.js"),
-    /liveIndicator\.hidden = /,
-    "shell.js 必须仍用 hidden 属性切换状态行",
-  );
+  assert.match(read("web/src/pages/LogsPage.tsx"), /已暂停/);
 });

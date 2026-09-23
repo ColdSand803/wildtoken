@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WildToken Console</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+
+    <!--
+      主题在绘制前定下来。这段必须留在 HTML 里、不能搬进 React：
+      React 挂载在 JS 之后，主题选择要是跟着走，首屏会闪一下默认主题。
+
+      规则和 static/admin.html 一致——校验 id 形状加成员资格，避免老用户
+      localStorage 里留着已删除主题的 id 时加载不到任何 CSS。
+    -->
+    <script>
+      (function () {
+        try {
+          var safeThemeId = /^[a-z][a-z0-9-]{0,47}$/;
+          var safeThemeCss = /^\/theme-packs\/[a-z][a-z0-9-]{0,47}\/[A-Za-z0-9._/-]+\.css$/;
+          var bundledThemeCss = {
+            ark: "/theme-packs/ark/theme.css",
+            endfield: "/theme-packs/endfield/theme.css",
+            "sakura-mist": "/theme-packs/sakura-mist/theme.css",
+            anthropic: "/theme-packs/anthropic/theme.css",
+            "anthropic-dark": "/theme-packs/anthropic-dark/theme.css",
+            gojo: "/theme-packs/gojo/theme.css",
+            "co1dsand-light": "/theme-packs/co1dsand-light/theme.css",
+            "co1dsand-dark": "/theme-packs/co1dsand-dark/theme.css",
+            minegrub: "/theme-packs/minegrub/theme.css",
+          };
+          var t = localStorage.getItem("wildtoken_theme");
+          if (!safeThemeId.test(t || "") || (t !== "dark" && t !== "light" && !bundledThemeCss[t])) t = "dark";
+          document.documentElement.setAttribute("data-theme", t);
+          var arkThemeFamilies = { ark: "ark", endfield: "endfield" };
+          if (arkThemeFamilies[t]) {
+            document.documentElement.setAttribute("data-ark-theme", arkThemeFamilies[t]);
+            document.documentElement.setAttribute("data-ark-depth", "complex");
+          }
+          var themeCssId = localStorage.getItem("wildtoken_theme_css_id");
+          var themeCss = localStorage.getItem("wildtoken_theme_css");
+          if (themeCssId === t && themeCss && themeCss.indexOf("..") === -1 && safeThemeCss.test(themeCss)) {
+            document.documentElement.setAttribute("data-theme-pack-css", themeCss);
+          } else if (bundledThemeCss[t] && safeThemeCss.test(bundledThemeCss[t])) {
+            document.documentElement.setAttribute("data-theme-pack-css", bundledThemeCss[t]);
+            try {
+              localStorage.setItem("wildtoken_theme_css_id", t);
+              localStorage.setItem("wildtoken_theme_css", bundledThemeCss[t]);
+            } catch (e) {}
+          }
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "dark");
+        }
+        try {
+          var d = localStorage.getItem("wildtoken_density");
+          if (d !== "compact" && d !== "comfortable") d = "comfortable";
+          document.documentElement.setAttribute("data-density", d);
+        } catch (e) {
+          document.documentElement.setAttribute("data-density", "comfortable");
+        }
+      })();
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700;800&family=Noto+Serif+SC:wght@600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!--
+      复用旧控制台的样式表，新前端一行 CSS 都不产出。这样主题包的级联
+      顺序和旧版完全一致：base.css 在前，主题包在后，同等特异性时后者赢。
+      自己写 CSS-in-JS 会把运行时注入的 <style> 落在主题 <link> 之后，
+      级联翻转，主题被组件样式盖掉。
+    -->
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script>
+      (function () {
+        var href = document.documentElement.getAttribute("data-theme-pack-css");
+        if (!href) return;
+        document.write('<link id="theme-pack-css" rel="stylesheet" href="' + href + '" />');
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="aurora" aria-hidden="true">
+      <span class="aurora-blob aurora-a"></span>
+      <span class="aurora-blob aurora-b"></span>
+      <span class="aurora-blob aurora-c"></span>
+    </div>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

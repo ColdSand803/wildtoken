@@ -39,7 +39,7 @@ const (
 // logListColumns is the projection backing RequestLogOut.
 const logListColumns = `id, created_at, method, path,
                 downstream_token_id, downstream_token_name,
-                client_type,
+                client_ip, client_type,
                 upstream_id, upstream_name, model, request_model, upstream_model,
                 reasoning_effort, upstream_reasoning_effort, response_reasoning_effort,
                 stream, status_code,
@@ -408,9 +408,10 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	var requestUID, failureStage sql.NullString
 	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
 	var failureRetryable sql.NullBool
+	var clientIP sql.NullString
 
 	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Method, &entry.Path,
-		&downstreamTokenID, &downstreamTokenName, &entry.ClientType,
+		&downstreamTokenID, &downstreamTokenName, &clientIP, &entry.ClientType,
 		&upstreamID, &upstreamName, &model, &requestModel, &upstreamModel,
 		&reasoningEffort, &upstreamReasoningEffort, &responseReasoningEffort,
 		&entry.Stream, &statusCode,
@@ -426,6 +427,7 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	entry.DownstreamTokenID = nullInt64Ptr(downstreamTokenID)
 	entry.UpstreamID = nullInt64Ptr(upstreamID)
 	entry.DownstreamTokenName = nullStringPtr(downstreamTokenName)
+	entry.ClientIP = nullStringPtr(clientIP)
 	entry.UpstreamName = nullStringPtr(upstreamName)
 	entry.Model = nullStringPtr(model)
 	entry.RequestModel = nullStringPtr(requestModel)
@@ -519,7 +521,7 @@ func ListLogs(ctx context.Context, database *sql.DB, limit, offset int32,
 func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.RequestLogDetailOut, bool, error) {
 	row := database.QueryRowContext(ctx, `SELECT l.id, l.created_at, l.method, l.path,
               l.downstream_token_id, l.downstream_token_name,
-              l.client_type,
+              l.client_ip, l.client_type,
               l.upstream_id, l.upstream_name, l.model,
               l.request_model, l.upstream_model,
               l.reasoning_effort, l.upstream_reasoning_effort,
@@ -557,9 +559,10 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	var requestSnapshot, upstreamRequestOverride sql.NullString
 	var responseSnapshot, downstreamResponseOverride sql.NullString
 	var upstreamRequestIsOverride, downstreamResponseIsOverride int32
+	var clientIP sql.NullString
 
 	err := row.Scan(&detail.ID, &detail.CreatedAt, &detail.Method, &detail.Path,
-		&downstreamTokenID, &downstreamTokenName, &detail.ClientType,
+		&downstreamTokenID, &downstreamTokenName, &clientIP, &detail.ClientType,
 		&upstreamID, &upstreamName, &model, &requestModel, &upstreamModel,
 		&reasoningEffort, &upstreamReasoningEffort, &responseReasoningEffort,
 		&detail.Stream, &statusCode,
@@ -580,6 +583,7 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	detail.DownstreamTokenID = nullInt64Ptr(downstreamTokenID)
 	detail.UpstreamID = nullInt64Ptr(upstreamID)
 	detail.DownstreamTokenName = nullStringPtr(downstreamTokenName)
+	detail.ClientIP = nullStringPtr(clientIP)
 	detail.UpstreamName = nullStringPtr(upstreamName)
 	detail.Model = nullStringPtr(model)
 	detail.RequestModel = nullStringPtr(requestModel)
@@ -620,6 +624,75 @@ func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.Re
 	detail.UpstreamResponse = decodeSnapshot(responseSnapshot)
 	detail.DownstreamResponse = decodeSnapshot(downstreamResponse)
 	return detail, true, nil
+}
+
+// LogSnapshotField names one of the four captured payloads.
+type LogSnapshotField string
+
+const (
+	LogSnapshotDownstreamRequest  LogSnapshotField = "downstream_request"
+	LogSnapshotUpstreamRequest    LogSnapshotField = "upstream_request"
+	LogSnapshotUpstreamResponse   LogSnapshotField = "upstream_response"
+	LogSnapshotDownstreamResponse LogSnapshotField = "downstream_response"
+)
+
+// ParseLogSnapshotField maps a URL segment onto a field, or ok=false.
+func ParseLogSnapshotField(name string) (LogSnapshotField, bool) {
+	switch field := LogSnapshotField(name); field {
+	case LogSnapshotDownstreamRequest, LogSnapshotUpstreamRequest,
+		LogSnapshotUpstreamResponse, LogSnapshotDownstreamResponse:
+		return field, true
+	}
+	return "", false
+}
+
+// GetLogSnapshot returns one captured payload, or ok=false when the log is
+// missing. A log without that payload is found with a nil snapshot.
+//
+// The console opens a log with its metadata already in hand and fetches each
+// payload as the reader asks for it, so this reads only the columns that
+// payload needs instead of the whole payload row.
+func GetLogSnapshot(ctx context.Context, database *sql.DB, logID int64, field LogSnapshotField) (json.RawMessage, bool, error) {
+	// The override columns pair with their canonical snapshot the same way
+	// GetLogDetail resolves them; the canonical fields carry no override.
+	var canonical, override, isOverride string
+	switch field {
+	case LogSnapshotDownstreamRequest:
+		canonical = "p.request_snapshot"
+	case LogSnapshotUpstreamRequest:
+		canonical, override, isOverride = "p.request_snapshot",
+			"p.upstream_request_override", "p.upstream_request_is_override"
+	case LogSnapshotUpstreamResponse:
+		canonical = "p.response_snapshot"
+	case LogSnapshotDownstreamResponse:
+		canonical, override, isOverride = "p.response_snapshot",
+			"p.downstream_response_override", "p.downstream_response_is_override"
+	default:
+		return nil, false, apperr.BadRequest("unknown snapshot field")
+	}
+	if override == "" {
+		override, isOverride = "NULL", "0"
+	}
+
+	row := database.QueryRowContext(ctx, `SELECT `+canonical+`, `+override+`,
+              COALESCE(`+isOverride+`, 0)
+       FROM request_logs AS l
+       LEFT JOIN request_log_payloads AS p ON p.request_log_id = l.id
+       WHERE l.id = ?`, logID)
+
+	var stored, storedOverride sql.NullString
+	var overridden int32
+	err := row.Scan(&stored, &storedOverride, &overridden)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, apperr.Database(err)
+	}
+	if overridden != 0 {
+		stored = storedOverride
+	}
+	return decodeSnapshot(stored), true, nil
 }
 
 // decodeSnapshot returns the stored JSON, or nil when it is absent or corrupt.

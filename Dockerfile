@@ -1,3 +1,18 @@
+# ── Console build stage ──────────────────────────────────────────────────────
+# The console is served at /console. It builds here so
+# `docker compose up -d --build` stays the single deployment command; the
+# shared CSS, fonts and theme packs under static/ are copied as-is.
+FROM node:24-bookworm-slim AS console-builder
+
+WORKDIR /web
+
+# Lockfile first: dependency installs are cached until the manifest changes.
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ ./
+RUN npm run build
+
 # ── Build stage ──────────────────────────────────────────────────────────────
 FROM golang:1.25-bookworm AS builder
 
@@ -34,6 +49,10 @@ WORKDIR /app
 COPY --from=builder /out/wildtoken /usr/local/bin/wildtoken
 COPY static ./static
 COPY config ./config
+
+# The React console's build output. Kept out of the image when the stage is
+# skipped would break /console, so it is copied unconditionally.
+COPY --from=console-builder /web/dist ./web/dist
 
 # Themes are runtime-only, so copying them last keeps theme edits from
 # invalidating the compile cache.

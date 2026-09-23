@@ -341,6 +341,8 @@ type Deps struct {
 type RequestContext struct {
 	DownstreamTokenID   int64
 	DownstreamTokenName string
+	// ClientIP is the caller's address; empty when it could not be resolved.
+	ClientIP string
 	// QuotaPeriodStamp is the reset cycle this request was admitted under, carried
 	// onto every log entry so its usage settles against that cycle rather than
 	// whichever one is current when the row commits.
@@ -663,11 +665,20 @@ func baseLogEntry(requestCtx RequestContext, upstream *models.UpstreamRow,
 	clientType := requestCtx.ClientType
 	attemptIndex := requestCtx.AttemptIndex
 
+	// nil rather than a pointer to "": the column means "not known", and an
+	// empty string would render as a blank cell instead of a dash.
+	var clientIP *string
+	if requestCtx.ClientIP != "" {
+		address := requestCtx.ClientIP
+		clientIP = &address
+	}
+
 	entry := LogEntry{
 		Method:                  requestCtx.Method,
 		Path:                    requestCtx.Path,
 		DownstreamTokenID:       &tokenID,
 		DownstreamTokenName:     &tokenName,
+		ClientIP:                clientIP,
 		ClientType:              &clientType,
 		UpstreamID:              &upstreamID,
 		UpstreamName:            &upstreamName,

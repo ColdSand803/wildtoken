@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS upstreams (
     weight          INTEGER NOT NULL DEFAULT 100 CHECK (weight BETWEEN 0 AND 10000),
     auto_weight_enabled INTEGER NOT NULL DEFAULT 1 CHECK (auto_weight_enabled IN (0, 1)),
     enabled         INTEGER NOT NULL DEFAULT 1,
+    -- Archiving parks a channel out of routing without deleting it. The table
+    -- keeps one column for the fact and one for what enabled was before, so
+    -- unarchiving restores that rather than assuming it was on.
+    archived             INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1)),
+    archived_prev_enabled INTEGER,
     extra_headers   TEXT NOT NULL DEFAULT '{}',
     timeout_seconds REAL NOT NULL DEFAULT 300.0,
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
@@ -56,6 +61,9 @@ CREATE TABLE IF NOT EXISTS request_logs (
     path                TEXT NOT NULL,
     downstream_token_id INTEGER REFERENCES api_tokens(id) ON DELETE SET NULL,
     downstream_token_name TEXT,
+    -- Client address, as resolved from X-Forwarded-For / X-Real-IP with the
+    -- socket peer as fallback. NULL on rows written before the column existed.
+    client_ip           TEXT,
     client_type         TEXT NOT NULL DEFAULT 'unknown',
     upstream_id         INTEGER REFERENCES upstreams(id) ON DELETE SET NULL,
     upstream_name       TEXT,

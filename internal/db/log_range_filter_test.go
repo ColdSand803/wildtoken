@@ -146,7 +146,7 @@ func TestListLogsFiltersByStreamAndDuration(t *testing.T) {
 		{
 			// Zero is a legitimate sample, so a >=0 threshold keeps it while
 			// still excluding the untimed row.
-			name: "threshold zero keeps timed rows only",
+			name:    "threshold zero keeps timed rows only",
 			filter:  LogFilter{MinDurationMs: int64Ptr(0)},
 			wantIDs: []int64{1, 2, 3, 5, 6},
 		},

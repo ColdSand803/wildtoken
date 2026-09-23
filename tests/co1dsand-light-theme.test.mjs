@@ -5,8 +5,8 @@ import test from "node:test";
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const manifest = JSON.parse(read("themes/co1dsand-light/theme.json"));
 const css = read("themes/co1dsand-light/theme.css");
-const events = read("static/js/events.js");
-const adminHtml = read("static/admin.html");
+const events = read("web/src/theme.ts");
+const adminHtml = read("web/index.html");
 
 test("素宣 的清单字段完整且与目录名一致", () => {
   assert.deepEqual(manifest, {
@@ -63,9 +63,7 @@ test("素宣 的圆角比默认更克制，字体栈补了中文", () => {
 
 test("素宣 在主题注册表初始化前后都可选", () => {
   const cssHref = "/theme-packs/co1dsand-light/theme.css";
-  assert.match(
-    events,
-    /\{ id: "co1dsand-light", label: "素宣", swatch: \["#ffffff", "#111111"\], css: "\/theme-packs\/co1dsand-light\/theme\.css", description: ".*" \}/,
-  );
+  assert.ok(events.includes('"co1dsand-light": "素宣"'));
+  assert.ok(events.includes(cssHref));
   assert.ok(adminHtml.includes(`"co1dsand-light": "${cssHref}"`));
 });

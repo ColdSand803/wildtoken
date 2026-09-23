@@ -3,64 +3,28 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import vm from "node:vm";
+
+import { reasoningChain } from "../web/src/reasoningChain.ts";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 
-function extractFunction(source, name) {
-  const start = source.indexOf(`function ${name}(`);
-  assert.notEqual(start, -1, `${name} must exist`);
-
-  const bodyStart = source.indexOf("{", start);
-  let depth = 0;
-  for (let index = bodyStart; index < source.length; index += 1) {
-    const char = source[index];
-    if (char === "{") depth += 1;
-    if (char === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        return source.slice(start, index + 1);
-      }
-    }
-  }
-
-  throw new Error(`could not extract ${name}`);
-}
-
-function routeContext() {
-  const source = read("static/js/logs.js");
-  const context = vm.createContext({ escapeHtml: (v) => String(v) });
-  for (const name of [
-    "getReasoningEffortRoute",
-    "reasoningEffortTitle",
-    "renderLogReasoningEffort",
-  ]) {
-    vm.runInContext(extractFunction(source, name), context);
-  }
-  return context;
-}
-
-// 只取每个环节的值，避开 vm realm 的原型差异。
-function chainOf(context, log) {
-  context.candidate = log;
-  return vm.runInContext(
-    "getReasoningEffortRoute(candidate).chain.map((s) => s.value).join('>')",
-    context,
-  );
-}
+/** 只取每个环节的值，断言才读得懂。 */
+const chainOf = (log) =>
+  reasoningChain({
+    reasoning_effort: null,
+    upstream_reasoning_effort: null,
+    ...log,
+  })
+    .map((step) => step.value)
+    .join(">");
 
 test("渠道改写过强度时，实际发往上游的值出现在链路里", () => {
-  const context = routeContext();
-
   // 上游没回报强度：没有上游环节的话，日志就只剩 max，等于把真实值藏了。
-  assert.equal(
-    chainOf(context, { reasoning_effort: "max", upstream_reasoning_effort: "xhigh" }),
-    "max>xhigh",
-  );
+  assert.equal(chainOf({ reasoning_effort: "max", upstream_reasoning_effort: "xhigh" }), "max>xhigh");
 
   // 上游回报的和发出去的一致，合并掉，不重复显示。
   assert.equal(
-    chainOf(context, {
+    chainOf({
       reasoning_effort: "max",
       upstream_reasoning_effort: "xhigh",
       response_reasoning_effort: "xhigh",
@@ -70,7 +34,7 @@ test("渠道改写过强度时，实际发往上游的值出现在链路里", ()
 
   // 三个环节都不同，就都要显示出来。
   assert.equal(
-    chainOf(context, {
+    chainOf({
       reasoning_effort: "max",
       upstream_reasoning_effort: "xhigh",
       response_reasoning_effort: "high",
@@ -80,40 +44,33 @@ test("渠道改写过强度时，实际发往上游的值出现在链路里", ()
 });
 
 test("没有改写时的显示与从前一致", () => {
-  const context = routeContext();
-
   // 未配置映射：请求与发出一致，合并成单值。
-  assert.equal(
-    chainOf(context, { reasoning_effort: "high", upstream_reasoning_effort: "high" }),
-    "high",
-  );
+  assert.equal(chainOf({ reasoning_effort: "high", upstream_reasoning_effort: "high" }), "high");
   // 旧日志行没有 upstream 字段，也不能凭空多出环节。
-  assert.equal(chainOf(context, { reasoning_effort: "high" }), "high");
+  assert.equal(chainOf({ reasoning_effort: "high" }), "high");
   // 请求没写强度、只有上游回报。
-  assert.equal(chainOf(context, { response_reasoning_effort: "medium" }), "medium");
-  // 请求与响应不同仍然成链，这是改动前就有的行为。
+  assert.equal(chainOf({ response_reasoning_effort: "medium" }), "medium");
+  // 请求与响应不同仍然成链。
   assert.equal(
-    chainOf(context, { reasoning_effort: "high", response_reasoning_effort: "low" }),
+    chainOf({ reasoning_effort: "high", response_reasoning_effort: "low" }),
     "high>low",
   );
   // 完全没有强度信息。
-  assert.equal(chainOf(context, {}), "");
+  assert.equal(chainOf({}), "");
 });
 
+/* 单值是一段纯文本，多环节才画成带箭头的路由并把完整说明放进 title。
+   单值也套路由外壳的话，绝大多数行会白白多出一层缩进。 */
 test("单值渲染成纯文本，多环节渲染成带 title 的路由", () => {
-  const context = routeContext();
+  const source = read("web/src/pages/LogsPage.tsx");
+  const cell = source.slice(
+    source.indexOf("function ReasoningCell"),
+    source.indexOf("const CLIENT_TYPES"),
+  );
 
-  context.single = { reasoning_effort: "high", upstream_reasoning_effort: "high" };
-  const single = vm.runInContext("renderLogReasoningEffort(single)", context);
-  assert.match(single, /model-single/);
-  assert.doesNotMatch(single, /model-route/);
-
-  context.routed = { reasoning_effort: "max", upstream_reasoning_effort: "xhigh" };
-  const routed = vm.runInContext("renderLogReasoningEffort(routed)", context);
-  assert.match(routed, /model-route/);
-  assert.match(routed, /请求强度：max；上游强度：xhigh/);
-  assert.match(routed, /xhigh/);
-
-  const empty = vm.runInContext("renderLogReasoningEffort({})", context);
-  assert.match(empty, /muted/);
+  assert.match(cell, /chain\.length === 1/, "单值要单独一条分支");
+  assert.match(cell, /className="model-text model-single"/);
+  assert.match(cell, /className="model-route" title=\{title\}/);
+  // title 把三段完整写出来，列里放不下的信息在这里补齐。
+  assert.match(cell, /chain\.map\(\(step\) => `\$\{step\.label\}：\$\{step\.value\}`\)/);
 });

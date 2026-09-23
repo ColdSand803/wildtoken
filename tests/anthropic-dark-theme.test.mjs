@@ -5,8 +5,8 @@ import test from "node:test";
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const manifest = JSON.parse(read("themes/anthropic-dark/theme.json"));
 const css = read("themes/anthropic-dark/theme.css");
-const events = read("static/js/events.js");
-const adminHtml = read("static/admin.html");
+const themeModule = read("web/src/theme.ts");
+const consoleHtml = read("web/index.html");
 
 test("Anthropic Dark manifest exposes the dark brand palette", () => {
   assert.deepEqual(manifest, {
@@ -50,11 +50,18 @@ test("Anthropic Dark loads its OFL fonts from the shared static font directory",
   assert.match(css, /--font-mono: "JetBrains Mono",/);
 });
 
-test("Anthropic Dark is available before and after theme registry initialization", () => {
+/* Registered in two places: the pre-paint script in index.html, which runs
+   before React so the first frame is not the default theme, and the runtime
+   registry behind the theme menu. */
+test("Anthropic Dark is registered for both pre-paint and runtime selection", () => {
   const cssHref = "/theme-packs/anthropic-dark/theme.css";
-  assert.match(
-    events,
-    /\{ id: "anthropic-dark", label: "Anthropic Dark", swatch: \["#141413", "#d97757"\], css: "\/theme-packs\/anthropic-dark\/theme\.css", description: ".*" \}/,
+  assert.ok(
+    themeModule.includes(`"anthropic-dark": "${cssHref}"`),
+    "missing runtime pack entry",
   );
-  assert.ok(adminHtml.includes(`"anthropic-dark": "${cssHref}"`));
+  assert.ok(
+    themeModule.includes('"anthropic-dark": ["#141413", "#d97757"]'),
+    "missing swatch",
+  );
+  assert.ok(consoleHtml.includes(`"anthropic-dark": "${cssHref}"`), "missing pre-paint entry");
 });

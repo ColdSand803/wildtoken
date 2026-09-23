@@ -52,84 +52,62 @@ function createThemeContext(storedTheme) {
   };
 }
 
+/** 预绘制脚本是纯 JS 且要在 React 之前跑，所以能在 vm 里真执行。 */
+function prePaintScript() {
+  const html = read("web/index.html");
+  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script, "index.html must include its pre-paint theme script");
+  return script;
+}
+
 test("pre-paint boot preserves a stored Ark selection", () => {
   const { attributes, context } = createThemeContext("ark");
-  const html = read("static/admin.html");
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-
-  assert.ok(script, "admin.html must include its pre-paint theme script");
-  vm.runInContext(script, context, { filename: "admin-prepaint.js" });
+  vm.runInContext(prePaintScript(), context, { filename: "console-prepaint.js" });
 
   assert.equal(attributes.get("data-theme"), "ark");
   assert.equal(attributes.get("data-ark-theme"), "ark");
   assert.equal(attributes.get("data-ark-depth"), "complex");
 });
 
-test("runtime selection persists Ark's complex root contract", () => {
-  const { attributes, storedValues, context } = createThemeContext("dark");
-  const source = read("static/js/events.js");
-  const definitionsEnd = source.indexOf("\ninitializeThemes();");
-
-  assert.notEqual(definitionsEnd, -1, "events.js must retain its theme initialization marker");
-  vm.runInContext(source.slice(0, definitionsEnd), context, { filename: "events-theme-definitions.js" });
-  vm.runInContext('applyTheme("ark");', context, { filename: "events-theme-apply.js" });
-
-  assert.equal(attributes.get("data-theme"), "ark");
-  assert.equal(attributes.get("data-ark-theme"), "ark");
-  assert.equal(attributes.get("data-ark-depth"), "complex");
-  assert.equal(storedValues.get("wildtoken_theme"), "ark");
-});
-
-test("Endfield selection retains its existing complex family contract", () => {
-  const { attributes, context } = createThemeContext("dark");
-  const source = read("static/js/events.js");
-  const definitionsEnd = source.indexOf("\ninitializeThemes();");
-
-  vm.runInContext(source.slice(0, definitionsEnd), context, { filename: "events-theme-definitions.js" });
-  vm.runInContext('applyTheme("endfield");', context, { filename: "events-theme-endfield.js" });
+test("pre-paint boot gives Endfield the same complex family contract", () => {
+  const { attributes, context } = createThemeContext("endfield");
+  vm.runInContext(prePaintScript(), context, { filename: "console-prepaint.js" });
 
   assert.equal(attributes.get("data-theme"), "endfield");
   assert.equal(attributes.get("data-ark-theme"), "endfield");
   assert.equal(attributes.get("data-ark-depth"), "complex");
 });
 
-test("selecting a non-Ark theme clears the Ark root contract", () => {
-  const { attributes, context } = createThemeContext("dark");
-  const source = read("static/js/events.js");
-  const definitionsEnd = source.indexOf("\ninitializeThemes();");
+/* applyTheme lives in TypeScript, which this runner cannot execute, so the
+   runtime half is pinned at the source level: the two attributes must be set
+   for the complex family and removed for everything else. Dropping the else
+   branch would leave a stale data-ark-depth behind after switching away. */
+test("runtime selection keeps the Ark root contract in both directions", () => {
+  const source = read("web/src/theme.ts");
+  const applyTheme = source.slice(source.indexOf("export function applyTheme"));
+  const branch = applyTheme.slice(0, applyTheme.indexOf("const css ="));
 
-  vm.runInContext(source.slice(0, definitionsEnd), context, { filename: "events-theme-definitions.js" });
-  vm.runInContext('applyTheme("ark"); applyTheme("light");', context, { filename: "events-theme-cleanup.js" });
+  assert.match(branch, /resolved === "ark" \|\| resolved === "endfield"/);
+  assert.match(branch, /setAttribute\("data-ark-theme", resolved\)/);
+  assert.match(branch, /setAttribute\("data-ark-depth", "complex"\)/);
+  assert.match(branch, /removeAttribute\("data-ark-theme"\)/);
+  assert.match(branch, /removeAttribute\("data-ark-depth"\)/);
+});
+
+test("pre-paint boot clears the Ark root contract for other themes", () => {
+  const { attributes, context } = createThemeContext("light");
+  vm.runInContext(prePaintScript(), context, { filename: "console-prepaint.js" });
 
   assert.equal(attributes.get("data-theme"), "light");
   assert.equal(attributes.get("data-ark-theme"), undefined);
   assert.equal(attributes.get("data-ark-depth"), undefined);
 });
 
-test("Ark primary action rules leave navigation and utility controls to their own states", () => {
+test("Ark primary actions are explicitly opted in, leaving utility controls neutral", () => {
   const css = read(ARK_CSS);
-  const selectors = [...css.matchAll(/(html\[data-theme="ark"\] button:not\(:where\([\s\S]*?\)\))(?::hover)?\s*\{/g)].map(
-    ([, selector]) => selector,
-  );
-  const utilityControls = [
-    ".table-sort-button",
-    ".priority-value",
-    ".token-preview-button",
-    ".model-selection-remove",
-    ".toast-close",
-    /* 重试链路的每一步是个 <button>，但它是一行记录、不是主操作。漏在清单外时
-       整行会拿到主按钮的实心渐变，把里面的状态码徽章和渠道名一起糊掉。 */
-    ".retry-chain-step",
-  ];
-
-  assert.equal(selectors.length, 2, "Ark must keep paired default and hover primary-action selectors");
-  for (const selector of selectors) {
-    assert.match(selector, /\.nav-link/, "navigation buttons must not inherit primary-action styling");
-    for (const utilityControl of utilityControls) {
-      assert.ok(selector.includes(utilityControl), `${utilityControl} must retain its utility-control styling`);
-    }
-    assert.match(selector, /\.segmented-control\s*>\s*button/, "segmented choices must retain selected and unselected states");
-  }
+  assert.match(css, /html\[data-theme="ark"\] button\.primary\s*\{/);
+  assert.match(css, /html\[data-theme="ark"\] button\.primary:hover\s*\{/);
+  assert.doesNotMatch(css, /button:not\(:where\(/);
 });
 
 test("Ark's shared button geometry does not override inline utility-control sizing or type", () => {

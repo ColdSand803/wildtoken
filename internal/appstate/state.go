@@ -220,6 +220,9 @@ type State struct {
 	// minutes, so persisting them would mean a restart routing on measurements
 	// taken before it.
 	Latency *proxy.LatencyTracker
+	// ActiveRequests holds what is being proxied right now, which no log row
+	// covers: a row only exists once the request is over.
+	ActiveRequests *proxy.ActiveRegistry
 	// TokenRateLimiter and UpstreamRateLimiter enforce the per-token and
 	// per-channel rate expressions. They must stay separate instances: both key
 	// their windows by an int64 id, so sharing one would let a token and a
@@ -245,6 +248,16 @@ type State struct {
 	StartedAt time.Time
 }
 
+// EffectiveUpstreamTimeoutSeconds is the fallback timeout for channels that
+// leave theirs unset: the operator-edited runtime value when one is set,
+// otherwise the startup config.
+func (s *State) EffectiveUpstreamTimeoutSeconds() float64 {
+	if runtime := s.Runtime.Get(); runtime.DefaultUpstreamTimeoutSeconds > 0 {
+		return float64(runtime.DefaultUpstreamTimeoutSeconds)
+	}
+	return s.Settings.Upstream.DefaultTimeoutSeconds
+}
+
 // ProxyDeps assembles the dependencies one forwarded request needs.
 func (s *State) ProxyDeps() proxy.Deps {
 	return proxy.Deps{
@@ -253,7 +266,7 @@ func (s *State) ProxyDeps() proxy.Deps {
 		Metrics:        s.Metrics,
 		LogWriter:      s.LogWriter,
 		Latency:        s.Latency,
-		DefaultTimeout: time.Duration(s.Settings.Upstream.DefaultTimeoutSeconds * float64(time.Second)),
+		DefaultTimeout: time.Duration(s.EffectiveUpstreamTimeoutSeconds() * float64(time.Second)),
 	}
 }
 

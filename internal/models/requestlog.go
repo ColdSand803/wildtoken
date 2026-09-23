@@ -7,12 +7,14 @@ import (
 
 // RequestLogOut is the list representation of a proxied request.
 type RequestLogOut struct {
-	ID                        int64   `json:"id"`
-	CreatedAt                 string  `json:"created_at"`
-	Method                    string  `json:"method"`
-	Path                      string  `json:"path"`
-	DownstreamTokenID         *int64  `json:"downstream_token_id"`
-	DownstreamTokenName       *string `json:"downstream_token_name"`
+	ID                  int64   `json:"id"`
+	CreatedAt           string  `json:"created_at"`
+	Method              string  `json:"method"`
+	Path                string  `json:"path"`
+	DownstreamTokenID   *int64  `json:"downstream_token_id"`
+	DownstreamTokenName *string `json:"downstream_token_name"`
+	// ClientIP is null on rows written before the column existed.
+	ClientIP                  *string `json:"client_ip"`
 	ClientType                string  `json:"client_type"`
 	UpstreamID                *int64  `json:"upstream_id"`
 	UpstreamName              *string `json:"upstream_name"`
@@ -103,12 +105,55 @@ type RequestLogCursorOut struct {
 	ID        int64  `json:"id"`
 }
 
+// ActiveRequestOut is a request the gateway is still proxying, so the console
+// can show it before there is a log row to show.
+//
+// The field names match RequestLogOut where they mean the same thing, so the
+// console's channel, token, model, and reasoning-effort formatters read either
+// shape. What is missing is what only exists once the request is over: status,
+// usage, and duration. ElapsedMs stands in for the last of those, measured by
+// the server so a browser with a skewed clock still counts from the right
+// place.
+//
+// ResponseReasoningEffort has no counterpart here for the same reason: it is
+// read out of an answer that has not arrived.
+type ActiveRequestOut struct {
+	ID                  int64   `json:"id"`
+	StartedAt           string  `json:"started_at"`
+	ElapsedMs           int64   `json:"elapsed_ms"`
+	Method              string  `json:"method"`
+	Path                string  `json:"path"`
+	DownstreamTokenID   *int64  `json:"downstream_token_id"`
+	DownstreamTokenName *string `json:"downstream_token_name"`
+	ClientIP            *string `json:"client_ip"`
+	ClientType          string  `json:"client_type"`
+	UpstreamID          *int64  `json:"upstream_id"`
+	UpstreamName        *string `json:"upstream_name"`
+	Model               *string `json:"model"`
+	RequestModel        *string `json:"request_model"`
+	UpstreamModel       *string `json:"upstream_model"`
+	// ReasoningEffort is what the caller asked for; UpstreamReasoningEffort is
+	// what the channel's effort mapping rewrote it into. Both are known once the
+	// upstream request has been prepared.
+	ReasoningEffort         *string `json:"reasoning_effort"`
+	UpstreamReasoningEffort *string `json:"upstream_reasoning_effort"`
+	// Attempt counts how many channels this request has been handed to. It is
+	// zero until routing picks the first one.
+	Attempt int32 `json:"attempt"`
+}
+
 type RequestLogPage struct {
-	Items      []RequestLogOut      `json:"items"`
-	HasMore    bool                 `json:"has_more"`
-	RecentRPM  int64                `json:"recent_rpm"`
-	RecentTPM  int64                `json:"recent_tpm"`
-	NextCursor *RequestLogCursorOut `json:"next_cursor,omitempty"`
+	Items   []RequestLogOut `json:"items"`
+	HasMore bool            `json:"has_more"`
+	// Active is only filled on the newest page: an in-flight request has no
+	// cursor position, so it would be an intruder on any other one.
+	Active []ActiveRequestOut `json:"active,omitempty"`
+	// ActiveTotal counts everything in flight, which Active does not: that list
+	// is capped, so concurrency has to be read from here.
+	ActiveTotal int                  `json:"active_total"`
+	RecentRPM   int64                `json:"recent_rpm"`
+	RecentTPM   int64                `json:"recent_tpm"`
+	NextCursor  *RequestLogCursorOut `json:"next_cursor,omitempty"`
 }
 
 type TokenUsageWindowOut struct {

@@ -69,11 +69,11 @@ html[data-theme="endfield"] {
   --shadow: var(--shadow-sm);
   --glow-accent: none;
 
-  --code-frame-bg: #191919;
-  --code-bg: #20201e;
-  --code-text: #f3f3ed;
-  --code-muted: #afafa5;
-  --code-border: #5a5a54;
+  --code-frame-bg: #d9d9d2;
+  --code-bg: #f8f8f4;
+  --code-text: #191919;
+  --code-muted: #5c5c57;
+  --code-border: #b4b4ab;
 
   --row-hover: rgb(255 250 0 / 24%);
   --row-disabled: rgb(217 217 210 / 60%);
@@ -493,14 +493,14 @@ html[data-theme="endfield"] button {
   min-height: var(--control-h);
 }
 
-html[data-theme="endfield"] button:not(.secondary):not(.danger):not(.ghost):not(.status-switch):not([role="option"]):not([role="menuitem"]):not([role="menuitemradio"]) {
+html[data-theme="endfield"] button.primary {
   background: var(--ef-signal);
   border-color: var(--ef-ink);
   box-shadow: 3px 3px 0 var(--ef-ink);
   color: var(--ef-ink);
 }
 
-html[data-theme="endfield"] button:not(.secondary):not(.danger):not(.ghost):not(.status-switch):not([role="option"]):not([role="menuitem"]):not([role="menuitemradio"]):hover {
+html[data-theme="endfield"] button.primary:hover {
   background: var(--ef-paper);
   box-shadow: 3px 3px 0 var(--ef-ink), inset 4px 0 0 var(--ef-signal);
   color: var(--ef-ink);

@@ -1,0 +1,14 @@
+---
+# Accepted zizmor findings, with the reasoning. Anything not listed here is a
+# real finding and should be fixed rather than appended to this file.
+rules:
+  # Every workflow in this repository references actions by mutable major tag
+  # (actions/checkout@v7, actions/setup-go@v6, ...). Hash pinning is the safer
+  # default and is worth doing, but it is a repository-wide change that also
+  # needs an update bot to stay current, so it is tracked separately instead of
+  # being applied to whichever file was edited most recently.
+  unpinned-uses:
+    config:
+      policies:
+        actions/*: ref-pin
+        softprops/*: ref-pin

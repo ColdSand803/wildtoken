@@ -26,9 +26,11 @@ func NewRouter(state *appstate.State) http.Handler {
 
 	router.Get("/health", handlers.HealthCheck(state))
 	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/admin", http.StatusSeeOther)
+		http.Redirect(w, r, "/console", http.StatusSeeOther)
 	})
-	router.Get("/admin", serveAdminHTML)
+	router.Get("/console", serveConsoleHTML)
+	router.Mount("/console/assets", noStore(http.StripPrefix("/console/assets",
+		http.FileServer(http.Dir(filepath.Join("web", "dist", "assets"))))))
 	router.Get("/api/themes", handlers.ListPublicThemePacks(state))
 
 	// Outside the admin group: Prometheus authenticates with its own bearer token,
@@ -111,6 +113,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			upstreams.Put("/{id}", handlers.AdminUpdateUpstream(state))
 			upstreams.Delete("/{id}", handlers.AdminDeleteUpstream(state))
 			upstreams.Patch("/{id}/enabled", handlers.AdminSetUpstreamEnabled(state))
+			upstreams.Patch("/{id}/archived", handlers.AdminSetUpstreamArchived(state))
 			upstreams.Patch("/{id}/priority", handlers.AdminSetUpstreamPriority(state))
 			upstreams.Post("/{id}/test", handlers.AdminTestUpstream(state))
 			upstreams.Post("/{id}/test-model", handlers.AdminTestUpstreamModel(state))
@@ -147,6 +150,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			logs.Get("/top", handlers.AdminTopLogStats(state))
 			logs.Get("/overview", handlers.AdminLogOverview(state))
 			logs.Get("/{id}", handlers.AdminGetLogDetail(state))
+			logs.Get("/{id}/snapshots/{field}", handlers.AdminGetLogSnapshot(state))
 		})
 	})
 }
@@ -211,12 +215,18 @@ func allowAnyOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// serveAdminHTML serves the admin console from static/.
-func serveAdminHTML(w http.ResponseWriter, r *http.Request) {
-	html, err := os.ReadFile(filepath.Join("static", "admin.html"))
+// serveConsoleHTML serves the console from web/dist.
+//
+// The build output lives under web/dist; the bundle's asset paths are already
+// prefixed with /console/ by Vite's base setting. A missing build is reported
+// rather than served as an empty page, so the cause is visible instead of
+// looking like a blank console.
+func serveConsoleHTML(w http.ResponseWriter, r *http.Request) {
+	index := filepath.Join("web", "dist", "index.html")
+	html, err := os.ReadFile(index)
 	if err != nil {
 		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Admin page not found"))
+		w.Write([]byte("Console build not found; run npm run build in web/"))
 		return
 	}
 	w.Header().Set("content-type", "text/html; charset=utf-8")
@@ -224,7 +234,7 @@ func serveAdminHTML(w http.ResponseWriter, r *http.Request) {
 	w.Write(html)
 }
 
-// AdminURLFromSettings builds the browser-facing admin URL.
+// AdminURLFromSettings builds the browser-facing console URL.
 //
 // When the server binds on all interfaces (0.0.0.0 or ::), loopback is opened
 // instead, because a wildcard address is not something a browser can visit.
@@ -233,7 +243,7 @@ func AdminURLFromSettings(host string, port uint16) string {
 	case "0.0.0.0", "::", "[::]":
 		host = "127.0.0.1"
 	}
-	return "http://" + host + ":" + strconv.Itoa(int(port)) + "/admin"
+	return "http://" + host + ":" + strconv.Itoa(int(port)) + "/console"
 }
 
 // IsLoopbackBindHost reports whether a configured bind host only accepts local

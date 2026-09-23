@@ -45,6 +45,92 @@
   animation-delay: var(--log-row-delay, 0ms);
 }
 
+/* 详情列：错误文本最多占两行，完整内容在 title 里。不限高的话一条上游堆栈
+   能把整行撛成一屏。 */
+.detail-cell {
+  max-width: 320px;
+  min-width: 160px;
+}
+
+/* IP 列。等宽才能竖着对齐段位，扫一眼看出同网段的请求。
+   IPv6 很长，给个上限并省略，完整值在 title 里。 */
+.ip-cell {
+  max-width: 150px;
+  white-space: nowrap;
+}
+
+.log-ip {
+  color: var(--muted);
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.log-error-detail {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--danger);
+  display: -webkit-box;
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* 进行中的请求：还没有日志行，所以整行不可点，靠左侧竖条和呼吸的圆点区分。 */
+.log-row--active {
+  background: var(--accent-soft);
+  box-shadow: inset 2px 0 0 var(--accent);
+  cursor: default;
+}
+
+.log-row--active:hover,
+.log-row--active:focus {
+  background: var(--accent-soft);
+}
+
+.status-active {
+  align-items: center;
+  display: inline-flex;
+  gap: 5px;
+}
+
+.status-active-dot {
+  animation: status-active-pulse 1.4s ease-in-out infinite;
+  background: var(--accent);
+  border-radius: 50%;
+  height: 6px;
+  width: 6px;
+}
+
+.active-attempt {
+  margin-left: 6px;
+}
+
+@keyframes status-active-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-active-dot {
+    animation: none;
+  }
+}
+
 .log-row:hover,
 .log-row:focus {
   background: var(--row-hover);
@@ -55,24 +141,29 @@
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-.token-triple {
+/* 输入在上、输出在下，两行。没有底色和边框：一行两个小数字不需要被圈
+   起来，去掉之后整列安静很多。 */
+.token-io {
   display: grid;
-  gap: 4px;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  max-width: 360px;
+  gap: 2px;
+  max-width: 96px;
 }
 
-.token-triple span {
-  background: var(--panel-subtle);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  display: grid;
-  gap: 1px;
+.token-io-line {
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
   min-width: 0;
-  padding: 3px 5px;
 }
 
-.token-triple b {
+.token-io-arrow {
+  color: var(--muted);
+  flex: none;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.token-io b {
   color: var(--text);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -82,12 +173,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.token-triple small {
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.1;
 }
 
 @keyframes log-row-enter {
@@ -112,14 +197,6 @@
 
 /* ── Log detail ──────────────────────────────────────────── */
 
-.request-detail-grid {
-  align-items: start;
-  display: grid;
-  gap: 12px;
-  grid-auto-flow: dense;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .log-detail-head {
   align-items: flex-start;
   background: var(--panel-subtle);
@@ -137,42 +214,50 @@
   overflow-wrap: anywhere;
 }
 
-/* 中间那列（状态与耗时）装四段耗时，比左右两列需要更多横向空间。 */
+/* 元信息是两列表：key 一列作表头，value 一列是内容。
+   两列连成一块，中间一条竖线，表头列有自己的底色。
+   卡片只当结构用（display:contents），格子直接进网格，两列宽度全局一致。 */
 .log-detail-meta {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) minmax(0, 1fr);
-}
-
-.log-detail-meta-card {
-  align-content: start;
   background: var(--panel-subtle);
   border: 1px solid var(--line);
   border-radius: var(--radius);
+  column-gap: 0;
   display: grid;
-  gap: 3px;
+  grid-template-columns: max-content minmax(0, 1fr);
   min-width: 0;
-  padding: 10px 12px;
+  /* 表头列的底色要收进圆角里。 */
+  overflow: hidden;
 }
 
-.log-detail-meta-card strong,
-.log-detail-meta-card small {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.log-detail-meta-card {
+  display: contents;
+}
+
+.log-detail-meta-card > * {
+  padding: 9px 12px;
+}
+
+.log-detail-meta-card + .log-detail-meta-card > * {
+  border-top: 1px solid var(--line);
+}
+
+/* 表头列：底色 + 与内容列之间的竖线。 */
+.log-detail-meta-label {
+  background: var(--panel-muted);
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.35;
   white-space: nowrap;
 }
 
 .log-detail-meta-card strong {
   color: var(--text);
-  font-size: var(--text-base);
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.log-detail-meta-card small {
-  color: var(--muted);
   font-size: var(--text-sm);
+  font-weight: 600;
+  line-height: 1.35;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .log-detail-route-card {
@@ -191,10 +276,9 @@
 
 .log-detail-meta-label {
   color: var(--muted);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 .log-detail-status {
@@ -304,136 +388,147 @@
   white-space: nowrap;
 }
 
-.log-detail-sections-head {
-  align-items: end;
+/* 页签条贴着滚动区顶部：报文很长，翻到底了也能直接换一份看。
+   负外边距把它推回正文的内边距里，这样上滚的内容不会露在它上面。 */
+/* 页签条和面板必须直接贴着：body 是 grid，那 16px 网格间距会在中间
+   留一道空档，页签就变成飘在面板上方的一排按钮。
+   上内边距也归零：页签条自己贴顶，不再靠负 margin 上提——负 margin 会让
+   网格下一行跟着向上侵入 16px，正好把面板的上内边距遮掉，内容就贴在页签上了。 */
+.log-detail-panel .upstream-dialog-body {
+  gap: 0;
+  padding-top: 0;
+}
+
+/* 页签条是一条带底线的轨道，不是独立容器：给它四周边框会把整块变成
+   一个工具条，页签就退化成里面的分段按钮。底色比面板暗一档才分得出层次，
+   而且不能透：这条是 sticky 的，透了报文会从页签后面穿过去。 */
+.log-detail-tabs {
+  align-items: flex-end;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--line);
+  border-radius: var(--radius) var(--radius) 0 0;
   display: flex;
-  justify-content: space-between;
+  gap: 2px;
+  /* 下限 = 自然高：上内边距 8 + 页签 40 - 页签下移的 1 + 底线 1。
+     不能省：条子自己是横向滚动容器，而 CSS Grid 规定「溢出不是 visible 的
+     项，自动最小尺寸算 0」。正文 upstream-dialog-body 是 grid，内容一旦高出
+     滚动区，剩余空间转负，页签那一行就停在 0——条子只剩 padding 加底线共
+     9px，40px 的页签被 align-items: flex-end 顶到条子上沿外，看上去就是整条
+     页签往上跑、被抽屉头部切掉。报文短的元信息页签撑不满滚动区，行还能长到
+     内容高，所以只有报文长的页签犯。 */
+  min-height: 48px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding: 8px 10px 0;
+  position: sticky;
+  scrollbar-width: none;
+  top: 0;
+  z-index: 2;
 }
 
-.log-detail-sections-head h3 {
-  font-size: var(--text-md);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.25;
-  margin: 0;
-}
-
-.log-detail-sections-head p {
-  color: var(--muted);
-  font-size: var(--text-sm);
-  margin: 2px 0 0;
-}
-
-.log-detail-section {
-  background: var(--panel-solid);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  min-width: 0;
-  overflow: hidden;
-  transition: border-color 120ms ease;
-}
-
-.log-detail-section > summary {
-  align-items: center;
-  background: var(--panel-subtle);
-  color: var(--text);
-  cursor: pointer;
-  display: grid;
-  font-size: var(--text-base);
-  font-weight: 600;
-  gap: 12px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  list-style: none;
-  min-height: 56px;
-  outline: none;
-  padding: 12px 14px;
-  user-select: none;
-}
-
-.log-detail-section > summary::-webkit-details-marker {
+.log-detail-tabs::-webkit-scrollbar {
   display: none;
 }
 
-.log-detail-section > summary::marker {
-  content: "";
+.log-detail-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--muted);
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: var(--text-base);
+  font-weight: 600;
+  /* 下移 1px：选中项的底色盖住条子与面板的接缝，两者连成一块。 */
+  margin-bottom: -1px;
+  min-height: 40px;
+  padding: 9px 16px;
+  white-space: nowrap;
 }
 
-.log-detail-section:hover,
-.log-detail-section:focus-within {
-  border-color: var(--line-strong);
+.log-detail-tab:hover {
+  background: var(--panel-subtle);
+  color: var(--text);
 }
 
-.log-detail-section > summary:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--focus);
+.log-detail-tab[aria-selected="true"] {
+  background: var(--panel-solid);
+  /* 左右上三边加框、底边下移一像素：把轨道的底线切开，跟面板连通。 */
+  border-color: var(--line);
+  box-shadow: inset 0 2px 0 var(--accent);
+  color: var(--text);
 }
 
-.log-detail-section[open] {
-  border-color: var(--accent-border);
-  /* An expanded snapshot needs the whole dialog width; closed siblings
-     backfill the freed cell via grid-auto-flow: dense. */
-  grid-column: 1 / -1;
+/* 焦点环用 outline 而不是 box-shadow：选中项自己已经有一条顶部强调线，
+   两个 box-shadow 会互相覆盖。 */
+.log-detail-tab:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
 }
 
-.log-detail-section[open] > summary {
-  border-bottom: 1px solid var(--line);
-}
-
-.log-detail-section-title,
-.log-detail-section-copy {
-  display: block;
+.log-detail-tabpanel {
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  /* 上边的线由页签条承担，再画一条就是双线；上方方角才接得上页签。 */
+  border-radius: 0 0 var(--radius) var(--radius);
+  border-top: 0;
+  display: grid;
+  gap: 12px;
   min-width: 0;
+  /* clip 而不是 hidden：hidden 会把面板变成滚动容器，网格里的自动最小高度随之
+     从「内容高」变成 0，面板被压到刚好填满剩余空间，长报文被自己裁掉，外层
+     滚动区以为没什么可滚。clip 只裁圆角，不影响尺寸，滚动落到外层 body。 */
+  overflow: clip;
+  /* 内容要离页签条有距离：没这层内边距，工具条会直接贴在页签底下。 */
+  padding: 16px;
 }
 
-.log-detail-section-title {
-  line-height: 1.25;
+.log-detail-tabpanel--meta {
+  gap: 12px;
 }
 
-.log-detail-section-copy {
+/* 工具条不再通栏刷底色：面板已经有内边距，再刷一条就和页签条两条色带
+   挤在一起。它本来只是一句说明加一组模式按钮。 */
+.log-detail-panel-head {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.log-detail-panel-head p {
   color: var(--muted);
   font-size: var(--text-sm);
-  font-weight: 400;
-  margin-top: 2px;
+  margin: 0;
+  min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.log-detail-summary-state {
+.log-detail-state {
   align-items: center;
-  background: var(--panel-muted);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
-  color: var(--muted-strong);
-  display: inline-flex;
-  font-size: var(--text-md);
-  font-weight: 600;
-  height: 26px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--text-sm);
+  gap: 10px;
   justify-content: center;
-  width: 26px;
+  margin: 0;
+  padding: 28px 14px;
+  text-align: center;
 }
 
-.log-detail-summary-state::before {
-  content: "+";
-  transform: translateY(-1px);
-}
-
-.log-detail-section[open] .log-detail-summary-state {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-on);
-}
-
-.log-detail-section[open] .log-detail-summary-state::before {
-  content: "−";
+.log-detail-state.is-error {
+  color: var(--danger);
+  overflow-wrap: anywhere;
 }
 
 .log-detail-code-frame {
   background: var(--code-frame-bg);
+  border-radius: var(--radius-sm);
   display: grid;
   gap: 8px;
   padding: 8px;
-}
-
-.log-detail-expand {
-  justify-self: end;
 }
 
 .log-detail-code-frame > pre {
@@ -445,7 +540,7 @@
   font-size: 12px;
   line-height: 1.55;
   margin: 0;
-  /* Default: flow into the panel scroll (no nested scrollbar). */
+  /* 正文跟着抽屉滚动区走，不套第二层滚动条。 */
   max-height: none;
   min-height: 220px;
   overflow: visible;
@@ -454,28 +549,6 @@
   tab-size: 2;
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-.request-detail-grid.is-focused {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.request-detail-grid.is-focused .log-detail-section:not(.is-focused) {
-  display: none;
-}
-
-/* Focused/expanded view: only the code block scrolls. */
-.request-detail-grid.is-focused .log-detail-code-frame > pre {
-  max-height: min(72dvh, 760px);
-  min-height: min(56dvh, 480px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
-.log-detail-code-frame > pre:empty::before {
-  color: var(--code-muted);
-  content: "展开后加载…";
 }
 
 /* ── Token management ────────────────────────────────────── */
@@ -647,7 +720,7 @@
 }
 
 .log-conversation {
-  /* 供下面的 @container 查询用：详情弹窗是 2x2 面板，窄的时候角色窄栏要收起。 */
+  /* 供下面的 @container 查询用：抽屉窄的时候角色窄栏要收起。 */
   container-type: inline-size;
   display: flex;
   flex-direction: column;
@@ -670,9 +743,9 @@
 
 .conv-fold-all {
   background: transparent;
-  border: 1px solid var(--line);
+  border: 1px solid var(--code-border);
   border-radius: var(--radius-full);
-  color: var(--muted-strong);
+  color: var(--code-muted);
   cursor: pointer;
   flex: 0 0 auto;
   font-size: var(--text-xs);
@@ -682,6 +755,12 @@
 .conv-fold-all:hover {
   border-color: var(--accent-border);
   color: var(--accent);
+}
+
+.conv-summary-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 6px;
 }
 
 .conv-list {
@@ -695,8 +774,8 @@
 
 /* 角色在左侧窄栏，与内容并排——单独占一行会把短消息的高度翻倍。 */
 .conv-msg {
-  border: 1px solid var(--line-strong, var(--line));
-  background: var(--panel-subtle, transparent);
+  border: 1px solid var(--code-border);
+  border-left: 3px solid var(--code-border);
   border-radius: var(--radius);
   display: grid;
   gap: 0 10px;
@@ -713,7 +792,7 @@
 }
 
 /* 角色用左侧色条区分，比整块底色更安静，长会话里不会糊成一片。 */
-.conv-msg--system { border-left-color: var(--muted); }
+.conv-msg--system { border-left-color: var(--code-muted); }
 .conv-msg--user { border-left-color: var(--accent); }
 .conv-msg--assistant { border-left-color: var(--ok); }
 .conv-msg--tool { border-left-color: var(--warn, var(--muted-strong)); }
@@ -728,14 +807,14 @@
 }
 
 .conv-role-name {
-  color: var(--text-secondary);
+  color: var(--code-text);
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.04em;
 }
 
 .conv-msg-index {
-  color: var(--muted);
+  color: var(--code-muted);
   font-size: var(--text-xs);
 }
 
@@ -755,7 +834,7 @@
 }
 
 .conv-inline-body {
-  color: var(--text-secondary);
+  color: var(--code-text);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   min-width: 0;
@@ -769,7 +848,7 @@
 }
 
 .conv-block-body {
-  color: var(--text-secondary);
+  color: var(--code-text);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   margin: 0;
@@ -807,7 +886,7 @@
 }
 
 details.conv-block > summary {
-  color: var(--muted-strong);
+  color: var(--code-text);
   cursor: pointer;
   font-size: var(--text-sm);
   line-height: 1.5;
@@ -819,7 +898,7 @@ details.conv-block > summary::-webkit-details-marker { display: none; }
 
 details.conv-block > summary::before {
   content: "▸";
-  color: var(--muted);
+  color: var(--code-muted);
   display: inline-block;
   margin-right: 6px;
 }
@@ -827,25 +906,87 @@ details.conv-block > summary::before {
 details.conv-block[open] > summary::before { content: "▾"; }
 
 .conv-block-tag {
-  background: var(--panel-muted);
+  background: rgb(127 127 127 / 20%);
   border-radius: var(--radius-sm);
-  color: var(--muted-strong);
+  color: var(--code-muted);
   font-size: var(--text-xs);
   padding: 1px 6px;
 }
 
-.conv-block--thinking .conv-block-tag { color: var(--accent); }
-.conv-block--tool-use .conv-block-tag { color: var(--ok-strong); }
-.conv-block--tool-result.is-error .conv-block-tag { color: var(--danger); }
+/* 类型靠底色区分，文字统一用代码区的亮色。
+   拿语义色当文字色的话，浅色主题下那些色是为浅底调的深色，落在这块
+   深底上就看不清了。 */
+.conv-block--thinking .conv-block-tag {
+  background: var(--accent-soft);
+  color: var(--code-text);
+}
+
+.conv-block--tool-use .conv-block-tag,
+.conv-block--tool-call .conv-block-tag {
+  background: var(--ok-soft);
+  color: var(--code-text);
+}
+
+.conv-block--tool-result.is-error .conv-block-tag,
+.conv-block--tool-call.is-error .conv-block-tag {
+  background: var(--danger-soft);
+  color: var(--code-text);
+}
+
+/* 系统提示词用中性底：它是背景，不是某一方的发言。 */
+.conv-block--system .conv-block-tag {
+  background: rgb(127 127 127 / 20%);
+  color: var(--code-text);
+}
+
+/* 标题行里的一行预览：收着时也能看出调的是哪个文件、哪条命令。 */
+.conv-tool-input-preview {
+  color: var(--code-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  margin-left: 8px;
+  overflow-wrap: anywhere;
+}
+
+/* 预览和「→ 结果」之间留点距离，否则 `200}→ 结果` 粘成一串。 */
+.conv-tool-input-preview + .conv-block-meta {
+  margin-left: 10px;
+}
+
+/* 展开后入参和结果之间的小标题，不然两段等宽字糊在一起分不清哪段是哪段。 */
+.conv-tool-section {
+  color: var(--code-muted);
+  font-size: var(--text-xs);
+  letter-spacing: 0.04em;
+  margin-top: 6px;
+}
+
+.conv-block--tool-call .conv-block-body {
+  background: var(--code-bg);
+  border-radius: var(--radius-sm);
+  margin-top: 3px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 6px 8px;
+}
+
+/* 结果往往是整个文件转储，封顶高一些。 */
+.conv-block--tool-call .conv-tool-result {
+  max-height: 600px;
+}
+
+.conv-block--tool-call.is-error .conv-tool-result {
+  border-left: 2px solid var(--danger);
+}
 
 .conv-block-meta {
-  color: var(--muted);
+  color: var(--code-muted);
   font-size: var(--text-xs);
 }
 
 .conv-block--image,
 .conv-block--error {
-  color: var(--muted-strong);
+  color: var(--code-muted);
   font-size: var(--text-sm);
 }
 
@@ -853,7 +994,7 @@ details.conv-block[open] > summary::before { content: "▾"; }
 
 .conv-empty,
 .conv-truncated {
-  border: 1px solid var(--line-soft);
+  border: 1px solid var(--code-border);
   border-radius: var(--radius);
   display: flex;
   flex-direction: column;
@@ -863,13 +1004,13 @@ details.conv-block[open] > summary::before { content: "▾"; }
 
 .conv-empty strong,
 .conv-truncated strong {
-  color: var(--text-secondary);
+  color: var(--code-text);
   font-size: var(--text-sm);
 }
 
 .conv-empty span,
 .conv-truncated span {
-  color: var(--muted);
+  color: var(--code-muted);
   font-size: var(--text-xs);
 }
 

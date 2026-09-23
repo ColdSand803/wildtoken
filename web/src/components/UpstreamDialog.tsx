@@ -1,0 +1,841 @@
+import { useEffect, useMemo, useState } from "react";
+
+import { UnauthorizedError, fetchModelsPreview } from "../api";
+import { joinMappingLines, parseMappingLines } from "../mappingLines";
+import type { Upstream } from "../types";
+import { ModelDialog } from "./ModelDialog";
+import type { ModelSelection } from "./ModelDialog";
+import { useToast } from "./feedback";
+import { useDialog } from "../useDialog";
+
+/** 芯片预览最多显示几项，多的折成 +N。照抄旧版 FORM_MODEL_PREVIEW_LIMIT。 */
+const PREVIEW_LIMIT = 6;
+
+/** 提交给 POST/PUT /api/admin/upstreams 的形状。 */
+export interface UpstreamPayload {
+  name: string;
+  base_url: string;
+  api_key: string | null;
+  model_names: string[];
+  model_prefixes: string[];
+  model_mappings: Record<string, string>;
+  effort_mappings: Record<string, string>;
+  priority: number;
+  weight: number;
+  auto_weight_enabled: boolean;
+  timeout_seconds: number;
+  enabled: boolean;
+  extra_headers: Record<string, string>;
+  rate_limit: string | null;
+  clear_api_key: boolean;
+  group_ids: number[];
+}
+
+/** 一个渠道不选分组时归进这里。和后端的兜底一致。 */
+const DEFAULT_GROUP_ID = 1;
+
+/** 逗号或换行分隔的列表，去空去重。 */
+function splitList(value: string): string[] {
+  const seen = new Set<string>();
+  for (const part of value.split(/[,\n]/)) {
+    const trimmed = part.trim();
+    if (trimmed) seen.add(trimmed);
+  }
+  return [...seen];
+}
+
+/* 传输层和内部路由用的头，覆盖它们会直接弄坏请求。后端也拦，但报回来只是
+   一条 400；在这里拦能直接指出是哪一个头。 */
+const NON_OVERRIDABLE_HEADERS = new Set([
+  "connection",
+  "keep-alive",
+  "transfer-encoding",
+  "host",
+  "content-length",
+  "te",
+  "trailer",
+  "upgrade",
+  "proxy-authorization",
+  "proxy-authenticate",
+  "x-wildtoken-upstream",
+]);
+
+/** RFC 7230 的 token 字符集。 */
+const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/** 逐条校验并归一。两种语法共用这一层。 */
+function addHeader(result: Record<string, string>, name: string, value: string): void {
+  if (!HEADER_NAME_PATTERN.test(name)) throw new Error(`Header 名无效：${name || "（空）"}`);
+  // 控制字符会把一个头拆成两个（响应拆分）。
+  if (/[\x00-\x08\x0a-\x1f\x7f]/.test(value)) {
+    throw new Error(`Header ${name} 的值包含非法控制字符。`);
+  }
+
+  const normalized = name.toLowerCase();
+  if (NON_OVERRIDABLE_HEADERS.has(normalized)) {
+    throw new Error(`Header ${name} 属于传输或内部路由头，不能覆盖。`);
+  }
+  // 名字对 HTTP 来说不区大小写，写两遍只是后一个默默赢了。
+  if (Object.hasOwn(result, normalized)) {
+    throw new Error(`Header 名大小写重复：${name}`);
+  }
+  result[normalized] = value;
+}
+
+/**
+ * Header 覆盖：标准 HTTP 报文写法，每行一条 `Name: value`。
+ *
+ * 用这个而不是 JSON，是为了从 curl -v、浏览器网络面板、日志详情的报文区
+ * 拷出来能直接粘——那些地方吐出来的本来就是这个形式。
+ *
+ * 仍然收 JSON：老数据和旧控制台都是那个写法，粘进来不应该报错。
+ */
+function parseHeaderLines(value: string): Record<string, string> {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "{}") return {};
+
+  const result: Record<string, string> = {};
+
+  // 以 { 开头当 JSON 试——它不可能是合法的 Header 名。
+  if (trimmed.startsWith("{")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch (err) {
+      throw new Error(
+        `看起来是 JSON 但解析失败：${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("JSON 写法必须是由 Header 名和字符串值组成的对象。");
+    }
+    for (const [name, headerValue] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof headerValue !== "string") throw new Error(`Header ${name} 的值必须是字符串。`);
+      addHeader(result, name.trim(), headerValue);
+    }
+    return result;
+  }
+
+  for (const raw of trimmed.split("\n")) {
+    const line = raw.trim();
+    if (!line) continue;
+    // 粘进来的报文常带着请求行或注释，跳过而不是报错。
+    if (line.startsWith("#") || line.startsWith("//")) continue;
+
+    const colon = line.indexOf(":");
+    if (colon === -1) {
+      throw new Error(`这一行没有冒号，不是 Header：${line}`);
+    }
+    const name = line.slice(0, colon).trim();
+    // 值里可以再有冒号（比如 URL），只按第一个切。
+    const headerValue = line.slice(colon + 1).trim();
+    if (!headerValue) throw new Error(`Header ${name} 没有值。`);
+    addHeader(result, name, headerValue);
+  }
+  return result;
+}
+
+/** 存的是 map，回显成每行一条。 */
+function joinHeaderLines(headers: Record<string, string>): string {
+  return Object.entries(headers)
+    .map(([name, value]) => `${name}: ${value}`)
+    .join("\n");
+}
+
+interface FormState {
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  clearApiKey: boolean;
+  groupIds: number[];
+  modelNames: string[];
+  /** 手动添加输入框里还没提交的文本，只收模型名。 */
+  manual: string;
+  /** 模型映射，每行一条 `a => b`，文本就是真相，提交时才解析。 */
+  modelMappings: string;
+  modelPrefixes: string;
+  priority: string;
+  weight: string;
+  timeoutSeconds: string;
+  enabled: boolean;
+  /* UI 上是「固定权重」，提交时取反才是 auto_weight_enabled。
+     这个反转最容易搬错，所以状态里就按 UI 的说法存。 */
+  fixedWeight: boolean;
+  extraHeaders: string;
+  effortMappings: string;
+  rateLimit: string;
+}
+
+function emptyForm(): FormState {
+  return {
+    name: "",
+    baseUrl: "",
+    apiKey: "",
+    clearApiKey: false,
+    groupIds: [DEFAULT_GROUP_ID],
+    modelNames: [],
+    manual: "",
+    modelMappings: "",
+    modelPrefixes: "",
+    priority: "100",
+    weight: "100",
+    timeoutSeconds: "300",
+    enabled: true,
+    fixedWeight: false,
+    extraHeaders: "",
+    effortMappings: "",
+    rateLimit: "",
+  };
+}
+
+function formFromUpstream(upstream: Upstream): FormState {
+  return {
+    name: upstream.name,
+    baseUrl: upstream.base_url,
+    /* 详情接口会把密钥带回来，直接回显：编辑渠道时要能核对当前用的是哪把 Key。 */
+    apiKey: upstream.api_key ?? "",
+    clearApiKey: false,
+    groupIds: upstream.group_ids.length > 0 ? upstream.group_ids : [DEFAULT_GROUP_ID],
+    modelNames: upstream.model_names,
+    manual: "",
+    modelMappings: joinMappingLines(upstream.model_mappings ?? {}),
+    modelPrefixes: upstream.model_prefixes.join(","),
+    priority: String(upstream.priority),
+    weight: String(upstream.weight),
+    timeoutSeconds: String(upstream.timeout_seconds),
+    enabled: upstream.enabled,
+    fixedWeight: !upstream.auto_weight_enabled,
+    extraHeaders: joinHeaderLines(upstream.extra_headers ?? {}),
+    effortMappings: joinMappingLines(upstream.effort_mappings ?? {}),
+    rateLimit: upstream.rate_limit ?? "",
+  };
+}
+
+/** 抛出的错误由调用方接住展示。解析失败不该变成一次半截的保存。 */
+function payloadFromForm(form: FormState): UpstreamPayload {
+  return {
+    name: form.name.trim(),
+    base_url: form.baseUrl.trim(),
+    api_key: form.apiKey.trim() || null,
+    model_names: form.modelNames,
+    model_prefixes: splitList(form.modelPrefixes),
+    model_mappings: parseMappingLines(form.modelMappings, "模型映射"),
+    /* 键转小写存。后端也会抹一次（normalizeEffortMappings），这里先转是为了
+       让编辑框里看到的和存进去的一致。 */
+    effort_mappings: Object.fromEntries(
+      Object.entries(parseMappingLines(form.effortMappings, "思考强度映射")).map(
+        ([key, value]): [string, string] => [key.toLowerCase(), value],
+      ),
+    ),
+    priority: Number(form.priority || 100),
+    weight: Number(form.weight || 100),
+    // UI 勾的是「固定权重」，后端要的是「自动权重」。
+    auto_weight_enabled: !form.fixedWeight,
+    timeout_seconds: Number(form.timeoutSeconds || 300),
+    enabled: form.enabled,
+    extra_headers: parseHeaderLines(form.extraHeaders),
+    rate_limit: form.rateLimit.trim() || null,
+    clear_api_key: form.clearApiKey,
+    group_ids: form.groupIds,
+  };
+}
+
+/** 已选模型与映射的芯片预览，每个都能就地摘掉。 */
+/** 已选模型名的芯片预览，每个都能就地摘掉。映射不在这里，它有自己的文本框。 */
+function SelectionPreview({
+  names,
+  onRemove,
+}: {
+  names: string[];
+  onRemove: (name: string) => void;
+}) {
+  if (names.length === 0) {
+    return (
+      <div className="model-selection-preview" aria-live="polite">
+        <span className="model-selection-empty">未配置精确模型</span>
+      </div>
+    );
+  }
+
+  const visible = names.slice(0, PREVIEW_LIMIT);
+  const hidden = names.length - visible.length;
+
+  return (
+    <div className="model-selection-preview" aria-live="polite">
+      {visible.map((name) => (
+        <span key={name} className="model-selection-chip" title={name}>
+          <span className="model-selection-chip-name">{name}</span>
+          <button
+            type="button"
+            className="model-selection-remove"
+            aria-label={`移除模型 ${name}`}
+            title={`移除模型 ${name}`}
+            onClick={() => onRemove(name)}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {hidden > 0 ? (
+        <span className="model-selection-more" title={`还有 ${hidden} 项`}>{`+${hidden}`}</span>
+      ) : null}
+    </div>
+  );
+}
+
+export function UpstreamDialog({
+  open,
+  upstream,
+  groups,
+  busy,
+  onSubmit,
+  onClose,
+}: {
+  open: boolean;
+  /** null 表示新增。 */
+  upstream: Upstream | null;
+  groups: Array<{ id: number; name: string }>;
+  busy: boolean;
+  onSubmit: (payload: UpstreamPayload) => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState<FormState>(emptyForm);
+  const [advanced, setAdvanced] = useState(false);
+  /* catalog 为 null 表示「没拉取，只是来管理已选」。整块跟着一个对象走，
+     否则它们每次渲染都是新引用，会把选择器里的状态不断重置。 */
+  const [picker, setPicker] = useState<{ catalog: string[] | null; selection: ModelSelection } | null>(
+    null,
+  );
+  const [fetching, setFetching] = useState(false);
+  const dialogRef = useDialog(open, onClose);
+  const toast = useToast();
+
+  /* 每次打开都按当前渠道重置。不重置的话，关掉再开会留着上一个渠道的值。 */
+  useEffect(() => {
+    if (!open) return;
+    setForm(upstream ? formFromUpstream(upstream) : emptyForm());
+    // 配过高级项的渠道直接展开，否则那些值藏起来像丢了。
+    setAdvanced(
+      Boolean(
+        upstream &&
+          (Object.keys(upstream.effort_mappings ?? {}).length ||
+            Object.keys(upstream.extra_headers ?? {}).length ||
+            upstream.rate_limit),
+      ),
+    );
+  }, [open, upstream]);
+
+  const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
+    setForm((current) => ({ ...current, [key]: value }));
+
+  /**
+   * 把手动输入框里的模型名并进列表。
+   *
+   * 保存时也要先走一遍：框里还留着字就点保存，那些字应该算数，而不是被
+   * 悄悄丢掉。只收名字；映射有自己的文本框，写到这里的 `=>` 不认。
+   */
+  function commitManual(current: FormState): FormState {
+    const names = current.manual
+      .split(/[\s,，]+/)
+      .map((name) => name.trim())
+      .filter((name) => name && !name.includes("=>"));
+    if (names.length === 0) return current;
+    return {
+      ...current,
+      modelNames: [...new Set([...current.modelNames, ...names])],
+      manual: "",
+    };
+  }
+
+  function addManual() {
+    setForm((current) => {
+      const next = commitManual(current);
+      if (next === current) return current;
+      const added = next.modelNames.length - current.modelNames.length;
+      toast(added > 0 ? `已添加 ${added} 项，保存渠道后生效。` : "输入的模型名都已在列表中。", {
+        tone: added > 0 ? "ok" : "neutral",
+      });
+      return next;
+    });
+  }
+
+  /**
+   * 当前表单里的选择，开选择器时带进去。
+   *
+   * 映射文本解不开的行这里不报错，直接丢——选择器只是个参考，真正的校验
+   * 在保存时。
+   */
+  function currentSelection(state: FormState): ModelSelection {
+    let mappings: Record<string, string> = {};
+    try {
+      mappings = parseMappingLines(state.modelMappings, "模型映射");
+    } catch {
+      // 解不开就当没有。
+    }
+    return { names: state.modelNames, mappings };
+  }
+
+  /**
+   * 拿哪把 Key 去探上游。
+   *
+   * 输入框留空意思是「保持不变」，此时要用已存的那把；勾了清除就真的不带。
+   * 不这么判的话，编辑一个已配好的渠道时点拉取总是拿不到模型。
+   */
+  function probeApiKey(): string | null {
+    if (form.clearApiKey) return null;
+    return form.apiKey.trim() || upstream?.api_key || null;
+  }
+
+  async function fetchCatalog() {
+    const baseUrl = form.baseUrl.trim();
+    if (!baseUrl) {
+      toast("请先填写 Base URL 再拉取模型。", { tone: "error" });
+      return;
+    }
+
+    let headers: Record<string, string>;
+    try {
+      headers = parseHeaderLines(form.extraHeaders);
+    } catch (err) {
+      setAdvanced(true);
+      toast(err instanceof Error ? err.message : String(err), { tone: "error" });
+      return;
+    }
+
+    setFetching(true);
+    try {
+      const result = await fetchModelsPreview(baseUrl, probeApiKey(), {
+        extraHeaders: headers,
+        timeoutSeconds: Number(form.timeoutSeconds || 300),
+      });
+      setForm((current) => {
+        setPicker({ catalog: result.models, selection: currentSelection(current) });
+        return current;
+      });
+      toast(`已拉取 ${result.models.length} 个模型。`, { tone: "ok" });
+    } catch (err) {
+      if (!(err instanceof UnauthorizedError)) {
+        toast(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      }
+    } finally {
+      setFetching(false);
+    }
+  }
+
+  function openManager() {
+    setPicker({ catalog: null, selection: currentSelection(form) });
+  }
+
+  /* 选择器只写回表单，不碰服务端——这个渠道可能还没存下来。
+     名字进列表，映射回填到它自己的文本框。 */
+  function applySelection(next: ModelSelection) {
+    setForm((current) => ({
+      ...current,
+      modelNames: next.names,
+      modelMappings: joinMappingLines(next.mappings),
+    }));
+    setPicker(null);
+  }
+
+  function submit() {
+    const committed = commitManual(form);
+    let payload: UpstreamPayload;
+    try {
+      payload = payloadFromForm(committed);
+    } catch (err) {
+      // 解析失败的两项都在高级区，收着的话看不到错在哪。
+      setAdvanced(true);
+      toast(err instanceof Error ? err.message : String(err), { tone: "error" });
+      return;
+    }
+    setForm(committed);
+    onSubmit(payload);
+  }
+
+  /* 克隆进来的草稿 id 为 0，按新增对待——标题不该写「编辑渠道 #0」。 */
+  const title = upstream && upstream.id > 0 ? `编辑渠道 #${upstream.id}` : "新增渠道";
+  const canSubmit = useMemo(
+    () => form.name.trim() !== "" && form.baseUrl.trim() !== "",
+    [form.name, form.baseUrl],
+  );
+  const selectionCount = form.modelNames.length;
+
+  return (
+    <dialog className="upstream-dialog dialog--drawer" ref={dialogRef} onCancel={onClose}>
+      <form
+        className="upstream-dialog-panel"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!canSubmit || busy) return;
+          submit();
+        }}
+      >
+        <div className="modal-head upstream-modal-head">
+          <div>
+            <h2>{title}</h2>
+            <p>配置路由可用的上游渠道。</p>
+          </div>
+          <div className="modal-head-actions">
+            <button
+              type="button"
+              className="secondary ghost icon-close"
+              aria-label="关闭"
+              title="关闭"
+              onClick={onClose}
+            >
+              <svg className="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 4l8 8M12 4L4 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div className="upstream-dialog-body">
+          <section className="form-section">
+            <div className="form-section-head">
+              <div>
+                <h3>基础信息</h3>
+                <p>名称、接口地址与密钥。</p>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label className="field">
+                <span className="field-label">名称</span>
+                <input
+                  value={form.name}
+                  onChange={(event) => set("name", event.target.value)}
+                  required
+                  maxLength={80}
+                  placeholder="openai"
+                  autoComplete="off"
+                />
+              </label>
+
+              <label className="field span-2">
+                <span className="field-label">Base URL</span>
+                <input
+                  value={form.baseUrl}
+                  onChange={(event) => set("baseUrl", event.target.value)}
+                  required
+                  placeholder="https://api.openai.com 或 https://host/v1"
+                  autoComplete="off"
+                />
+                <span className="field-hint">支持根地址或已包含 /v1 的地址。</span>
+              </label>
+
+              <label className="field span-2">
+                <span className="field-label">API Key</span>
+                <input
+                  type="text"
+                  value={form.apiKey}
+                  onChange={(event) => set("apiKey", event.target.value)}
+                  placeholder="未配置时留空"
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+                <span className="field-hint">
+                  留空表示不改动；要移除已存密钥请勾选下方的清空。
+                </span>
+              </label>
+
+              <div className="field span-2">
+                <span className="field-label">分组</span>
+                <div className="group-checklist">
+                  {groups.map((group) => (
+                    <label key={group.id} className="group-checkbox">
+                      <input
+                        type="checkbox"
+                        value={group.id}
+                        checked={form.groupIds.includes(group.id)}
+                        onChange={(event) =>
+                          set(
+                            "groupIds",
+                            event.target.checked
+                              ? [...form.groupIds, group.id]
+                              : form.groupIds.filter((id) => id !== group.id),
+                          )
+                        }
+                      />{" "}
+                      <span>{group.name}</span>
+                    </label>
+                  ))}
+                </div>
+                <span className="field-hint">
+                  可同时加入多个分组；不选则归入 default。只有同分组的令牌能路由到本渠道。
+                </span>
+              </div>
+
+              {upstream?.api_key_set ? (
+                <div className="toggle-list span-2">
+                  <label className="toggle-row span-2">
+                    <input
+                      type="checkbox"
+                      checked={form.clearApiKey}
+                      onChange={(event) => set("clearApiKey", event.target.checked)}
+                    />
+                    <span>
+                      <strong>清空 API Key</strong>
+                      <small>保存后会移除当前渠道密钥。</small>
+                    </span>
+                  </label>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <section className="form-section">
+            <div className="form-section-head">
+              <div>
+                <h3>模型路由</h3>
+                <p>精确模型、前缀与名称映射。</p>
+              </div>
+              <div className="form-section-head-actions">
+                <button type="button" className="secondary" onClick={openManager}>
+                  管理模型
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={fetching}
+                  onClick={() => void fetchCatalog()}
+                >
+                  {fetching ? "拉取中…" : "拉取模型"}
+                </button>
+              </div>
+            </div>
+            <div className="form-grid">
+              <div className="field span-2">
+                <div className="model-picker-label-row">
+                  <span className="field-label">模型名</span>
+                  <span className="model-selection-count">
+                    {selectionCount > 0 ? `${selectionCount} 项` : "未选择"}
+                  </span>
+                </div>
+                <div className="model-picker" aria-label="已选模型">
+                  <SelectionPreview
+                    names={form.modelNames}
+                    onRemove={(name) =>
+                      set(
+                        "modelNames",
+                        form.modelNames.filter((item) => item !== name),
+                      )
+                    }
+                  />
+                </div>
+                <div className="model-manual-entry">
+                  <div className="model-manual-entry-body">
+                    <label className="field">
+                      <span className="field-label">手动添加</span>
+                      <input
+                        type="text"
+                        spellCheck={false}
+                        placeholder="gpt-5.5 claude-sonnet-5"
+                        value={form.manual}
+                        onChange={(event) => set("manual", event.target.value)}
+                        onKeyDown={(event) => {
+                          // 回车是「添加」，不是提交整个表单。
+                          if (event.key !== "Enter") return;
+                          event.preventDefault();
+                          addManual();
+                        }}
+                      />
+                    </label>
+                    <button type="button" className="secondary" onClick={addManual}>
+                      添加
+                    </button>
+                  </div>
+                </div>
+                <span className="field-hint">
+                  精确匹配所选模型；也可以只配置模型前缀。多个模型名用空白分隔，回车快速添加。
+                </span>
+              </div>
+
+              <label className="field span-2">
+                <span className="field-label">模型映射</span>
+                <textarea
+                  rows={4}
+                  spellCheck={false}
+                  value={form.modelMappings}
+                  onChange={(event) => set("modelMappings", event.target.value)}
+                  placeholder={"gpt-5.5 => grok-4.5\nfast => gpt-4o-mini"}
+                />
+                <span className="field-hint">
+                  每行一条「下游 =&gt; 渠道」，命中下游名后把请求里的模型名替换为渠道模型名。
+                </span>
+              </label>
+
+              <label className="field span-2">
+                <span className="field-label">模型前缀</span>
+                <input
+                  value={form.modelPrefixes}
+                  onChange={(event) => set("modelPrefixes", event.target.value)}
+                  placeholder="gpt-,claude-"
+                  autoComplete="off"
+                />
+                <span className="field-hint">多个前缀用逗号分隔。</span>
+              </label>
+            </div>
+          </section>
+
+          <section className="form-section">
+            <div className="form-section-head">
+              <div>
+                <h3>运行设置</h3>
+                <p>硬优先级、同层权重、超时与启用状态。</p>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label className="field">
+                <span className="field-label">优先级</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100000}
+                  value={form.priority}
+                  onChange={(event) => set("priority", event.target.value)}
+                />
+                <span className="field-hint">数字越大越优先；高优先级不会与低优先级混合分流。</span>
+              </label>
+
+              <label className="field">
+                <span className="field-label">基础权重</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={10000}
+                  required
+                  value={form.weight}
+                  onChange={(event) => set("weight", event.target.value)}
+                />
+                <span className="field-hint">
+                  动态时作为有效权重上限；固定时直接作为路由权重；0 表示不参与池内路由。
+                </span>
+              </label>
+
+              <label className="field">
+                <span className="field-label">超时秒数</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={3600}
+                  value={form.timeoutSeconds}
+                  onChange={(event) => set("timeoutSeconds", event.target.value)}
+                />
+              </label>
+
+              <div className="toggle-list span-2">
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={form.enabled}
+                    onChange={(event) => set("enabled", event.target.checked)}
+                  />
+                  <span>
+                    <strong>启用</strong>
+                    <small>保存后参与路由选择。</small>
+                  </span>
+                </label>
+                <label className="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={form.fixedWeight}
+                    onChange={(event) => set("fixedWeight", event.target.checked)}
+                  />
+                  <span>
+                    <strong>固定权重</strong>
+                    <small>选中后始终使用基础权重；未选中时按失败、成功和恢复动态调整有效权重。</small>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <details
+            className="form-section form-section-collapsible"
+            open={advanced}
+            onToggle={(event) => setAdvanced(event.currentTarget.open)}
+          >
+            <summary>
+              <span>
+                <span className="section-title">高级设置</span>
+                <span className="section-copy">Header 覆盖 JSON、思考强度映射与限速</span>
+              </span>
+              <span className="section-summary-state" aria-hidden="true" />
+            </summary>
+
+            <label className="field">
+              <span className="field-label">Header 覆盖（可选）</span>
+              <textarea
+                rows={5}
+                spellCheck={false}
+                value={form.extraHeaders}
+                onChange={(event) => set("extraHeaders", event.target.value)}
+                placeholder={"User-Agent: WildToken/1.0\nX-Tenant: acme"}
+              />
+              <span className="field-hint">
+                每行一条 <code>名称: 值</code>，就是报文里的写法——从 curl -v、浏览器网络面板
+                或日志详情的报文区拷出来可以直接粘。值里的冒号不用转义（只按第一个切），
+                以 # 或 // 开头的行跳过，仍然兼容旧的 JSON 对象写法。
+              </span>
+              <span className="field-hint">
+                Header 名大小写不敏感；这里的值最后写入，可覆盖下游请求头和渠道 API Key
+                生成的认证头。Host、Content-Length 这类传输头不可覆盖。
+              </span>
+            </label>
+
+            <label className="field">
+              <span className="field-label">思考强度映射（可选）</span>
+              <textarea
+                rows={3}
+                spellCheck={false}
+                value={form.effortMappings}
+                onChange={(event) => set("effortMappings", event.target.value)}
+                placeholder={"max => xhigh\nxhigh => high"}
+              />
+              <span className="field-hint">
+                每行一条「下游 =&gt; 渠道」，用于上游不支持某个思考强度时改写。未列出的强度原样转发。
+              </span>
+            </label>
+
+            <label className="field">
+              <span className="field-label">限速（可选）</span>
+              <input
+                value={form.rateLimit}
+                onChange={(event) => set("rateLimit", event.target.value)}
+                maxLength={24}
+                placeholder="留空则不限速，如 100/m、1000/h、50/10s"
+                autoComplete="off"
+                spellCheck={false}
+              />
+              <span className="field-hint">
+                格式为 次数/时间窗口，单位支持 s/m/h/d。被限速的渠道会在路由时被跳过。
+              </span>
+            </label>
+          </details>
+        </div>
+
+        <div className="modal-footer">
+          <button type="button" className="secondary" onClick={onClose}>
+            取消
+          </button>
+          <button type="submit" className="primary" disabled={!canSubmit || busy}>
+            {busy ? "保存中…" : "保存渠道"}
+          </button>
+        </div>
+      </form>
+
+      {/* 嵌在渠道对话框里。两个 modal dialog 叠在 top layer 上，选择器在上面。 */}
+      {picker ? (
+        <ModelDialog
+          open
+          channelName={form.name.trim() || "当前渠道"}
+          catalog={picker.catalog}
+          selection={picker.selection}
+          busy={false}
+          onSave={applySelection}
+          onClose={() => setPicker(null)}
+        />
+      ) : null}
+    </dialog>
+  );
+}

@@ -6,14 +6,12 @@ import test from "node:test";
 const root = path.resolve(import.meta.dirname, "..");
 const read = (relative) => fs.readFileSync(path.join(root, relative), "utf8");
 
-/** 控制台的全部视图，按导航里的顺序。 */
+/** 控制台的全部视图，按导航里的顺序。路由表就是唯一来源。 */
 function consoleViews() {
-  const markup = read("static/admin.html");
-  const nav = markup.slice(
-    markup.indexOf('<div class="topbar-nav"'),
-    markup.indexOf("</div>", markup.indexOf('<div class="topbar-nav"')),
-  );
-  const views = [...nav.matchAll(/data-view="([a-z-]+)"/g)].map((match) => match[1]);
+  const source = read("web/src/App.tsx");
+  const declared = source.match(/const VIEWS: ViewId\[\] = \[([^\]]+)\]/);
+  assert.ok(declared, "App.tsx 里找不到 VIEWS");
+  const views = [...declared[1].matchAll(/"([a-z-]+)"/g)].map((match) => match[1]);
   assert.notEqual(views.length, 0, "导航里必须有视图");
   return views;
 }
@@ -28,14 +26,15 @@ function themesWithPerViewRules() {
     .filter((theme) => /\[data-view="[a-z-]+"\]/.test(theme.css));
 }
 
-test("导航项与视图节点成对出现", () => {
-  const markup = read("static/admin.html");
+test("每个视图都有对应的页面组件", () => {
+  const source = read("web/src/App.tsx");
   for (const view of consoleViews()) {
-    // 少了视图节点，点导航就没反应。
+    /* 主题靠 data-view 定位，而渲染靠这条分支。只加进 VIEWS 不接组件的话，
+       那个页签点进去是空的。 */
     assert.match(
-      markup,
-      new RegExp(`<section class="view[^"]*" data-view="${view}"`),
-      `${view} 缺少视图节点`,
+      source,
+      new RegExp(`view === "${view}"`),
+      `${view} 没有渲染分支`,
     );
   }
 });
