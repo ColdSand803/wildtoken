@@ -32,6 +32,8 @@ import type { LogSnapshotField, RequestLog } from "../types";
 import { Conversation } from "./Conversation";
 import { useDialog } from "../useDialog";
 
+const SENSITIVE_MASK = "******";
+
 type TabKey = "meta" | LogSnapshotField;
 type ViewMode = "conversation" | "raw";
 
@@ -223,11 +225,13 @@ export function LogDetailDialog({
   log,
   logs = [],
   onSelect,
+  sensitiveHidden = false,
   onClose,
 }: {
   open: boolean;
   log: RequestLog | null;
   logs?: RequestLog[];
+  sensitiveHidden?: boolean;
   onSelect?: (log: RequestLog) => void;
   onClose: () => void;
 }) {
@@ -371,7 +375,7 @@ export function LogDetailDialog({
               id="log-detail-panel-meta"
               aria-labelledby="log-detail-tab-meta"
             >
-              {log ? <><MetaPanel log={log} /><LogTiming log={log} /><RetryChain log={log} logs={logs} onSelect={onSelect} /></> : null}
+              {log ? <><MetaPanel log={log} sensitiveHidden={sensitiveHidden} /><LogTiming log={log} /><RetryChain log={log} logs={logs} onSelect={onSelect} /></> : null}
             </div>
           )}
         </div>
@@ -380,11 +384,11 @@ export function LogDetailDialog({
   );
 }
 
-function MetaPanel({ log }: { log: RequestLog }) {
+function MetaPanel({ log, sensitiveHidden }: { log: RequestLog; sensitiveHidden?: boolean }) {
   return (
     <>
       <div className="log-detail-meta">
-        {metaRows(log).map((row) => (
+        {metaRows(log, sensitiveHidden).map((row) => (
           <MetaItem key={row.label} label={row.label} value={row.value} />
         ))}
       </div>
@@ -405,7 +409,7 @@ function MetaPanel({ log }: { log: RequestLog }) {
  * 可选行（缓存、思考 token、强度链、速度）没值就不出现——没记录的东西摆一排
  * 破折号只会把真正有用的行挤下去。
  */
-function metaRows(log: RequestLog): Array<{ label: string; value: string }> {
+function metaRows(log: RequestLog, sensitiveHidden = false): Array<{ label: string; value: string }> {
   const rows: Array<{ label: string; value: string }> = [];
   const push = (label: string, value: string | null) => {
     if (value !== null && value !== "") rows.push({ label, value });
@@ -415,9 +419,9 @@ function metaRows(log: RequestLog): Array<{ label: string; value: string }> {
   push("时间", `${formatTimestamp(log.created_at)}${relative ? `（${relative}）` : ""}`);
   push("请求", `${log.method} ${log.path}`);
   push("客户端", log.client_type);
-  push("来源 IP", log.client_ip ?? "-");
-  push("令牌", log.downstream_token_name ?? "-");
-  push("渠道", log.upstream_name ?? "-");
+  push("来源 IP", sensitiveHidden && log.client_ip ? SENSITIVE_MASK : log.client_ip ?? "-");
+  push("令牌", sensitiveHidden && log.downstream_token_name ? SENSITIVE_MASK : log.downstream_token_name ?? "-");
+  push("渠道", sensitiveHidden && log.upstream_name ? SENSITIVE_MASK : log.upstream_name ?? "-");
   push("模型", modelChain(log));
 
   for (const step of reasoningChain(log)) push(step.label, step.value);

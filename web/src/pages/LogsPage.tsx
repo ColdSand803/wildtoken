@@ -234,6 +234,24 @@ function TokenCell({
   return <span title={`#${log.downstream_token_id ?? "-"}`}>{name}</span>;
 }
 
+/** IP 格：屏蔽时换成星号。 */
+function IpCell({
+  ip,
+  sensitiveHidden,
+}: {
+  ip: string | null | undefined;
+  sensitiveHidden: boolean;
+}) {
+  const value = (ip ?? "").trim();
+  if (!value) return <span className="muted">-</span>;
+  if (sensitiveHidden) return <Masked />;
+  return (
+    <span className="log-ip" title={value}>
+      {value}
+    </span>
+  );
+}
+
 /**
  * 模型格。
  *
@@ -560,7 +578,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
             className={`secondary ghost log-sensitive-toggle${sensitiveHidden ? " is-active" : ""}`}
             aria-pressed={sensitiveHidden}
             aria-label={sensitiveHidden ? "敏感信息已屏蔽，点击显示" : "敏感信息显示中，点击屏蔽"}
-            title={sensitiveHidden ? "敏感信息已屏蔽" : "点击屏蔽令牌与渠道名"}
+            title={sensitiveHidden ? "敏感信息已屏蔽" : "点击屏蔽令牌、渠道名与 IP"}
             onClick={toggleSensitive}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -700,7 +718,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
         </div>
       </section>
 
-      <LogDetailDialog open={detail !== null} log={detail} logs={logs} onSelect={setDetail} onClose={() => setDetail(null)} />
+      <LogDetailDialog open={detail !== null} log={detail} logs={logs} sensitiveHidden={sensitiveHidden} onSelect={setDetail} onClose={() => setDetail(null)} />
     </section>
   );
 }
@@ -801,13 +819,7 @@ function ActiveRows({
           </td>
           {/* 在途行同样要占这一格。IP 在请求一进来就知道了，不必等完成。 */}
           <td className="ip-cell" data-col="ip">
-            {request.client_ip ? (
-              <span className="log-ip" title={request.client_ip}>
-                {request.client_ip}
-              </span>
-            ) : (
-              <span className="muted">-</span>
-            )}
+            <IpCell ip={request.client_ip} sensitiveHidden={sensitiveHidden} />
           </td>
           <td className="detail-cell" data-col="detail">
             <span className="muted">-</span>
@@ -951,13 +963,7 @@ function LogRow({
           用 span 不用 code：主题包给所有 code 元素上了底色和边框，IP 是表格里的
           一格数据，不是代码片段。 */}
       <td className="ip-cell" data-col="ip">
-        {log.client_ip ? (
-          <span className="log-ip" title={log.client_ip}>
-            {log.client_ip}
-          </span>
-        ) : (
-          <span className="muted">-</span>
-        )}
+        <IpCell ip={log.client_ip} sensitiveHidden={sensitiveHidden} />
       </td>
       {/* 这一列是错误信息，不是按钮。放按钮的话，列表里根本看不出错在哪，
           每行都得点开才知道。打开详情靠整行点击。 */}
