@@ -68,6 +68,9 @@ const COLUMNS = [
 
 type ColumnKey = (typeof COLUMNS)[number]["key"];
 
+/* 固定列不给隐藏：勾选、ID、渠道名、操作一藏，行就认不出或点不了。和旧版一致。 */
+const LOCKED_COLUMNS: ReadonlySet<ColumnKey> = new Set(["check", "id", "name", "actions"]);
+
 const COLUMNS_STORAGE_KEY = "wildtoken_upstream_columns";
 const VIEW_STORAGE_KEY = "wildtoken_upstream_view";
 
@@ -76,7 +79,11 @@ function readColumns(): Record<ColumnKey, boolean> {
   try {
     const raw = localStorage.getItem(COLUMNS_STORAGE_KEY);
     if (!raw) return fallback;
-    return { ...fallback, ...(JSON.parse(raw) as Record<string, boolean>) };
+
+    // 旧存档里固定列可能是 false，读回时强制显示。
+    const stored = { ...fallback, ...(JSON.parse(raw) as Record<string, boolean>) };
+    for (const key of LOCKED_COLUMNS) stored[key] = true;
+    return stored;
   } catch {
     // 存储不可用或内容坏了：全部显示。
     return fallback;
@@ -601,16 +608,20 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
               列
             </button>
             <div className="col-menu" hidden={!colMenuOpen} role="menu" aria-label="渠道列显示">
-              {COLUMNS.map((column) => (
-                <label key={column.key}>
-                  <input
-                    type="checkbox"
-                    checked={columns[column.key]}
-                    onChange={() => toggleColumn(column.key)}
-                  />
-                  <span>{column.label}</span>
-                </label>
-              ))}
+              {COLUMNS.map((column) => {
+                const locked = LOCKED_COLUMNS.has(column.key);
+                return (
+                  <label key={column.key} className={locked ? "is-locked" : undefined}>
+                    <input
+                      type="checkbox"
+                      checked={columns[column.key]}
+                      disabled={locked}
+                      onChange={() => toggleColumn(column.key)}
+                    />
+                    <span>{column.label + (locked ? "（固定）" : "")}</span>
+                  </label>
+                );
+              })}
             </div>
           </div>
 
