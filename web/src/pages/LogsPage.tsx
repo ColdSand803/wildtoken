@@ -16,6 +16,7 @@ import {
 import { reasoningChain } from "../reasoningChain";
 import type { ReasoningSource } from "../reasoningChain";
 import type { ActiveRequest, RequestLog, RequestLogPage } from "../types";
+import { logMatchesFilters } from "../logFilter";
 import { useLogStream } from "../useLogStream";
 import { elapsedMs, formatElapsed, useTicker } from "../useTicker";
 
@@ -388,27 +389,25 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
 
   /* 流推来的新行只在最新页合并；翻到旧页时攒着，靠提示条告知。 */
   useEffect(() => {
-    if (!onLatestPage && stream.logs.length > 0) setMissedNew(true);
-  }, [stream.logs.length, onLatestPage]);
+    if (!onLatestPage && stream.logs.some((log) => logMatchesFilters(log, filters))) setMissedNew(true);
+  }, [stream.logs, onLatestPage, filters]);
 
   const logs = useMemo(() => {
     const seen = new Set<number>();
     const merged: RequestLog[] = [];
-    const source = onLatestPage ? [...stream.logs, ...(page?.items ?? [])] : (page?.items ?? []);
-    for (const log of source) {
+    const streamed = onLatestPage ? stream.logs.filter((log) => logMatchesFilters(log, filters)) : [];
+    for (const log of [...streamed, ...(page?.items ?? [])]) {
       if (seen.has(log.id) || !matchesLogFilters(log, filters)) continue;
       seen.add(log.id);
       merged.push(log);
     }
-    /* 不在这里再过滤一遍。筛选已经回服务端，前端再筛一次只会把流推来的
-       新行误删——它们没经过查询，但确实属于当前结果集。 */
     return merged.slice(0, pageSize);
   }, [stream.logs, page?.items, onLatestPage, filters, pageSize]);
 
   /* 在途集合：只在最新页显示。流连着就以它为准，断了退回快照里的那份。 */
   const activeFromPage = page?.active ?? [];
   const activeLatest = stream.connected ? stream.active : activeFromPage;
-  const active = onLatestPage && !historical && !advanced.stream && !advanced.minDurationMs ? activeLatest.filter((row) => (!filters.upstreamId || String(row.upstream_id) === filters.upstreamId) && (!filters.tokenId || String(row.downstream_token_id) === filters.tokenId) && (!filters.clientType || row.client_type === filters.clientType) && !filters.status) : [];
+  const active = onLatestPage ? activeLatest : [];
   const activeTotal = stream.connected ? stream.activeTotal : (page?.active_total ?? 0);
 
   function toggleColumn(key: ColumnKey) {

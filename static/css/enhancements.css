@@ -228,6 +228,7 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
 /* Column visibility via data-col */
 .upstream-table.col-hide-base_url [data-col="base_url"],
 .upstream-table.col-hide-models [data-col="models"],
+.upstream-table.col-hide-groups [data-col="groups"],
 .upstream-table.col-hide-priority [data-col="priority"],
 .upstream-table.col-hide-weight [data-col="weight"],
 .upstream-table.col-hide-status [data-col="status"] {

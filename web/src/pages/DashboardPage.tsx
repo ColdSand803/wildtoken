@@ -5,8 +5,8 @@ import { navigateToLogs } from "../logFilters";
 import type { LogFilters } from "../logFilters";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
-import { UnauthorizedError, fetchDashboard, getSystemInfo, listUpstreams } from "../api";
-import type { LogOverview, RequestLog, SystemInfo, TokenUsage, TopItem, TopStats } from "../types";
+import { UnauthorizedError, fetchDashboard } from "../api";
+import type { LogOverview, RequestLog, TokenUsage, TopItem, TopStats } from "../types";
 
 /* 时间档。值直接进 query，必须是后端 parseDashboardRange 认的词。
 
@@ -97,12 +97,6 @@ function formatMs(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "—";
   if (value >= 1000) return `${(value / 1000).toFixed(1)}s`;
   return `${Math.round(value)}ms`;
-}
-
-function formatDuration(ms: number | null | undefined): string {
-  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "—";
-  if (ms < 1000) return `${Math.round(ms)}ms`;
-  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0).replace(/\.0$/, "")}s`;
 }
 
 /** KPI 卡。hint 放 title，卡面留给数字——照抄旧版 hoverHint 的做法。 */
@@ -352,8 +346,6 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [overview, setOverview] = useState<LogOverview | null>(null);
   const [top, setTop] = useState<TopStats | null>(null);
   const [usage, setUsage] = useState<TokenUsage | null>(null);
-  const [system, setSystem] = useState<SystemInfo | null>(null);
-  const [channels, setChannels] = useState<{ enabled: number; total: number } | null>(null);
   const [recent, setRecent] = useState<RequestLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -395,23 +387,9 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
 
   useEffect(() => {
     if (!refreshSeconds) return;
-    const timer = window.setInterval(() => { if (!document.hidden) { void load(); void getSystemInfo().then(setSystem).catch(() => {}); } }, refreshSeconds * 1000);
+    const timer = window.setInterval(() => { if (!document.hidden) void load(); }, refreshSeconds * 1000);
     return () => window.clearInterval(timer);
   }, [load, refreshSeconds]);
-
-  /* 运行态和渠道计数不随时间范围变，单独拉一次。 */
-  useEffect(() => {
-    getSystemInfo()
-      .then(setSystem)
-      .catch(() => setSystem(null));
-    listUpstreams()
-      .then((list) => {
-        const active = list.filter((item) => !item.archived);
-        setChannels({ enabled: active.filter((item) => item.enabled).length, total: active.length });
-      })
-      .catch(() => setChannels(null));
-  }, []);
-
   function switchRange(next: string) {
     setRange(next);
     writeStored(RANGE_KEY, next);
@@ -443,8 +421,6 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
     overview && total > 0 ? ((overview.error_requests / total) * 100).toFixed(1) : null;
   const errorTone =
     errorRate === null ? "" : Number(errorRate) >= 10 ? "tone-danger" : Number(errorRate) >= 2 ? "tone-warn" : "";
-  const metrics = system?.runtime_metrics;
-  const cleanup = metrics?.cleanup;
   /* 响应总是嵌套的：选了具体时间窗时，服务端把该窗的聚合值塞进 today。
      按扁平结构取字段全是 undefined，卡片渲染成 NaN。 */
   /* 滑块要量选中那个按钮的实际几何。用 layout effect 是为了在浏览器绘制前
@@ -602,14 +578,6 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                 value={overview ? formatMs(overview.avg_duration_ms) : "—"}
                 hint={overview?.duration_count ? `有效 ${overview.duration_count} 条` : "暂无耗时"}
               />
-              {/* 归档渠道不计入分母。算进去的话「2/3」看起来像有一个只是被停用，
-                  而它其实已经退出路由了。 */}
-            <Kpi
-              label="启用渠道"
-              value={channels ? String(channels.enabled) : "—"}
-              denominator={channels ? `/${channels.total}` : undefined}
-              hint={channels ? `停用 ${channels.total - channels.enabled}` : "暂无渠道"}
-            />
             <Kpi
               label="Tokens"
               rawValue={usageWindow?.total_tokens}
@@ -625,40 +593,6 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
               label="请求（全部）"
               value={usageWindow ? compact(usageWindow.all_request_count) : "—"}
               hint={`计入用量 ${compact(usageWindow?.request_count ?? 0)} 条`}
-            />
-            <Kpi
-                  label="活跃流"
-                  value={compact(metrics?.active_sse_streams ?? 0)}
-                  hint="当前 SSE 连接"
-                  tone={(metrics?.active_sse_streams ?? 0) > 0 ? "tone-ok" : ""}
-                />
-                <Kpi
-                  label="10m 断连"
-                  value={compact(metrics?.sse_recent_disconnects_10m ?? 0)}
-                  hint={`累计 ${compact(metrics?.sse_client_disconnects_total ?? 0)}`}
-                  tone={(metrics?.sse_recent_disconnects_10m ?? 0) > 0 ? "tone-warn" : ""}
-                />
-                <Kpi
-                  label="日志队列"
-                  value={compact(metrics?.log_queue_depth ?? 0)}
-                  hint={`失败 ${compact(metrics?.log_write_failures_total ?? 0)} · 丢弃 ${compact(metrics?.log_dropped_total ?? 0)} · 慢 DB ${compact(metrics?.slow_db_operations_total ?? 0)}`}
-                  tone={
-                    (metrics?.log_write_failures_total ?? 0) > 0 ||
-                    (metrics?.log_dropped_total ?? 0) > 0 ||
-                    (metrics?.slow_db_operations_total ?? 0) > 0
-                      ? "tone-danger"
-                      : ""
-                  }
-                />
-            <Kpi
-              label="清理任务"
-              value={cleanup?.active ? "运行中" : "空闲"}
-              hint={
-                cleanup?.active
-                  ? `${compact(cleanup.current_rows_cleared)} 行 / ${compact(cleanup.current_batches)} 批`
-                  : `上次 ${compact(cleanup?.last_rows_cleared ?? 0)} 行 · ${formatDuration(cleanup?.last_duration_ms)}`
-              }
-              tone={cleanup?.active ? "tone-warn" : ""}
             />
           </div>
 
