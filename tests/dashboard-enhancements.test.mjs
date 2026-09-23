@@ -25,3 +25,10 @@ test("dashboard latency and request sparklines render smooth cubic Bezier paths 
   assert.match(kpiHtml, /class="kpi-bg-spark-svg"/);
   assert.match(kpiHtml, /<path[^>]+class="spark-morph-line"[^>]+d="M[^"]+C[^"]+"/);
 });
+test("error distribution strip preserves grid cell feel with status-error-strip and status-error-cell", () => {
+  assert.match(page, /status-error-strip-wrap/);
+  assert.match(page, /status-error-strip-label/);
+  assert.match(page, /className="status-error-strip"/);
+  assert.match(page, /status-error-cell is-clean/);
+  assert.match(page, /status-error-cell is-clickable/);
+});
