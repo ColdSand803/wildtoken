@@ -115,7 +115,7 @@ test("在途请求只在最新一页出现", () => {
   // 游标页和偏移页都没有在途请求的位置：它们不属于任何一段历史。
   assert.match(
     handler,
-    /if cursor == nil && offset == 0 \{\n\t\t\tsnapshot := state\.ActiveRequests\.Snapshot\(\)/,
+    /if cursor == nil && offset == 0 \{[\r\n\t]+snapshot := state\.ActiveRequests\.Snapshot\(\)/,
   );
 });
 

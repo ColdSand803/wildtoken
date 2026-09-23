@@ -669,7 +669,49 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                 <span className="dashboard-card-meta wt-meta">{rangeLabel}</span>
               </div>
               <div className="dashboard-chart">
-                {overview ? <><StatusBar overview={overview} /><p className="field-hint">错误时间分布（选择时间桶下钻）</p><SegmentBar label="错误时间分布" className="ops-error-timeline" segments={overview.request_series.map((bucket) => ({ label: new Date(bucket.bucket_epoch * 1000).toLocaleString("zh-CN"), width: 100 / Math.max(overview.request_series.length, 1), className: `ops-bar-seg ${bucket.errors ? "danger" : "muted"}`, lines: [`请求 ${bucket.count} · 失败 ${bucket.errors ?? 0}`], onSelect: () => drillDown({ status: "error", start: new Date(bucket.bucket_epoch * 1000).toISOString(), end: new Date((bucket.bucket_epoch + overview.bucket_seconds) * 1000).toISOString() }) }))} /></> : null}
+                {overview ? (
+                  <>
+                    <StatusBar overview={overview} />
+                    {overview.request_series.length >= 2 && (
+                      <div className="status-error-strip-wrap">
+                        <span className="status-error-strip-label">错误时间分布</span>
+                        <SegmentBar
+                          label="按时间桶的错误分布"
+                          className="status-error-strip"
+                          segments={overview.request_series.map((bucket) => {
+                            const count = Number(bucket.count) || 0;
+                            const errors = Number(bucket.errors) || 0;
+                            const when = new Date(bucket.bucket_epoch * 1000).toLocaleString("zh-CN");
+                            const rate = count > 0 ? errors / count : 0;
+                            const opacity = errors ? (0.25 + 0.75 * Math.min(1, rate / 0.5)).toFixed(2) : 1;
+                            const isClean = !errors;
+                            const share = errors
+                              ? `错误 ${errors}/${count} (${(rate * 100).toFixed(1)}%)`
+                              : `${count} 条 · 无错误`;
+                            return {
+                              label: when,
+                              className: isClean
+                                ? "status-error-cell is-clean"
+                                : "status-error-cell is-clickable",
+                              style: isClean ? undefined : { opacity: Number(opacity) },
+                              lines: [share, ...(errors ? ["点击在日志中查看"] : [])],
+                              onSelect: errors
+                                ? () =>
+                                    drillDown({
+                                      status: "error",
+                                      start: new Date(bucket.bucket_epoch * 1000).toISOString(),
+                                      end: new Date(
+                                        (bucket.bucket_epoch + overview.bucket_seconds) * 1000
+                                      ).toISOString(),
+                                    })
+                                : undefined,
+                            };
+                          })}
+                        />
+                      </div>
+                    )}
+                  </>
+                ) : null}
               </div>
             </article>
 
