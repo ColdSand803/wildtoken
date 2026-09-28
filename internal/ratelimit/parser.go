@@ -2,6 +2,7 @@ package ratelimit
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"strconv"
 	"time"
@@ -59,6 +60,12 @@ func ParseRateLimit(expr string) (*RateLimit, error) {
 		baseWindow = 24 * time.Hour
 	default:
 		return nil, fmt.Errorf("invalid time unit: %s (must be s, m, h, or d)", unit)
+	}
+
+	// An oversized multiplier wraps the window negative, which admits every
+	// request: 1/106752d passed validation and limited nothing.
+	if multiplier > math.MaxInt64/int64(baseWindow) {
+		return nil, fmt.Errorf("rate limit window is too long: %s", expr)
 	}
 
 	return &RateLimit{

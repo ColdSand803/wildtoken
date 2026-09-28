@@ -87,6 +87,17 @@ func TestParseRateLimit(t *testing.T) {
 			expr:    "abc/m",
 			wantErr: true,
 		},
+		{
+			// 106752 days overflows a Duration and would wrap the window negative.
+			name:    "invalid format - window overflows",
+			expr:    "1/106752d",
+			wantErr: true,
+		},
+		{
+			name: "longest representable window",
+			expr: "1/106751d",
+			want: &RateLimit{Requests: 1, Window: 106751 * 24 * time.Hour},
+		},
 	}
 
 	for _, tt := range tests {
