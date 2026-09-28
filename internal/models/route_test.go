@@ -26,12 +26,15 @@ func TestProxyPathIsDerivedOneWay(t *testing.T) {
 }
 
 func TestAnthropicMessagesIsRecognisedThroughTheSameDerivation(t *testing.T) {
-	for _, path := range []string{"/v1/messages", "/v1//messages", "/v1/messages/"} {
+	// Sub-resources are the same API: Claude Code calls count_tokens with the
+	// same x-api-key it sends to messages.
+	for _, path := range []string{"/v1/messages", "/v1//messages", "/v1/messages/",
+		"/v1/messages/count_tokens", "/v1/messages/batches"} {
 		if !IsAnthropicMessages(ProxyPath(path)) {
 			t.Errorf("%q was not recognised as the Anthropic Messages route", path)
 		}
 	}
-	for _, path := range []string{"/v1/chat/completions", "/v1/models", "/v1/messages/count"} {
+	for _, path := range []string{"/v1/chat/completions", "/v1/models", "/v1/messagesx"} {
 		if IsAnthropicMessages(ProxyPath(path)) {
 			t.Errorf("%q was wrongly recognised as the Anthropic Messages route", path)
 		}

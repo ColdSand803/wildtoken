@@ -25,8 +25,12 @@ func ProxyPath(urlPath string) string {
 }
 
 // IsAnthropicMessages reports whether a proxy path addresses the Anthropic
-// Messages endpoint, which authenticates with x-api-key and speaks its own
-// error shape.
+// Messages API, which authenticates with x-api-key and speaks its own error
+// shape.
+//
+// Sub-resources such as messages/count_tokens belong to it too. Matching only
+// the bare path refused Claude Code's x-api-key on count_tokens, and forwarded
+// the channel key there as a Bearer token Anthropic does not accept.
 func IsAnthropicMessages(proxyPath string) bool {
-	return proxyPath == "messages"
+	return proxyPath == "messages" || strings.HasPrefix(proxyPath, "messages/")
 }
