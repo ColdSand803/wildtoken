@@ -12,9 +12,11 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/liguangsheng/wildtoken/internal/appstate"
+	"github.com/liguangsheng/wildtoken/internal/authstate"
 	"github.com/liguangsheng/wildtoken/internal/config"
 	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/metrics"
+	"github.com/liguangsheng/wildtoken/internal/middleware"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
 	"github.com/liguangsheng/wildtoken/internal/quota"
@@ -147,5 +149,47 @@ func TestWriteActiveRequestsEmitsAnEmptyArray(t *testing.T) {
 	const want = "event: active\ndata: {\"requests\":[],\"total\":0}\n\n"
 	if got := recorder.Body.String(); got != want {
 		t.Fatalf("unexpected frame: %q", got)
+	}
+}
+
+// The live log never ends on its own. Left open, it held every shutdown for the
+// full drain timeout and ended it with an error.
+func TestTheLiveLogStreamEndsWhenShutdownBegins(t *testing.T) {
+	state := activeLogTestState(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 8,
+		state.Quotas)
+	t.Cleanup(func() {
+		state.LogWriter.Close()
+		cancel()
+	})
+
+	hash, err := authstate.HashAdminToken("stream-admin-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := authstate.NewCredentials(
+		models.AdminCredential{CredentialHash: hash, CredentialVersion: 1}, authstate.NewThrottle())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Credentials = credentials
+	stopping := make(chan struct{})
+	state.Stopping = stopping
+
+	handler := middleware.RequireAdmin(credentials, "")(AdminStreamLogs(state))
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/logs/stream", nil)
+	request.Header.Set("x-admin-token", "stream-admin-token")
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(httptest.NewRecorder(), request)
+		close(done)
+	}()
+
+	close(stopping)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the live log stream did not end when shutdown began")
 	}
 }

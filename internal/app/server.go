@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -106,6 +107,7 @@ func New(ctx context.Context) (*Server, error) {
 	logWriter := proxy.NewLogWriter(jobsCtx, database, runtimeMetrics, logStats,
 		settings.Logging.LogQueueCapacity, quotas)
 
+	stopping := make(chan struct{})
 	state := &appstate.State{
 		DB:                  database,
 		Settings:            settings,
@@ -123,6 +125,7 @@ func New(ctx context.Context) (*Server, error) {
 		UpstreamRateLimiter: ratelimit.NewLimiter(),
 		Quotas:              quotas,
 		StartedAt:           time.Now(),
+		Stopping:            stopping,
 	}
 	// The client reads the proxy setting through the runtime store on every
 	// request, so a console edit applies to new connections without a restart.
@@ -148,7 +151,7 @@ func New(ctx context.Context) (*Server, error) {
 	}
 
 	port := uint16(listener.Addr().(*net.TCPAddr).Port)
-	return &Server{
+	server := &Server{
 		state: state,
 		httpServer: &http.Server{
 			Handler: NewRouter(state),
@@ -166,7 +169,10 @@ func New(ctx context.Context) (*Server, error) {
 			Port:     port,
 			AdminURL: AdminURLFromSettings(settings.Server.Host, port),
 		},
-	}, nil
+	}
+	var stopOnce sync.Once
+	server.httpServer.RegisterOnShutdown(func() { stopOnce.Do(func() { close(stopping) }) })
+	return server, nil
 }
 
 // Serve accepts connections until ctx is cancelled, then shuts down gracefully.
@@ -193,6 +199,12 @@ func (s *Server) Serve(ctx context.Context) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), requestDrainTimeout)
 	defer cancel()
 	err := s.httpServer.Shutdown(shutdownCtx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		// Answers still streaming are cut off by the exit. That is the drain's
+		// bound working, not the process failing, so it does not exit non-zero.
+		slog.Warn("in-flight requests outlived the shutdown drain", "waited", requestDrainTimeout)
+		err = nil
+	}
 	s.shutdownResources()
 	slog.Info("WildToken stopped")
 	return err

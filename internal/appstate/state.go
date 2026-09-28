@@ -129,6 +129,10 @@ type State struct {
 	// directory is configured; every method treats nil as "off".
 	Images    *imagestore.Store
 	StartedAt time.Time
+	// Stopping closes when shutdown begins. A stream with no end of its own,
+	// such as the console's live log, returns on it; otherwise it held the
+	// request drain open until the drain timed out. Nil never closes.
+	Stopping <-chan struct{}
 }
 
 // EffectiveUpstreamTimeoutSeconds is the fallback timeout for channels that

@@ -2,6 +2,9 @@ services:
   wildtoken:
     build: .
     restart: unless-stopped
+    # 关停先等在途请求最多 15 秒，再等日志队列写完最多 30 秒。Docker 默认 10 秒
+    # 就 SIGKILL，写日志那一步跑不到，队列里的日志和额度增量随之丢失。
+    stop_grace_period: 50s
     env_file:
       - .env
     environment:

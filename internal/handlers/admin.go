@@ -687,6 +687,9 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 			case <-r.Context().Done():
 				return
 
+			case <-state.Stopping:
+				return
+
 			case event, open := <-events:
 				if !open {
 					return
