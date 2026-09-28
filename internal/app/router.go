@@ -157,9 +157,12 @@ func serveThemePackCSS(dir string) http.Handler {
 //
 // The console needs the files under /static by name; nothing needs an index of
 // them, and this route is outside the admin credential like the theme one.
+//
+// The mount point itself arrives with an empty path once its prefix is
+// stripped, which the FileServer turns into "/" and lists.
 func noDirectoryListing(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/") {
+		if r.URL.Path == "" || strings.HasSuffix(r.URL.Path, "/") {
 			http.NotFound(w, r)
 			return
 		}
@@ -179,7 +182,15 @@ func allowAnyOrigin(next http.Handler) http.Handler {
 		header := w.Header()
 		header.Set("access-control-allow-origin", "*")
 		header.Set("access-control-allow-methods", "*")
-		header.Set("access-control-allow-headers", "*")
+		// The wildcard never covers Authorization, which is how most clients
+		// send their key, so a preflight is answered with the headers it asked
+		// for. Answered with "*" alone, a browser refused every Bearer request.
+		if requested := r.Header.Get("access-control-request-headers"); requested != "" {
+			header.Set("access-control-allow-headers", requested)
+			header.Add("vary", "access-control-request-headers")
+		} else {
+			header.Set("access-control-allow-headers", "*")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
