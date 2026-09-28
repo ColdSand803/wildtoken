@@ -215,9 +215,15 @@ export function saveSettings(payload: RuntimeSettings): Promise<RuntimeSettings>
   });
 }
 
-/** 轮换管理员令牌。新值只在响应里出现一次。 */
-export function rotateAdminToken(): Promise<{ token: string }> {
-  return api<{ token: string }>("/api/admin/settings/admin-token/rotate", { method: "POST" });
+/**
+ * 更换管理员令牌。新值由管理员自己定，和旧控制台一致；后端要显式确认，
+ * 成功回 204，不回令牌。
+ */
+export function rotateAdminToken(token: string): Promise<null> {
+  return api<null>("/api/admin/settings/admin-token/rotate", {
+    method: "POST",
+    body: JSON.stringify({ confirm: true, token }),
+  });
 }
 
 export function getSystemInfo(): Promise<SystemInfo> {

@@ -89,6 +89,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     null,
   );
   const [rotatedToken, setRotatedToken] = useState("");
+  const [rotating, setRotating] = useState(false);
   const [defaultHome, setDefaultHome] = useState(readDefaultHome);
   const [refreshingSystem, setRefreshingSystem] = useState(false);
 
@@ -159,22 +160,17 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     }
   }
 
-  async function rotate() {
-    const ok = await confirm({
-      title: "轮换管理员令牌？",
-      message: "旧令牌立刻失效，其他已登录的浏览器会被登出。新令牌只显示一次。",
-      confirmLabel: "轮换",
-    });
-    if (!ok) return;
+  async function rotate(token: string) {
+    setRotating(false);
     try {
-      const { token } = await rotateAdminToken();
+      await rotateAdminToken(token);
       // 当前页面接着用新令牌，否则下一个请求就 401。
       setAdminToken(token);
       setRotatedToken(token);
-      toast("管理员令牌已轮换，请立刻保存新值。", { tone: "warn", durationMs: 9000 });
+      toast("管理员令牌已更换，当前控制台已改用新令牌。", { tone: "warn", durationMs: 9000 });
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`轮换失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      else toast(`更换失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
     }
   }
 
@@ -360,13 +356,15 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                       hint="设为 0 时只保留元数据和请求头，不采集正文。"
                       onChange={(v) => patch("log_body_max_bytes", v)}
                     />
-                    {/* 服务端按 MB 存，这里按 GB 填：图片目录的量级是 GB。 */}
+                    {/* 服务端按 MB 存，这里按 GB 填：图片目录的量级是 GB。显示取两位
+                        小数，1229MB 显示成 1.2 而不是 1.2001953125。 */}
                     <NumberField
                       className="span-2"
                       label="生图图片存储上限（GB）"
-                      value={settings.image_storage_max_mb / 1024}
+                      value={Math.round((settings.image_storage_max_mb / 1024) * 100) / 100}
                       min={0}
                       max={1024}
+                      step={0.01}
                       hint="生图结果另存为文件，日志里只留链接，链接可直接下载。超出上限时从最旧的图删起，约每五分钟检查一次。设为 0 不再保存，并清空已存的图。"
                       onChange={(v) => patch("image_storage_max_mb", Math.round(v * 1024))}
                     />
@@ -685,7 +683,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                 <strong>更换管理员令牌</strong>
                 <p>保存后当前控制台会自动改用新令牌，新值只显示一次。</p>
               </div>
-              <button type="button" className="danger" onClick={() => void rotate()}>
+              <button type="button" className="danger" onClick={() => setRotating(true)}>
                 更换令牌
               </button>
             </div>
@@ -772,6 +770,11 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
         onSubmit={(name, prompt) => void saveTemplate(name, prompt)}
         onClose={() => setEditingTemplate(null)}
       />
+      <RotateDialog
+        open={rotating}
+        onSubmit={(token) => void rotate(token)}
+        onClose={() => setRotating(false)}
+      />
     </section>
   );
 }
@@ -805,6 +808,10 @@ function NumberField({
   className?: string;
   onChange: (value: number) => void;
 }) {
+  /* 输入时以敲的原文为准。受控值可能是换算出来的（GB 由 MB 反推），每敲一
+     位就写回的话，1.2 会被改写成 1.2001953125，小数根本输不进去。 */
+  const [draft, setDraft] = useState<string | null>(null);
+
   return (
     <label className={className ? `field ${className}` : "field"}>
       <span className="field-label">{label}</span>
@@ -815,11 +822,113 @@ function NumberField({
         step={step}
         required
         inputMode={step !== undefined && step < 1 ? "decimal" : "numeric"}
-        value={value}
-        onChange={(event) => onChange(num(event.target.value))}
+        value={draft ?? value}
+        onFocus={() => setDraft(String(value))}
+        onBlur={() => setDraft(null)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          onChange(num(event.target.value));
+        }}
       />
       {hint ? <span className="field-hint">{hint}</span> : null}
     </label>
+  );
+}
+
+/** 管理员令牌的形状，和后端校验一致：8–256 位可打印 ASCII，不含空格。 */
+const ADMIN_TOKEN_PATTERN = /^[\x21-\x7E]{8,256}$/;
+
+/** 32 位字母数字。丢掉 248 以上的字节，每个字符才等概率。 */
+function randomAdminToken(): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let token = "";
+  while (token.length < 32) {
+    for (const byte of crypto.getRandomValues(new Uint8Array(32))) {
+      if (byte < 248 && token.length < 32) token += alphabet[byte % alphabet.length];
+    }
+  }
+  return token;
+}
+
+/**
+ * 更换管理员令牌。新值由管理员填或随机生成，和旧控制台一致：后端不代为
+ * 生成，也不在响应里回令牌。
+ */
+function RotateDialog({
+  open,
+  onSubmit,
+  onClose,
+}: {
+  open: boolean;
+  onSubmit: (token: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useDialog(open, onClose);
+  const [token, setToken] = useState("");
+  const [understood, setUnderstood] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setToken("");
+    setUnderstood(false);
+  }, [open]);
+
+  const valid = ADMIN_TOKEN_PATTERN.test(token.trim());
+
+  return (
+    <dialog className="confirm-dialog" ref={ref} onCancel={onClose} aria-label="更换管理员令牌">
+      <form
+        className="confirm-panel"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid && understood) onSubmit(token.trim());
+        }}
+      >
+        <div className="modal-head">
+          <div>
+            <h2>更换管理员令牌</h2>
+            <p>保存后旧令牌立即失效，其他已登录的浏览器会被登出，当前控制台自动改用新令牌。</p>
+          </div>
+        </div>
+
+        <div className="form-grid">
+          <label className="field span-2">
+            <span className="field-label">新令牌</span>
+            <input
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              minLength={8}
+              maxLength={256}
+              required
+              spellCheck={false}
+              autoComplete="new-password"
+              placeholder="8–256 位可打印字符，不含空格"
+            />
+            <span className="field-hint">保存前先把它存好，之后只会在本页显示一次。</span>
+          </label>
+          <label className="rotate-confirm-check span-2">
+            <input
+              type="checkbox"
+              checked={understood}
+              onChange={(event) => setUnderstood(event.target.checked)}
+            />
+            <span>我了解保存后旧令牌会立即失效。</span>
+          </label>
+        </div>
+
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={() => setToken(randomAdminToken())}>
+            随机生成
+          </button>
+          <button type="button" className="secondary" onClick={onClose}>
+            取消
+          </button>
+          <button type="submit" className="danger" disabled={!valid || !understood}>
+            保存并更换
+          </button>
+        </div>
+      </form>
+    </dialog>
   );
 }
 
