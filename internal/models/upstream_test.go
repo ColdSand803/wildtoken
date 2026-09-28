@@ -98,6 +98,53 @@ func TestEveryUpdateFieldIsClassified(t *testing.T) {
 	}
 }
 
+// jsonFields lists a struct's json names, embedded structs flattened.
+func jsonFields(kind reflect.Type) []string {
+	var fields []string
+	for i := range kind.NumField() {
+		field := kind.Field(i)
+		if field.Anonymous {
+			fields = append(fields, jsonFields(field.Type)...)
+			continue
+		}
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if name != "" && name != "-" {
+			fields = append(fields, name)
+		}
+	}
+	return fields
+}
+
+// Every field of a token edit is either required or has a meaning when left
+// out, for the same reason as a channel's.
+func TestEveryTokenUpdateFieldIsClassified(t *testing.T) {
+	fields := jsonFields(reflect.TypeFor[APITokenUpdateIn]())
+	classified := slices.Concat(tokenUpdateRequired, tokenUpdateOptional)
+	slices.Sort(fields)
+	slices.Sort(classified)
+	if !slices.Equal(fields, classified) {
+		t.Errorf("fields %v, classified %v", fields, classified)
+	}
+}
+
+func TestMissingTokenFieldsAcceptsNullOnlyWhereItMeansSomething(t *testing.T) {
+	body := map[string]json.RawMessage{}
+	for _, name := range tokenUpdateRequired {
+		body[name] = json.RawMessage(`null`)
+	}
+	missing := MissingTokenFields(body)
+	for _, name := range []string{"expires_at", "rate_limit"} {
+		if slices.Contains(missing, name) {
+			t.Errorf("%s may be null", name)
+		}
+	}
+	for _, name := range []string{"group_id", "allowed_models", "name"} {
+		if !slices.Contains(missing, name) {
+			t.Errorf("a null %s was accepted", name)
+		}
+	}
+}
+
 func TestMissingUpstreamFieldsCountsNullAsMissing(t *testing.T) {
 	body := map[string]json.RawMessage{}
 	for _, name := range upstreamUpdateRequired {

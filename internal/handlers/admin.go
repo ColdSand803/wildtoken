@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -440,9 +441,28 @@ func AdminUpdateToken(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-		var input models.APITokenUpdateIn
-		if err := decodeStrictJSON(w, r, &input); err != nil {
+		// Read once, decoded twice: the keys it names, then their values.
+		var body json.RawMessage
+		if err := decodeJSON(w, r, &body); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(body, &fields); err != nil {
+			apperr.WriteError(w, apperr.BadRequest("invalid request body: "+err.Error()))
+			return
+		}
+		// A full replacement: a field left out is refused rather than read as
+		// its most permissive value.
+		if missing := models.MissingTokenFields(fields); len(missing) > 0 {
+			apperr.WriteError(w, apperr.BadRequest("missing fields: "+strings.Join(missing, ", ")))
+			return
+		}
+		var input models.APITokenUpdateIn
+		decoder := json.NewDecoder(bytes.NewReader(body))
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			apperr.WriteError(w, apperr.BadRequest("invalid request body: "+err.Error()))
 			return
 		}
 		if err := input.Validate(); err != nil {

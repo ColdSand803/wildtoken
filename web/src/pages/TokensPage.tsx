@@ -159,12 +159,9 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
     const target = editing?.token;
     setSaving(true);
     try {
-      /* 更新不收 enabled：启用状态走独立的开关接口，发过去会被严格解码
-         拒掉整个请求（unknown field "enabled"）。新建才要带。 */
-      const { enabled: _enabled, ...updatePayload } = payload;
-      const saved = target
-        ? await updateToken(target.id, updatePayload)
-        : await createToken(payload);
+      /* 更新也带 enabled：编辑框里有这个开关，原先发送前把它剔掉，
+         改了开关提示已保存，令牌却照旧可用。 */
+      const saved = target ? await updateToken(target.id, payload) : await createToken(payload);
       setEditing(null);
       await reload();
       toast(`令牌 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });

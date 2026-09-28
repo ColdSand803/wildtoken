@@ -1,6 +1,8 @@
 package models
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"time"
 	"unicode"
@@ -128,6 +130,38 @@ type APITokenUpdateIn struct {
 	// AllowedModels restricts which models this token may request. Empty means
 	// any. A trailing "*" matches by prefix: "gpt-4*" covers "gpt-4o".
 	AllowedModels []string `json:"allowed_models"`
+	// Enabled switches the token as part of the edit; absent keeps it. The
+	// console's edit form shows the switch, and without this field its change
+	// was dropped while the save reported success.
+	Enabled *bool `json:"enabled"`
+}
+
+// tokenUpdateRequired are the fields a replacing edit must carry as values.
+// Absent, each decoded to its most permissive setting — no quota, any model,
+// no rate limit, no expiry, the default group — so a script renaming a token
+// lifted every restriction on it. expires_at and rate_limit may be null: that
+// is how "never" and "unlimited" are said.
+var tokenUpdateRequired = []string{
+	"name", "description", "expires_at", "group_id", "limit_expression",
+	"rate_limit", "allowed_models",
+}
+
+// tokenUpdateOptional may be left out: a missing token or enabled keeps the
+// current one.
+var tokenUpdateOptional = []string{"token", "enabled"}
+
+// MissingTokenFields names the required fields a token edit left out or sent
+// as null where null means nothing.
+func MissingTokenFields(body map[string]json.RawMessage) []string {
+	var missing []string
+	for _, name := range tokenUpdateRequired {
+		value, ok := body[name]
+		nullable := name == "expires_at" || name == "rate_limit"
+		if !ok || (!nullable && bytes.Equal(bytes.TrimSpace(value), []byte("null"))) {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 // RequestedToken is the replacement value, or "" when this edit keeps the

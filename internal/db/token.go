@@ -582,6 +582,10 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
         updated_at = datetime('now')`
 	args := []any{trimSpace(input.Name), trimSpace(input.Description),
 		expiresAt, groupID, limitTokens, rateLimit, allowedModels}
+	if input.Enabled != nil {
+		query += ", enabled = ?"
+		args = append(args, boolToInt64(*input.Enabled))
+	}
 	if replacement != "" {
 		// The same four columns CreateToken writes, kept in step: the legacy
 		// `token` column takes the digest because the startup migration
