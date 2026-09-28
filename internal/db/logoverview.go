@@ -129,9 +129,14 @@ func overviewSpanSeconds(ctx context.Context, database *sql.DB,
 		}
 	default:
 		// The cutoff expression is a compile-time constant of this package,
-		// never caller input.
+		// never caller input. "today" starts at the operator's midnight when
+		// the caller resolved one.
+		from, args := window.cutoffExpression(), []any(nil)
+		if window == LogTopWindowToday && startAt != "" {
+			from, args = "?", []any{startAt}
+		}
 		row := database.QueryRowContext(ctx,
-			"SELECT CAST(strftime('%s', "+window.cutoffExpression()+") AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER)")
+			"SELECT CAST(strftime('%s', "+from+") AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER)", args...)
 		if err := row.Scan(&start, &end); err != nil {
 			return 0, err
 		}
@@ -144,8 +149,12 @@ func overviewSpanSeconds(ctx context.Context, database *sql.DB,
 
 // LogOverview aggregates request totals, status buckets, latency stats, and a
 // time-bucketed latency series over the selected window.
+//
+// offsetSeconds is the operator's UTC offset. Buckets are aligned to it, so a
+// daily bucket runs from their midnight rather than from UTC's — eight in the
+// morning for an operator in UTC+8.
 func LogOverview(ctx context.Context, database *sql.DB,
-	window LogTopWindow, startAt, endAt string) (LogOverviewOut, error) {
+	window LogTopWindow, startAt, endAt string, offsetSeconds int64) (LogOverviewOut, error) {
 	var out LogOverviewOut
 
 	var predicate strings.Builder
@@ -195,7 +204,7 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	// 状态卡的时间细带定位失败发生在哪些桶。
 	seriesQuery := `
 		SELECT
-			(CAST(strftime('%s', created_at) AS INTEGER) / ?) * ? AS bucket_epoch,
+			((CAST(strftime('%s', created_at) AS INTEGER) + ?) / ?) * ? - ? AS bucket_epoch,
 			COUNT(*),
 			COALESCE(SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300 THEN 1 ELSE 0 END), 0),
 			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END),
@@ -204,7 +213,8 @@ func LogOverview(ctx context.Context, database *sql.DB,
 		WHERE ` + predicate.String() + `
 		GROUP BY bucket_epoch
 		ORDER BY bucket_epoch ASC`
-	seriesArgs := append([]any{out.BucketSeconds, out.BucketSeconds}, predicateArgs...)
+	seriesArgs := append([]any{offsetSeconds, out.BucketSeconds, out.BucketSeconds, offsetSeconds},
+		predicateArgs...)
 	rows, err := database.QueryContext(ctx, seriesQuery, seriesArgs...)
 	if err != nil {
 		return out, err
@@ -244,7 +254,8 @@ func LogOverview(ctx context.Context, database *sql.DB,
 		out.PreviousStatus = &previousCounts
 	}
 
-	if err := fillLatencyQuantiles(ctx, database, &out, predicate.String(), predicateArgs); err != nil {
+	if err := fillLatencyQuantiles(ctx, database, &out, predicate.String(), predicateArgs,
+		offsetSeconds); err != nil {
 		return out, err
 	}
 	return out, nil
@@ -260,7 +271,7 @@ const maxQuantileDurations = 200_000
 // SQLite has no percentile aggregate, and the row count is retention-bounded,
 // so computing in Go over one ordered scan is the cheap option.
 func fillLatencyQuantiles(ctx context.Context, database *sql.DB, out *LogOverviewOut,
-	predicate string, predicateArgs []any) error {
+	predicate string, predicateArgs []any, offsetSeconds int64) error {
 	if out.DurationCount == 0 || out.DurationCount > maxQuantileDurations {
 		return nil
 	}
@@ -268,11 +279,12 @@ func fillLatencyQuantiles(ctx context.Context, database *sql.DB, out *LogOvervie
 	// ORDER BY bucket, duration keeps every bucket's slice sorted as scanned,
 	// so no per-bucket sort is needed; the window-wide slice is sorted once.
 	durationsQuery := `
-		SELECT (CAST(strftime('%s', created_at) AS INTEGER) / ?) * ? AS bucket_epoch, duration_ms
+		SELECT ((CAST(strftime('%s', created_at) AS INTEGER) + ?) / ?) * ? - ? AS bucket_epoch, duration_ms
 		FROM request_logs
 		WHERE ` + predicate + ` AND duration_ms IS NOT NULL AND duration_ms >= 0
 		ORDER BY bucket_epoch ASC, duration_ms ASC`
-	args := append([]any{out.BucketSeconds, out.BucketSeconds}, predicateArgs...)
+	args := append([]any{offsetSeconds, out.BucketSeconds, out.BucketSeconds, offsetSeconds},
+		predicateArgs...)
 	rows, err := database.QueryContext(ctx, durationsQuery, args...)
 	if err != nil {
 		return err
@@ -354,6 +366,16 @@ func previousWindowCounts(ctx context.Context, database *sql.DB,
 	case LogTopWindowToday:
 		predicate = "created_at >= datetime('now', 'localtime', 'start of day', 'utc', '-1 day')" +
 			" AND created_at < datetime('now', '-1 day')"
+		// Yesterday up to this time of day, from the operator's midnight when
+		// the caller resolved one.
+		if startAt != "" {
+			start, err := time.Parse("2006-01-02 15:04:05", startAt)
+			if err != nil {
+				return counts, false, err
+			}
+			predicate = "created_at >= ? AND created_at < datetime('now', '-1 day')"
+			args = append(args, start.Add(-24*time.Hour).Format("2006-01-02 15:04:05"))
+		}
 	case LogTopWindowOneDay:
 		predicate = "created_at >= datetime('now', '-2 days') AND created_at < datetime('now', '-1 day')"
 	case LogTopWindowThreeDays:

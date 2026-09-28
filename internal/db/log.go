@@ -133,6 +133,15 @@ func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWin
 		}
 		query.WriteString("created_at >= ? AND created_at < ?")
 		args = append(args, startAt, endAt)
+	case LogTopWindowToday:
+		// A caller that knows the operator's zone passes the start of their day;
+		// without one, "today" is the server's.
+		if startAt == "" {
+			fmt.Fprintf(query, "created_at >= %s", window.cutoffExpression())
+		} else {
+			query.WriteString("created_at >= ?")
+			args = append(args, startAt)
+		}
 	default:
 		cutoff := window.cutoffExpression()
 		if cutoff == "" {
@@ -501,6 +510,13 @@ const tokenMetricFilter = "total_tokens IS NOT NULL AND total_tokens > 0"
 // TopLogStats ranks models and channels by request count and token usage.
 func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, limit int64) (models.RequestLogTopStatsOut, error) {
 	return topLogStats(ctx, database, window, "", "", limit)
+}
+
+// TopLogStatsRange ranks logs in a window the caller resolved: a custom
+// interval, or "today" from the operator's own midnight.
+func TopLogStatsRange(ctx context.Context, database *sql.DB, window LogTopWindow,
+	startAt, endAt string, limit int64) (models.RequestLogTopStatsOut, error) {
+	return topLogStats(ctx, database, window, startAt, endAt, limit)
 }
 
 // TopLogStatsCustom ranks logs in the half-open UTC interval [startAt, endAt).

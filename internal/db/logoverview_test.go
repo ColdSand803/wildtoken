@@ -31,7 +31,7 @@ func TestLogOverviewAggregatesTheSelectedWindow(t *testing.T) {
 		t.Fatalf("seed logs: %v", err)
 	}
 
-	day, err := LogOverview(ctx, database, LogTopWindowOneDay, "", "")
+	day, err := LogOverview(ctx, database, LogTopWindowOneDay, "", "", 0)
 	if err != nil {
 		t.Fatalf("1d overview: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestLogOverviewAggregatesTheSelectedWindow(t *testing.T) {
 		t.Errorf("1d series errors = %d, want 3", seriesErrors)
 	}
 
-	all, err := LogOverview(ctx, database, LogTopWindowAll, "", "")
+	all, err := LogOverview(ctx, database, LogTopWindowAll, "", "", 0)
 	if err != nil {
 		t.Fatalf("all overview: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestLogOverviewAggregatesTheSelectedWindow(t *testing.T) {
 	// Custom window covering the last two days must exclude the -10d row.
 	end := time.Now().UTC().AddDate(0, 0, 1).Format("2006-01-02 15:04:05")
 	start := time.Now().UTC().AddDate(0, 0, -2).Format("2006-01-02 15:04:05")
-	custom, err := LogOverview(ctx, database, LogTopWindowCustom, start, end)
+	custom, err := LogOverview(ctx, database, LogTopWindowCustom, start, end, 0)
 	if err != nil {
 		t.Fatalf("custom overview: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestLogOverviewAggregatesTheSelectedWindow(t *testing.T) {
 func TestLogOverviewSurvivesAnEmptyTable(t *testing.T) {
 	database := memoryDB(t)
 
-	out, err := LogOverview(context.Background(), database, LogTopWindowAll, "", "")
+	out, err := LogOverview(context.Background(), database, LogTopWindowAll, "", "", 0)
 	if err != nil {
 		t.Fatalf("overview on empty table: %v", err)
 	}
@@ -149,10 +149,69 @@ func TestLogOverviewSurvivesAnEmptyTable(t *testing.T) {
 func TestLatencyQuantilesSurviveAWindowThatEmptiedSinceTheCount(t *testing.T) {
 	database := memoryDB(t)
 	out := LogOverviewOut{DurationCount: 1, BucketSeconds: latencyBucketSteps[0]}
-	if err := fillLatencyQuantiles(context.Background(), database, &out, "1 = 1", nil); err != nil {
+	if err := fillLatencyQuantiles(context.Background(), database, &out, "1 = 1", nil, 0); err != nil {
 		t.Fatalf("quantiles over an emptied window: %v", err)
 	}
 	if out.P50DurationMs != nil {
 		t.Error("quantiles were reported for an empty window")
+	}
+}
+
+// A daily bucket runs from the operator's midnight. Aligned to UTC, an operator
+// in UTC+8 read days that turned over at eight in the morning.
+func TestOverviewBucketsFollowTheOperatorsMidnight(t *testing.T) {
+	database := memoryDB(t)
+	if _, err := database.Exec(`INSERT INTO request_logs
+        (created_at, method, path, client_type, stream, status_code, duration_ms) VALUES
+        (datetime('now', '-2 days'), 'POST', 'r', 'codex', 0, 200, 10),
+        (datetime('now', '-5 days'), 'POST', 'r', 'codex', 0, 200, 30)`); err != nil {
+		t.Fatal(err)
+	}
+
+	const offset = 8 * 3600
+	out, err := LogOverview(context.Background(), database, LogTopWindowThirtyDays, "", "", offset)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.BucketSeconds != 86400 {
+		t.Fatalf("bucket = %d, want daily", out.BucketSeconds)
+	}
+	for _, bucket := range out.RequestSeries {
+		if (bucket.BucketEpoch+offset)%86400 != 0 {
+			t.Errorf("bucket %d does not start at a UTC+8 midnight", bucket.BucketEpoch)
+		}
+	}
+	for _, bucket := range out.LatencySeries {
+		if (bucket.BucketEpoch+offset)%86400 != 0 || bucket.P50Ms == nil {
+			t.Errorf("latency bucket %d is misaligned or lost its quantiles", bucket.BucketEpoch)
+		}
+	}
+}
+
+// "today" can start at a midnight the caller resolved in the operator's zone,
+// and its comparison is yesterday up to the same time of day.
+func TestTodayCanStartAtTheOperatorsMidnight(t *testing.T) {
+	database := memoryDB(t)
+	if _, err := database.Exec(`INSERT INTO request_logs
+        (created_at, method, path, client_type, stream, status_code) VALUES
+        (datetime('now', '-2 hours'), 'POST', 'r', 'codex', 0, 200),
+        (datetime('now', '-25 hours'), 'POST', 'r', 'codex', 0, 200),
+        (datetime('now', '-30 hours'), 'POST', 'r', 'codex', 0, 200)`); err != nil {
+		t.Fatal(err)
+	}
+	var startAt string
+	if err := database.QueryRow("SELECT datetime('now', '-3 hours')").Scan(&startAt); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := LogOverview(context.Background(), database, LogTopWindowToday, startAt, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.TotalRequests != 1 {
+		t.Errorf("today counted %d rows, want the one since the given midnight", out.TotalRequests)
+	}
+	if out.PreviousTotal == nil || *out.PreviousTotal != 1 {
+		t.Errorf("previous = %v, want the one row from yesterday's same span", out.PreviousTotal)
 	}
 }

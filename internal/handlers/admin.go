@@ -750,14 +750,33 @@ var dashboardRangeLayouts = []string{
 
 // parseDashboardBound reports whether the value named a whole day, which
 // decides if the upper bound is rounded up to the following midnight.
-func parseDashboardBound(value string) (time.Time, bool, error) {
+func parseDashboardBound(value string, zone *time.Location) (time.Time, bool, error) {
 	for _, layout := range dashboardRangeLayouts {
-		parsed, err := time.ParseInLocation(layout, value, time.Local)
+		parsed, err := time.ParseInLocation(layout, value, zone)
 		if err == nil {
 			return parsed, layout == dashboardDateLayout, nil
 		}
 	}
 	return time.Time{}, false, errors.New("unrecognised timestamp")
+}
+
+// dashboardZone reads the console's UTC offset, tz_offset in minutes east of
+// UTC.
+//
+// The dashboard's days are the operator's: "today", custom dates and bucket
+// edges all follow their browser. Read in the server's zone instead, a custom
+// range shifted by the difference between the two, and so did "today". A
+// caller that sends no offset gets the server's zone, as before.
+func dashboardZone(value string) (*time.Location, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Local, nil
+	}
+	minutes, err := strconv.Atoi(value)
+	if err != nil || minutes < -14*60 || minutes > 14*60 {
+		return nil, apperr.BadRequest("tz_offset must be minutes east of UTC, between -840 and 840")
+	}
+	return time.FixedZone("", minutes*60), nil
 }
 
 type dashboardRangeSelection struct {
@@ -766,9 +785,12 @@ type dashboardRangeSelection struct {
 	Window  db.LogTopWindow
 	StartAt string
 	EndAt   string
+	// OffsetSeconds is the zone's current UTC offset, for bucket alignment.
+	OffsetSeconds int64
 }
 
-func parseDashboardRange(value, startValue, endValue, fallback string) (dashboardRangeSelection, error) {
+func parseDashboardRange(value, startValue, endValue, fallback string,
+	zone *time.Location) (dashboardRangeSelection, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		value = fallback
@@ -779,10 +801,14 @@ func parseDashboardRange(value, startValue, endValue, fallback string) (dashboar
 			"range must be one of: today, 1d, 3d, 7d, 30d, all, default, custom")
 	}
 
-	selection := dashboardRangeSelection{Value: value, Window: window}
+	now := time.Now().In(zone)
+	_, offset := now.Zone()
+	selection := dashboardRangeSelection{Value: value, Window: window, OffsetSeconds: int64(offset)}
 	switch value {
 	case "today":
 		selection.Label = "今天"
+		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone)
+		selection.StartAt = midnight.UTC().Format(models.TimestampFormat)
 	case "1d":
 		selection.Label = "最近 24 小时"
 	case "3d":
@@ -804,8 +830,8 @@ func parseDashboardRange(value, startValue, endValue, fallback string) (dashboar
 		}
 		// Only the upper bound cares whether it named a whole day; a start is
 		// taken at its own midnight either way.
-		startDate, _, startErr := parseDashboardBound(startValue)
-		endDate, endIsWholeDay, endErr := parseDashboardBound(endValue)
+		startDate, _, startErr := parseDashboardBound(startValue, zone)
+		endDate, endIsWholeDay, endErr := parseDashboardBound(endValue, zone)
 		if startErr != nil || endErr != nil {
 			return dashboardRangeSelection{}, apperr.BadRequest(
 				"start_date and end_date must use YYYY-MM-DD or YYYY-MM-DDTHH:MM[:SS]")
@@ -835,8 +861,13 @@ func parseDashboardRange(value, startValue, endValue, fallback string) (dashboar
 func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
+		zone, err := dashboardZone(query.Get("tz_offset"))
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 		selection, err := parseDashboardRange(
-			query.Get("range"), query.Get("start_date"), query.Get("end_date"), "default")
+			query.Get("range"), query.Get("start_date"), query.Get("end_date"), "default", zone)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -848,10 +879,21 @@ func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		// The cache's "today" starts at the server's midnight; an operator in
+		// another zone gets theirs from the database.
+		_, serverOffset := time.Now().Zone()
 		var usage models.TokenUsageWindowOut
 		switch selection.Window {
 		case db.LogTopWindowToday:
 			usage = stats.Today
+			if selection.OffsetSeconds != int64(serverOffset) {
+				usage, err = db.QueryTokenUsage(r.Context(), state.DB, selection.Window,
+					selection.StartAt, selection.EndAt)
+				if err != nil {
+					apperr.WriteError(w, err)
+					return
+				}
+			}
 		case db.LogTopWindowOneDay:
 			usage = stats.OneDay
 		case db.LogTopWindowSevenDays:
@@ -883,15 +925,20 @@ func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 func AdminLogOverview(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
+		zone, err := dashboardZone(query.Get("tz_offset"))
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 		selection, err := parseDashboardRange(
-			query.Get("range"), query.Get("start_date"), query.Get("end_date"), "today")
+			query.Get("range"), query.Get("start_date"), query.Get("end_date"), "today", zone)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
 
 		overview, err := db.LogOverview(r.Context(), state.DB,
-			selection.Window, selection.StartAt, selection.EndAt)
+			selection.Window, selection.StartAt, selection.EndAt, selection.OffsetSeconds)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -906,21 +953,21 @@ func AdminLogOverview(state *appstate.State) http.HandlerFunc {
 func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		query := r.URL.Query()
+		zone, err := dashboardZone(query.Get("tz_offset"))
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 		selection, err := parseDashboardRange(
-			query.Get("window"), query.Get("start_date"), query.Get("end_date"), "today")
+			query.Get("window"), query.Get("start_date"), query.Get("end_date"), "today", zone)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
 		limit := clampInt64(queryInt64(query.Get("limit"), 10), 1, 20)
 
-		var stats models.RequestLogTopStatsOut
-		if selection.Window == db.LogTopWindowCustom {
-			stats, err = db.TopLogStatsCustom(r.Context(), state.DB,
-				selection.StartAt, selection.EndAt, limit)
-		} else {
-			stats, err = db.TopLogStats(r.Context(), state.DB, selection.Window, limit)
-		}
+		stats, err := db.TopLogStatsRange(r.Context(), state.DB, selection.Window,
+			selection.StartAt, selection.EndAt, limit)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -986,7 +1033,13 @@ func AdminGetLogSnapshot(state *appstate.State) http.HandlerFunc {
 func AdminUpstreamHealthHistory(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		hours := clampInt64(queryInt64(r.URL.Query().Get("hours"), 24), 1, 24*7)
-		health, err := db.UpstreamHealthHistory(r.Context(), state.DB, hours)
+		zone, err := dashboardZone(r.URL.Query().Get("tz_offset"))
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		_, offset := time.Now().In(zone).Zone()
+		health, err := db.UpstreamHealthHistory(r.Context(), state.DB, hours, int64(offset))
 		if err != nil {
 			apperr.WriteError(w, err)
 			return

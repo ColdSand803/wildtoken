@@ -318,10 +318,11 @@ export function fetchDashboard(
     range === "custom" && custom
       ? `&start_date=${encodeURIComponent(custom.start)}&end_date=${encodeURIComponent(custom.end)}`
       : "";
+  const zone = tzOffsetParam();
   return Promise.all([
-    api<LogOverview>(`/api/admin/logs/overview?range=${range}${dates}`),
-    api<TopStats>(`/api/admin/logs/top?window=${range}&limit=5${dates}`),
-    api<TokenUsage>(`/api/admin/logs/token-usage?range=${range}${dates}`),
+    api<LogOverview>(`/api/admin/logs/overview?range=${range}${dates}${zone}`),
+    api<TopStats>(`/api/admin/logs/top?window=${range}&limit=5${dates}${zone}`),
+    api<TokenUsage>(`/api/admin/logs/token-usage?range=${range}${dates}${zone}`),
     api<RequestLogPage>("/api/admin/logs/?limit=20"),
     getSettings(),
   ]).then(([overview, top, usage, recent, settings]) => ({
@@ -415,8 +416,18 @@ export function fetchUpstreamStats(): Promise<Record<string, UpstreamStats>> {
 /** 24 小时逐小时健康，同样是一次拿全部。 */
 export function fetchUpstreamHealth(): Promise<Record<string, UpstreamHealth>> {
   return api<{ entries: Record<string, UpstreamHealth> }>(
-    "/api/admin/upstreams/health?hours=24",
+    `/api/admin/upstreams/health?hours=24${tzOffsetParam()}`,
   ).then((payload) => payload.entries ?? {});
+}
+
+/**
+ * 浏览器时区，UTC 以东的分钟数（东八区 480）。
+ *
+ * 看板的「今天」、自定义日期和分桶边界都按操作者的时区切。不带的话按服务器
+ * 时区：容器跑在 UTC 时，东八区早上 8 点才换日。
+ */
+function tzOffsetParam(): string {
+  return `&tz_offset=${-new Date().getTimezoneOffset()}`;
 }
 
 /** 导出文档。后端返回的是带 kind/version 的包装，直接存成文件。 */
