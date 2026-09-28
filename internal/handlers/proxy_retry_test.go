@@ -133,7 +133,7 @@ func TestCountTokensSpeaksTheMessagesAPI(t *testing.T) {
 	input.BaseURL = server.URL
 	input.APIKey = &key
 	input.ModelNames = []string{"test-model"}
-	if _, err := db.CreateUpstream(context.Background(), state.DB, &input, 30); err != nil {
+	if _, err := db.CreateUpstream(context.Background(), state.DB, &input); err != nil {
 		t.Fatal(err)
 	}
 	router := proxyRateLimitRouter(state)
@@ -197,7 +197,7 @@ func TestAnAllowlistAlsoBindsTheForwardedModel(t *testing.T) {
 	fuzzy.Name = "fuzzy"
 	fuzzy.BaseURL = server.URL
 	fuzzy.ModelNames = []string{"gpt-4.5-preview"}
-	if _, err := db.CreateUpstream(ctx, state.DB, &fuzzy, 30); err != nil {
+	if _, err := db.CreateUpstream(ctx, state.DB, &fuzzy); err != nil {
 		t.Fatal(err)
 	}
 	router := proxyRateLimitRouter(state)
@@ -214,7 +214,7 @@ func TestAnAllowlistAlsoBindsTheForwardedModel(t *testing.T) {
 	mapped.Name = "mapped"
 	mapped.BaseURL = server.URL
 	mapped.ModelMappings = map[string]string{"gpt-4": "gpt-4.5-preview"}
-	if _, err := db.CreateUpstream(ctx, state.DB, &mapped, 30); err != nil {
+	if _, err := db.CreateUpstream(ctx, state.DB, &mapped); err != nil {
 		t.Fatal(err)
 	}
 	state.Routing.Invalidate()

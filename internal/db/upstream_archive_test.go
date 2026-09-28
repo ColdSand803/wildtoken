@@ -21,7 +21,7 @@ func TestArchiveSemantics(t *testing.T) {
 		input := models.DefaultUpstreamIn()
 		input.Name = name
 		input.BaseURL = "https://api.example.com"
-		if _, err := CreateUpstream(ctx, db, &input, 300); err != nil {
+		if _, err := CreateUpstream(ctx, db, &input); err != nil {
 			t.Fatalf("create %s: %v", name, err)
 		}
 		return byName(t, ctx, db, name)
@@ -172,7 +172,7 @@ func TestArchivingIsIdempotent(t *testing.T) {
 	input := models.DefaultUpstreamIn()
 	input.Name = "twice"
 	input.BaseURL = "https://api.example.com"
-	if _, err := CreateUpstream(ctx, db, &input, 300); err != nil {
+	if _, err := CreateUpstream(ctx, db, &input); err != nil {
 		t.Fatal(err)
 	}
 	id := byName(t, ctx, db, "twice").ID
@@ -255,7 +255,7 @@ func TestAnUpgradedDatabaseGainsTheArchiveColumns(t *testing.T) {
 	input := models.DefaultUpstreamIn()
 	input.Name = "pre-upgrade"
 	input.BaseURL = "https://api.example.com"
-	created, err := CreateUpstream(ctx, db, &input, 300)
+	created, err := CreateUpstream(ctx, db, &input)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

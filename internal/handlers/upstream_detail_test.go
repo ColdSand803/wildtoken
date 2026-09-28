@@ -90,8 +90,7 @@ func TestTheDetailResponseCarriesTheChannelsGroups(t *testing.T) {
 	input.Name = "multi"
 	input.BaseURL = "https://example.test"
 	input.GroupIDs = []int64{models.DefaultGroupID, teamID.ID}
-	created, err := db.CreateUpstream(ctx, state.DB, &input,
-		state.Settings.Upstream.DefaultTimeoutSeconds)
+	created, err := db.CreateUpstream(ctx, state.DB, &input)
 	if err != nil {
 		t.Fatalf("create upstream: %v", err)
 	}
@@ -138,8 +137,7 @@ func TestASingleGroupChannelKeepsItAfterAnEditRoundTrip(t *testing.T) {
 	input.Name = "scoped"
 	input.BaseURL = "https://example.test"
 	input.GroupIDs = []int64{group.ID}
-	created, err := db.CreateUpstream(ctx, state.DB, &input,
-		state.Settings.Upstream.DefaultTimeoutSeconds)
+	created, err := db.CreateUpstream(ctx, state.DB, &input)
 	if err != nil {
 		t.Fatalf("create upstream: %v", err)
 	}
@@ -173,8 +171,7 @@ func TestAChannelInNoGroupReportsAnEmptyListNotNull(t *testing.T) {
 	input := models.DefaultUpstreamIn()
 	input.Name = "bare"
 	input.BaseURL = "https://example.test"
-	created, err := db.CreateUpstream(ctx, state.DB, &input,
-		state.Settings.Upstream.DefaultTimeoutSeconds)
+	created, err := db.CreateUpstream(ctx, state.DB, &input)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -206,7 +203,7 @@ func TestTogglingAChannelRefusesABodyThatNamesNothing(t *testing.T) {
 	input := models.DefaultUpstreamIn()
 	input.Name = "primary"
 	input.BaseURL = "https://api.example.com"
-	created, err := db.CreateUpstream(context.Background(), state.DB, &input, 300)
+	created, err := db.CreateUpstream(context.Background(), state.DB, &input)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

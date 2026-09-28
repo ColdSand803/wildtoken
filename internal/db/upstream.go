@@ -286,8 +286,12 @@ func boolToInt64(value bool) int64 {
 	return 0
 }
 
-func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, defaultTimeout float64) (models.UpstreamOut, error) {
-	timeout := defaultTimeout
+// CreateUpstream stores a new channel. A missing timeout is stored as 0, which
+// requests resolve to the service default when they run. Stored as the
+// default's value on the day, a channel created blank never followed a later
+// change to it, and nothing in the console could make it.
+func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn) (models.UpstreamOut, error) {
+	var timeout float64
 	if input.TimeoutSeconds != nil {
 		timeout = *input.TimeoutSeconds
 	}

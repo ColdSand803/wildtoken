@@ -51,7 +51,7 @@ func TestModelsListIsFilteredByTheTokenAllowlist(t *testing.T) {
 	input.Name = "multi"
 	input.BaseURL = "http://127.0.0.1:1"
 	input.ModelNames = []string{"gpt-4o", "gpt-4o-mini", "o3"}
-	if _, err := db.CreateUpstream(context.Background(), state.DB, &input, 30); err != nil {
+	if _, err := db.CreateUpstream(context.Background(), state.DB, &input); err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
 

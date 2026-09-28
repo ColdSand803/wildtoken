@@ -243,7 +243,9 @@ function payloadFromForm(form: FormState): UpstreamPayload {
     weight: requiredNumber(form.weight, "基础权重"),
     // UI 勾的是「固定权重」，后端要的是「自动权重」。
     auto_weight_enabled: !form.fixedWeight,
-    timeout_seconds: form.timeoutSeconds.trim() === "" ? null : Number(form.timeoutSeconds),
+    /* 留空发 0，按设置页的默认值走，默认值改了也跟着变。发 null 的话后端
+       保留原值：清空提示说用默认，存下去的还是旧数。 */
+    timeout_seconds: form.timeoutSeconds.trim() === "" ? 0 : Number(form.timeoutSeconds),
     enabled: form.enabled,
     extra_headers: parseHeaderLines(form.extraHeaders),
     rate_limit: form.rateLimit.trim() || null,
@@ -414,11 +416,13 @@ export function UpstreamDialog({
       return;
     }
 
+    // 0 和留空一样是「用默认」，都不带；带 0 的话预览接口按超出范围拒掉。
+    const timeout = Number(form.timeoutSeconds);
     setFetching(true);
     try {
       const result = await fetchModelsPreview(baseUrl, probeApiKey(), {
         extraHeaders: headers,
-        timeoutSeconds: form.timeoutSeconds.trim() === "" ? undefined : Number(form.timeoutSeconds),
+        timeoutSeconds: form.timeoutSeconds.trim() !== "" && timeout > 0 ? timeout : undefined,
       });
       setForm((current) => {
         setPicker({ catalog: result.models, selection: currentSelection(current) });
@@ -728,8 +732,9 @@ export function UpstreamDialog({
                 <span className="field-label">超时秒数</span>
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={3600}
+                  step="any"
                   placeholder="默认"
                   value={form.timeoutSeconds}
                   onChange={(event) => set("timeoutSeconds", event.target.value)}

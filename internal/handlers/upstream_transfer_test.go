@@ -50,8 +50,9 @@ func TestImportFillsWhatTheDocumentLeavesOut(t *testing.T) {
 		t.Errorf("collections stored as %s / %s / %s, want empty ones",
 			row.ModelNames, row.ModelPrefixes, row.EffortMappings)
 	}
-	if row.TimeoutSeconds != state.EffectiveUpstreamTimeoutSeconds() {
-		t.Errorf("timeout = %v, want the service default", row.TimeoutSeconds)
+	// 0 follows the service default, including later changes to it.
+	if row.TimeoutSeconds != 0 {
+		t.Errorf("timeout = %v, want 0 for the service default", row.TimeoutSeconds)
 	}
 }
 
@@ -81,7 +82,7 @@ func TestAnExportWithoutKeysLeavesCredentialHeadersOut(t *testing.T) {
 	input.Name = "secretive"
 	input.BaseURL = "https://api.example.com"
 	input.ExtraHeaders = map[string]string{"X-Api-Key": "header-secret", "X-Region": "eu"}
-	if _, err := db.CreateUpstream(context.Background(), state.DB, &input, 30); err != nil {
+	if _, err := db.CreateUpstream(context.Background(), state.DB, &input); err != nil {
 		t.Fatal(err)
 	}
 
@@ -170,7 +171,7 @@ func TestAnUpdateMissingAFieldIsRefused(t *testing.T) {
 	input.Name = "off"
 	input.BaseURL = "https://api.example.com"
 	input.Enabled = false
-	created, err := db.CreateUpstream(ctx, state.DB, &input, 30)
+	created, err := db.CreateUpstream(ctx, state.DB, &input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +219,7 @@ func TestAMessagesModelTestSendsTheKeyAsXAPIKey(t *testing.T) {
 	input.Name = "anthropic"
 	input.BaseURL = server.URL
 	input.APIKey = &key
-	created, err := db.CreateUpstream(context.Background(), state.DB, &input, 30)
+	created, err := db.CreateUpstream(context.Background(), state.DB, &input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +321,7 @@ func TestAnExportCarriesGroupNamesAndTheArchive(t *testing.T) {
 	input.Name = "parked"
 	input.BaseURL = "https://x"
 	input.GroupIDs = []int64{vip.ID}
-	created, err := db.CreateUpstream(ctx, state.DB, &input, 30)
+	created, err := db.CreateUpstream(ctx, state.DB, &input)
 	if err != nil {
 		t.Fatal(err)
 	}

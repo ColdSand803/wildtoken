@@ -1044,12 +1044,13 @@ func TestUpstreamRoundTripsItsJSONColumns(t *testing.T) {
 	input.EffortMappings = map[string]string{"max": "xhigh"}
 	input.ExtraHeaders = map[string]string{"x-tenant": "acme"}
 
-	created, err := CreateUpstream(ctx, db, &input, 300)
+	created, err := CreateUpstream(ctx, db, &input)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if created.TimeoutSeconds != 300 {
-		t.Errorf("timeout = %v, want the default 300", created.TimeoutSeconds)
+	// 0 is the service default, resolved per request.
+	if created.TimeoutSeconds != 0 {
+		t.Errorf("timeout = %v, want 0 for the service default", created.TimeoutSeconds)
 	}
 	if len(created.ModelNames) != 2 || created.ModelMappings["alias"] != "gpt-4o" ||
 		created.ExtraHeaders["x-tenant"] != "acme" ||
@@ -1099,7 +1100,7 @@ func TestUpstreamRateLimitRoundTrips(t *testing.T) {
 
 	// The stored shape is the trimmed expression, so the console echoes back
 	// exactly what the operator wrote.
-	created, err := CreateUpstream(ctx, db, &input, 300)
+	created, err := CreateUpstream(ctx, db, &input)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1151,7 +1152,7 @@ func TestDeletingAGroupRehomesTheChannelsItWasTheLastGroupOf(t *testing.T) {
 	only.Name = "only-in-team-a"
 	only.BaseURL = "https://api.example.com"
 	only.GroupIDs = []int64{group.ID}
-	onlyCreated, err := CreateUpstream(ctx, db, &only, 300)
+	onlyCreated, err := CreateUpstream(ctx, db, &only)
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -1160,7 +1161,7 @@ func TestDeletingAGroupRehomesTheChannelsItWasTheLastGroupOf(t *testing.T) {
 	shared.Name = "in-both"
 	shared.BaseURL = "https://api.example.com"
 	shared.GroupIDs = []int64{group.ID, models.DefaultGroupID}
-	sharedCreated, err := CreateUpstream(ctx, db, &shared, 300)
+	sharedCreated, err := CreateUpstream(ctx, db, &shared)
 	if err != nil {
 		t.Fatalf("create shared channel: %v", err)
 	}
