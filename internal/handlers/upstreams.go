@@ -1645,10 +1645,27 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 			}
 		}
 
+		groups, err := db.ListGroups(ctx, state.DB)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		groupNames := make(map[int64]string, len(groups))
+		for _, group := range groups {
+			groupNames[group.ID] = group.Name
+		}
+
 		// Build export items
 		channels := make([]models.ChannelExportItem, 0, len(filtered))
 		for _, out := range filtered {
 			timeout := out.TimeoutSeconds
+			archived := out.Archived
+			names := make([]string, 0, len(out.GroupIDs))
+			for _, id := range out.GroupIDs {
+				if name, ok := groupNames[id]; ok {
+					names = append(names, name)
+				}
+			}
 			item := models.ChannelExportItem{
 				Name:              out.Name,
 				BaseURL:           out.BaseURL,
@@ -1664,6 +1681,8 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 				TimeoutSeconds:    &timeout,
 				RateLimit:         out.RateLimit,
 				GroupIDs:          out.GroupIDs,
+				GroupNames:        names,
+				Archived:          &archived,
 			}
 			// Include API key if requested and present
 			if req.IncludeAPIKeys {
@@ -1701,6 +1720,17 @@ func withoutSensitiveHeaders(headers map[string]string) map[string]string {
 		}
 	}
 	return kept
+}
+
+// validateGroupNames judges each name as creating the group would.
+func validateGroupNames(names []string) error {
+	for _, name := range names {
+		group := models.GroupIn{Name: name}
+		if err := group.Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // keepSensitiveHeaders adds a channel's stored credential headers that an
@@ -1762,6 +1792,7 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 				TimeoutSeconds:    item.TimeoutSeconds,
 				RateLimit:         item.RateLimit,
 				GroupIDs:          item.GroupIDs,
+				Archived:          item.Archived,
 			}
 			// A document may still spell a collection as null; stored as such,
 			// the console cannot render the channel.
@@ -1790,6 +1821,18 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 				continue
 			}
 
+			// Checked with the channel, before a missing group is created for it.
+			if err := validateGroupNames(item.GroupNames); err != nil {
+				msg := err.Error()
+				result.Items = append(result.Items, models.ImportResultItem{
+					Name:    item.Name,
+					Action:  "failed",
+					Message: &msg,
+				})
+				result.Failed++
+				continue
+			}
+
 			// Check if exists. By the trimmed name Validate left in input, which
 			// is the one stored: " foo " missed an existing "foo" and then
 			// collided with it on insert.
@@ -1805,16 +1848,34 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 				continue
 			}
 
-			if found {
-				if req.Mode == "skip" {
+			if found && req.Mode == "skip" {
+				result.Items = append(result.Items, models.ImportResultItem{
+					Name:   item.Name,
+					Action: "skipped",
+				})
+				result.Skipped++
+				continue
+			}
+
+			// Names over ids: the ids number the groups where the document was
+			// made. A group missing here is created, rather than the channel
+			// landing in another group that happens to hold the id.
+			if len(item.GroupNames) > 0 {
+				ids, err := db.EnsureGroups(ctx, state.DB, item.GroupNames)
+				if err != nil {
+					msg := "group lookup failed: " + err.Error()
 					result.Items = append(result.Items, models.ImportResultItem{
-						Name:   item.Name,
-						Action: "skipped",
+						Name:    item.Name,
+						Action:  "failed",
+						Message: &msg,
 					})
-					result.Skipped++
+					result.Failed++
 					continue
 				}
+				input.GroupIDs = ids
+			}
 
+			if found {
 				// Overwrite. Credential headers the document leaves out stay, as
 				// the API key does: an export without keys omits both.
 				input.ExtraHeaders = keepSensitiveHeaders(existing.ExtraHeaders, input.ExtraHeaders)

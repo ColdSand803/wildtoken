@@ -182,6 +182,14 @@ func ListEnabledUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamRow
 // unarchiving would switch on every channel it touched, including ones an
 // operator had taken out of service for their own reasons.
 func SetUpstreamArchived(ctx context.Context, db *sql.DB, id int64, archived bool) (models.UpstreamOut, error) {
+	if err := setArchived(ctx, db, id, archived); err != nil {
+		return models.UpstreamOut{}, err
+	}
+	return reloadUpstreamOut(ctx, db, id)
+}
+
+// setArchived is SetUpstreamArchived's write, for callers inside a transaction.
+func setArchived(ctx context.Context, db Queryer, id int64, archived bool) error {
 	// Each statement only touches a row not already in the requested state, so
 	// a repeat is a no-op. Without that, archiving twice recorded the parked
 	// channel's enabled=0 as its previous state, and unarchiving a channel that
@@ -200,9 +208,9 @@ func SetUpstreamArchived(ctx context.Context, db *sql.DB, id int64, archived boo
 			WHERE id = ? AND archived = 1`
 	}
 	if _, err := db.ExecContext(ctx, query, id); err != nil {
-		return models.UpstreamOut{}, apperr.Database(err)
+		return apperr.Database(err)
 	}
-	return reloadUpstreamOut(ctx, db, id)
+	return nil
 }
 
 // GetUpstream returns ok=false when no row carries the id.
@@ -321,6 +329,14 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 		return models.UpstreamOut{}, err
 	}
 
+	// An imported archived channel is never visible unarchived, so it never
+	// routes between the insert and the archiving.
+	if input.Archived != nil && *input.Archived {
+		if err := setArchived(ctx, tx, id, true); err != nil {
+			return models.UpstreamOut{}, err
+		}
+	}
+
 	// Read back inside the transaction, so the response describes the channel
 	// this call created rather than what a concurrent edit had made of it by
 	// the time the read ran.
@@ -387,11 +403,21 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 		timeout = *input.TimeoutSeconds
 	}
 
+	// Unarchived first, so the enabled below is the one that sticks rather than
+	// the one unarchiving restores.
+	if input.Archived != nil && !*input.Archived {
+		if err := setArchived(ctx, tx, id, false); err != nil {
+			return models.UpstreamOut{}, err
+		}
+	}
+
+	// An archived channel stays off whatever the edit says, as archiving
+	// guarantees; unarchiving restores what it was.
 	_, err = tx.ExecContext(ctx, `UPDATE upstreams
         SET name = ?, base_url = ?, api_key = ?,
             model_names = ?, model_prefixes = ?, model_mappings = ?,
             effort_mappings = ?, priority = ?, weight = ?, auto_weight_enabled = ?,
-            enabled = ?, extra_headers = ?,
+            enabled = CASE WHEN archived = 1 THEN 0 ELSE ? END, extra_headers = ?,
             timeout_seconds = ?, rate_limit = ?, updated_at = datetime('now')
         WHERE id = ?`,
 		input.Name, input.BaseURL, apiKey, encoded.Names, encoded.Prefixes,
@@ -403,6 +429,13 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 	}
 	if err := ReplaceUpstreamGroups(ctx, tx, id, input.GroupIDs); err != nil {
 		return models.UpstreamOut{}, err
+	}
+
+	// Archived last, so it remembers the enabled this edit wrote.
+	if input.Archived != nil && *input.Archived {
+		if err := setArchived(ctx, tx, id, true); err != nil {
+			return models.UpstreamOut{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return models.UpstreamOut{}, apperr.Database(err)

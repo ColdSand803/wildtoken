@@ -200,3 +200,121 @@ func TestThePreviewRefusesAnOutOfRangeTimeout(t *testing.T) {
 		t.Errorf("returned %d, want 400: %s", response.Code, response.Body.String())
 	}
 }
+
+// Groups travel by name. The ids number the groups of the instance the export
+// came from; bound by id, a channel landed in whichever group held that number
+// here, or failed when none did.
+func TestAnImportBindsGroupsByName(t *testing.T) {
+	state := upstreamTestState(t)
+	ctx := context.Background()
+	other, err := db.CreateGroup(ctx, state.DB, &models.GroupIn{Name: "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	id := strconv.FormatInt(other.ID, 10)
+	response := adminCall(t, http.MethodPost, "/import", "/import", AdminImportUpstreams(state),
+		`{"mode":"skip","channels":[
+            {"name":"vip-channel","base_url":"https://x","group_ids":[`+id+`],"group_names":["vip"]},
+            {"name":"other-channel","base_url":"https://x","group_ids":[99],"group_names":["other"]}]}`)
+	var result models.ImportUpstreamsResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result.Created != 2 {
+		t.Fatalf("import: %s", response.Body.String())
+	}
+
+	groups, err := db.ListGroups(ctx, state.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]int64{}
+	for _, group := range groups {
+		byName[group.Name] = group.ID
+	}
+	for channel, want := range map[string]int64{"vip-channel": byName["vip"], "other-channel": other.ID} {
+		row, _, err := db.GetUpstreamByName(ctx, state.DB, channel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids, err := db.ListUpstreamGroupIDs(ctx, state.DB, row.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want == 0 || len(ids) != 1 || ids[0] != want {
+			t.Errorf("%s serves %v, want [%d]", channel, ids, want)
+		}
+	}
+}
+
+// An export records group names and the archive; without the archive, an
+// archived channel came back as a disabled one.
+func TestAnExportCarriesGroupNamesAndTheArchive(t *testing.T) {
+	state := upstreamTestState(t)
+	ctx := context.Background()
+	vip, err := db.CreateGroup(ctx, state.DB, &models.GroupIn{Name: "vip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := models.DefaultUpstreamIn()
+	input.Name = "parked"
+	input.BaseURL = "https://x"
+	input.GroupIDs = []int64{vip.ID}
+	created, err := db.CreateUpstream(ctx, state.DB, &input, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetUpstreamArchived(ctx, state.DB, created.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	response := adminCall(t, http.MethodPost, "/export", "/export", AdminExportUpstreams(state), `{}`)
+	var document models.ExportUpstreamsResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil || len(document.Channels) != 1 {
+		t.Fatalf("export: %s", response.Body.String())
+	}
+	item := document.Channels[0]
+	if len(item.GroupNames) != 1 || item.GroupNames[0] != "vip" {
+		t.Errorf("group_names = %v, want [vip]", item.GroupNames)
+	}
+	if item.Archived == nil || !*item.Archived {
+		t.Errorf("archived = %v, want true", item.Archived)
+	}
+}
+
+// The archive is applied with the write. A document that says nothing about
+// it leaves an archived channel archived, and off even if it says enabled.
+func TestAnImportRestoresTheArchive(t *testing.T) {
+	state := upstreamTestState(t)
+	ctx := context.Background()
+	importOne := func(mode, channel string) {
+		t.Helper()
+		response := adminCall(t, http.MethodPost, "/import", "/import", AdminImportUpstreams(state),
+			`{"mode":"`+mode+`","channels":[`+channel+`]}`)
+		var result models.ImportUpstreamsResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil || result.Failed != 0 {
+			t.Fatalf("import %s: %s", channel, response.Body.String())
+		}
+	}
+	stored := func() (archived, enabled int64) {
+		t.Helper()
+		row, _, err := db.GetUpstreamByName(ctx, state.DB, "c")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return row.Archived, row.Enabled
+	}
+
+	importOne("skip", `{"name":"c","base_url":"https://x","enabled":false,"archived":true}`)
+	if archived, enabled := stored(); archived != 1 || enabled != 0 {
+		t.Errorf("created: archived=%d enabled=%d, want 1 0", archived, enabled)
+	}
+
+	importOne("overwrite", `{"name":"c","base_url":"https://x","enabled":true}`)
+	if archived, enabled := stored(); archived != 1 || enabled != 0 {
+		t.Errorf("no archived field: archived=%d enabled=%d, want 1 0", archived, enabled)
+	}
+
+	importOne("overwrite", `{"name":"c","base_url":"https://x","enabled":true,"archived":false}`)
+	if archived, enabled := stored(); archived != 0 || enabled != 1 {
+		t.Errorf("archived false: archived=%d enabled=%d, want 0 1", archived, enabled)
+	}
+}

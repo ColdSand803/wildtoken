@@ -136,6 +136,10 @@ export interface ChannelExportItem {
   timeout_seconds: number;
   rate_limit?: string | null;
   group_ids: number[];
+  /** 导入按名字绑分组：id 换个实例就对不上。旧文件没有这项。 */
+  group_names?: string[];
+  /** 旧文件没有这项，覆盖导入时不改动已有渠道的归档状态。 */
+  archived?: boolean;
 }
 
 /** 导出/导入的文档包装。kind 和 version 用于拒掉不相干的 JSON。 */

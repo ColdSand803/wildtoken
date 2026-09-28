@@ -60,6 +60,10 @@ type UpstreamIn struct {
 	// GroupIDs are the groups this channel serves. An empty selection falls
 	// back to the default group, because a channel in no group is unreachable.
 	GroupIDs []int64 `json:"group_ids"`
+	// Archived is the state an import carries, applied in the same transaction
+	// as the write; nil leaves it as it is. Not part of the API: archiving has
+	// its own endpoint.
+	Archived *bool `json:"-"`
 }
 
 // DefaultUpstreamIn supplies the field defaults serde applied when a key is absent.
@@ -352,6 +356,12 @@ type ChannelExportItem struct {
 	TimeoutSeconds    *float64          `json:"timeout_seconds"`
 	RateLimit         *string           `json:"rate_limit,omitempty"`
 	GroupIDs          []int64           `json:"group_ids"`
+	// GroupNames name the same groups. Ids differ between instances, so an
+	// import binds by name when it has one; GroupIDs serve older documents.
+	GroupNames []string `json:"group_names,omitempty"`
+	// Archived is nil in older documents, and an import then leaves an
+	// existing channel's state alone.
+	Archived *bool `json:"archived,omitempty"`
 }
 
 // UnmarshalJSON starts an imported channel from the defaults a created one
