@@ -918,10 +918,12 @@ func DeleteOldLogs(ctx context.Context, database *sql.DB, retentionDays int64) e
 		}
 
 		// Yield the write lock between batches so a proxied request's log does
-		// not wait out the whole cleanup.
+		// not wait out the whole cleanup. A cancellation is reported: taken as
+		// done, the caller went on to queries the cancellation failed, and a
+		// shutdown was logged as a cleanup error.
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case <-time.After(logDeleteBatchPause):
 		}
 	}

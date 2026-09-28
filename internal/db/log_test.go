@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -824,5 +825,30 @@ func TestDeletingARowDetachesAllItsLogs(t *testing.T) {
 	if n := count(`SELECT (SELECT COUNT(*) FROM upstreams WHERE id = 1)
         + (SELECT COUNT(*) FROM api_tokens WHERE id = 1)`); n != 0 {
 		t.Errorf("%d deleted rows remain", n)
+	}
+}
+
+// Retention stopped by shutdown reports the cancellation rather than success,
+// so the pass stops instead of running on into queries that then fail.
+func TestRetentionReportsItsCancellation(t *testing.T) {
+	database := memoryDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := DeleteOldLogs(ctx, database, 30); !errors.Is(err, context.Canceled) {
+		t.Errorf("err = %v, want context.Canceled", err)
+	}
+}
+
+// A delete completes when its caller has gone: stopping between the detach and
+// the delete left the row standing with part of its history cut away.
+func TestADeleteOutlivesItsCaller(t *testing.T) {
+	database := memoryDB(t)
+	if _, err := database.Exec(`INSERT INTO upstreams (id, name, base_url) VALUES (1, 'c', 'https://x')`); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if deleted, err := DeleteUpstream(ctx, database, 1); err != nil || !deleted {
+		t.Errorf("deleted=%v err=%v, want the delete finished", deleted, err)
 	}
 }

@@ -792,6 +792,15 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 	}
 }
 
+// analyticsContext bounds a dashboard query as LogQueryTimeout bounds a log
+// listing. These scan whole windows of request_logs on the few pooled
+// connections the proxy's token lookups and the log writer wait for; left
+// unbounded on a large table, a dashboard load held them for as long as it
+// took.
+func analyticsContext(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(r.Context(), db.LogQueryTimeout)
+}
+
 // rateRefreshInterval is how often the live stream re-reads the one-minute
 // rates, which change as the window slides even when no log arrives. A var so
 // a test need not wait it out.
@@ -946,7 +955,9 @@ func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 		case db.LogTopWindowToday:
 			usage = stats.Today
 			if selection.OffsetSeconds != int64(serverOffset) {
-				usage, err = db.QueryTokenUsage(r.Context(), state.DB, selection.Window,
+				ctx, cancel := analyticsContext(r)
+				defer cancel()
+				usage, err = db.QueryTokenUsage(ctx, state.DB, selection.Window,
 					selection.StartAt, selection.EndAt)
 				if err != nil {
 					apperr.WriteError(w, err)
@@ -962,7 +973,9 @@ func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 		case db.LogTopWindowAll:
 			usage = stats.AllTime
 		default:
-			usage, err = db.QueryTokenUsage(r.Context(), state.DB, selection.Window,
+			ctx, cancel := analyticsContext(r)
+			defer cancel()
+			usage, err = db.QueryTokenUsage(ctx, state.DB, selection.Window,
 				selection.StartAt, selection.EndAt)
 			if err != nil {
 				apperr.WriteError(w, err)
@@ -996,7 +1009,9 @@ func AdminLogOverview(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		overview, err := db.LogOverview(r.Context(), state.DB,
+		ctx, cancel := analyticsContext(r)
+		defer cancel()
+		overview, err := db.LogOverview(ctx, state.DB,
 			selection.Window, selection.StartAt, selection.EndAt, selection.OffsetSeconds)
 		if err != nil {
 			apperr.WriteError(w, err)
@@ -1025,7 +1040,9 @@ func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 		}
 		limit := clampInt64(queryInt64(query.Get("limit"), 10), 1, 20)
 
-		stats, err := db.TopLogStatsRange(r.Context(), state.DB, selection.Window,
+		ctx, cancel := analyticsContext(r)
+		defer cancel()
+		stats, err := db.TopLogStatsRange(ctx, state.DB, selection.Window,
 			selection.StartAt, selection.EndAt, limit)
 		if err != nil {
 			apperr.WriteError(w, err)
@@ -1098,7 +1115,9 @@ func AdminUpstreamHealthHistory(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		_, offset := time.Now().In(zone).Zone()
-		health, err := db.UpstreamHealthHistory(r.Context(), state.DB, hours, int64(offset))
+		ctx, cancel := analyticsContext(r)
+		defer cancel()
+		health, err := db.UpstreamHealthHistory(ctx, state.DB, hours, int64(offset))
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -1185,7 +1204,9 @@ func AdminGetUpstreamsStats(state *appstate.State) http.HandlerFunc {
 
 		// 6-hour sparkline: 30-minute buckets, grouped per channel.
 		sixHoursAgo := time.Now().Add(-6 * time.Hour)
-		rows, err := state.DB.QueryContext(r.Context(), `
+		ctx, cancel := analyticsContext(r)
+		defer cancel()
+		rows, err := state.DB.QueryContext(ctx, `
 			SELECT
 				upstream_id,
 				strftime('%Y-%m-%d %H:%M:00', created_at,

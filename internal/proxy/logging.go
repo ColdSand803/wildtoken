@@ -901,6 +901,10 @@ func RunCleanupPass(ctx context.Context, database *sql.DB, settings *models.Runt
 	if runRetentionCleanup {
 		deleteStartedAt := time.Now()
 		if err := db.DeleteOldLogs(ctx, database, settings.LogRetentionDays); err != nil {
+			if errors.Is(err, context.Canceled) {
+				slog.Info("log retention stopped for shutdown")
+				return
+			}
 			cleanupSucceeded = false
 			slog.Error("deleting old logs failed", "error", err)
 		}
