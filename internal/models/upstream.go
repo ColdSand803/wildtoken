@@ -61,10 +61,10 @@ type UpstreamIn struct {
 	// GroupIDs are the groups this channel serves. An empty selection falls
 	// back to the default group, because a channel in no group is unreachable.
 	GroupIDs []int64 `json:"group_ids"`
-	// Archived is the state an import carries, applied in the same transaction
-	// as the write; nil leaves it as it is. Not part of the API: archiving has
-	// its own endpoint.
-	Archived *bool `json:"-"`
+	// Archived is the state a write carries, applied in the same transaction:
+	// nil leaves it as it is. An undo re-creates an archived channel with it,
+	// never visible unarchived in between.
+	Archived *bool `json:"archived"`
 }
 
 // DefaultUpstreamIn supplies the field defaults serde applied when a key is absent.
@@ -267,9 +267,9 @@ var upstreamUpdateRequired = []string{
 	"extra_headers", "rate_limit", "group_ids",
 }
 
-// upstreamUpdateOptional may be left out: a missing key or timeout keeps the
-// stored one, and clear_api_key defaults to false.
-var upstreamUpdateOptional = []string{"api_key", "timeout_seconds", "clear_api_key"}
+// upstreamUpdateOptional may be left out: a missing key, timeout or archive
+// keeps the stored one, and clear_api_key defaults to false.
+var upstreamUpdateOptional = []string{"api_key", "timeout_seconds", "clear_api_key", "archived"}
 
 // MissingUpstreamFields names the required fields a replacing update left out
 // or sent as null.
@@ -359,6 +359,10 @@ type UpstreamOut struct {
 	EffectiveWeight                float64           `json:"effective_weight"`
 	HealthRecoveryRemainingSeconds *int64            `json:"health_recovery_remaining_seconds,omitempty"`
 	GroupIDs                       []int64           `json:"group_ids"`
+	// EnabledBeforeArchive is what unarchiving restores, set only while
+	// archived. An undo or an export carries it, so the channel comes back as
+	// it was rather than disabled.
+	EnabledBeforeArchive *bool `json:"enabled_before_archive,omitempty"`
 }
 
 // ExportUpstreamsRequest is the request payload for /api/admin/upstreams/export.
@@ -390,6 +394,9 @@ type ChannelExportItem struct {
 	// Archived is nil in older documents, and an import then leaves an
 	// existing channel's state alone.
 	Archived *bool `json:"archived,omitempty"`
+	// EnabledBeforeArchive is what unarchiving restores. enabled is always
+	// false for an archived channel, so without it one came back disabled.
+	EnabledBeforeArchive *bool `json:"enabled_before_archive,omitempty"`
 }
 
 // UnmarshalJSON starts an imported channel from the defaults a created one
@@ -479,4 +486,8 @@ type UpstreamDetailOut struct {
 	EffectiveWeight                float64           `json:"effective_weight"`
 	HealthRecoveryRemainingSeconds *int64            `json:"health_recovery_remaining_seconds,omitempty"`
 	GroupIDs                       []int64           `json:"group_ids"`
+	// Archived lets the edit form say that enabled cannot change while the
+	// channel is parked; the undo of a delete re-creates it with both.
+	Archived             bool  `json:"archived"`
+	EnabledBeforeArchive *bool `json:"enabled_before_archive,omitempty"`
 }

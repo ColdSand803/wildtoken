@@ -392,3 +392,97 @@ func TestAnAcceptEncodingOverrideIsRefusedWhenSaved(t *testing.T) {
 		t.Errorf("an ordinary override was refused: %v", err)
 	}
 }
+
+// A document that names no group keeps an overwritten channel's groups rather
+// than moving it to the default group alone.
+func TestAnImportWithoutGroupsKeepsTheChannelsGroups(t *testing.T) {
+	state := upstreamTestState(t)
+	ctx := context.Background()
+	vip, err := db.CreateGroup(ctx, state.DB, &models.GroupIn{Name: "vip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := models.DefaultUpstreamIn()
+	input.Name = "c"
+	input.BaseURL = "https://x"
+	input.GroupIDs = []int64{vip.ID}
+	created, err := db.CreateUpstream(ctx, state.DB, &input)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adminCall(t, http.MethodPost, "/import", "/import", AdminImportUpstreams(state),
+		`{"mode":"overwrite","channels":[{"name":"c","base_url":"https://y"}]}`)
+	ids, err := db.ListUpstreamGroupIDs(ctx, state.DB, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 1 || ids[0] != vip.ID {
+		t.Errorf("groups = %v, want [%d] kept", ids, vip.ID)
+	}
+}
+
+// An archived channel keeps, through export and import, the state unarchiving
+// restores: enabled is always false while archived, so without it the
+// channel came back disabled.
+func TestAnArchivedChannelComesBackAsItWasBeforeTheArchive(t *testing.T) {
+	source := upstreamTestState(t)
+	ctx := context.Background()
+	input := models.DefaultUpstreamIn()
+	input.Name = "parked"
+	input.BaseURL = "https://x"
+	created, err := db.CreateUpstream(ctx, source.DB, &input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetUpstreamArchived(ctx, source.DB, created.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	exported := adminCall(t, http.MethodPost, "/export", "/export", AdminExportUpstreams(source), `{}`)
+	if !strings.Contains(exported.Body.String(), `"enabled_before_archive":true`) {
+		t.Fatalf("export lacks the state before the archive: %s", exported.Body.String())
+	}
+
+	var document struct {
+		Channels json.RawMessage `json:"channels"`
+	}
+	json.Unmarshal(exported.Body.Bytes(), &document)
+	if _, err := source.DB.Exec(`DELETE FROM upstreams`); err != nil {
+		t.Fatal(err)
+	}
+	adminCall(t, http.MethodPost, "/import", "/import", AdminImportUpstreams(source),
+		`{"mode":"skip","channels":`+string(document.Channels)+`}`)
+
+	row, _, err := db.GetUpstreamByName(ctx, source.DB, "parked")
+	if err != nil || row.Archived != 1 || row.Enabled != 0 {
+		t.Fatalf("imported archived=%d enabled=%d err=%v, want archived and off", row.Archived, row.Enabled, err)
+	}
+	restored, err := db.SetUpstreamArchived(ctx, source.DB, row.ID, false)
+	if err != nil || !restored.Enabled {
+		t.Errorf("unarchived enabled=%v err=%v, want it back on", restored.Enabled, err)
+	}
+}
+
+// The enable switch is refused on an archived channel. Written through, it
+// left the channel archived and enabled at once.
+func TestAnArchivedChannelCannotBeSwitched(t *testing.T) {
+	state := upstreamTestState(t)
+	ctx := context.Background()
+	input := models.DefaultUpstreamIn()
+	input.Name = "parked"
+	input.BaseURL = "https://x"
+	created, err := db.CreateUpstream(ctx, state.DB, &input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SetUpstreamArchived(ctx, state.DB, created.ID, true); err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/api/admin/upstreams/" + strconv.FormatInt(created.ID, 10) + "/enabled"
+	response := adminCall(t, http.MethodPatch, "/api/admin/upstreams/{id}/enabled", path,
+		AdminSetUpstreamEnabled(state), `{"enabled":true}`)
+	if response.Code != http.StatusBadRequest {
+		t.Errorf("returned %d, want 400", response.Code)
+	}
+}

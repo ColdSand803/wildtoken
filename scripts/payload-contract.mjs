@@ -133,6 +133,8 @@ const contracts = [
     fields: goFields(models.upstream, "UpstreamIn"),
     // clear_api_key 在 UpstreamUpdateIn 上，创建时后端也收。
     extraAllowed: new Set(["clear_api_key"]),
+    // archived 只有撤销删除时带；表单不管归档，不带就是不改。
+    allowMissing: new Set(["archived"]),
   },
   {
     name: "令牌创建 APITokenIn",

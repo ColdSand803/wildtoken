@@ -656,6 +656,8 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 			RuntimeHealthScore:             health.Score,
 			EffectiveWeight:                health.EffectiveWeight,
 			HealthRecoveryRemainingSeconds: health.RecoveryRemainingSeconds,
+			Archived:                       row.Archived == 1,
+			EnabledBeforeArchive:           db.EnabledBeforeArchive(&row),
 		})
 	}
 }
@@ -791,11 +793,18 @@ func AdminSetUpstreamEnabled(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		if _, found, err := db.GetUpstream(r.Context(), state.DB, id); err != nil {
+		existing, found, err := db.GetUpstream(r.Context(), state.DB, id)
+		if err != nil {
 			apperr.WriteError(w, err)
 			return
 		} else if !found {
 			apperr.WriteError(w, apperr.NotFound("upstream not found"))
+			return
+		}
+		// Written through, the switch produced a channel both archived and
+		// enabled, which unarchiving then overwrote with the state from before.
+		if existing.Archived == 1 {
+			apperr.WriteError(w, apperr.BadRequest("an archived channel cannot be switched; restore it first"))
 			return
 		}
 
@@ -1708,6 +1717,8 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 				GroupIDs:          out.GroupIDs,
 				GroupNames:        names,
 				Archived:          &archived,
+
+				EnabledBeforeArchive: out.EnabledBeforeArchive,
 			}
 			// Include API key if requested and present
 			if req.IncludeAPIKeys {
@@ -1819,6 +1830,11 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 				GroupIDs:          item.GroupIDs,
 				Archived:          item.Archived,
 			}
+			// Archived in the same transaction as the write, the channel
+			// remembers this as what unarchiving restores.
+			if item.Archived != nil && *item.Archived && item.EnabledBeforeArchive != nil {
+				input.Enabled = *item.EnabledBeforeArchive
+			}
 			// A document may still spell a collection as null; stored as such,
 			// the console cannot render the channel.
 			input.Normalize()
@@ -1901,6 +1917,24 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 			}
 
 			if found {
+				// A document naming no group keeps the channel's, as one without
+				// archived keeps its archive. Read as an empty selection, it moved
+				// the channel to the default group alone.
+				if item.GroupIDs == nil && len(item.GroupNames) == 0 {
+					ids, err := db.ListUpstreamGroupIDs(ctx, state.DB, existing.ID)
+					if err != nil {
+						msg := "group lookup failed: " + err.Error()
+						result.Items = append(result.Items, models.ImportResultItem{
+							Name:    item.Name,
+							Action:  "failed",
+							Message: &msg,
+						})
+						result.Failed++
+						continue
+					}
+					input.GroupIDs = ids
+				}
+
 				// Overwrite. Credential headers the document leaves out stay, as
 				// the API key does: an export without keys omits both.
 				input.ExtraHeaders = keepSensitiveHeaders(existing.ExtraHeaders, input.ExtraHeaders)

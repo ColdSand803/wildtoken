@@ -530,10 +530,21 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         actionLabel: snapshot ? "撤销" : undefined,
         onAction: snapshot
           ? async () => {
+              /* 快照来自详情，带着 Key。归档的渠道带上归档状态和归档前的启用
+                 状态，后端在同一个事务里重建并归档，恢复出来还在归档区。 */
               const { id: _id, api_key_set: _set, ...rest } = snapshot;
-              await createUpstream(rest);
-              await reload();
-              toast(`已恢复渠道「${snapshot.name}」，API Key 需重新填写。`, { tone: "ok" });
+              try {
+                await createUpstream({
+                  ...rest,
+                  enabled: snapshot.archived ? Boolean(snapshot.enabled_before_archive) : snapshot.enabled,
+                });
+                await reload();
+                toast(`已恢复渠道「${snapshot.name}」。`, { tone: "ok" });
+              } catch (err) {
+                // 提示条的按钮不接异常，这里不报的话，失败时提示条直接消失。
+                if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+                else toast(`恢复失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+              }
             }
           : undefined,
       });

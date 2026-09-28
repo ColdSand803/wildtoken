@@ -96,7 +96,7 @@ func RowToUpstreamOut(row *models.UpstreamRow) (models.UpstreamOut, error) {
 		return models.UpstreamOut{}, err
 	}
 
-	return models.UpstreamOut{
+	out := models.UpstreamOut{
 		ID:                 row.ID,
 		Name:               row.Name,
 		BaseURL:            row.BaseURL,
@@ -117,7 +117,19 @@ func RowToUpstreamOut(row *models.UpstreamRow) (models.UpstreamOut, error) {
 		UpdatedAt:          row.UpdatedAt,
 		RuntimeHealthScore: 100,
 		EffectiveWeight:    float64(row.Weight),
-	}, nil
+	}
+	out.EnabledBeforeArchive = EnabledBeforeArchive(row)
+	return out, nil
+}
+
+// EnabledBeforeArchive is what unarchiving a row would restore, nil while it
+// is not archived.
+func EnabledBeforeArchive(row *models.UpstreamRow) *bool {
+	if row.Archived != 1 {
+		return nil
+	}
+	enabled := row.ArchivedPrevEnabled != nil && *row.ArchivedPrevEnabled == 1
+	return &enabled
 }
 
 func queryUpstreamRows(ctx context.Context, db *sql.DB, query string, args ...any) ([]models.UpstreamRow, error) {

@@ -747,11 +747,15 @@ export function UpstreamDialog({
                   <input
                     type="checkbox"
                     checked={form.enabled}
+                    disabled={Boolean(upstream?.archived)}
                     onChange={(event) => set("enabled", event.target.checked)}
                   />
                   <span>
                     <strong>启用</strong>
-                    <small>保存后参与路由选择。</small>
+                    {/* 归档期间后端固定为停用，这里改了也存不进去。 */}
+                    <small>
+                      {upstream?.archived ? "已归档，恢复时回到归档前的启用状态。" : "保存后参与路由选择。"}
+                    </small>
                   </span>
                 </label>
                 <label className="toggle-row">

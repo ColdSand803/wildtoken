@@ -69,7 +69,7 @@ test("删除撤销的重建 payload 覆盖整张渠道配置", () => {
     /const \{ id: _id, api_key_set: _set, \.\.\.rest \} = snapshot/,
     "撤销应整份解构快照，而不是逐字段挑",
   );
-  assert.match(block, /createUpstream\(rest\)/);
-  // API Key 回不来，文案要说清楚，别让人以为恢复得一模一样。
-  assert.match(block, /API Key \u9700\u91cd\u65b0\u586b\u5199/);
+  // 快照来自详情接口，带着 Key，整份交给重建；归档的渠道带上归档前的启用状态。
+  assert.match(block, /createUpstream\(\{\s*\.\.\.rest,/);
+  assert.match(block, /snapshot\.enabled_before_archive/);
 });

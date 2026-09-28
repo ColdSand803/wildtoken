@@ -19,6 +19,8 @@ export interface Upstream {
   enabled: boolean;
   /** 归档渠道同时读作停用：归档会把 enabled 置 0。 */
   archived: boolean;
+  /** 归档期间才有：恢复归档时回到的启用状态。撤销删除和导出靠它原样还原。 */
+  enabled_before_archive?: boolean;
   extra_headers: Record<string, string>;
   timeout_seconds: number;
   rate_limit: string | null;
@@ -140,6 +142,8 @@ export interface ChannelExportItem {
   group_names?: string[];
   /** 旧文件没有这项，覆盖导入时不改动已有渠道的归档状态。 */
   archived?: boolean;
+  /** 归档渠道恢复时回到的启用状态；enabled 在归档期间恒为 false。 */
+  enabled_before_archive?: boolean;
 }
 
 /** 导出/导入的文档包装。kind 和 version 用于拒掉不相干的 JSON。 */
