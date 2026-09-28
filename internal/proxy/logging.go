@@ -25,6 +25,7 @@ const (
 	logWriteBatchSize           = 20
 	logWriteBatchInterval       = 50 * time.Millisecond
 	logWriteTimeout             = 15 * time.Second
+	carriedUsageRetryInterval   = 5 * time.Second
 	logEventChannelCapacity     = 1024
 	cleanupStartupDelay         = 120 * time.Second
 	logBodyCleanupInterval      = 60 * time.Second
@@ -112,6 +113,12 @@ type LogWriter struct {
 	closeMu   sync.RWMutex
 	closed    bool
 	closeOnce sync.Once
+
+	// carried is usage whose row was dropped or failed to commit, per token.
+	// It is still owed to the stored total, so a later batch applies it on its
+	// own; until then it stays held against the quota.
+	carriedMu sync.Mutex
+	carried   map[int64]int64
 }
 
 // NewLogWriter starts the background writer. It stops when Close is called,
@@ -144,14 +151,14 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 		w.metrics.RecordLogDequeue(1)
 		w.metrics.RecordLogDrop()
 		slog.Warn("request log queue closed; dropping request log")
+		w.carryDropped(entry)
 		return
 	}
 
 	select {
 	case w.entries <- entry:
 		// The usage is held against the token's quota until the row commits,
-		// because until then the stored total still understates it. A dropped
-		// entry holds nothing: it will never reach the total either.
+		// because until then the stored total still understates it.
 		if tokenID, used, ok := quotaUsage(entry); ok {
 			w.quotas.Meter(tokenID, used)
 		}
@@ -159,7 +166,39 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 		w.metrics.RecordLogDequeue(1)
 		w.metrics.RecordLogDrop()
 		slog.Warn("request log queue full; dropping request log")
+		w.carryDropped(entry)
 	}
+}
+
+// carryDropped keeps the usage of an entry that will not be written.
+//
+// Dropping it with its row let a token under load spend without the quota ever
+// seeing it: the busier the gateway, the more usage went uncounted.
+func (w *LogWriter) carryDropped(entry LogEntry) {
+	tokenID, used, ok := quotaUsage(entry)
+	if !ok {
+		return
+	}
+	w.quotas.Meter(tokenID, used)
+	w.carry(tokenID, used)
+}
+
+func (w *LogWriter) carry(tokenID, used int64) {
+	w.carriedMu.Lock()
+	defer w.carriedMu.Unlock()
+	if w.carried == nil {
+		w.carried = map[int64]int64{}
+	}
+	w.carried[tokenID] += used
+}
+
+// takeCarried hands everything owed to one batch.
+func (w *LogWriter) takeCarried() map[int64]int64 {
+	w.carriedMu.Lock()
+	defer w.carriedMu.Unlock()
+	carried := w.carried
+	w.carried = nil
+	return carried
 }
 
 // quotaUsage reports the token and amount a log entry contributes to a quota.
@@ -218,10 +257,23 @@ func (w *LogWriter) CloseWithin(limit time.Duration) bool {
 func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogStatsCache) {
 	defer close(w.done)
 
+	// Carried usage normally rides with the next batch; the tick applies it
+	// when no batch is coming.
+	carriedRetry := time.NewTicker(carriedUsageRetryInterval)
+	defer carriedRetry.Stop()
+
 	batch := make([]LogEntry, 0, logWriteBatchSize)
 	for {
-		entry, ok := <-w.entries
+		var entry LogEntry
+		var ok bool
+		select {
+		case entry, ok = <-w.entries:
+		case <-carriedRetry.C:
+			w.flush(ctx, database, logStats, nil)
+			continue
+		}
 		if !ok {
+			w.flush(ctx, database, logStats, nil)
 			return
 		}
 		batch = append(batch, entry)
@@ -260,16 +312,10 @@ func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.Lo
 	entryCount := uint64(len(entries))
 	w.metrics.RecordLogDequeue(entryCount)
 
-	// The hold each entry took at enqueue is released however the write turns
-	// out: a committed row is in the stored total, and an abandoned one never
-	// will be.
-	defer func() {
-		for _, entry := range entries {
-			if tokenID, used, ok := quotaUsage(entry); ok {
-				w.quotas.Settle(tokenID, used)
-			}
-		}
-	}()
+	carried := w.takeCarried()
+	if len(entries) == 0 && len(carried) == 0 {
+		return
+	}
 
 	// Shutdown cancels the jobs context, but the batch it interrupts still has
 	// to reach the database: these rows carry the quota increments, so a write
@@ -279,11 +325,31 @@ func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.Lo
 	defer cancel()
 
 	startedAt := time.Now()
-	records, err := insertLogBatchWithRetry(writeCtx, database, entries)
+	records, err := insertLogBatchWithRetry(writeCtx, database, entries, carried)
 	if err != nil {
 		w.metrics.RecordLogWriteFailureCount(entryCount)
 		slog.Error("failed to persist request logs", "error", err, "entry_count", entryCount)
+
+		// The rows are lost; the usage they carry is not. It stays held and
+		// goes to a later batch, which applies it without them.
+		for _, entry := range entries {
+			if tokenID, used, ok := quotaUsage(entry); ok {
+				w.carry(tokenID, used)
+			}
+		}
+		for tokenID, used := range carried {
+			w.carry(tokenID, used)
+		}
 	} else {
+		// Committed, so the stored total carries it and the hold can go.
+		for _, entry := range entries {
+			if tokenID, used, ok := quotaUsage(entry); ok {
+				w.quotas.Settle(tokenID, used)
+			}
+		}
+		for tokenID, used := range carried {
+			w.quotas.Settle(tokenID, used)
+		}
 		w.metrics.RecordLogWritten(entryCount)
 		w.publish(writeCtx, database, logStats, records)
 	}
@@ -328,13 +394,14 @@ func (w *LogWriter) publish(ctx context.Context, database *sql.DB, logStats *db.
 	}
 }
 
-func insertLogBatchWithRetry(ctx context.Context, database *sql.DB, entries []LogEntry) ([]persistedLogRecord, error) {
-	if len(entries) == 0 {
+func insertLogBatchWithRetry(ctx context.Context, database *sql.DB, entries []LogEntry,
+	carried map[int64]int64) ([]persistedLogRecord, error) {
+	if len(entries) == 0 && len(carried) == 0 {
 		return nil, nil
 	}
 
 	for attempt := 0; ; attempt++ {
-		records, err := insertLogBatch(ctx, database, entries)
+		records, err := insertLogBatch(ctx, database, entries, carried)
 		if err == nil {
 			return records, nil
 		}
@@ -363,12 +430,22 @@ func isDatabaseLocked(err error) bool {
 		strings.Contains(err.Error(), "SQLITE_BUSY")
 }
 
-func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) ([]persistedLogRecord, error) {
+func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
+	carried map[int64]int64) ([]persistedLogRecord, error) {
 	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, apperr.Database(err)
 	}
 	defer tx.Rollback()
+
+	// Usage owed by rows that were dropped or failed earlier.
+	for tokenID, used := range carried {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE api_tokens SET used_tokens = used_tokens + ? WHERE id = ?",
+			used, tokenID); err != nil {
+			return nil, apperr.Database(err)
+		}
+	}
 
 	records := make([]persistedLogRecord, 0, len(entries))
 	for _, entry := range entries {
@@ -385,6 +462,11 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 		requestPayload := encodeSnapshotPair(entry.DownstreamRequest, entry.UpstreamRequest)
 		responsePayload := encodeSnapshotPair(entry.UpstreamResponse, entry.DownstreamResponse)
 
+		// The token and channel ids were resolved when the request began, and
+		// either row may have been deleted since. A dangling id failed the
+		// foreign key and rolled back the whole batch, other tokens' rows and
+		// quota increments with it, so a vanished parent is stored as NULL:
+		// what ON DELETE SET NULL would have left had the row been older.
 		result, err := tx.ExecContext(ctx, `INSERT INTO request_logs
         (method, path, downstream_token_id, downstream_token_name, client_ip,
          client_type,
@@ -394,7 +476,9 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
          prompt_tokens, completion_tokens, total_tokens,
          prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
          duration_ms, first_token_ms, error, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, (SELECT id FROM api_tokens WHERE id = ?), ?, ?, ?,
+            (SELECT id FROM upstreams WHERE id = ?),
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			entry.ClientIP,
 			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,

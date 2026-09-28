@@ -53,9 +53,13 @@ func (s *SettingsStore) Set(settings models.RuntimeSettings) {
 //
 // It is invalidated explicitly on upstream and group write operations.
 // Concurrent misses may reload the same value, which is intentional and harmless.
+//
+// A load that raced an invalidation must not store what it read, or the stale
+// list stays until the next write. The revision is what tells it.
 type ModelsListCache struct {
-	mu      sync.RWMutex
-	byGroup map[int64]json.RawMessage
+	mu       sync.RWMutex
+	byGroup  map[int64]json.RawMessage
+	revision uint64
 }
 
 func NewModelsListCache() *ModelsListCache {
@@ -68,9 +72,21 @@ func (c *ModelsListCache) Get(groupID int64) json.RawMessage {
 	return c.byGroup[groupID]
 }
 
-func (c *ModelsListCache) Set(groupID int64, value json.RawMessage) {
+// Revision is read before a load and handed back to Set.
+func (c *ModelsListCache) Revision() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.revision
+}
+
+// Set stores a loaded list, unless the cache was invalidated after the load
+// began at revision.
+func (c *ModelsListCache) Set(groupID int64, value json.RawMessage, revision uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if revision != c.revision {
+		return
+	}
 	c.byGroup[groupID] = value
 }
 
@@ -79,6 +95,7 @@ func (c *ModelsListCache) Set(groupID int64, value json.RawMessage) {
 func (c *ModelsListCache) Invalidate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.revision++
 	clear(c.byGroup)
 }
 

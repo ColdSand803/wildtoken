@@ -686,3 +686,136 @@ func TestABufferedResponseDeliveredInFullKeepsTheUpstreamStatus(t *testing.T) {
 		t.Errorf("total tokens = %v, want the usage to survive the deferral", totalTokens)
 	}
 }
+
+// proxyOnce sends one request through a channel and drains the answer.
+func (h *proxyHarness) proxyOnce(t *testing.T, upstream *models.UpstreamRow, path string) *Response {
+	t.Helper()
+	requestCtx := testRequestContext()
+	requestCtx.Path = path
+	prepared, err := PrepareRequest(http.Header{}, upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m","stream":true}`), requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	response, err := ProxyRequest(context.Background(), h.deps, testPolicy(), upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+	io.Copy(io.Discard, response.Body)
+	response.Body.Close()
+	return response
+}
+
+// A 4xx other than 408 and 429 may be the request's own fault. Charging it let
+// a few requests too long for any model take every channel out of routing.
+func TestOnlyChannelFaultsAreChargedAtOnce(t *testing.T) {
+	harness := newProxyHarness(t)
+	for index, tc := range []struct {
+		status  int
+		charged bool
+	}{
+		{http.StatusBadRequest, false},
+		{http.StatusNotFound, false},
+		{http.StatusUnprocessableEntity, false},
+		{http.StatusRequestTimeout, true},
+		{http.StatusTooManyRequests, true},
+		{http.StatusInternalServerError, true},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tc.status)
+		}))
+		upstream := models.UpstreamRow{
+			ID: int64(index + 1), Name: server.URL, BaseURL: server.URL,
+			ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+		}
+		harness.registerUpstream(t, &upstream)
+		harness.proxyOnce(t, &upstream, "responses")
+		server.Close()
+
+		score := harness.deps.AutoWeight.Snapshot(upstream.ID, upstream.Weight, true, testPolicy()).Score
+		if charged := score < MaxHealthScore; charged != tc.charged {
+			t.Errorf("status %d: charged=%v, want %v", tc.status, charged, tc.charged)
+		}
+	}
+}
+
+// Anthropic reports input in message_start and output in message_delta, and a
+// compatible upstream need not repeat the input in the delta. Keeping only the
+// last report logged, and charged, the output alone.
+func TestAnAnthropicStreamCountsTheInputItsStartEventCarried(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.Write([]byte("event: message_start\n" +
+			`data: {"type":"message_start","message":{"usage":{"input_tokens":1200,"output_tokens":1}}}` + "\n\n" +
+			"event: message_delta\n" +
+			`data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":15}}` + "\n\n" +
+			"event: message_stop\n" + `data: {"type":"message_stop"}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "anthropic", BaseURL: server.URL,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+	harness.proxyOnce(t, &upstream, "messages")
+	harness.waitForLogs(t, 1)
+
+	var prompt, completion, total int64
+	if err := harness.database.QueryRow(`SELECT prompt_tokens, completion_tokens, total_tokens
+        FROM request_logs WHERE id = 1`).Scan(&prompt, &completion, &total); err != nil {
+		t.Fatal(err)
+	}
+	if prompt != 1200 || completion != 15 || total != 1215 {
+		t.Errorf("usage = %d/%d/%d, want 1200/15/1215", prompt, completion, total)
+	}
+}
+
+// A stream that began as a 200 and ended on an error event failed. It is logged
+// as a failure, and the channel is charged only when the error blames it.
+func TestAStreamThatEndsOnAnErrorEventIsLoggedAsAFailure(t *testing.T) {
+	harness := newProxyHarness(t)
+	for index, tc := range []struct {
+		event   string
+		charged bool
+	}{
+		{`{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`, true},
+		{`{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}`, false},
+		{`{"type":"response.failed","response":{"error":{"code":"server_error","message":"x"}}}`, true},
+		{`{"error":{"message":"upstream exploded","type":"server_error"}}`, true},
+	} {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("content-type", "text/event-stream")
+			w.Write([]byte("data: " + tc.event + "\n\n"))
+		}))
+		upstream := models.UpstreamRow{
+			ID: int64(index + 1), Name: server.URL, BaseURL: server.URL,
+			ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+		}
+		harness.registerUpstream(t, &upstream)
+		harness.proxyOnce(t, &upstream, "messages")
+		server.Close()
+
+		score := harness.deps.AutoWeight.Snapshot(upstream.ID, upstream.Weight, true, testPolicy()).Score
+		if charged := score < MaxHealthScore; charged != tc.charged {
+			t.Errorf("%s: charged=%v, want %v", tc.event, charged, tc.charged)
+		}
+	}
+	harness.waitForLogs(t, 4)
+
+	var failures int64
+	if err := harness.database.QueryRow(`SELECT COUNT(*) FROM request_logs
+        WHERE status_code = 502 AND error LIKE 'upstream reported an error in the stream%'`).
+		Scan(&failures); err != nil {
+		t.Fatal(err)
+	}
+	if failures != 4 {
+		t.Errorf("%d of 4 streams were logged as failures", failures)
+	}
+	if snapshot := harness.metrics.Snapshot(); snapshot.SSECompletedTotal != 0 ||
+		snapshot.SSEUpstreamErrorsTotal != 4 {
+		t.Errorf("sse metrics = %d completed / %d errors, want 0 / 4",
+			snapshot.SSECompletedTotal, snapshot.SSEUpstreamErrorsTotal)
+	}
+}

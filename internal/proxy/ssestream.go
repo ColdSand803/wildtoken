@@ -132,7 +132,22 @@ func (s *sseStream) recordResponseHealth() {
 // stream reaches here more than once: the terminal event finishes it, and so
 // does the EOF that follows. Recording outside the guard scored one stream
 // twice and let a penalised channel recover at double the configured rate.
+//
+// A stream that ended on an error event failed, though it began as a 200.
+// Logged as the 200, the failure was invisible to the log filters and the
+// dashboard, and the channel was credited for it.
 func (s *sseStream) finishComplete() {
+	s.observation.finish(s.measure)
+	if failure := s.observation.streamError; failure != nil {
+		if s.finishLog(502, failure) {
+			if s.observation.streamErrorFault {
+				s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
+			}
+			s.deps.Metrics.RecordSSEUpstreamError()
+		}
+		return
+	}
+
 	if s.finishLog(int32(s.upstreamStatus), nil) {
 		s.recordResponseHealth()
 		s.deps.Metrics.RecordSSEComplete()
@@ -201,7 +216,7 @@ func (s *sseStream) finishLog(statusCode int32, streamError *string) bool {
 	}
 
 	s.observation.finish(s.measure)
-	usage := s.observation.usage
+	usage := s.observation.tokenUsage()
 	responseSnapshot := s.snapshotResponse()
 
 	entry.StatusCode = &statusCode

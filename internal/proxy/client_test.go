@@ -104,6 +104,20 @@ func assertUsage(t *testing.T, usage TokenUsage, want map[string]any) {
 	}
 }
 
+// A buffered stream is read like a live one: the input message_start reported
+// survives a message_delta that only carries the output.
+func TestBufferedStreamUsageMergesSplitReports(t *testing.T) {
+	body := []byte(`data: {"type":"message_start","message":{"usage":` +
+		`{"input_tokens":40,"cache_read_input_tokens":60,"output_tokens":1}}}` + "\n\n" +
+		`data: {"type":"message_delta","usage":{"output_tokens":9}}` + "\n\n")
+
+	// Anthropic's input is residual, so the cache read adds to it.
+	assertUsage(t, ExtractUsage(body, "text/event-stream"), map[string]any{
+		"prompt": int32(100), "completion": int32(9), "total": int32(109),
+		"prompt_cached": int32(60),
+	})
+}
+
 func TestExtractsUsageFromCodexResponsesCompletionEvent(t *testing.T) {
 	response := []byte(`data: {"type":"response.completed","response":{"usage":{"input_tokens":99424,"output_tokens":440,"total_tokens":99864,"input_tokens_details":{"cached_tokens":12000},"output_tokens_details":{"reasoning_tokens":128}}}}
 
@@ -375,7 +389,7 @@ func TestObservationExtractsTerminalMetadataAfterTheSnapshotLimit(t *testing.T) 
 	if capture.byteLength != len(first)+len(terminal) {
 		t.Errorf("byte length = %d, want the full stream length", capture.byteLength)
 	}
-	assertUsage(t, observation.usage, map[string]any{
+	assertUsage(t, observation.tokenUsage(), map[string]any{
 		"prompt": int32(11), "completion": int32(7), "total": int32(18),
 		"prompt_cached": int32(3), "cache_creation": int32(5),
 		"completion_reason": int32(2),

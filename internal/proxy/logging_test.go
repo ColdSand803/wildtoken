@@ -179,7 +179,7 @@ func TestLogInsertWritesMetadataAndDeduplicatedPayloadAtomically(t *testing.T) {
 		PromptCachedTokens:        &promptCached,
 		CacheCreationTokens:       &cacheCreation,
 		CompletionReasoningTokens: &reasoning,
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatalf("insert: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestCleanupPassClearsBodiesBeyondTheKeepCount(t *testing.T) {
 			Path:              "/v1/responses",
 			DownstreamRequest: json.RawMessage(`{"body":{"text":"request"}}`),
 			UpstreamResponse:  json.RawMessage(`{"body":{"text":"response"}}`),
-		}}); err != nil {
+		}}, nil); err != nil {
 			t.Fatalf("insert: %v", err)
 		}
 	}
@@ -400,7 +400,7 @@ func TestCommittedLogsAdvanceTheTokenQuotaCounter(t *testing.T) {
 		DownstreamTokenID: &created.ID,
 		TotalTokens:       &total,
 	}
-	if _, err := insertLogBatch(ctx, database, []LogEntry{entry, entry}); err != nil {
+	if _, err := insertLogBatch(ctx, database, []LogEntry{entry, entry}, nil); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 
@@ -434,7 +434,7 @@ func TestARequestWithoutUsageLeavesTheQuotaUntouched(t *testing.T) {
 		DownstreamTokenID: &created.ID,
 		StatusCode:        &status,
 		Error:             &message,
-	}}); err != nil {
+	}}, nil); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 
@@ -444,6 +444,142 @@ func TestARequestWithoutUsageLeavesTheQuotaUntouched(t *testing.T) {
 	}
 	if reloaded.Quota.UsedTokens != 0 {
 		t.Errorf("used = %d, want 0 for a request with no usage", reloaded.Quota.UsedTokens)
+	}
+}
+
+// The token and channel ids are resolved when a request begins, and either may
+// be deleted before its row is written. A dangling id failed the foreign key and
+// rolled back every row batched with it, other tokens' usage included.
+func TestARowForADeletedTokenOrChannelDoesNotSinkItsBatch(t *testing.T) {
+	database := loggingTestDB(t)
+	ctx := context.Background()
+
+	gone, err := db.CreateToken(ctx, database, &models.APITokenIn{Name: "gone", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := db.CreateToken(ctx, database, &models.APITokenIn{Name: "kept", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec("DELETE FROM api_tokens WHERE id = ?", gone.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	missingChannel := int64(999)
+	hundred, fifty := int32(100), int32(50)
+	if _, err := insertLogBatch(ctx, database, []LogEntry{
+		{Method: "POST", Path: "responses", DownstreamTokenID: &gone.ID, TotalTokens: &hundred},
+		{Method: "POST", Path: "responses", DownstreamTokenID: &kept.ID,
+			UpstreamID: &missingChannel, TotalTokens: &fifty},
+	}, nil); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	var rows, danglingIDs int64
+	if err := database.QueryRow("SELECT COUNT(*) FROM request_logs").Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.QueryRow(`SELECT COUNT(*) FROM request_logs
+        WHERE downstream_token_id = ? OR upstream_id = ?`, gone.ID, missingChannel).
+		Scan(&danglingIDs); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 2 || danglingIDs != 0 {
+		t.Errorf("rows=%d dangling=%d, want both rows with the vanished ids cleared", rows, danglingIDs)
+	}
+	reloaded, _, err := db.GetToken(ctx, database, kept.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Quota.UsedTokens != 50 {
+		t.Errorf("the surviving token used %d, want 50", reloaded.Quota.UsedTokens)
+	}
+}
+
+// idleLogWriter is a writer whose batches the test drives itself.
+func idleLogWriter(quotas *quota.Tracker) *LogWriter {
+	return &LogWriter{
+		entries: make(chan LogEntry, 1),
+		metrics: metrics.New(),
+		events:  newEventBroker(),
+		quotas:  quotas,
+		done:    make(chan struct{}),
+	}
+}
+
+// A full queue drops the row, but the usage is still owed: dropping it too let a
+// token under load spend without the quota seeing it.
+func TestADroppedEntryStillReachesTheQuota(t *testing.T) {
+	database := loggingTestDB(t)
+	ctx := context.Background()
+	created, err := db.CreateToken(ctx, database, &models.APITokenIn{Name: "busy", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	quotas := quota.NewTracker()
+	writer := idleLogWriter(quotas)
+	used := int32(700)
+	entry := LogEntry{Method: "POST", Path: "responses", DownstreamTokenID: &created.ID, TotalTokens: &used}
+	writer.Schedule(entry)
+	writer.Schedule(entry) // the queue holds one; this one is dropped
+
+	if held := quotas.Outstanding(created.ID); held != 1400 {
+		t.Fatalf("held %d, want both requests weighed until committed", held)
+	}
+
+	writer.flush(ctx, database, db.NewLogStatsCache(), []LogEntry{<-writer.entries})
+
+	reloaded, _, err := db.GetToken(ctx, database, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Quota.UsedTokens != 1400 {
+		t.Errorf("used = %d, want the dropped request counted too", reloaded.Quota.UsedTokens)
+	}
+	if held := quotas.Outstanding(created.ID); held != 0 {
+		t.Errorf("still held %d after commit", held)
+	}
+}
+
+// A batch that fails to commit loses its rows, not its usage: the next write
+// applies it, even one with no rows of its own.
+func TestUsageOfAFailedBatchIsAppliedLater(t *testing.T) {
+	database := loggingTestDB(t)
+	ctx := context.Background()
+	created, err := db.CreateToken(ctx, database, &models.APITokenIn{Name: "unlucky", Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	broken, err := sql.Open("sqlite", "file:"+t.Name()+"-broken?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	broken.Close()
+
+	quotas := quota.NewTracker()
+	writer := idleLogWriter(quotas)
+	used := int32(300)
+	entry := LogEntry{Method: "POST", Path: "responses", DownstreamTokenID: &created.ID, TotalTokens: &used}
+	quotas.Meter(created.ID, 300)
+	writer.flush(ctx, broken, db.NewLogStatsCache(), []LogEntry{entry})
+
+	if held := quotas.Outstanding(created.ID); held != 300 {
+		t.Fatalf("held %d after the failed write, want the usage still held", held)
+	}
+
+	writer.flush(ctx, database, db.NewLogStatsCache(), nil)
+	reloaded, _, err := db.GetToken(ctx, database, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.Quota.UsedTokens != 300 {
+		t.Errorf("used = %d, want the failed batch's usage applied", reloaded.Quota.UsedTokens)
+	}
+	if held := quotas.Outstanding(created.ID); held != 0 {
+		t.Errorf("still held %d after it was applied", held)
 	}
 }
 

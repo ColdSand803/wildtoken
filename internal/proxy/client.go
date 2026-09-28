@@ -57,6 +57,18 @@ func (t *attemptTimeout) stop() {
 	t.cancel()
 }
 
+// IsChannelFault reports whether a failed status is the channel's own doing,
+// to be charged to its health at once.
+//
+// A 5xx, 408 or 429 is: the channel is down, slow or saturated. Any other 4xx
+// may be the request's fault instead — a prompt too long for any model — and
+// charging those let a few bad requests take every channel out of routing. The
+// caller charges them only once another channel has served the same request.
+func IsChannelFault(status int) bool {
+	return status < 400 || status >= 500 ||
+		status == http.StatusRequestTimeout || status == http.StatusTooManyRequests
+}
+
 // BuildUpstreamURL builds the full upstream URL for a proxied path.
 func BuildUpstreamURL(upstream *models.UpstreamRow, path, queryParams string) string {
 	base := strings.TrimRight(upstream.BaseURL, "/")
@@ -451,7 +463,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		return &Response{Status: status, Headers: responseHeaders, Body: stream}, nil
 	}
 
-	bodyBytes, streamedFirstTokenMs, err := readResponseBody(response.Body, start, attempt.extend)
+	bodyBytes, observation, err := readResponseBody(response.Body, start, attempt.extend)
 	response.Body.Close()
 	attempt.stop()
 	if err != nil {
@@ -477,9 +489,20 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		return nil, apperr.Upstream(message)
 	}
 
+	// A 2xx body that is a stream can still end on an error event.
+	var streamError *string
 	if status >= 200 && status < 300 {
+		streamError = observation.streamError
+	}
+
+	switch {
+	case streamError != nil:
+		if observation.streamErrorFault {
+			deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
+		}
+	case status >= 200 && status < 300:
 		deps.AutoWeight.RecordSuccess(upstream.ID, autoWeightEnabled, policy)
-	} else {
+	case IsChannelFault(status):
 		deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
 	}
 
@@ -493,7 +516,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	// only a fallback, and only for stream bodies.
 	var firstTokenMs *int32
 	if isStream {
-		firstTokenMs = streamedFirstTokenMs
+		firstTokenMs = observation.firstTokenMs
 		if firstTokenMs == nil && HasVisibleToken(bodyBytes) {
 			firstTokenMs = elapsedMs(start)
 		}
@@ -502,6 +525,11 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	entry := baseLogEntry(requestCtx, upstream, prepared)
 	statusCode := int32(status)
 	entry.StatusCode = &statusCode
+	if streamError != nil {
+		failed := int32(http.StatusBadGateway)
+		entry.StatusCode = &failed
+		entry.Error = streamError
+	}
 	entry.Stream = isStream
 	entry.ResponseReasoningEffort = ExtractResponseReasoningEffort(bodyBytes, contentType)
 	entry.PromptTokens = usage.PromptTokens
@@ -607,12 +635,12 @@ const MaxUpstreamResponseBytes = 128 << 20
 // ErrUpstreamResponseTooLarge reports a buffered response that ran past the cap.
 var ErrUpstreamResponseTooLarge = errors.New("upstream response exceeded the maximum buffered size")
 
-// readResponseBody reads a full upstream body while recording the true
-// time-to-first-token for SSE streams.
+// readResponseBody reads a full upstream body while observing it as an SSE
+// stream, for the true time-to-first-token and any error event it carries.
 //
 // progress is called for each chunk, so the attempt's clock measures silence
 // from the upstream rather than the total time a long body takes to arrive.
-func readResponseBody(body io.Reader, start time.Time, progress func()) ([]byte, *int32, error) {
+func readResponseBody(body io.Reader, start time.Time, progress func()) ([]byte, *sseObservation, error) {
 	var collected bytes.Buffer
 	observation := &sseObservation{}
 	measure := func() int32 { return int32(time.Since(start).Milliseconds()) }
@@ -640,5 +668,5 @@ func readResponseBody(body io.Reader, start time.Time, progress func()) ([]byte,
 	// The final partial line is observed too, keeping parity with buffered
 	// detection.
 	observation.finish(measure)
-	return collected.Bytes(), observation.firstTokenMs, nil
+	return collected.Bytes(), observation, nil
 }
