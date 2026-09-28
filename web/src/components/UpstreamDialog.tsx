@@ -35,6 +35,15 @@ export interface UpstreamPayload {
 /** 一个渠道不选分组时归进这里。和后端的兜底一致。 */
 const DEFAULT_GROUP_ID = 1;
 
+/** 必填数字。留空不能悄悄换成 100：存下去的就不是表单上看到的值了。 */
+function requiredNumber(value: string, label: string): number {
+  const trimmed = value.trim();
+  if (trimmed === "") throw new Error(`${label}不能为空。`);
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) throw new Error(`${label}必须是数字。`);
+  return parsed;
+}
+
 /** 逗号或换行分隔的列表，去空去重。 */
 function splitList(value: string): string[] {
   const seen = new Set<string>();
@@ -230,8 +239,8 @@ function payloadFromForm(form: FormState): UpstreamPayload {
         ([key, value]): [string, string] => [key.toLowerCase(), value],
       ),
     ),
-    priority: Number(form.priority || 100),
-    weight: Number(form.weight || 100),
+    priority: requiredNumber(form.priority, "优先级"),
+    weight: requiredNumber(form.weight, "基础权重"),
     // UI 勾的是「固定权重」，后端要的是「自动权重」。
     auto_weight_enabled: !form.fixedWeight,
     timeout_seconds: form.timeoutSeconds.trim() === "" ? null : Number(form.timeoutSeconds),
@@ -446,7 +455,7 @@ export function UpstreamDialog({
     try {
       payload = payloadFromForm(committed);
     } catch (err) {
-      // 解析失败的两项都在高级区，收着的话看不到错在哪。
+      // 解析失败的两项都在高级区，收着的话看不到错在哪。数字项不在，多展开无妨。
       setAdvanced(true);
       toast(err instanceof Error ? err.message : String(err), { tone: "error" });
       return;
