@@ -56,11 +56,17 @@ export function ImagePage({
   const [bodyText, setBodyText] = useState(() => formatBody(defaultImageBody("", DEFAULT_PROMPT)));
   const { runs, running, now, send, stop } = useDebugRuns(onUnauthorized);
 
+  /* 页面常驻不卸载，渠道列表每次切回来重拉：渠道页的增删改归档不这样就
+     看不到，删掉的渠道还能选，发出去是 404。 */
   useEffect(() => {
+    if (!active) return;
     let cancelled = false;
     listUpstreams()
       .then((channels) => {
-        if (!cancelled) setUpstreams(channels.filter((item) => !item.archived));
+        if (cancelled) return;
+        const live = channels.filter((item) => !item.archived);
+        setUpstreams(live);
+        setSelected((current) => current.filter((id) => live.some((item) => item.id === id)));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -70,7 +76,7 @@ export function ImagePage({
     return () => {
       cancelled = true;
     };
-  }, [onUnauthorized]);
+  }, [active, onUnauthorized]);
 
   const modelOptions = useMemo(() => candidateModels(upstreams, selected), [upstreams, selected]);
   const body = useMemo(() => parseBody(bodyText), [bodyText]);
@@ -318,11 +324,14 @@ function ImageRunCard({ run, now }: { run: Run; now: number }) {
   );
 }
 
-/** 上游给的 http(s) 图片链接是否跨域。存到服务端的图是同源相对路径。 */
+/** 图片链接是否跨域。存到服务端的图是同源相对路径，data:/blob: 按同源算。
+    先按当前页面解析再比来源：原先只认 http(s): 开头，`//cdn…` 这种协议相对
+    链接被当成同源，点下载就把整页导航走了。 */
 function isCrossOrigin(src: string): boolean {
-  if (!/^https?:/i.test(src)) return false;
   try {
-    return new URL(src).origin !== window.location.origin;
+    const url = new URL(src, window.location.href);
+    if (url.protocol === "data:" || url.protocol === "blob:") return false;
+    return url.origin !== window.location.origin;
   } catch {
     return true;
   }

@@ -194,7 +194,9 @@ export function ModelTestDialog({
     return `测试失败${result.status_code ? ` · HTTP ${result.status_code}` : ""}`;
   }, [result]);
 
-  const canSend = model !== "" && templateId !== "" && !sending;
+  /* 手写了 prompt 就不需要模板，和后端一致。原先非要选模板，模板删光后
+     这个窗口就发不出去了。 */
+  const canSend = model !== "" && (templateId !== "" || prompt.trim() !== "") && !sending;
 
   return (
     <dialog className="upstream-dialog dialog--drawer" ref={dialogRef} onCancel={onClose} aria-label="测试模型">
@@ -258,7 +260,7 @@ export function ModelTestDialog({
 
           <label className="field">
             <span className="field-label">Prompt 模板</span>
-            <select value={templateId} onChange={(event) => pickTemplate(event.target.value)} required>
+            <select value={templateId} onChange={(event) => pickTemplate(event.target.value)}>
               {templates.length === 0 ? (
                 <option value="" disabled>
                   尚未配置 Prompt 模板

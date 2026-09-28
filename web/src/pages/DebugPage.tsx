@@ -50,15 +50,32 @@ export function DebugPage({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([listUpstreams(), listPromptTemplates().catch(() => [] as PromptTemplate[])])
-      .then(([channels, prompts]) => {
+    listPromptTemplates()
+      .catch(() => [] as PromptTemplate[])
+      .then((prompts) => {
         if (cancelled) return;
-        setUpstreams(channels.filter((item) => !item.archived));
         setTemplates(prompts);
         if (prompts[0]) {
           setTemplateId(String(prompts[0].id));
           setBodyText(formatBody(defaultBody(DEBUG_PROTOCOLS[0].value, "", prompts[0].prompt, true)));
         }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /* 页面常驻不卸载，渠道列表每次切回来重拉：渠道页的增删改归档不这样就
+     看不到，删掉的渠道还能选，发出去是 404。 */
+  useEffect(() => {
+    if (!active) return;
+    let cancelled = false;
+    listUpstreams()
+      .then((channels) => {
+        if (cancelled) return;
+        const live = channels.filter((item) => !item.archived);
+        setUpstreams(live);
+        setSelected((current) => current.filter((id) => live.some((item) => item.id === id)));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -68,7 +85,7 @@ export function DebugPage({
     return () => {
       cancelled = true;
     };
-  }, [onUnauthorized]);
+  }, [active, onUnauthorized]);
 
   const modelOptions = useMemo(() => candidateModels(upstreams, selected), [upstreams, selected]);
   const parsedBody = useMemo(() => parseBody(bodyText), [bodyText]);

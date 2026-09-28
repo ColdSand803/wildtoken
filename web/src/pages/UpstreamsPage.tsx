@@ -294,6 +294,11 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     if (raw.trim() === "") return;
     const next = Number(raw);
     if (!Number.isInteger(next) || next === upstream.priority) return;
+    // 和编辑抽屉同一范围。超出的值行内存得进去，之后抽屉却因为它保存不了。
+    if (next < 0 || next > 100000) {
+      toast("优先级需在 0 到 100000 之间。", { tone: "error" });
+      return;
+    }
     await mutate(upstream.id, () => setUpstreamPriority(upstream.id, next));
   }
 
@@ -327,6 +332,10 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       const result = await importUpstreams(doc, mode);
       setImportResult(result);
       await reload();
+      // 导入可能按名字新建了分组；不重拉的话分组列显示成 #id，编辑时也选不到。
+      void listGroups()
+        .then(setGroups)
+        .catch(() => undefined);
       const tone = result.failed > 0 ? "warn" : "ok";
       toast(`新建 ${result.created} · 更新 ${result.updated} · 跳过 ${result.skipped} · 失败 ${result.failed}`, { tone });
     } catch (err) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchModelsPreview } from "../api";
 import { joinMappingLines, parseMappingLines } from "../mappingLines";
@@ -324,8 +324,18 @@ export function UpstreamDialog({
   const dialogRef = useDialog(open, onClose);
   const toast = useToast();
 
-  /* 每次打开都按当前渠道重置。不重置的话，关掉再开会留着上一个渠道的值。 */
+  /* 拉取模型的序号，结果回来时读的是最新的表单。 */
+  const fetchRequest = useRef(0);
+  const formRef = useRef(form);
+  formRef.current = form;
+
+  /* 每次打开都按当前渠道重置。不重置的话，关掉再开会留着上一个渠道的值。
+     在途的拉取一并作废：晚到的结果会带着上一个渠道的目录弹进这一个的选择器，
+     点「移除未返回」就删掉这个渠道的真实模型。 */
   useEffect(() => {
+    fetchRequest.current += 1;
+    setPicker(null);
+    setFetching(false);
     if (!open) return;
     setForm(upstream ? formFromUpstream(upstream) : emptyForm());
     // 配过高级项的渠道直接展开，否则那些值藏起来像丢了。
@@ -346,13 +356,17 @@ export function UpstreamDialog({
    * 把手动输入框里的模型名并进列表。
    *
    * 保存时也要先走一遍：框里还留着字就点保存，那些字应该算数，而不是被
-   * 悄悄丢掉。只收名字；映射有自己的文本框，写到这里的 `=>` 不认。
+   * 悄悄丢掉。只收名字；写了 `=>` 的是映射，报错而不是拆开——原先按空白拆，
+   * `a => b` 成了两个精确模型名，不带空格的整段被悄悄丢掉。
    */
   function commitManual(current: FormState): FormState {
+    if (current.manual.includes("=>")) {
+      throw new Error("「手动添加」只收模型名，映射请写到「模型映射」里。");
+    }
     const names = current.manual
       .split(/[\s,，]+/)
       .map((name) => name.trim())
-      .filter((name) => name && !name.includes("=>"));
+      .filter(Boolean);
     if (names.length === 0) return current;
     return {
       ...current,
@@ -362,31 +376,29 @@ export function UpstreamDialog({
   }
 
   function addManual() {
-    setForm((current) => {
-      const next = commitManual(current);
-      if (next === current) return current;
-      const added = next.modelNames.length - current.modelNames.length;
-      toast(added > 0 ? `已添加 ${added} 项，保存渠道后生效。` : "输入的模型名都已在列表中。", {
-        tone: added > 0 ? "ok" : "neutral",
-      });
-      return next;
+    let next: FormState;
+    try {
+      next = commitManual(form);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), { tone: "error" });
+      return;
+    }
+    if (next === form) return;
+    const added = next.modelNames.length - form.modelNames.length;
+    setForm(next);
+    toast(added > 0 ? `已添加 ${added} 项，保存渠道后生效。` : "输入的模型名都已在列表中。", {
+      tone: added > 0 ? "ok" : "neutral",
     });
   }
 
   /**
    * 当前表单里的选择，开选择器时带进去。
    *
-   * 映射文本解不开的行这里不报错，直接丢——选择器只是个参考，真正的校验
-   * 在保存时。
+   * 映射解不开时抛错，由调用方提示、不开选择器。原先当成没有映射：选择器
+   * 保存时拿空映射覆盖文本框，一行写错就清掉了全部映射。
    */
   function currentSelection(state: FormState): ModelSelection {
-    let mappings: Record<string, string> = {};
-    try {
-      mappings = parseMappingLines(state.modelMappings, "模型映射");
-    } catch {
-      // 解不开就当没有。
-    }
-    return { names: state.modelNames, mappings };
+    return { names: state.modelNames, mappings: parseMappingLines(state.modelMappings, "模型映射") };
   }
 
   /**
@@ -410,6 +422,7 @@ export function UpstreamDialog({
     let headers: Record<string, string>;
     try {
       headers = parseHeaderLines(form.extraHeaders);
+      currentSelection(form);
     } catch (err) {
       setAdvanced(true);
       toast(err instanceof Error ? err.message : String(err), { tone: "error" });
@@ -418,28 +431,32 @@ export function UpstreamDialog({
 
     // 0 和留空一样是「用默认」，都不带；带 0 的话预览接口按超出范围拒掉。
     const timeout = Number(form.timeoutSeconds);
+    const request = ++fetchRequest.current;
     setFetching(true);
     try {
       const result = await fetchModelsPreview(baseUrl, probeApiKey(), {
         extraHeaders: headers,
         timeoutSeconds: form.timeoutSeconds.trim() !== "" && timeout > 0 ? timeout : undefined,
       });
-      setForm((current) => {
-        setPicker({ catalog: result.models, selection: currentSelection(current) });
-        return current;
-      });
+      if (request !== fetchRequest.current) return;
+      setPicker({ catalog: result.models, selection: currentSelection(formRef.current) });
       toast(`已拉取 ${result.models.length} 个模型。`, { tone: "ok" });
     } catch (err) {
+      if (request !== fetchRequest.current) return;
       if (!(err instanceof UnauthorizedError)) {
         toast(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
       }
     } finally {
-      setFetching(false);
+      if (request === fetchRequest.current) setFetching(false);
     }
   }
 
   function openManager() {
-    setPicker({ catalog: null, selection: currentSelection(form) });
+    try {
+      setPicker({ catalog: null, selection: currentSelection(form) });
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), { tone: "error" });
+    }
   }
 
   /* 选择器只写回表单，不碰服务端——这个渠道可能还没存下来。
@@ -454,9 +471,10 @@ export function UpstreamDialog({
   }
 
   function submit() {
-    const committed = commitManual(form);
+    let committed: FormState;
     let payload: UpstreamPayload;
     try {
+      committed = commitManual(form);
       payload = payloadFromForm(committed);
     } catch (err) {
       // 解析失败的两项都在高级区，收着的话看不到错在哪。数字项不在，多展开无妨。
