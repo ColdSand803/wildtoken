@@ -196,6 +196,11 @@ func AdminUpdateModelTestPromptTemplate(state *appstate.State) http.HandlerFunc 
 
 		template, found, err := db.UpdateModelTestPromptTemplate(r.Context(), state.DB, id, &input)
 		if err != nil {
+			// A rename onto another template's name, answered as creation does.
+			if isUniqueViolation(err) {
+				apperr.WriteError(w, apperr.BadRequest("prompt template name already exists"))
+				return
+			}
 			apperr.WriteError(w, err)
 			return
 		}

@@ -95,7 +95,7 @@ func AdminDebugUpstream(state *appstate.State) http.HandlerFunc {
 			targetQuery = "beta=true"
 		}
 		targetURL := buildProbeURL(row.BaseURL, debugProtocolPaths[input.Protocol], targetQuery)
-		headers := buildChannelRequestHeaders(protocolHeaders(input.Protocol, model), row.APIKey, overrides)
+		headers := buildProtocolRequestHeaders(input.Protocol, model, row.APIKey, overrides)
 
 		w.Header().Set("content-type", "text/event-stream")
 		w.Header().Set("cache-control", "no-store")
@@ -141,7 +141,7 @@ func AdminDebugUpstream(state *appstate.State) http.HandlerFunc {
 					send("chunk", map[string]any{"text": text, "elapsed_ms": time.Since(startedAt).Milliseconds()})
 				}
 			},
-		}, probeTimeout(row.TimeoutSeconds))
+		}, probeTimeout(state, row.TimeoutSeconds))
 		if rest := splitter.flush(); rest != "" {
 			send("chunk", map[string]any{"text": rest, "elapsed_ms": time.Since(startedAt).Milliseconds()})
 		}

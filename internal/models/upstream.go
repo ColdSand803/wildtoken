@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"net/url"
 	"strings"
 	"unicode"
@@ -348,9 +349,35 @@ type ChannelExportItem struct {
 	AutoWeightEnabled bool              `json:"auto_weight_enabled"`
 	Enabled           bool              `json:"enabled"`
 	ExtraHeaders      map[string]string `json:"extra_headers"`
-	TimeoutSeconds    float64           `json:"timeout_seconds"`
+	TimeoutSeconds    *float64          `json:"timeout_seconds"`
 	RateLimit         *string           `json:"rate_limit,omitempty"`
 	GroupIDs          []int64           `json:"group_ids"`
+}
+
+// UnmarshalJSON starts an imported channel from the defaults a created one
+// gets. Decoded onto the zero value, a document that left fields out stored a
+// disabled channel with weight 0 and priority 0, and null model lists the
+// console could not render. A missing timeout stays nil, so the channel takes
+// the service default as a created one does.
+func (c *ChannelExportItem) UnmarshalJSON(data []byte) error {
+	type plain ChannelExportItem
+	defaults := DefaultUpstreamIn()
+	item := plain{
+		ModelNames:        defaults.ModelNames,
+		ModelPrefixes:     defaults.ModelPrefixes,
+		ModelMappings:     defaults.ModelMappings,
+		EffortMappings:    defaults.EffortMappings,
+		Priority:          defaults.Priority,
+		Weight:            defaults.Weight,
+		AutoWeightEnabled: defaults.AutoWeightEnabled,
+		Enabled:           defaults.Enabled,
+		ExtraHeaders:      defaults.ExtraHeaders,
+	}
+	if err := json.Unmarshal(data, &item); err != nil {
+		return err
+	}
+	*c = ChannelExportItem(item)
+	return nil
 }
 
 // ExportUpstreamsResponse is the response envelope for /api/admin/upstreams/export.

@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -108,6 +109,24 @@ func buildChannelRequestHeaders(headers map[string]string, apiKey *string,
 	}
 	// Admin-side probes have no downstream request context, so client header
 	// placeholders are skipped while static overrides still apply.
+	proxy.ApplyHeaderOverrides(headers, overrides, nil)
+	return headers
+}
+
+// buildProtocolRequestHeaders composes an inference probe's headers the way the
+// proxy would send them for the same protocol.
+//
+// The Messages API takes the key as x-api-key. Sending it as a Bearer token made
+// a native Anthropic channel fail its test while serving traffic fine.
+func buildProtocolRequestHeaders(protocol, model string, apiKey *string,
+	overrides map[string]string) map[string]string {
+	headers := protocolHeaders(protocol, model)
+	if protocol != "messages" {
+		return buildChannelRequestHeaders(headers, apiKey, overrides)
+	}
+	if apiKey != nil && *apiKey != "" {
+		headers["x-api-key"] = *apiKey
+	}
 	proxy.ApplyHeaderOverrides(headers, overrides, nil)
 	return headers
 }
@@ -306,8 +325,15 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 		}
 	}
 
-	requestCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+	// The bound is on silence, as it is for proxied traffic: every chunk
+	// restarts it. A deadline over the whole exchange cut the debug page's
+	// streams off for running long, where the proxy would have let them finish.
+	requestCtx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	idle := time.AfterFunc(timeout, func() {
+		cancel(fmt.Errorf("upstream sent nothing for %s", timeout))
+	})
+	defer idle.Stop()
 
 	var bodyReader io.Reader
 	if probe.body != nil {
@@ -324,6 +350,7 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 	startedAt := time.Now()
 	response, err := state.HTTPClient.Do(request)
 	if err != nil {
+		err = probeError(ctx, requestCtx, err)
 		entry := newEntry()
 		entry.DurationMs = durationMs(startedAt)
 		message := err.Error()
@@ -346,13 +373,15 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 		probe.onResponse(status, headers)
 	}
 
+	reader := progressReader{Reader: response.Body, onRead: func() { idle.Reset(timeout) }}
 	var body []byte
 	if probe.onChunk != nil {
-		body, err = readProbeChunks(response.Body, probe.onChunk)
+		body, err = readProbeChunks(reader, probe.onChunk)
 	} else {
-		body, err = io.ReadAll(io.LimitReader(response.Body, maxProbeResponseBytes))
+		body, err = io.ReadAll(io.LimitReader(reader, maxProbeResponseBytes))
 	}
 	if err != nil {
+		err = probeError(ctx, requestCtx, err)
 		entry := newEntry()
 		entry.StatusCode = &statusCode
 		entry.DurationMs = durationMs(startedAt)
@@ -390,6 +419,32 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 	return probeOutcome{status: status, headers: headers, body: string(body)}, nil
 }
 
+// progressReader reports every read that returned data.
+type progressReader struct {
+	io.Reader
+	onRead func()
+}
+
+func (r progressReader) Read(buffer []byte) (int, error) {
+	count, err := r.Reader.Read(buffer)
+	if count > 0 {
+		r.onRead()
+	}
+	return count, err
+}
+
+// probeError names the idle timeout when it is what ended a probe. The client
+// only reports the cancellation, which reads like the operator gave up.
+func probeError(parent, request context.Context, err error) error {
+	if parent.Err() != nil {
+		return err
+	}
+	if cause := context.Cause(request); cause != nil && !errors.Is(cause, context.Canceled) {
+		return cause
+	}
+	return err
+}
+
 // readProbeChunks hands every chunk to onChunk as it arrives and keeps the
 // first maxProbeResponseBytes for the log. Past that the caller still gets the
 // rest: cutting a debug stream short to protect a log snapshot would hide the
@@ -420,8 +475,16 @@ func durationMs(startedAt time.Time) *int32 {
 	return &measured
 }
 
-// probeTimeout bounds a probe, never dropping below one second.
-func probeTimeout(seconds float64) time.Duration {
+// probeTimeout bounds a probe by a channel's timeout, never dropping below one
+// second.
+//
+// Zero means "the service default", as it does to the proxy. Reading it as the
+// one-second floor gave an imported channel's tests a second to answer in while
+// its traffic had five minutes.
+func probeTimeout(state *appstate.State, seconds float64) time.Duration {
+	if seconds <= 0 {
+		seconds = state.EffectiveUpstreamTimeoutSeconds()
+	}
 	return time.Duration(max(seconds, 1.0) * float64(time.Second))
 }
 
@@ -659,6 +722,11 @@ func AdminUpdateUpstream(state *appstate.State) http.HandlerFunc {
 
 		updated, err := db.UpdateUpstream(r.Context(), state.DB, id, &input)
 		if err != nil {
+			// A rename onto another channel's name, answered as creation does.
+			if isUniqueViolation(err) {
+				apperr.WriteError(w, apperr.BadRequest("upstream name already exists"))
+				return
+			}
 			apperr.WriteError(w, err)
 			return
 		}
@@ -889,7 +957,7 @@ func AdminTestUpstream(state *appstate.State) http.HandlerFunc {
 			headers:      headers,
 			upstreamID:   &row.ID,
 			upstreamName: &row.Name,
-		}, probeTimeout(row.TimeoutSeconds))
+		}, probeTimeout(state, row.TimeoutSeconds))
 		if err != nil {
 			apperr.WriteJSON(w, http.StatusOK, map[string]any{
 				"ok": false, "status_code": nil, "message": err.Error(),
@@ -962,8 +1030,6 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 		}
 		targetURL := buildProbeURL(row.BaseURL, targetPath, targetQuery)
 
-		defaultHeaders := protocolHeaders(input.Protocol, strings.TrimSpace(input.Model))
-
 		overrides, err := parseExtraHeaders(row.ExtraHeaders)
 		if err != nil {
 			apperr.WriteError(w, err)
@@ -973,7 +1039,8 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-		headers := buildChannelRequestHeaders(defaultHeaders, row.APIKey, overrides)
+		headers := buildProtocolRequestHeaders(input.Protocol, strings.TrimSpace(input.Model),
+			row.APIKey, overrides)
 		headersPreview := redactHeaderPreview(headers)
 
 		model := strings.TrimSpace(input.Model)
@@ -986,7 +1053,7 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			upstreamID:   &row.ID,
 			upstreamName: &row.Name,
 			model:        &model,
-		}, probeTimeout(row.TimeoutSeconds))
+		}, probeTimeout(state, row.TimeoutSeconds))
 		if err != nil {
 			apperr.WriteJSON(w, http.StatusOK, map[string]any{
 				"ok": false, "status_code": nil, "message": err.Error(),
@@ -1160,7 +1227,7 @@ func fetchModelsForTarget(ctx context.Context, state *appstate.State, upstreamID
 		headers:      headers,
 		upstreamID:   upstreamID,
 		upstreamName: upstreamName,
-	}, probeTimeout(timeoutSeconds))
+	}, probeTimeout(state, timeoutSeconds))
 	if err != nil {
 		return models.ModelListOut{}, apperr.Upstream("upstream request failed: " + err.Error())
 	}
@@ -1242,6 +1309,12 @@ func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 
 		timeout := state.EffectiveUpstreamTimeoutSeconds()
 		if input.TimeoutSeconds != nil {
+			// Bounded as a saved channel's is: a huge value overflows the
+			// Duration and times the probe out at once.
+			if seconds := *input.TimeoutSeconds; seconds < 0 || seconds > models.UpstreamMaxTimeoutSeconds {
+				apperr.WriteError(w, apperr.BadRequest("timeout_seconds must be between 0 and 3600"))
+				return
+			}
 			timeout = *input.TimeoutSeconds
 		}
 
@@ -1285,7 +1358,7 @@ func AdminFetchUpstreamBalance(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		timeout := probeTimeout(row.TimeoutSeconds)
+		timeout := probeTimeout(state, row.TimeoutSeconds)
 		headers := buildChannelRequestHeaders(nil, row.APIKey, extra)
 		subscriptionURL := buildProbeURL(row.BaseURL, "dashboard/billing/subscription", "")
 		usageURL := buildProbeURL(row.BaseURL, "dashboard/billing/usage", billingUsageRange())
@@ -1418,7 +1491,7 @@ func AdminFetchUpstreamSub2APIBalance(state *appstate.State) http.HandlerFunc {
 			headers:      headers,
 			upstreamID:   &row.ID,
 			upstreamName: &row.Name,
-		}, probeTimeout(row.TimeoutSeconds))
+		}, probeTimeout(state, row.TimeoutSeconds))
 		if err != nil {
 			apperr.WriteJSON(w, http.StatusOK, map[string]any{
 				"ok": false, "provider": "sub2api", "message": "请求失败: " + err.Error(),
@@ -1575,6 +1648,7 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 		// Build export items
 		channels := make([]models.ChannelExportItem, 0, len(filtered))
 		for _, out := range filtered {
+			timeout := out.TimeoutSeconds
 			item := models.ChannelExportItem{
 				Name:              out.Name,
 				BaseURL:           out.BaseURL,
@@ -1587,7 +1661,7 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 				AutoWeightEnabled: out.AutoWeightEnabled,
 				Enabled:           out.Enabled,
 				ExtraHeaders:      out.ExtraHeaders,
-				TimeoutSeconds:    out.TimeoutSeconds,
+				TimeoutSeconds:    &timeout,
 				RateLimit:         out.RateLimit,
 				GroupIDs:          out.GroupIDs,
 			}
@@ -1601,6 +1675,9 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 				if found && row.APIKey != nil {
 					item.APIKey = row.APIKey
 				}
+			} else {
+				// A key moved into a header is still a key.
+				item.ExtraHeaders = withoutSensitiveHeaders(out.ExtraHeaders)
 			}
 			channels = append(channels, item)
 		}
@@ -1613,6 +1690,39 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 		}
 		apperr.WriteJSON(w, http.StatusOK, resp)
 	}
+}
+
+// withoutSensitiveHeaders drops the overrides that carry credentials.
+func withoutSensitiveHeaders(headers map[string]string) map[string]string {
+	kept := make(map[string]string, len(headers))
+	for name, value := range headers {
+		if !proxy.IsSensitiveHeaderName(name) {
+			kept[name] = value
+		}
+	}
+	return kept
+}
+
+// keepSensitiveHeaders adds a channel's stored credential headers that an
+// imported map does not name. A name the import does carry wins.
+func keepSensitiveHeaders(stored string, imported map[string]string) map[string]string {
+	existing := map[string]string{}
+	if err := json.Unmarshal([]byte(stored), &existing); err != nil {
+		return imported
+	}
+
+	merged := make(map[string]string, len(imported)+len(existing))
+	named := make(map[string]bool, len(imported))
+	for name, value := range imported {
+		merged[name] = value
+		named[strings.ToLower(name)] = true
+	}
+	for name, value := range existing {
+		if proxy.IsSensitiveHeaderName(name) && !named[strings.ToLower(name)] {
+			merged[name] = value
+		}
+	}
+	return merged
 }
 
 // AdminImportUpstreams imports channels from a JSON document.
@@ -1649,10 +1759,13 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 				AutoWeightEnabled: item.AutoWeightEnabled,
 				Enabled:           item.Enabled,
 				ExtraHeaders:      item.ExtraHeaders,
-				TimeoutSeconds:    &item.TimeoutSeconds,
+				TimeoutSeconds:    item.TimeoutSeconds,
 				RateLimit:         item.RateLimit,
 				GroupIDs:          item.GroupIDs,
 			}
+			// A document may still spell a collection as null; stored as such,
+			// the console cannot render the channel.
+			input.Normalize()
 
 			// Validate
 			if err := input.Validate(); err != nil {
@@ -1677,8 +1790,10 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 				continue
 			}
 
-			// Check if exists
-			existing, found, err := db.GetUpstreamByName(ctx, state.DB, item.Name)
+			// Check if exists. By the trimmed name Validate left in input, which
+			// is the one stored: " foo " missed an existing "foo" and then
+			// collided with it on insert.
+			existing, found, err := db.GetUpstreamByName(ctx, state.DB, input.Name)
 			if err != nil {
 				msg := "database error: " + err.Error()
 				result.Items = append(result.Items, models.ImportResultItem{
@@ -1700,7 +1815,9 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 					continue
 				}
 
-				// Overwrite
+				// Overwrite. Credential headers the document leaves out stay, as
+				// the API key does: an export without keys omits both.
+				input.ExtraHeaders = keepSensitiveHeaders(existing.ExtraHeaders, input.ExtraHeaders)
 				update := models.UpstreamUpdate{
 					UpstreamIn:  input,
 					ClearAPIKey: false, // Keep existing key if import has none

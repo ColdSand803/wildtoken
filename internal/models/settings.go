@@ -30,8 +30,10 @@ func (r *ModelTestRequest) Validate() error {
 	default:
 		return ErrString("protocol must be responses, chat_completions, or messages")
 	}
-	if r.PromptTemplateID < 1 {
-		return ErrString("prompt_template_id must be positive")
+	// A typed prompt makes the template unnecessary; requiring one anyway left
+	// the test unusable once every template had been deleted.
+	if strings.TrimSpace(r.Prompt) == "" && r.PromptTemplateID < 1 {
+		return ErrString("prompt_template_id must be positive when prompt is empty")
 	}
 	if len(r.Prompt) > 20000 {
 		return ErrString("prompt must be at most 20000 bytes")
