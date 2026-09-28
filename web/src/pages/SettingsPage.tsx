@@ -24,6 +24,7 @@ import {
   currentDensity,
   currentTheme,
 } from "../theme";
+import { formatTimestamp } from "../logFormat";
 import type { PromptTemplate, RuntimeSettings, SystemInfo } from "../types";
 
 /** 和 App 的路由共用一个键；改完下次打开控制台就落在这一页。 */
@@ -37,10 +38,34 @@ function readDefaultHome(): string {
   }
 }
 
-/** 数字输入统一走这里：空串当 0，避免 NaN 提交到后端。 */
-function num(raw: string): number {
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : 0;
+/** 每张卡管的字段。保存只提交本卡的，其余取服务端最近一次的值：原先整页
+    提交，另一张卡上没确认的改动跟着落库。 */
+const CARD_FIELDS = {
+  log: ["log_body_keep_count", "log_retention_days", "log_body_max_bytes", "image_storage_max_mb"],
+  routing: [
+    "max_retries",
+    "same_upstream_retry_interval_ms",
+    "auto_weight_failure_penalty",
+    "auto_weight_success_increment",
+    "auto_weight_recovery_increment",
+    "auto_weight_recovery_interval_seconds",
+  ],
+  proxy: ["proxy_enabled", "proxy_url"],
+  timeout: ["default_upstream_timeout_seconds"],
+  dashboard: ["dashboard_multiplier"],
+} satisfies Record<string, (keyof RuntimeSettings)[]>;
+
+type SettingsCard = keyof typeof CARD_FIELDS;
+
+/** base 换上 source 里 keys 的值。 */
+function withFields(
+  base: RuntimeSettings,
+  source: RuntimeSettings,
+  keys: readonly (keyof RuntimeSettings)[],
+): RuntimeSettings {
+  const next: Record<string, unknown> = { ...base };
+  for (const key of keys) next[key] = source[key];
+  return next as unknown as RuntimeSettings;
 }
 
 function formatCount(value: number): string {
@@ -76,13 +101,14 @@ function formatDuration(ms: number | null | undefined): string {
 
 export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
   const [settings, setSettings] = useState<RuntimeSettings | null>(null);
+  /* 服务端最近一次返回的设置。保存以它为底，只换上当前那张卡的字段。 */
+  const [saved, setSaved] = useState<RuntimeSettings | null>(null);
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  /* 哪一张卡正在保存。三张卡各自一个按钮，但后端是整体写入——标出具体那张，
-     免得点了日志策略却看到代理那边转圈。 */
-  const [savingCard, setSavingCard] = useState<string | null>(null);
+  /* 哪一张卡正在保存，标出具体那张，免得点了日志策略却看到代理那边转圈。 */
+  const [savingCard, setSavingCard] = useState<SettingsCard | null>(null);
   const [theme, setTheme] = useState(currentTheme);
   const [density, setDensity] = useState(currentDensity);
   const [editingTemplate, setEditingTemplate] = useState<{ template: PromptTemplate | null } | null>(
@@ -104,6 +130,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
         getSystemInfo(),
       ]);
       setSettings(loaded);
+      setSaved(loaded);
       setTemplates(loadedTemplates);
       setSystem(loadedSystem);
       setError("");
@@ -133,12 +160,23 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     setSettings((current) => (current ? { ...current, [key]: value } : current));
   }
 
-  async function save(card: string) {
-    if (!settings) return;
+  async function save(card: SettingsCard) {
+    if (!settings || !saved) return;
     setSavingCard(card);
     try {
-      /* revision 原样带回去：后端靠它拒掉过期的写入。 */
-      setSettings(await saveSettings(settings));
+      /* revision 取服务端那份原样带回去：后端靠它拒掉过期的写入。 */
+      const result = await saveSettings(withFields(saved, settings, CARD_FIELDS[card]));
+      setSaved(result);
+      // 本卡换成服务端的结果，别的卡上没保存的草稿原样留着。
+      setSettings((current) =>
+        current
+          ? {
+              ...withFields(current, result, CARD_FIELDS[card]),
+              revision: result.revision,
+              updated_at: result.updated_at,
+            }
+          : result,
+      );
       toast("设置已保存。", { tone: "ok" });
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
@@ -371,7 +409,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                   </div>
                   <div className="settings-save-row">
                     <p className="settings-inline-status" role="status">
-                      {`上次更新 ${settings.updated_at}`}
+                      {`上次更新 ${formatTimestamp(settings.updated_at)}`}
                     </p>
                     <button
                       type="button"
@@ -827,7 +865,11 @@ function NumberField({
         onBlur={() => setDraft(null)}
         onChange={(event) => {
           setDraft(event.target.value);
-          onChange(num(event.target.value));
+          /* 清空不回写：原先按 0 存，图片上限清空就是删光已存的图，重试次数
+             清空就是不重试。失焦后草稿作废，框里回到原值。 */
+          const raw = event.target.value.trim();
+          const value = Number(raw);
+          if (raw !== "" && Number.isFinite(value)) onChange(value);
         }}
       />
       {hint ? <span className="field-hint">{hint}</span> : null}
