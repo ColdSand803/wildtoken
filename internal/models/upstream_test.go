@@ -1,6 +1,12 @@
 package models
 
-import "testing"
+import (
+	"encoding/json"
+	"reflect"
+	"slices"
+	"strings"
+	"testing"
+)
 
 func validUpstreamIn() UpstreamIn {
 	input := DefaultUpstreamIn()
@@ -60,5 +66,51 @@ func TestValidateRejectsUnusableEffortMappings(t *testing.T) {
 		if err := input.Validate(); err == nil {
 			t.Errorf("%s was accepted", testCase.name)
 		}
+	}
+}
+
+// Every field of a replacing update is either required or has a meaning when
+// left out. A field added to the struct and to neither list would be filled
+// with a default on every PUT that predates it.
+func TestEveryUpdateFieldIsClassified(t *testing.T) {
+	var fields []string
+	var collect func(reflect.Type)
+	collect = func(kind reflect.Type) {
+		for i := range kind.NumField() {
+			field := kind.Field(i)
+			if field.Anonymous {
+				collect(field.Type)
+				continue
+			}
+			name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+			if name != "" && name != "-" {
+				fields = append(fields, name)
+			}
+		}
+	}
+	collect(reflect.TypeFor[UpstreamUpdate]())
+
+	classified := slices.Concat(upstreamUpdateRequired, upstreamUpdateOptional)
+	slices.Sort(fields)
+	slices.Sort(classified)
+	if !slices.Equal(fields, classified) {
+		t.Errorf("fields %v, classified %v", fields, classified)
+	}
+}
+
+func TestMissingUpstreamFieldsCountsNullAsMissing(t *testing.T) {
+	body := map[string]json.RawMessage{}
+	for _, name := range upstreamUpdateRequired {
+		body[name] = json.RawMessage(`[]`)
+	}
+	if missing := MissingUpstreamFields(body); len(missing) != 0 {
+		t.Fatalf("complete body reported missing %v", missing)
+	}
+
+	delete(body, "enabled")
+	body["priority"] = json.RawMessage(`null`)
+	body["rate_limit"] = json.RawMessage(`null`)
+	if missing := MissingUpstreamFields(body); !slices.Equal(missing, []string{"priority", "enabled"}) {
+		t.Errorf("missing = %v, want [priority enabled]: rate_limit may be null", missing)
 	}
 }

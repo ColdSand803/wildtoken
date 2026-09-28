@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/url"
 	"strings"
@@ -254,6 +255,33 @@ func (u *UpstreamIn) Normalize() {
 type UpstreamUpdate struct {
 	UpstreamIn
 	ClearAPIKey bool `json:"clear_api_key"`
+}
+
+// upstreamUpdateRequired are the fields a replacing update must carry as values.
+// Decoded from their absence, a missing enabled switched a disabled channel back
+// on and a missing group_ids moved it to the default group. rate_limit may be
+// null: that is how unlimited is said.
+var upstreamUpdateRequired = []string{
+	"name", "base_url", "model_names", "model_prefixes", "model_mappings",
+	"effort_mappings", "priority", "weight", "auto_weight_enabled", "enabled",
+	"extra_headers", "rate_limit", "group_ids",
+}
+
+// upstreamUpdateOptional may be left out: a missing key or timeout keeps the
+// stored one, and clear_api_key defaults to false.
+var upstreamUpdateOptional = []string{"api_key", "timeout_seconds", "clear_api_key"}
+
+// MissingUpstreamFields names the required fields a replacing update left out
+// or sent as null.
+func MissingUpstreamFields(body map[string]json.RawMessage) []string {
+	var missing []string
+	for _, name := range upstreamUpdateRequired {
+		value, ok := body[name]
+		if !ok || (name != "rate_limit" && bytes.Equal(bytes.TrimSpace(value), []byte("null"))) {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 // UpstreamEnabledIn toggles a channel.

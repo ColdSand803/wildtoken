@@ -695,9 +695,26 @@ func AdminUpdateUpstream(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-		input := models.UpstreamUpdate{UpstreamIn: models.DefaultUpstreamIn()}
-		if err := decodeJSON(w, r, &input); err != nil {
+		// Read once, decoded twice: the keys it names, then their values.
+		var body json.RawMessage
+		if err := decodeJSON(w, r, &body); err != nil {
 			apperr.WriteError(w, err)
+			return
+		}
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(body, &fields); err != nil {
+			apperr.WriteError(w, apperr.BadRequest("invalid request body: "+err.Error()))
+			return
+		}
+		// A PUT replaces the channel, so a field it leaves out has no value to
+		// keep; it is refused rather than filled with a default.
+		if missing := models.MissingUpstreamFields(fields); len(missing) > 0 {
+			apperr.WriteError(w, apperr.BadRequest("missing fields: "+strings.Join(missing, ", ")))
+			return
+		}
+		input := models.UpstreamUpdate{UpstreamIn: models.DefaultUpstreamIn()}
+		if err := json.Unmarshal(body, &input); err != nil {
+			apperr.WriteError(w, apperr.BadRequest("invalid request body: "+err.Error()))
 			return
 		}
 		input.Normalize()

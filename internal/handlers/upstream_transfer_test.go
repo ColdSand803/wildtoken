@@ -132,9 +132,71 @@ func TestRenamingOntoATakenNameIsABadRequest(t *testing.T) {
 
 	path := "/api/admin/upstreams/" + strconv.FormatInt(second.ID, 10)
 	response := adminCall(t, http.MethodPut, "/api/admin/upstreams/{id}", path,
-		AdminUpdateUpstream(state), `{"name":"first","base_url":"https://api.example.com"}`)
-	if response.Code != http.StatusBadRequest {
+		AdminUpdateUpstream(state), updateBody(t, fullUpdate("first"), ""))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "already exists") {
 		t.Errorf("rename onto a taken name returned %d, want 400: %s",
+			response.Code, response.Body.String())
+	}
+}
+
+// fullUpdate is a complete replacing update, as the console sends one.
+func fullUpdate(name string) map[string]any {
+	return map[string]any{
+		"name": name, "base_url": "https://api.example.com",
+		"model_names": []string{}, "model_prefixes": []string{},
+		"model_mappings": map[string]string{}, "effort_mappings": map[string]string{},
+		"priority": 100, "weight": 100, "auto_weight_enabled": true, "enabled": true,
+		"extra_headers": map[string]string{}, "rate_limit": nil, "group_ids": []int64{},
+	}
+}
+
+// updateBody encodes an update without the named field.
+func updateBody(t *testing.T, fields map[string]any, without string) string {
+	t.Helper()
+	delete(fields, without)
+	encoded, err := json.Marshal(fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
+}
+
+// A PUT replaces the channel. A field it leaves out is refused, not defaulted:
+// a missing enabled switched a disabled channel back on.
+func TestAnUpdateMissingAFieldIsRefused(t *testing.T) {
+	state := upstreamTestState(t)
+	ctx := context.Background()
+	input := models.DefaultUpstreamIn()
+	input.Name = "off"
+	input.BaseURL = "https://api.example.com"
+	input.Enabled = false
+	created, err := db.CreateUpstream(ctx, state.DB, &input, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	path := "/api/admin/upstreams/" + strconv.FormatInt(created.ID, 10)
+	response := adminCall(t, http.MethodPut, "/api/admin/upstreams/{id}", path,
+		AdminUpdateUpstream(state), updateBody(t, fullUpdate("off"), "enabled"))
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "enabled") {
+		t.Fatalf("returned %d, want 400 naming enabled: %s", response.Code, response.Body.String())
+	}
+	row, _, err := db.GetUpstream(ctx, state.DB, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Enabled != 0 {
+		t.Error("the refused update switched the channel on")
+	}
+
+	// Those with a meaning when absent may still be left out: fullUpdate has no
+	// api_key, timeout_seconds or clear_api_key.
+	fields := fullUpdate("off")
+	fields["enabled"] = false
+	response = adminCall(t, http.MethodPut, "/api/admin/upstreams/{id}", path,
+		AdminUpdateUpstream(state), updateBody(t, fields, ""))
+	if response.Code != http.StatusOK {
+		t.Errorf("an update without api_key or timeout returned %d: %s",
 			response.Code, response.Body.String())
 	}
 }
