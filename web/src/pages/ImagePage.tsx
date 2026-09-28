@@ -318,6 +318,16 @@ function ImageRunCard({ run, now }: { run: Run; now: number }) {
   );
 }
 
+/** 上游给的 http(s) 图片链接是否跨域。存到服务端的图是同源相对路径。 */
+function isCrossOrigin(src: string): boolean {
+  if (!/^https?:/i.test(src)) return false;
+  try {
+    return new URL(src).origin !== window.location.origin;
+  } catch {
+    return true;
+  }
+}
+
 function ImageFigure({ image, name, index }: { image: ImageItem; name: string; index: number }) {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
 
@@ -351,9 +361,17 @@ function ImageFigure({ image, name, index }: { image: ImageItem; name: string; i
       <figcaption>
         <span>{meta.join(" · ")}</span>
         {image.partialIndex === null && !image.truncated ? (
-          <a href={image.src} download={`${name}-${index + 1}.${image.format ?? "png"}`}>
-            下载
-          </a>
+          /* 跨域链接上 download 不生效，点了会把当前标签页导航走，整页状态全丢。
+             这种只能新标签打开，另存交给浏览器。 */
+          isCrossOrigin(image.src) ? (
+            <a href={image.src} target="_blank" rel="noreferrer">
+              打开原图
+            </a>
+          ) : (
+            <a href={image.src} download={`${name}-${index + 1}.${image.format ?? "png"}`}>
+              下载
+            </a>
+          )
         ) : null}
       </figcaption>
       {image.revisedPrompt ? <p className="field-hint">改写后的 prompt：{image.revisedPrompt}</p> : null}

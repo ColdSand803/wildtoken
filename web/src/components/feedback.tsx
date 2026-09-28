@@ -120,7 +120,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {createPortal(
         <div className="toast-region" ref={regionRef} popover="manual" aria-live="polite">
           {toasts.map((toast) => (
-            <ToastItem key={toast.id} toast={toast} onDismiss={() => dismiss(toast.id)} />
+            <ToastItem key={toast.id} toast={toast} onDismiss={dismiss} />
           ))}
         </div>,
         host ?? document.body,
@@ -129,9 +129,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
+/* onDismiss 收 id 而不是现包一个闭包：闭包每次渲染都是新的，倒计时 effect
+   跟着重跑，来一条新消息、切一次页面，已显示的提示就从头计时。 */
+function ToastItem({ toast, onDismiss: dismissById }: { toast: Toast; onDismiss: (id: number) => void }) {
   const [paused, setPaused] = useState(false);
   const [busy, setBusy] = useState(false);
+  const onDismiss = useCallback(() => dismissById(toast.id), [dismissById, toast.id]);
 
   /* 悬停时暂停倒计时：正在读的消息不该自己消失。
      paused 变回 false 时重新计时，和旧版的 mouseleave 重启一致。 */

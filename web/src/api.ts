@@ -24,16 +24,34 @@ import type {
 
 const ADMIN_TOKEN_KEY = "wildtoken_admin_token";
 
+/* 站点存储被禁用时，碰 localStorage 本身就抛错，控制台一启动就白屏。退到
+   内存里：这次会话照常用，只是刷新后要重新登录。 */
+let memoryToken = "";
+
 export function getAdminToken(): string {
-  return localStorage.getItem(ADMIN_TOKEN_KEY) ?? "";
+  try {
+    return localStorage.getItem(ADMIN_TOKEN_KEY) ?? "";
+  } catch {
+    return memoryToken;
+  }
 }
 
 export function setAdminToken(token: string): void {
-  localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  memoryToken = token;
+  try {
+    localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  } catch {
+    // 见 memoryToken。
+  }
 }
 
 export function clearAdminToken(): void {
-  localStorage.removeItem(ADMIN_TOKEN_KEY);
+  memoryToken = "";
+  try {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch {
+    // 见 memoryToken。
+  }
 }
 
 /** 401 时抛这个，让调用方能弹出登录框而不是显示一条普通错误。 */
@@ -69,6 +87,13 @@ export async function send(path: string, init: RequestInit = {}): Promise<Respon
   const response = await fetch(path, { ...init, headers });
 
   if (!response.ok) {
+    /* 令牌在请求路上被换过（重新登录、轮换），这个 401 说的是旧令牌。照它清
+       存储会把新令牌一起清掉、登录框再弹一次。401 在鉴权处就拒了，请求没执行
+       过，拿当前令牌重发是安全的。 */
+    if (response.status === 401) {
+      const current = getAdminToken();
+      if (current && current !== token) return send(path, init);
+    }
     let message = `${response.status} ${response.statusText}`;
     try {
       const data = await response.json();
@@ -119,11 +144,20 @@ export function getUpstream(id: number): Promise<Upstream> {
   return api<Upstream>(`/api/admin/upstreams/${id}`);
 }
 
-export function testUpstream(id: number, path = "/v1/models"): Promise<unknown> {
-  return api<unknown>(`/api/admin/upstreams/${id}/test`, {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
+/**
+ * 测连接。和模型测试一样，上游不通或报错也回 200，成败看 ok；不看的话
+ * Key 错、地址不通的渠道也提示「测试连接成功」。
+ */
+export async function testUpstream(id: number, path = "/v1/models"): Promise<void> {
+  const result = await api<{ ok: boolean; status_code: number | null; message?: string; preview?: string }>(
+    `/api/admin/upstreams/${id}/test`,
+    { method: "POST", body: JSON.stringify({ path }) },
+  );
+  if (result.ok) return;
+  const detail = result.message || result.preview?.slice(0, 200) || "";
+  throw new Error(
+    result.status_code === null ? detail || "上游不可达" : `HTTP ${result.status_code}${detail ? `：${detail}` : ""}`,
+  );
 }
 
 export function fetchUpstreamModels(id: number): Promise<{ models: string[] }> {

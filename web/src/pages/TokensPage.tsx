@@ -139,14 +139,17 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
       .includes(q);
   });
 
-  async function mutate(id: number, run: () => Promise<APIToken>) {
+  /** 返回是否成功：错误在这里就报了，调用方据此决定还要不要报成功。 */
+  async function mutate(id: number, run: () => Promise<APIToken>): Promise<boolean> {
     setPending(id);
     try {
       const updated = await run();
       setTokens((list) => list.map((t) => (t.id === updated.id ? updated : t)));
+      return true;
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else toast(err instanceof Error ? err.message : String(err), { tone: "error" });
+      return false;
     } finally {
       setPending(null);
     }
@@ -214,8 +217,9 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
       danger: false,
     });
     if (!ok) return;
-    await mutate(token.id, () => resetTokenUsage(token.id));
-    toast("已用额度已清零。", { tone: "ok" });
+    if (await mutate(token.id, () => resetTokenUsage(token.id))) {
+      toast("已用额度已清零。", { tone: "ok" });
+    }
   }
 
   function menuFor(token: APIToken): MenuEntry[] {

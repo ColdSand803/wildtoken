@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import { UnauthorizedError, fetchModelsPreview } from "../api";
@@ -95,9 +95,11 @@ export function ChannelExportDialog({
           <button type="button" className="secondary" onClick={onClose}>
             关闭
           </button>
+          {/* 文档没到之前没有可给的东西：空文件或者上一份文档都不对。 */}
           <button
             type="button"
             className="secondary"
+            disabled={!doc}
             onClick={() => void copyText(json)}
           >
             复制
@@ -105,6 +107,7 @@ export function ChannelExportDialog({
           <button
             className="primary"
             type="button"
+            disabled={!doc}
             onClick={() => {
               /* Blob + 临时链接下载。用 data: URL 在大文档上会被浏览器拦。 */
               const blob = new Blob([json], { type: "application/json" });
@@ -173,8 +176,9 @@ export function ChannelImportDialog({
       setParseError("不是合法的 JSON。");
       return null;
     }
-    const doc = parsed as Partial<ChannelExportDocument>;
-    if (doc.kind !== CHANNEL_DOCUMENT_KIND) {
+    // 粘进来的可能是 null、数组或字符串：读 null.kind 会抛错，按钮点了没反应。
+    const doc = parsed as Partial<ChannelExportDocument> | null;
+    if (!doc || typeof doc !== "object" || doc.kind !== CHANNEL_DOCUMENT_KIND) {
       setParseError(`这不是渠道导出文件（kind 应为 ${CHANNEL_DOCUMENT_KIND}）。`);
       return null;
     }
@@ -184,6 +188,18 @@ export function ChannelImportDialog({
     }
     if (doc.channels.length > MAX_IMPORT_ENTRIES) {
       setParseError(`一次最多导入 ${MAX_IMPORT_ENTRIES} 个渠道，当前 ${doc.channels.length} 个。`);
+      return null;
+    }
+    // 名字和地址是最少要有的；其余字段缺了由后端按新建渠道的默认值补。
+    const incomplete = doc.channels.findIndex(
+      (channel: unknown) =>
+        !channel ||
+        typeof channel !== "object" ||
+        typeof (channel as { name?: unknown }).name !== "string" ||
+        typeof (channel as { base_url?: unknown }).base_url !== "string",
+    );
+    if (incomplete !== -1) {
+      setParseError(`第 ${incomplete + 1} 个渠道缺少 name 或 base_url。`);
       return null;
     }
     setParseError("");
@@ -270,8 +286,9 @@ export function ChannelImportDialog({
             <ul>
               {result.items
                 .filter((item) => item.action === "failed")
-                .map((item) => (
-                  <li key={item.name}>
+                .map((item, index) => (
+                  // 文档里可以有同名渠道，名字当 key 会撞。
+                  <li key={`${index}-${item.name}`}>
                     {item.name}：{item.message ?? "未知原因"}
                   </li>
                 ))}
@@ -348,10 +365,17 @@ export function QuickImportDialog({
     setName("");
     setBaseUrl("");
     setApiKey("");
+  }, [open]);
+
+  /* 拉到的列表只属于发起时的地址和 Key。改了其中一个、或者关窗重开，列表和
+     还在路上的请求都作废：否则按 A 地址拉的模型会跟着 B 地址填进表单。 */
+  const pullRequest = useRef(0);
+  useEffect(() => {
+    pullRequest.current += 1;
     setPull(null);
     setPulling(false);
     setPullError("");
-  }, [open]);
+  }, [open, baseUrl, apiKey]);
 
   /** 从 URL 猜个名字，省得每次手打。 */
   function suggestName(url: string): string {
@@ -374,19 +398,21 @@ export function QuickImportDialog({
       return;
     }
 
+    const request = ++pullRequest.current;
     setPulling(true);
     setPullError("");
     try {
-      const models = readModels(
-        await fetchModelsPreview(url, apiKey.trim() || null, { timeoutSeconds: 300 }),
-      );
+      // 不带超时，后端按设置页的默认上游超时。
+      const models = readModels(await fetchModelsPreview(url, apiKey.trim() || null));
+      if (request !== pullRequest.current) return;
       // 拉到的默认全选：拉回来就是为了用，逐个勾是反过来的默认。
       setPull({ models, picked: new Set(models) });
     } catch (err) {
+      if (request !== pullRequest.current) return;
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else setPullError(err instanceof Error ? err.message : String(err));
     } finally {
-      setPulling(false);
+      if (request === pullRequest.current) setPulling(false);
     }
   }
 

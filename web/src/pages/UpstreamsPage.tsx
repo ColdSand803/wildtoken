@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   UnauthorizedError,
@@ -111,7 +111,14 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [editing, setEditing] = useState<{ upstream: Upstream | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>(() => readStoredSort(localStorage));
+  // 站点存储被禁用时，取 localStorage 这个全局本身就会抛错。
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>(() => {
+    try {
+      return readStoredSort(localStorage);
+    } catch {
+      return readStoredSort(undefined);
+    }
+  });
 
   /* 排序偏好跟着列显隐一起落 localStorage：切页、刷新、换标签页都不丢，换设备
      归默认。写不进存储时当前页面仍然生效。 */
@@ -139,6 +146,9 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [exportDoc, setExportDoc] = useState<ChannelExportDocument | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportIncludeKeys, setExportIncludeKeys] = useState(true);
+  /* 每次导出一个序号，只收最新那次的结果。带 Key 的导出要逐个查渠道、更慢，
+     快速切换时它可能最后到，勾选框写着不含 Key，文件里却有。 */
+  const exportRequest = useRef(0);
   const [importOpen, setImportOpen] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -280,8 +290,10 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   /** 优先级行内编辑提交。值没变就不发请求。 */
   async function savePriority(upstream: Upstream, raw: string) {
     setEditingPriority(null);
+    // 清空是放弃编辑，不是 0：Number("") 为 0，失焦就把渠道静默降到最低层。
+    if (raw.trim() === "") return;
     const next = Number(raw);
-    if (!Number.isFinite(next) || next === upstream.priority) return;
+    if (!Number.isInteger(next) || next === upstream.priority) return;
     await mutate(upstream.id, () => setUpstreamPriority(upstream.id, next));
   }
 
@@ -291,16 +303,21 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
    * 带不带密钥是服务端决定的，所以开关一变就得重新取一份，不能在前端裁。
    */
   async function runExport(includeKeys = exportIncludeKeys) {
+    const request = ++exportRequest.current;
     setBusyDialog(true);
     setExportOpen(true);
+    // 新文档回来之前旧的不能再下载：切掉「包含 API Key」后拿到的还是带 Key 的那份。
+    setExportDoc(null);
     try {
-      setExportDoc(await exportUpstreams(visibleSelected.map((u) => u.id), includeKeys));
+      const doc = await exportUpstreams(visibleSelected.map((u) => u.id), includeKeys);
+      if (request === exportRequest.current) setExportDoc(doc);
     } catch (err) {
+      if (request !== exportRequest.current) return;
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else toast(`导出失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
       setExportOpen(false);
     } finally {
-      setBusyDialog(false);
+      if (request === exportRequest.current) setBusyDialog(false);
     }
   }
 
@@ -354,7 +371,8 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         enabled: true,
         archived: false,
         extra_headers: {},
-        timeout_seconds: 300,
+        // 0 让表单留空，保存时按设置页的默认超时落库。
+        timeout_seconds: 0,
         rate_limit: null,
         created_at: "",
         updated_at: "",
@@ -925,8 +943,11 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
           void runExport(next);
         }}
         onClose={() => {
+          // 关窗后晚到的结果不该再写进下一次打开的窗口。
+          exportRequest.current += 1;
           setExportOpen(false);
           setExportDoc(null);
+          setBusyDialog(false);
         }}
       />
 

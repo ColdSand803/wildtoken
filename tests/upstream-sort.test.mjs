@@ -122,7 +122,8 @@ test("存储被挡住时回落默认，不抛", () => {
 test("四个表头都接到写入路径上", () => {
   const page = read("web/src/pages/UpstreamsPage.tsx");
 
-  assert.match(page, /useState<[^>]*>\(\(\) => readStoredSort\(localStorage\)\)/);
+  // 取 localStorage 这个全局本身就可能抛错（站点存储被禁用），所以初始化包了一层 try。
+  assert.match(page, /useState<[^>]*>\(\(\) => \{\s*try \{\s*return readStoredSort\(localStorage\);/);
   assert.equal(page.includes("onSort={setSort}"), false, "不能有绕过落盘的表头");
   assert.equal(page.match(/onSort=\{applySort\}/g).length, 4);
   assert.match(page, /localStorage\.setItem\(UPSTREAM_SORT_KEY, JSON\.stringify\(next\)\)/);

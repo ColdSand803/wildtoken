@@ -23,7 +23,8 @@ export interface UpstreamPayload {
   priority: number;
   weight: number;
   auto_weight_enabled: boolean;
-  timeout_seconds: number;
+  /** null 表示不指定：新建时后端按设置页的默认超时落库，编辑时保持原值。 */
+  timeout_seconds: number | null;
   enabled: boolean;
   extra_headers: Record<string, string>;
   rate_limit: string | null;
@@ -179,7 +180,8 @@ function emptyForm(): FormState {
     modelPrefixes: "",
     priority: "100",
     weight: "100",
-    timeoutSeconds: "300",
+    // 留空：新建渠道以设置页的默认上游超时为初始值，而不是写死 300。
+    timeoutSeconds: "",
     enabled: true,
     fixedWeight: false,
     extraHeaders: "",
@@ -202,7 +204,8 @@ function formFromUpstream(upstream: Upstream): FormState {
     modelPrefixes: upstream.model_prefixes.join(","),
     priority: String(upstream.priority),
     weight: String(upstream.weight),
-    timeoutSeconds: String(upstream.timeout_seconds),
+    // 存的 0 表示跟随默认值，显示成留空。
+    timeoutSeconds: upstream.timeout_seconds > 0 ? String(upstream.timeout_seconds) : "",
     enabled: upstream.enabled,
     fixedWeight: !upstream.auto_weight_enabled,
     extraHeaders: joinHeaderLines(upstream.extra_headers ?? {}),
@@ -231,7 +234,7 @@ function payloadFromForm(form: FormState): UpstreamPayload {
     weight: Number(form.weight || 100),
     // UI 勾的是「固定权重」，后端要的是「自动权重」。
     auto_weight_enabled: !form.fixedWeight,
-    timeout_seconds: Number(form.timeoutSeconds || 300),
+    timeout_seconds: form.timeoutSeconds.trim() === "" ? null : Number(form.timeoutSeconds),
     enabled: form.enabled,
     extra_headers: parseHeaderLines(form.extraHeaders),
     rate_limit: form.rateLimit.trim() || null,
@@ -406,7 +409,7 @@ export function UpstreamDialog({
     try {
       const result = await fetchModelsPreview(baseUrl, probeApiKey(), {
         extraHeaders: headers,
-        timeoutSeconds: Number(form.timeoutSeconds || 300),
+        timeoutSeconds: form.timeoutSeconds.trim() === "" ? undefined : Number(form.timeoutSeconds),
       });
       setForm((current) => {
         setPicker({ catalog: result.models, selection: currentSelection(current) });
@@ -718,9 +721,11 @@ export function UpstreamDialog({
                   type="number"
                   min={1}
                   max={3600}
+                  placeholder="默认"
                   value={form.timeoutSeconds}
                   onChange={(event) => set("timeoutSeconds", event.target.value)}
                 />
+                <span className="field-hint">留空用设置页的默认上游超时。</span>
               </label>
 
               <div className="toggle-list span-2">
