@@ -152,6 +152,37 @@ func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWin
 	return args, nil
 }
 
+// detachLogBatch bounds one pass of detachLogs.
+const detachLogBatch = 5000
+
+// detachLogs clears one row's references from request_logs in short
+// transactions, ahead of deleting that row.
+//
+// ON DELETE SET NULL does the same inside the DELETE, as one statement holding
+// the write lock throughout: 0.9s per 300k logs on a desktop. Past the
+// five-second busy timeout an edit made meanwhile fails as "database is
+// locked"; past the log writer's fifteen-second deadline a batch of logs is
+// lost. The DELETE afterwards only has what arrived in between left to clear.
+//
+// column is one of this package's own column names, never caller input.
+func detachLogs(ctx context.Context, database *sql.DB, column string, id int64) error {
+	query := fmt.Sprintf(`UPDATE request_logs SET %[1]s = NULL
+        WHERE id IN (SELECT id FROM request_logs WHERE %[1]s = ? LIMIT ?)`, column)
+	for {
+		result, err := database.ExecContext(ctx, query, id, detachLogBatch)
+		if err != nil {
+			return apperr.Database(err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return apperr.Database(err)
+		}
+		if affected < detachLogBatch {
+			return nil
+		}
+	}
+}
+
 // LogFilter narrows a log listing. A nil field means the filter is not applied.
 type LogFilter struct {
 	UpstreamID *int64

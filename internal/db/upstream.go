@@ -448,5 +448,8 @@ func reloadUpstreamOut(ctx context.Context, db *sql.DB, id int64) (models.Upstre
 }
 
 func DeleteUpstream(ctx context.Context, db *sql.DB, id int64) (bool, error) {
+	if err := detachLogs(ctx, db, "upstream_id", id); err != nil {
+		return false, err
+	}
 	return execAffectsAny(ctx, db, "DELETE FROM upstreams WHERE id = ?", id)
 }

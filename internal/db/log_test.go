@@ -774,3 +774,55 @@ func TestLogSearchIsBoundedBeforeItReachesTheQuery(t *testing.T) {
 		t.Errorf("a literal %% matched %d rows, want none", len(entries))
 	}
 }
+
+// Deleting a channel or token detaches its logs across batches. The logs stay,
+// and those of other rows keep their references.
+func TestDeletingARowDetachesAllItsLogs(t *testing.T) {
+	database := memoryDB(t)
+	ctx := context.Background()
+
+	if _, err := database.Exec(`INSERT INTO upstreams (id, name, base_url)
+        VALUES (1, 'gone', 'https://x'), (2, 'kept', 'https://x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`INSERT INTO api_tokens (id, name, token, token_hash, token_preview)
+        VALUES (1, 'gone', 't1', 'h1', 'p1'), (2, 'kept', 't2', 'h2', 'p2')`); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two full batches and a remainder for row 1, three logs for row 2.
+	const detachable = 2*detachLogBatch + 1
+	if _, err := database.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+        INSERT INTO request_logs (method, path, client_type, stream, upstream_id, downstream_token_id)
+        SELECT 'POST', 'r', 'codex', 0, IIF(i <= 3, 2, 1), IIF(i <= 3, 2, 1) FROM n`,
+		detachable+3); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, remove := range []func(context.Context, *sql.DB, int64) (bool, error){DeleteUpstream, DeleteToken} {
+		if deleted, err := remove(ctx, database, 1); err != nil || !deleted {
+			t.Fatalf("deleted=%v err=%v", deleted, err)
+		}
+	}
+
+	count := func(query string) int64 {
+		t.Helper()
+		var n int64
+		if err := database.QueryRow(query).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(`SELECT COUNT(*) FROM request_logs
+        WHERE upstream_id IS NULL AND downstream_token_id IS NULL`); n != detachable {
+		t.Errorf("%d logs detached, want %d", n, detachable)
+	}
+	if n := count(`SELECT COUNT(*) FROM request_logs
+        WHERE upstream_id = 2 AND downstream_token_id = 2`); n != 3 {
+		t.Errorf("%d logs of the kept rows still reference them, want 3", n)
+	}
+	if n := count(`SELECT (SELECT COUNT(*) FROM upstreams WHERE id = 1)
+        + (SELECT COUNT(*) FROM api_tokens WHERE id = 1)`); n != 0 {
+		t.Errorf("%d deleted rows remain", n)
+	}
+}

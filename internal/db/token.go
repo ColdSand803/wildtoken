@@ -676,6 +676,9 @@ func reloadToken(ctx context.Context, db Queryer, id int64) (models.APITokenOut,
 }
 
 func DeleteToken(ctx context.Context, db *sql.DB, id int64) (bool, error) {
+	if err := detachLogs(ctx, db, "downstream_token_id", id); err != nil {
+		return false, err
+	}
 	return execAffectsAny(ctx, db, "DELETE FROM api_tokens WHERE id = ?", id)
 }
 
