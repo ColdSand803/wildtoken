@@ -59,3 +59,23 @@ export function scaleDashboard(
     },
   };
 }
+
+/**
+ * 看板上的计数缩写，到 T 为止。
+ *
+ * 原先只有 k 和 M：25 亿显示成 2500.0M，999960 四舍五入成 1000.0k。按一位
+ * 小数取整后还够 1000 就进一档：999960 → 1.0M，2500000000 → 2.5B。
+ */
+export function compactCount(value: number): string {
+  const rounded = Math.round(value);
+  if (Math.abs(rounded) < 1000) return String(rounded);
+
+  const units = ["k", "M", "B", "T"];
+  let scaled = value / 1000;
+  let unit = 0;
+  while (unit < units.length - 1 && Math.abs(Math.round(scaled * 10) / 10) >= 1000) {
+    scaled /= 1000;
+    unit += 1;
+  }
+  return `${scaled.toFixed(1)}${units[unit]}`;
+}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchDashboard } from "../api";
-import { scaleDashboard } from "../dashboardScale";
+import { compactCount, scaleDashboard } from "../dashboardScale";
 import { formatTimestamp } from "../logFormat";
 import type { LogOverview, RequestLog, TokenUsage, TopItem, TopStats } from "../types";
 
@@ -83,11 +83,7 @@ function readRange(): string {
    泄露出去，那恰恰是遮罩要藏的东西。 */
 const SENSITIVE_MASK = "******";
 
-function compact(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
-  return String(Math.round(value));
-}
+const compact = compactCount;
 
 function formatMs(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "—";

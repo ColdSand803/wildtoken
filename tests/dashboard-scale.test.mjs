@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { scaleDashboard } from "../web/src/dashboardScale.ts";
+import { compactCount, scaleDashboard } from "../web/src/dashboardScale.ts";
 
 const usageWindow = { total_tokens: 1000, prompt_tokens: 800, prompt_cached_tokens: 200, request_count: 3, all_request_count: 4 };
 
@@ -56,4 +56,12 @@ test("非法倍率按 1 处理", () => {
   for (const m of [0, -2, NaN, undefined]) {
     assert.equal(scaleDashboard(sample(), m).overview.total_requests, 3);
   }
+});
+
+test("计数缩写到 T，四舍五入进位后换档", () => {
+  assert.equal(compactCount(999), "999");
+  assert.equal(compactCount(1500), "1.5k");
+  assert.equal(compactCount(999_960), "1.0M");
+  assert.equal(compactCount(2_500_000_000), "2.5B");
+  assert.equal(compactCount(3_200_000_000_000), "3.2T");
 });
