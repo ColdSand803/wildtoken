@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -212,9 +213,8 @@ func quotaUsage(entry LogEntry) (tokenID int64, used int64, ok bool) {
 	return *entry.DownstreamTokenID, int64(*entry.TotalTokens), true
 }
 
-// Subscribe returns a channel of committed rows and the function that releases
-// it.
-func (w *LogWriter) Subscribe() (<-chan LogStreamEvent, func()) {
+// Subscribe returns a feed of committed rows. Close releases it.
+func (w *LogWriter) Subscribe() *LogSubscription {
 	return w.events.subscribe()
 }
 
@@ -628,44 +628,66 @@ func int32PtrToInt64Ptr(value *int32) *int64 {
 // eventBroker fans committed log rows out to the console's SSE subscribers.
 type eventBroker struct {
 	mu          sync.Mutex
-	subscribers map[int64]chan LogStreamEvent
+	subscribers map[int64]*LogSubscription
 	nextID      int64
 }
 
-func newEventBroker() *eventBroker {
-	return &eventBroker{subscribers: map[int64]chan LogStreamEvent{}}
+// LogSubscription is one console's feed of committed rows.
+type LogSubscription struct {
+	broker *eventBroker
+	id     int64
+	events chan LogStreamEvent
+	// missed is set when publish drops an event this subscriber had no room for.
+	missed atomic.Bool
 }
 
-func (b *eventBroker) subscribe() (<-chan LogStreamEvent, func()) {
+func newEventBroker() *eventBroker {
+	return &eventBroker{subscribers: map[int64]*LogSubscription{}}
+}
+
+func (b *eventBroker) subscribe() *LogSubscription {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	id := b.nextID
+	subscription := &LogSubscription{
+		broker: b,
+		id:     b.nextID,
+		events: make(chan LogStreamEvent, logEventChannelCapacity),
+	}
 	b.nextID++
-	events := make(chan LogStreamEvent, logEventChannelCapacity)
-	b.subscribers[id] = events
+	b.subscribers[subscription.id] = subscription
+	return subscription
+}
 
-	return events, func() {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		if existing, ok := b.subscribers[id]; ok {
-			delete(b.subscribers, id)
-			close(existing)
-		}
+// Events delivers committed rows until Close.
+func (s *LogSubscription) Events() <-chan LogStreamEvent { return s.events }
+
+// TakeMissed reports whether rows were dropped since it last said so. A dropped
+// row is never sent late; the console reloads from the database instead.
+func (s *LogSubscription) TakeMissed() bool { return s.missed.Swap(false) }
+
+// Close stops delivery and closes the Events channel. A repeat is a no-op.
+func (s *LogSubscription) Close() {
+	s.broker.mu.Lock()
+	defer s.broker.mu.Unlock()
+	if _, ok := s.broker.subscribers[s.id]; ok {
+		delete(s.broker.subscribers, s.id)
+		close(s.events)
 	}
 }
 
 // publish delivers without blocking. A subscriber that cannot keep up loses the
-// event rather than stalling the writer; the database stays authoritative and
-// the console reloads from it.
+// event rather than stalling the writer, and is marked to reload: the database
+// stays authoritative.
 func (b *eventBroker) publish(event LogStreamEvent) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	for _, events := range b.subscribers {
+	for _, subscription := range b.subscribers {
 		select {
-		case events <- event:
+		case subscription.events <- event:
 		default:
+			subscription.missed.Store(true)
 		}
 	}
 }

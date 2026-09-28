@@ -231,8 +231,9 @@ func TestLogWriterBatchesQueuedEntriesAndUpdatesMetrics(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	writer := NewLogWriter(ctx, database, runtimeMetrics, logStats, 16, quota.NewTracker())
-	events, unsubscribe := writer.Subscribe()
-	defer unsubscribe()
+	subscription := writer.Subscribe()
+	defer subscription.Close()
+	events := subscription.Events()
 
 	status := int32(200)
 	for _, path := range []string{"/v1/responses", "/v1/chat/completions"} {
@@ -621,4 +622,26 @@ func TestSchedulingConcurrentlyWithCloseNeverPanics(t *testing.T) {
 	}
 	wg.Go(writer.Close)
 	wg.Wait()
+}
+
+// A subscriber with no room loses the event and is marked, once, to reload.
+func TestAFullSubscriberIsToldItMissedRows(t *testing.T) {
+	broker := newEventBroker()
+	subscription := broker.subscribe()
+	defer subscription.Close()
+
+	for range logEventChannelCapacity {
+		broker.publish(LogStreamEvent{})
+	}
+	if subscription.TakeMissed() {
+		t.Fatal("marked before anything was dropped")
+	}
+
+	broker.publish(LogStreamEvent{})
+	if !subscription.TakeMissed() {
+		t.Fatal("a dropped event left no mark")
+	}
+	if subscription.TakeMissed() {
+		t.Error("the mark survived being taken")
+	}
 }

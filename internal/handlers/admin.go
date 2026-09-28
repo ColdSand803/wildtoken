@@ -649,7 +649,8 @@ func writeActiveRequests(w http.ResponseWriter, flusher http.Flusher,
 //
 // The endpoint intentionally does not replay historical rows. A disconnected or
 // lagged client reloads the normal paginated endpoint, which remains the source
-// of truth and keeps cursor pagination stable.
+// of truth and keeps cursor pagination stable. A lagged one learns it lagged
+// from a resync event, sent when rows it had no room for were dropped.
 //
 // In-flight requests are sent as a whole set rather than as per-request events.
 // The set is small and short-lived, and one snapshot cannot leave a console
@@ -667,8 +668,9 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		events, unsubscribe := state.LogWriter.Subscribe()
-		defer unsubscribe()
+		subscription := state.LogWriter.Subscribe()
+		defer subscription.Close()
+		events := subscription.Events()
 
 		w.Header().Set("content-type", "text/event-stream")
 		w.Header().Set("cache-control", "no-store")
@@ -681,6 +683,15 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 		sentActiveVersion := writeActiveRequests(w, flusher, state)
 		activePoll := time.NewTicker(activePollInterval)
 		defer activePoll.Stop()
+
+		// Without it a console that fell behind kept a list with holes and no
+		// sign of them.
+		resyncIfMissed := func() {
+			if subscription.TakeMissed() {
+				fmt.Fprint(w, "event: resync\ndata: {}\n\n")
+				flusher.Flush()
+			}
+		}
 
 		// A rotation invalidates this stream, so a revoked operator stops
 		// receiving live logs without waiting for their connection to drop.
@@ -708,6 +719,7 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 				}
 				fmt.Fprintf(w, "event: log\nid: %d\ndata: %s\n\n", event.Log.ID, encoded)
 				flusher.Flush()
+				resyncIfMissed()
 
 				// A committed row is the one moment the two views are certain to
 				// disagree: the request left the in-flight set before its log was
@@ -724,6 +736,7 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 				if state.ActiveRequests.Version() != sentActiveVersion {
 					sentActiveVersion = writeActiveRequests(w, flusher, state)
 				}
+				resyncIfMissed()
 
 			case <-authCheck.C:
 				if state.Credentials.Version() != auth.CredentialVersion {

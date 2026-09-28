@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -191,5 +193,106 @@ func TestTheLiveLogStreamEndsWhenShutdownBegins(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the live log stream did not end when shutdown began")
+	}
+}
+
+// stalledConsole stops reading at its first flush until released.
+type stalledConsole struct {
+	header  http.Header
+	mu      sync.Mutex
+	body    strings.Builder
+	stalled chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (c *stalledConsole) Header() http.Header { return c.header }
+func (c *stalledConsole) WriteHeader(int)     {}
+
+func (c *stalledConsole) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.body.Write(p)
+}
+
+func (c *stalledConsole) Flush() {
+	c.once.Do(func() {
+		close(c.stalled)
+		<-c.release
+	})
+}
+
+func (c *stalledConsole) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.body.String()
+}
+
+// A console that falls behind is told to reload. The rows it had no room for
+// are never sent; without the resync its list kept the holes silently.
+func TestALaggingLogStreamIsToldToResync(t *testing.T) {
+	state := activeLogTestState(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 4096,
+		state.Quotas)
+	t.Cleanup(func() {
+		state.LogWriter.Close()
+		cancel()
+	})
+
+	hash, err := authstate.HashAdminToken("stream-admin-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := authstate.NewCredentials(
+		models.AdminCredential{CredentialHash: hash, CredentialVersion: 1}, authstate.NewThrottle())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Credentials = credentials
+	stopping := make(chan struct{})
+	state.Stopping = stopping
+
+	handler := middleware.RequireAdmin(credentials, "")(AdminStreamLogs(state))
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/logs/stream", nil)
+	request.Header.Set("x-admin-token", "stream-admin-token")
+	console := &stalledConsole{header: http.Header{}, stalled: make(chan struct{}), release: make(chan struct{})}
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(console, request)
+		close(done)
+	}()
+	defer func() {
+		close(stopping)
+		<-done
+	}()
+
+	// Subscribed and stalled: commit more rows than its buffer holds.
+	<-console.stalled
+	const rows = 1100
+	for range rows {
+		state.LogWriter.Schedule(proxy.LogEntry{Method: "POST", Path: "/v1/responses"})
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var count int
+		if err := state.DB.QueryRow("SELECT COUNT(*) FROM request_logs").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count == rows {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d of %d rows committed", count, rows)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	close(console.release)
+	for !strings.Contains(console.String(), "event: resync\ndata: {}\n\n") {
+		if time.Now().After(deadline) {
+			t.Fatal("the stream never told the lagging console to resync")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
