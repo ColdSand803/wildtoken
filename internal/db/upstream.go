@@ -16,18 +16,28 @@ const upstreamColumns = `id, name, base_url, api_key, model_names, model_prefixe
     archived, archived_prev_enabled,
     extra_headers, timeout_seconds, rate_limit, created_at, updated_at`
 
+// parseJSONArray decodes a stored list. A stored null reads as empty: decoding
+// it leaves the slice nil, which the API sent on as null and the console's
+// channel page crashed on.
 func parseJSONArray(value string) ([]string, error) {
 	parsed := []string{}
 	if err := json.Unmarshal([]byte(value), &parsed); err != nil {
 		return nil, apperr.JSON(err)
 	}
+	if parsed == nil {
+		parsed = []string{}
+	}
 	return parsed, nil
 }
 
+// parseJSONMap decodes a stored map, reading null as empty for the same reason.
 func parseJSONMap(value string) (map[string]string, error) {
 	parsed := map[string]string{}
 	if err := json.Unmarshal([]byte(value), &parsed); err != nil {
 		return nil, apperr.JSON(err)
+	}
+	if parsed == nil {
+		parsed = map[string]string{}
 	}
 	return parsed, nil
 }
@@ -172,18 +182,22 @@ func ListEnabledUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamRow
 // unarchiving would switch on every channel it touched, including ones an
 // operator had taken out of service for their own reasons.
 func SetUpstreamArchived(ctx context.Context, db *sql.DB, id int64, archived bool) (models.UpstreamOut, error) {
+	// Each statement only touches a row not already in the requested state, so
+	// a repeat is a no-op. Without that, archiving twice recorded the parked
+	// channel's enabled=0 as its previous state, and unarchiving a channel that
+	// was never archived switched it off.
 	var query string
 	if archived {
 		query = `UPDATE upstreams
 			SET archived = 1, enabled = 0, archived_prev_enabled = enabled,
 				updated_at = datetime('now')
-			WHERE id = ?`
+			WHERE id = ? AND archived = 0`
 	} else {
 		query = `UPDATE upstreams
 			SET archived = 0, enabled = COALESCE(archived_prev_enabled, 0),
 				archived_prev_enabled = NULL,
 				updated_at = datetime('now')
-			WHERE id = ?`
+			WHERE id = ? AND archived = 1`
 	}
 	if _, err := db.ExecContext(ctx, query, id); err != nil {
 		return models.UpstreamOut{}, apperr.Database(err)

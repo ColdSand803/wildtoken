@@ -294,6 +294,13 @@ func fillLatencyQuantiles(ctx context.Context, database *sql.DB, out *LogOvervie
 		return err
 	}
 
+	// The window is re-evaluated by this second query, so rows at its edge can
+	// have aged out since the count that let us in. Nothing left would index an
+	// empty slice below.
+	if len(all) == 0 {
+		return nil
+	}
+
 	for i := range out.LatencySeries {
 		bucket := &out.LatencySeries[i]
 		durations := byBucket[bucket.BucketEpoch]

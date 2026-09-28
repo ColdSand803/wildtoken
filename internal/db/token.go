@@ -296,8 +296,12 @@ func countMissingTokenHashes(ctx context.Context, tx *sql.Tx) (int64, error) {
 
 // hashLegacyPlaintextTokens replaces every plaintext value with its digest,
 // using a collision-free marker for the legacy UNIQUE column.
+//
+// Only rows without a digest hold plaintext. A migrated row's token column
+// holds its digest, and hashing that again broke every such token at once.
 func hashLegacyPlaintextTokens(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id, token FROM api_tokens ORDER BY id")
+	rows, err := tx.QueryContext(ctx,
+		"SELECT id, token FROM api_tokens WHERE token_hash IS NULL ORDER BY id")
 	if err != nil {
 		return err
 	}

@@ -143,3 +143,16 @@ func TestLogOverviewSurvivesAnEmptyTable(t *testing.T) {
 			out.BucketSeconds, latencyBucketSteps[0])
 	}
 }
+
+// The quantile pass re-reads the window, which can have slid past every row the
+// count saw. Nothing to rank must not index an empty slice.
+func TestLatencyQuantilesSurviveAWindowThatEmptiedSinceTheCount(t *testing.T) {
+	database := memoryDB(t)
+	out := LogOverviewOut{DurationCount: 1, BucketSeconds: latencyBucketSteps[0]}
+	if err := fillLatencyQuantiles(context.Background(), database, &out, "1 = 1", nil); err != nil {
+		t.Fatalf("quantiles over an emptied window: %v", err)
+	}
+	if out.P50DurationMs != nil {
+		t.Error("quantiles were reported for an empty window")
+	}
+}

@@ -794,8 +794,10 @@ func clearSnapshotBody(snapshot sql.NullString, shouldClear bool) any {
 		return snapshot.String
 	}
 
+	// A JSON null decodes without error into a nil map, and assigning to that
+	// panicked the cleanup goroutine, taking the whole process down.
 	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(snapshot.String), &decoded); err != nil {
+	if err := json.Unmarshal([]byte(snapshot.String), &decoded); err != nil || decoded == nil {
 		return clearedBodySnapshot
 	}
 	decoded["body"] = json.RawMessage(`{"cleared":true}`)

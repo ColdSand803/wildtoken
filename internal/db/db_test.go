@@ -321,6 +321,73 @@ func TestAnOlderDatabaseGainsThePlaintextColumn(t *testing.T) {
 	}
 }
 
+// Repair runs whenever a row lacks a digest. Only those rows hold plaintext: a
+// migrated row's token column holds its digest, and hashing that a second time
+// broke every existing token at once.
+func TestRepairingOneLegacyRowLeavesTheMigratedOnesAlone(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+
+	// The pre-hashing table, as an old database has it.
+	if _, err := db.Exec(`CREATE TABLE api_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        token TEXT NOT NULL UNIQUE,
+        enabled INTEGER NOT NULL DEFAULT 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO api_tokens (name, token) VALUES ('first', 'first-plaintext')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLegacyTokenStorage(ctx, db); err != nil {
+		t.Fatalf("first migration: %v", err)
+	}
+
+	// A row that arrives without a digest, as an older binary writes one.
+	if _, err := db.Exec(`INSERT INTO api_tokens (name, token) VALUES ('late', 'late-plaintext')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLegacyTokenStorage(ctx, db); err != nil {
+		t.Fatalf("repair: %v", err)
+	}
+
+	for name, plaintext := range map[string]string{"first": "first-plaintext", "late": "late-plaintext"} {
+		var digest string
+		if err := db.QueryRow("SELECT token_hash FROM api_tokens WHERE name = ?", name).
+			Scan(&digest); err != nil {
+			t.Fatal(err)
+		}
+		if digest != TokenDigest(plaintext) {
+			t.Errorf("%s no longer authenticates: its digest was rewritten", name)
+		}
+	}
+}
+
+// An operator who deleted every starting template does not want them back at
+// the next restart.
+func TestDeletedPromptTemplatesStayDeleted(t *testing.T) {
+	ctx := context.Background()
+	db := memoryDB(t)
+	if _, err := db.Exec("DELETE FROM model_test_prompt_templates"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Init(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.QueryRow("SELECT COUNT(*) FROM model_test_prompt_templates").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("restart re-seeded %d deleted templates", count)
+	}
+}
+
 // The legacy migration runs on every startup and rewrites the compatibility
 // `token` column. It must leave token_plain alone, or a restart would silently
 // strip every copyable credential.

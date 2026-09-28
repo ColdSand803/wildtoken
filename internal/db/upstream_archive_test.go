@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"testing"
 
 	"github.com/liguangsheng/wildtoken/internal/models"
@@ -159,6 +160,75 @@ func TestArchiveSemantics(t *testing.T) {
 			t.Error("the restored channel is not routing again")
 		}
 	})
+}
+
+// A repeated request is a no-op. Archiving twice used to record the parked
+// channel's enabled=0 as its previous state, and unarchiving a channel that was
+// never archived switched it off — both left an enabled channel disabled.
+func TestArchivingIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	db := memoryDB(t)
+
+	input := models.DefaultUpstreamIn()
+	input.Name = "twice"
+	input.BaseURL = "https://api.example.com"
+	if _, err := CreateUpstream(ctx, db, &input, 300); err != nil {
+		t.Fatal(err)
+	}
+	id := byName(t, ctx, db, "twice").ID
+
+	if _, err := SetUpstreamArchived(ctx, db, id, false); err != nil {
+		t.Fatal(err)
+	}
+	if row := byName(t, ctx, db, "twice"); row.Enabled != 1 {
+		t.Fatalf("unarchiving a channel that was never archived left enabled=%d", row.Enabled)
+	}
+
+	for range 2 {
+		if _, err := SetUpstreamArchived(ctx, db, id, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 2 {
+		if _, err := SetUpstreamArchived(ctx, db, id, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if row := byName(t, ctx, db, "twice"); row.Enabled != 1 || row.Archived != 0 {
+		t.Errorf("after archiving and restoring twice: enabled=%d archived=%d, want 1 / 0",
+			row.Enabled, row.Archived)
+	}
+}
+
+// A document that spelled a collection as null stored it that way; reading it
+// back must give an empty collection, which the console can render.
+func TestStoredNullCollectionsReadAsEmpty(t *testing.T) {
+	ctx := context.Background()
+	db := memoryDB(t)
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO upstreams
+        (name, base_url, model_names, model_prefixes, model_mappings, effort_mappings, extra_headers)
+        VALUES ('nulls', 'https://api.example.com', 'null', 'null', 'null', 'null', 'null')`); err != nil {
+		t.Fatal(err)
+	}
+	listed, err := ListUpstreams(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(listed[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"model_names", "model_prefixes", "model_mappings",
+		"effort_mappings", "extra_headers"} {
+		if string(fields[name]) == "null" {
+			t.Errorf("%s reads back as null", name)
+		}
+	}
 }
 
 func byName(t *testing.T, ctx context.Context, db *sql.DB, name string) models.UpstreamRow {

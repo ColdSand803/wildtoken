@@ -30,13 +30,19 @@ func ensureColumn(ctx context.Context, db *sql.DB, table, column, definition str
 // duplicate. ON CONFLICT(name) DO NOTHING protects a row that still exists; it
 // says nothing about one that was removed on purpose. These rows are starting
 // examples, not an invariant to restore.
+//
+// An empty table is not proof of a new one: the operator may have deleted every
+// row. AUTOINCREMENT leaves a sqlite_sequence entry behind once any row was
+// written, which is what tells the two apart.
 func seedPromptTemplatesOnce(ctx context.Context, db *sql.DB) error {
-	var existing int64
+	var used int64
 	if err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM model_test_prompt_templates").Scan(&existing); err != nil {
+		`SELECT (SELECT COUNT(*) FROM model_test_prompt_templates) +
+		        (SELECT COUNT(*) FROM sqlite_sequence WHERE name = 'model_test_prompt_templates')`).
+		Scan(&used); err != nil {
 		return fmt.Errorf("count prompt templates: %w", err)
 	}
-	if existing != 0 {
+	if used != 0 {
 		return nil
 	}
 	if _, err := db.ExecContext(ctx, seedModelTestPromptTemplates); err != nil {

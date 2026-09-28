@@ -444,6 +444,12 @@ func TestClearSnapshotBodyKeepsMetadataAndSurvivesCorruptJSON(t *testing.T) {
 	if clearSnapshotBody(nullStringInvalid(), true) != nil {
 		t.Error("an absent snapshot produced a value")
 	}
+
+	// A JSON null decodes into a nil map; writing into it panicked the cleanup
+	// goroutine, which has no recover.
+	if clearSnapshotBody(nullString("null"), true) != clearedBodySnapshot {
+		t.Error("a null snapshot was not replaced by the cleared placeholder")
+	}
 }
 
 func TestRefreshGroupsLogsIntoUsageWindows(t *testing.T) {
