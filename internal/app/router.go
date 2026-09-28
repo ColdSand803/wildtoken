@@ -1,6 +1,7 @@
 package app
 
 import (
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -227,7 +228,8 @@ func AdminURLFromSettings(host string, port uint16) string {
 	case "0.0.0.0", "::", "[::]":
 		host = "127.0.0.1"
 	}
-	return "http://" + host + ":" + strconv.Itoa(int(port)) + "/console"
+	// JoinHostPort brackets an IPv6 host; "::1:3100" is no address at all.
+	return "http://" + net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(int(port))) + "/console"
 }
 
 // IsLoopbackBindHost reports whether a configured bind host only accepts local

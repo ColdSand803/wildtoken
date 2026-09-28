@@ -48,3 +48,13 @@ func TestTheStaticMountPointIsNotListed(t *testing.T) {
 		}
 	}
 }
+
+// An IPv6 host is bracketed; "http://::1:3100" names nothing a browser opens.
+func TestTheAdminURLBracketsAnIPv6Host(t *testing.T) {
+	if got := AdminURLFromSettings("::1", 3100); got != "http://[::1]:3100/console" {
+		t.Errorf("url = %q", got)
+	}
+	if got := AdminURLFromSettings("0.0.0.0", 3100); got != "http://127.0.0.1:3100/console" {
+		t.Errorf("url = %q", got)
+	}
+}
