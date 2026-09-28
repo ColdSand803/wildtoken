@@ -82,6 +82,18 @@ func writeProtocolError(w http.ResponseWriter, status int, path, message, errorT
 	})
 }
 
+// writeProxyError answers a failed proxied request in the caller's protocol, as
+// every other refusal on this path is. A bare {"error": "..."} left an
+// Anthropic SDK unable to read the failure at all.
+func writeProxyError(w http.ResponseWriter, path string, err error) {
+	var appErr *apperr.AppError
+	if !errors.As(err, &appErr) {
+		appErr = apperr.Internal(err.Error())
+	}
+	status, message := appErr.StatusAndMessage()
+	writeProtocolError(w, status, path, message, "api_error")
+}
+
 // UpstreamRateLimitedCode identifies "every routable channel is rate-limited"
 // at the top level of the refusal, mirroring the API-key rejections in
 // middleware: a caller that does not speak either vendor's error shape can
@@ -307,6 +319,22 @@ func (g *abortLogGuard) setPreparedRequest(prepared *proxy.PreparedRequest) {
 // disarm gives up ownership of the log, because the proxy already wrote one.
 func (g *abortLogGuard) disarm() { g.entry = nil }
 
+// logAttempt records one failed attempt on a row of its own and stays armed:
+// the request goes on to another channel, which logs how it ended.
+func (g *abortLogGuard) logAttempt(upstream *models.UpstreamRow, statusCode int32, message string) {
+	if g.entry == nil {
+		return
+	}
+	entry := *g.entry
+	upstreamID, upstreamName := upstream.ID, upstream.Name
+	entry.UpstreamID = &upstreamID
+	entry.UpstreamName = &upstreamName
+	entry.StatusCode = &statusCode
+	entry.Error = &message
+	entry.DurationMs = g.elapsed()
+	g.logWriter.Schedule(entry)
+}
+
 // logAndDisarm records a specific failure instead of the default abort.
 func (g *abortLogGuard) logAndDisarm(statusCode int32, message string) {
 	entry := g.entry
@@ -363,14 +391,23 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		guard.setClientType(auth.ClientType)
 		guard.setClientIP(clientIP(r))
 
+		if !models.ProxyEndpointAllowed(r.Method, path) {
+			guard.logAndDisarm(http.StatusNotFound, "endpoint is not relayed")
+			writeProtocolError(w, http.StatusNotFound, r.URL.Path,
+				"this endpoint is not available through the gateway", "not_found_error")
+			return
+		}
+
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDownstreamBodyBytes))
 		if err != nil {
 			// A body that exceeded the cap is the caller's error; anything else
 			// means the caller went away mid-upload.
 			var maxBytesError *http.MaxBytesError
 			if errors.As(err, &maxBytesError) {
-				guard.logAndDisarm(400, "failed to read downstream request body: "+err.Error())
-				apperr.BadRequest("failed to read body: " + err.Error()).Write(w)
+				guard.logAndDisarm(http.StatusRequestEntityTooLarge,
+					"failed to read downstream request body: "+err.Error())
+				writeProtocolError(w, http.StatusRequestEntityTooLarge, r.URL.Path,
+					"request body exceeds 50 MiB", "request_too_large")
 				return
 			}
 			guard.logAndDisarm(499,
@@ -405,7 +442,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 				state.AutoWeight, policy, selector, model, auth.GroupID, nil)
 			if err != nil {
 				guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
-				apperr.WriteError(w, err)
+				writeProxyError(w, r.URL.Path, err)
 				return
 			}
 		}
@@ -430,7 +467,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			// disconnect for what was an upstream failure and leaving the
 			// console unable to tell the two apart.
 			guard.disarm()
-			apperr.WriteError(w, err)
+			writeProxyError(w, r.URL.Path, err)
 			return
 		}
 		if response == nil {
@@ -479,6 +516,7 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 	// which turns "nothing left" into a 429 rather than a 503.
 	excluded := map[int64]bool{}
 	anyRateLimited := false
+	anyMisconfigured := false
 
 	// rejected are the channels that answered this request with a 4xx that
 	// may be its own fault. They are charged only if another channel then
@@ -490,6 +528,7 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		// admission records the request, refusal excludes the channel. The loop
 		// terminates because every refusal shrinks the candidate set.
 		var selected *proxy.Selection
+		var prepared *proxy.PreparedRequest
 		for {
 			selected = config.directSelection
 			if config.selector == nil {
@@ -514,6 +553,21 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				excluded[selected.Upstream.ID] = true
 				continue
 			}
+			// A channel whose stored headers no longer build a request fails
+			// every request it is given, so it is charged, logged and passed
+			// over. Ending the request here refused it with healthy channels
+			// left, and told the caller the channel's name.
+			var err error
+			prepared, err = proxy.PrepareRequest(r.Header, &selected.Upstream, r.Method,
+				config.path, config.query, selected.ForwardModel, config.body, logBodyMaxBytes)
+			if err != nil {
+				state.AutoWeight.RecordFailure(selected.Upstream.ID,
+					selected.Upstream.AutoWeightEnabled == 1, config.policy)
+				config.guard.logAttempt(&selected.Upstream, 502, err.Error())
+				excluded[selected.Upstream.ID] = true
+				anyMisconfigured = true
+				continue
+			}
 			if proxy.UpstreamRateLimitAdmits(state.UpstreamRateLimiter, &selected.Upstream) {
 				break
 			}
@@ -532,6 +586,13 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				// 429 rather than the no-route 503.
 				config.guard.logAndDisarm(429, "all candidate channels are rate limited")
 				writeUpstreamRateLimitRejection(w, config.path)
+				return nil, nil
+			}
+			if anyMisconfigured {
+				// Each channel's failure is already on a row of its own.
+				config.guard.disarm()
+				writeProtocolError(w, http.StatusBadGateway, config.path,
+					"no usable upstream channel", "api_error")
 				return nil, nil
 			}
 			reason := noRouteReason(config.selector, config.model, config.groupName)
@@ -563,19 +624,6 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		lastFailure = nil
 
 		config.guard.setUpstream(selected.Upstream.ID, selected.Upstream.Name, selected.ForwardModel)
-
-		prepared, err := proxy.PrepareRequest(r.Header, &selected.Upstream, r.Method,
-			config.path, config.query, selected.ForwardModel, config.body, logBodyMaxBytes)
-		if err != nil {
-			// The channel's stored header configuration is what fails here, so
-			// the channel is charged for it. A channel that cannot build a
-			// request fails every one it is given, and without a penalty it
-			// keeps full weight and keeps being chosen to fail again.
-			state.AutoWeight.RecordFailure(selected.Upstream.ID,
-				selected.Upstream.AutoWeightEnabled == 1, config.policy)
-			config.guard.logAndDisarm(502, err.Error())
-			return nil, err
-		}
 		config.guard.setPreparedRequest(prepared)
 
 		response, err := proxy.ProxyRequest(r.Context(), state.ProxyDeps(), config.policy,
@@ -783,7 +831,8 @@ func OpenAIModelsListResponse(ids []string) json.RawMessage {
 func resolveEnabledUpstreamForModels(ctx context.Context, state *appstate.State,
 	selector string, groupID int64) (models.UpstreamRow, error) {
 	reachable := func(upstream models.UpstreamRow) (bool, error) {
-		if upstream.Enabled != 1 {
+		// An archived channel does not route, so it lists no models either.
+		if upstream.Enabled != 1 || upstream.Archived != 0 {
 			return false, nil
 		}
 		groupIDs, err := db.ListUpstreamGroupIDs(ctx, state.DB, upstream.ID)

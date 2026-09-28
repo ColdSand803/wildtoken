@@ -434,10 +434,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.Error = &message
 		deps.LogWriter.Schedule(entry)
 
-		// Returned unwrapped: buildUpstreamRequest already answers with an
-		// upstream error, and wrapping it again repeated the prefix in both the
-		// response and the log.
-		return nil, err
+		return nil, apperr.Upstream("the channel's base URL is invalid")
 	}
 
 	response, err := deps.HTTPClient.Do(request)
@@ -468,7 +465,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.Error = &message
 		deps.LogWriter.Schedule(entry)
 
-		return nil, apperr.Upstream(message)
+		return nil, attemptFailure(statusCode)
 	}
 
 	responseHeaders := flattenHeaders(response.Header)
@@ -517,7 +514,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
 		deps.LogWriter.Schedule(entry)
-		return nil, apperr.Upstream(message)
+		return nil, attemptFailure(statusCode)
 	}
 
 	// A 2xx body that is a stream can still end on an error event.
@@ -588,6 +585,17 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		Headers: responseHeaders,
 		Body:    newBufferedStream(ctx, bodyBytes, entry, deps, statusCode),
 	}, nil
+}
+
+// attemptFailure is what the caller is told about an attempt that got no
+// answer. The transport's error names the upstream URL, query and all, which
+// is the operator's to read in the log; returned as is, it went to whoever
+// held a token. A timeout answers 504, as the log records it.
+func attemptFailure(statusCode int32) error {
+	if statusCode == http.StatusGatewayTimeout {
+		return apperr.GatewayTimeout("the upstream did not respond in time")
+	}
+	return apperr.Upstream("the upstream request failed")
 }
 
 func buildUpstreamRequest(ctx context.Context, method string, prepared *PreparedRequest) (*http.Request, error) {

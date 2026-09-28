@@ -40,3 +40,26 @@ func TestAnthropicMessagesIsRecognisedThroughTheSameDerivation(t *testing.T) {
 		}
 	}
 }
+
+// Inference is relayed; an upstream account's stored state is not.
+func TestOnlyInferenceEndpointsAreRelayed(t *testing.T) {
+	for _, allowed := range [][2]string{
+		{"POST", "chat/completions"}, {"POST", "messages"}, {"POST", "messages/count_tokens"},
+		{"POST", "responses"}, {"GET", "responses/resp_1"}, {"POST", "responses/compact"},
+		{"POST", "images/generations"}, {"POST", "images/edits"}, {"POST", "embeddings"},
+		{"GET", "models/gpt-5"},
+	} {
+		if !ProxyEndpointAllowed(allowed[0], allowed[1]) {
+			t.Errorf("%s %s was refused", allowed[0], allowed[1])
+		}
+	}
+	for _, refused := range [][2]string{
+		{"GET", "files"}, {"POST", "files"}, {"DELETE", "files/file-1"}, {"POST", "batches"},
+		{"GET", "fine_tuning/jobs"}, {"POST", "messages/batches"}, {"GET", "chat/completions"},
+		{"POST", "audio/speech"}, {"POST", "vector_stores"}, {"POST", "chat//completions"},
+	} {
+		if ProxyEndpointAllowed(refused[0], refused[1]) {
+			t.Errorf("%s %s was relayed", refused[0], refused[1])
+		}
+	}
+}

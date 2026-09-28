@@ -20,6 +20,7 @@ const (
 	KindInternal
 	KindDatabase
 	KindJSON
+	KindGatewayTimeout
 )
 
 // AppError is the error type every handler returns.
@@ -38,6 +39,8 @@ func (e *AppError) Error() string {
 		KindInternal:   "internal error",
 		KindDatabase:   "database error",
 		KindJSON:       "JSON error",
+
+		KindGatewayTimeout: "gateway timeout",
 	}[e.Kind]
 	if e.Err != nil && e.Msg == "" {
 		return fmt.Sprintf("%s: %v", prefix, e.Err)
@@ -52,6 +55,9 @@ func BadRequest(msg string) *AppError { return &AppError{Kind: KindBadRequest, M
 func Conflict(msg string) *AppError   { return &AppError{Kind: KindConflict, Msg: msg} }
 func Upstream(msg string) *AppError   { return &AppError{Kind: KindUpstream, Msg: msg} }
 func Internal(msg string) *AppError   { return &AppError{Kind: KindInternal, Msg: msg} }
+
+// GatewayTimeout reports an upstream that did not answer in time.
+func GatewayTimeout(msg string) *AppError { return &AppError{Kind: KindGatewayTimeout, Msg: msg} }
 
 // Database wraps a driver failure; the detail stays in the log, not the response.
 func Database(err error) *AppError { return &AppError{Kind: KindDatabase, Err: err} }
@@ -71,6 +77,8 @@ func (e *AppError) StatusAndMessage() (int, string) {
 		return http.StatusConflict, e.Msg
 	case KindUpstream:
 		return http.StatusBadGateway, e.Msg
+	case KindGatewayTimeout:
+		return http.StatusGatewayTimeout, e.Msg
 	case KindDatabase:
 		slog.Error("database error", "error", e.Err)
 		return http.StatusInternalServerError, "internal database error"

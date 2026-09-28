@@ -93,6 +93,15 @@ func validateOverrides(overrides map[string]string) error {
 	if err := proxy.ValidateHeaderOverrides(overrides); err != nil {
 		return apperr.BadRequest(err.Error())
 	}
+	// Refused when saved rather than in ValidateHeaderOverrides, which also runs
+	// per request: a channel already storing one keeps working, the override
+	// ignored.
+	for name := range overrides {
+		if strings.EqualFold(name, "accept-encoding") {
+			return apperr.BadRequest("Header accept-encoding cannot be overridden: " +
+				"the gateway reads responses uncompressed")
+		}
+	}
 	return nil
 }
 

@@ -381,3 +381,14 @@ func TestAnImportRestoresTheArchive(t *testing.T) {
 		t.Errorf("archived false: archived=%d enabled=%d, want 0 1", archived, enabled)
 	}
 }
+
+// Saving an Accept-Encoding override is refused; the gateway must read
+// responses uncompressed.
+func TestAnAcceptEncodingOverrideIsRefusedWhenSaved(t *testing.T) {
+	if err := validateOverrides(map[string]string{"Accept-Encoding": "gzip"}); err == nil {
+		t.Error("an Accept-Encoding override was accepted")
+	}
+	if err := validateOverrides(map[string]string{"X-Region": "eu"}); err != nil {
+		t.Errorf("an ordinary override was refused: %v", err)
+	}
+}

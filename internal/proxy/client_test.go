@@ -329,6 +329,25 @@ func TestChannelHeadersOverrideDownstreamAndGeneratedCredentialsCaseInsensitivel
 	}
 }
 
+// A stored override of Accept-Encoding, or one copying the client's, is
+// ignored: usage is read from the body text, which the transport would not
+// decompress.
+func TestAnAcceptEncodingOverrideIsIgnored(t *testing.T) {
+	downstream := http.Header{}
+	downstream.Set("accept-encoding", "gzip, br")
+	upstream := upstreamWithHeaders(t, "https://example.test", `{
+        "Accept-Encoding": "{client_header:Accept-Encoding}"
+    }`)
+
+	headers, err := BuildForwardHeaders(downstream, &upstream, "responses")
+	if err != nil {
+		t.Fatalf("build headers: %v", err)
+	}
+	if headers["accept-encoding"] != "identity" {
+		t.Errorf("accept-encoding = %q, want identity", headers["accept-encoding"])
+	}
+}
+
 func TestHeaderOverrideValidationRejectsAmbiguousOrTransportHeaders(t *testing.T) {
 	duplicate := map[string]string{"Authorization": "one", "authorization": "two"}
 	err := ValidateHeaderOverrides(duplicate)
