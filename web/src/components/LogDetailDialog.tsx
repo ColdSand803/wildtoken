@@ -62,6 +62,30 @@ function bodyText(body: SnapshotBody): string {
   return body.kind === "text" ? body.text : "";
 }
 
+/**
+ * 正文没有可读文本时的说明，有文本返回 null。说法和原始模式一致：一律报
+ * 「无法解析」的话，被保留策略清掉的正文看着像网关的错误页，查错方向就偏了。
+ */
+function absentBodyReason(
+  snapshot: Snapshot | null,
+  body: SnapshotBody,
+): { title: string; detail: string } | null {
+  if (!snapshot) return { title: "未记录", detail: "这条日志没有保存这一项请求或响应详情。" };
+  if (snapshot.cleared || body.kind === "cleared") {
+    return { title: "正文已清理", detail: "日志正文已按保留策略清理，仅保留元数据。" };
+  }
+  switch (body.kind) {
+    case "missing":
+      return { title: "没有正文", detail: "这一项没有记录正文。" };
+    case "empty":
+      return { title: "正文为空", detail: "发送的正文是空的。" };
+    case "base64":
+      return { title: "正文不是文本", detail: "切换到原始模式查看。" };
+    case "text":
+      return body.text ? null : { title: "正文为空", detail: "发送的正文是空的。" };
+  }
+}
+
 /** 按 HTTP 报文排版，照抄旧版 formatHttpSnapshot。 */
 function formatSnapshot(raw: unknown): string {
   if (!raw || typeof raw !== "object") {
@@ -159,6 +183,17 @@ function SnapshotBodyView({
 
   if (mode === "raw") {
     return <pre>{formatSnapshot(raw)}</pre>;
+  }
+  const absent = absentBodyReason(snapshot, body);
+  if (absent) {
+    return (
+      <div className="log-conversation">
+        <div className="conv-empty">
+          <strong>{absent.title}</strong>
+          <span>{absent.detail}</span>
+        </div>
+      </div>
+    );
   }
   return (
     <div className="log-conversation">
@@ -274,12 +309,15 @@ export function LogDetailDialog({
         setCache((current) => withSnapshot(current, id, field, { status: "ready", raw }));
       })
       .catch((err: unknown) => {
-        // 401 由 App 统一接住弹登录框；这里只把加载态撤掉，登录后重开再拉。
-        if (err instanceof UnauthorizedError) {
-          setCache((current) => (current.id === id ? EMPTY_SNAPSHOTS : current));
-          return;
-        }
-        const message = err instanceof Error ? err.message : String(err);
+        /* 401 由 App 统一接住弹登录框；这里标成错误，登录后点重试再拉。清空缓存
+           的话页签又变成待拉，effect 立刻再发，令牌已清，401 之后又是 401，抽屉
+           开着就一直发下去。 */
+        const message =
+          err instanceof UnauthorizedError
+            ? "登录已失效，重新登录后点重试。"
+            : err instanceof Error
+              ? err.message
+              : String(err);
         setCache((current) => withSnapshot(current, id, field, { status: "error", message }));
       });
   }

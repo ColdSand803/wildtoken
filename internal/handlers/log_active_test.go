@@ -296,3 +296,61 @@ func TestALaggingLogStreamIsToldToResync(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// The rates change as the minute slides, with or without new logs. Sent only
+// with logs, they froze at the last one's figures once traffic stopped.
+func TestTheLiveLogStreamRefreshesItsRates(t *testing.T) {
+	previous := rateRefreshInterval
+	rateRefreshInterval = 20 * time.Millisecond
+	t.Cleanup(func() { rateRefreshInterval = previous })
+
+	state := activeLogTestState(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 8,
+		state.Quotas)
+	t.Cleanup(func() {
+		state.LogWriter.Close()
+		cancel()
+	})
+	if _, err := state.DB.Exec(`INSERT INTO request_logs
+        (created_at, method, path, client_type, stream, status_code, total_tokens)
+        VALUES (datetime('now'), 'POST', 'r', 'codex', 0, 200, 42)`); err != nil {
+		t.Fatal(err)
+	}
+
+	hash, err := authstate.HashAdminToken("stream-admin-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentials, err := authstate.NewCredentials(
+		models.AdminCredential{CredentialHash: hash, CredentialVersion: 1}, authstate.NewThrottle())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Credentials = credentials
+	stopping := make(chan struct{})
+	state.Stopping = stopping
+
+	handler := middleware.RequireAdmin(credentials, "")(AdminStreamLogs(state))
+	request := httptest.NewRequest(http.MethodGet, "/api/admin/logs/stream", nil)
+	request.Header.Set("x-admin-token", "stream-admin-token")
+	console := &stalledConsole{header: http.Header{}, stalled: make(chan struct{}), release: make(chan struct{})}
+	close(console.release)
+	done := make(chan struct{})
+	go func() {
+		handler.ServeHTTP(console, request)
+		close(done)
+	}()
+	defer func() {
+		close(stopping)
+		<-done
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for !strings.Contains(console.String(), `event: rate`+"\n"+`data: {"recent_rpm":1,"recent_tpm":42}`) {
+		if time.Now().After(deadline) {
+			t.Fatalf("no rate event: %q", console.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

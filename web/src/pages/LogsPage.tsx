@@ -307,10 +307,16 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   /* 每次加载一个序号，只收最新那次的结果。快速切筛选时，先发的请求可能后到，
      把 B 条件下的列表换成 A 的。 */
   const loadRequest = useRef(0);
+  /* 最新页覆盖到的 id：不超过它的行要么在这一页，要么本就属于后面的页，挤出
+     流也不缺。取加载开始时流里的最新 id：那些行已提交，一定在这次查询的范围
+     里；查询发出后才到的可能不在，取完成时的值会把它们算成已覆盖。 */
+  const coveredThrough = useRef(0);
+  const streamNewest = useRef(0);
 
   const load = useCallback(
     async (cursor?: { created_at: string; id: number }) => {
       const request = ++loadRequest.current;
+      const streamedBefore = streamNewest.current;
       try {
         const loaded = await listLogs({
           limit: pageSize,
@@ -323,6 +329,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
         });
         if (request !== loadRequest.current) return;
         setPage(loaded);
+        if (!cursor) coveredThrough.current = Math.max(streamedBefore, loaded.items[0]?.id ?? 0);
         setError("");
       } catch (err) {
         if (request !== loadRequest.current) return;
@@ -400,6 +407,17 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
       setMissedNew(true);
     }
   }, [stream.logs, onLatestPage, filters]);
+
+  /* 流只留最新 200 条。挤出去的行比这一页覆盖到的还新，流和页之间就断了一截，
+     表里看不出来：重拉最新页补上。一截只拉一次，流满后每来约 200 条才会再有。 */
+  useEffect(() => {
+    for (const log of stream.logs) streamNewest.current = Math.max(streamNewest.current, log.id);
+  }, [stream.logs]);
+  useEffect(() => {
+    if (!onLatestPage || stream.evictedNewestId <= coveredThrough.current) return;
+    coveredThrough.current = stream.evictedNewestId;
+    void load();
+  }, [stream.evictedNewestId, onLatestPage, load]);
 
   const logs = useMemo(() => {
     const seen = new Set<number>();

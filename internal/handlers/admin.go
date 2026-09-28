@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -718,6 +719,12 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 		authCheck := time.NewTicker(15 * time.Second)
 		defer authCheck.Stop()
 
+		// Rates travel with each log, so once traffic stopped the console kept
+		// showing the last log's figures long after the window had emptied.
+		rateRefresh := time.NewTicker(rateRefreshInterval)
+		defer rateRefresh.Stop()
+		var sentRate db.RecentLogRate
+
 		for {
 			select {
 			case <-r.Context().Done():
@@ -732,6 +739,9 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 				}
 				if state.Credentials.Version() != auth.CredentialVersion {
 					return
+				}
+				if event.RecentRPM != nil && event.RecentTPM != nil {
+					sentRate = db.RecentLogRate{RequestCount: *event.RecentRPM, TotalTokens: *event.RecentTPM}
 				}
 				encoded, err := json.Marshal(event)
 				if err != nil {
@@ -758,6 +768,17 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 				}
 				resyncIfMissed()
 
+			case <-rateRefresh.C:
+				ctx, cancel := context.WithTimeout(r.Context(), rateRefreshInterval)
+				rate, err := db.RecentOneMinuteLogRate(ctx, state.DB)
+				cancel()
+				if err == nil && rate != sentRate {
+					sentRate = rate
+					fmt.Fprintf(w, "event: rate\ndata: {\"recent_rpm\":%d,\"recent_tpm\":%d}\n\n",
+						rate.RequestCount, rate.TotalTokens)
+					flusher.Flush()
+				}
+
 			case <-authCheck.C:
 				if state.Credentials.Version() != auth.CredentialVersion {
 					return
@@ -770,6 +791,11 @@ func AdminStreamLogs(state *appstate.State) http.HandlerFunc {
 		}
 	}
 }
+
+// rateRefreshInterval is how often the live stream re-reads the one-minute
+// rates, which change as the window slides even when no log arrives. A var so
+// a test need not wait it out.
+var rateRefreshInterval = 10 * time.Second
 
 const dashboardDateLayout = "2006-01-02"
 

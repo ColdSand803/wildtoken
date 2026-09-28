@@ -73,6 +73,17 @@ function reportUnauthorized(message: string): void {
 }
 
 /**
+ * 用 token 发出的请求被拒：令牌还是这把才清掉并广播弹登录框。事件流不走
+ * send()，也要走这里——否则它拿失效的令牌静默重连，每次都在服务端记一次登录
+ * 失败。已经换了新令牌的话什么都不做，下一次请求自然用上新的。
+ */
+export function rejectAdminToken(token: string, message: string): void {
+  if (getAdminToken() !== token) return;
+  clearAdminToken();
+  reportUnauthorized(message);
+}
+
+/**
  * 发请求、带令牌、把非 2xx 变成异常。返回原始 Response，读法由调用方定——
  * JSON 走 api()，事件流由调用方自己逐块读。
  */
