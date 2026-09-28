@@ -85,9 +85,7 @@ test("Gojo renders the log view picker as a themed segmented control", () => {
   assert.match(css, /\.log-view-mode-button\[aria-pressed="true"\][\s\S]*?linear-gradient\(135deg/);
   assert.match(css, /\.log-view-mode-button:focus-visible \{[\s\S]*?box-shadow: var\(--focus-ring\)/);
 
-  const primaryButtonSelectors = [...css.matchAll(/button:not\(:where\(([\s\S]*?)\)\)(?=[^{]*\{)/g)];
-  assert.ok(primaryButtonSelectors.length > 0, "expected Gojo primary-button selectors");
-  for (const [, exclusions] of primaryButtonSelectors) {
-    assert.match(exclusions, /\.log-view-mode-button/, "log mode leaked into the primary-button treatment");
-  }
+  // 主操作只认显式的 .primary（5639f9c），日志视图切换不会再被全局规则刷成主按钮。
+  assert.doesNotMatch(css, /button:not\(:where\(/, "a global primary-action rule is back");
+  assert.match(css, /html\[data-theme="gojo"\] button\.primary\s*\{/);
 });

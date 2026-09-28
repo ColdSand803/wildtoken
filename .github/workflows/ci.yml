@@ -64,12 +64,12 @@ jobs:
       - name: Run Go tests
         run: go test -race ./...
 
-      - name: Check JavaScript syntax
+      # 旧前端的 static/js 已删，原先逐个 node --check 的循环随之失效（删的时候
+      # 漏了 done，这一步从此语法错误，下面的测试一直没跑过）。
+      - name: Run JavaScript tests
         shell: bash
         run: |
           set -euo pipefail
-          while IFS= read -r -d '' file; do
-            node --check "$file"
           node --test tests/*.test.mjs
           # 前端拼的请求体和后端严格解码的结构体对齐。字段对不上时后端只回一句
           # 400，界面上看不出是哪个字段——已经这样坏过三次。

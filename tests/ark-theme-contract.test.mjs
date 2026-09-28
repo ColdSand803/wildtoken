@@ -103,27 +103,14 @@ test("pre-paint boot clears the Ark root contract for other themes", () => {
   assert.equal(attributes.get("data-ark-depth"), undefined);
 });
 
-test("Ark primary action rules leave navigation and utility controls to their own states", () => {
+/* 主操作只认显式的 .primary（5639f9c）。以前是「所有按钮刷成主操作，再用
+   button:not(:where(...)) 白名单把导航、排序、分段控件摘出来」，漏登记一项就
+   多一块实心色块。现在不该再有那种全局规则。 */
+test("Ark paints only explicit primary actions as primary", () => {
   const css = read(ARK_CSS);
-  const selectors = [...css.matchAll(/(html\[data-theme="ark"\] button:not\(:where\([\s\S]*?\)\))(?::hover)?\s*\{/g)].map(
-    ([, selector]) => selector,
-  );
-  const utilityControls = [
-    ".table-sort-button",
-    ".priority-value",
-    ".token-preview-button",
-    ".model-selection-remove",
-    ".toast-close",
-  ];
-
-  assert.equal(selectors.length, 2, "Ark must keep paired default and hover primary-action selectors");
-  for (const selector of selectors) {
-    assert.match(selector, /\.nav-link/, "navigation buttons must not inherit primary-action styling");
-    for (const utilityControl of utilityControls) {
-      assert.ok(selector.includes(utilityControl), `${utilityControl} must retain its utility-control styling`);
-    }
-    assert.match(selector, /\.segmented-control\s*>\s*button/, "segmented choices must retain selected and unselected states");
-  }
+  assert.doesNotMatch(css, /button:not\(:where\(/, "a global primary-action rule is back");
+  assert.match(css, /html\[data-theme="ark"\] button\.primary\s*\{/);
+  assert.match(css, /html\[data-theme="ark"\] button\.primary:hover\s*\{/);
 });
 
 test("Ark's shared button geometry does not override inline utility-control sizing or type", () => {
