@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import type { KeyboardEvent } from "react";
+import { Component, useEffect, useState } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 
 import { UnauthorizedError, getLogSnapshot } from "../api";
 import {
@@ -117,6 +117,27 @@ function formatSnapshot(raw: unknown): string {
   return lines.join("\n");
 }
 
+/**
+ * 会话视图的兜底。报文来自上游，形状由不得我们：解析或渲染哪一步没接住，就
+ * 退回原文。应用没有更外层的错误边界，漏出去就是整个控制台白屏。
+ */
+class ConversationBoundary extends Component<{ raw: unknown; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  // 面板不随日志重挂，换了一条日志的报文就重新试。
+  componentDidUpdate(previous: { raw: unknown }) {
+    if (this.state.failed && previous.raw !== this.props.raw) this.setState({ failed: false });
+  }
+
+  render() {
+    return this.state.failed ? <pre>{formatSnapshot(this.props.raw)}</pre> : this.props.children;
+  }
+}
+
 function SnapshotBodyView({
   section,
   raw,
@@ -209,7 +230,10 @@ function SnapshotPanel({
         </p>
       ) : (
         <div className="log-detail-code-frame">
-          <SnapshotBodyView section={section} raw={state.raw} mode={mode} />
+          {/* 切回会话视图时重新尝试。 */}
+          <ConversationBoundary key={mode} raw={state.raw}>
+            <SnapshotBodyView section={section} raw={state.raw} mode={mode} />
+          </ConversationBoundary>
         </div>
       )}
     </div>

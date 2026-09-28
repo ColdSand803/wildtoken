@@ -99,7 +99,8 @@ export function useLogStream(enabled: boolean, onResync: () => void): LogStreamS
       pending = [];
       setState((prev) => {
         const seen = new Set(prev.logs.map((log) => log.id));
-        const fresh = incoming.filter((log) => !seen.has(log.id));
+        // 到达顺序是升序，列表要最新在前：不倒过来的话一批 101、102、103 排成 101 在顶。
+        const fresh = incoming.filter((log) => !seen.has(log.id)).sort((a, b) => b.id - a.id);
         if (fresh.length === 0) return prev;
         return { ...prev, logs: [...fresh, ...prev.logs].slice(0, 200) };
       });

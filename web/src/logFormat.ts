@@ -117,13 +117,15 @@ export function formatRelativeTime(raw: string, now: number = Date.now()): strin
  */
 export function formatDuration(ms: number | null): string {
   if (ms === null || ms === undefined || !Number.isFinite(ms)) return "-";
-  if (ms < 1000) return `${Math.round(ms)} 毫秒`;
+  if (Math.round(ms) < 1000) return `${Math.round(ms)} 毫秒`;
 
-  const totalSeconds = ms / 1000;
-  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)} 秒`;
+  // 先按显示精度取整再分档：否则 59.96 秒显示成 60.0 秒，119.5 秒拆成 1 分 60 秒。
+  const tenths = Math.round(ms / 100);
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)} 秒`;
 
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = Math.round(totalSeconds - minutes * 60);
+  const total = Math.round(ms / 1000);
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
   return seconds === 0 ? `${minutes} 分` : `${minutes} 分 ${seconds} 秒`;
 }
 

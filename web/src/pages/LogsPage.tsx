@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { UnauthorizedError, listLogs, listUpstreams } from "../api";
 import { LogDetailDialog } from "../components/LogDetailDialog";
@@ -304,26 +304,32 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
 
   const onLatestPage = cursors.length === 0;
 
+  /* 每次加载一个序号，只收最新那次的结果。快速切筛选时，先发的请求可能后到，
+     把 B 条件下的列表换成 A 的。 */
+  const loadRequest = useRef(0);
+
   const load = useCallback(
     async (cursor?: { created_at: string; id: number }) => {
+      const request = ++loadRequest.current;
       try {
-        setPage(
-          await listLogs({
-            limit: pageSize,
-            beforeCreatedAt: cursor?.created_at,
-            beforeId: cursor?.id,
-            search,
-            clientType: clientFilter,
-            status: statusFilter,
-            upstreamId: upstreamFilter,
-          }),
-        );
+        const loaded = await listLogs({
+          limit: pageSize,
+          beforeCreatedAt: cursor?.created_at,
+          beforeId: cursor?.id,
+          search,
+          clientType: clientFilter,
+          status: statusFilter,
+          upstreamId: upstreamFilter,
+        });
+        if (request !== loadRequest.current) return;
+        setPage(loaded);
         setError("");
       } catch (err) {
+        if (request !== loadRequest.current) return;
         if (err instanceof UnauthorizedError) onUnauthorized(err.message);
         else setError(err instanceof Error ? err.message : String(err));
       } finally {
-        setLoading(false);
+        if (request === loadRequest.current) setLoading(false);
       }
     },
     [onUnauthorized, pageSize, search, clientFilter, statusFilter, upstreamFilter],
@@ -333,17 +339,29 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
     void load(cursors.at(-1));
   }, [load, cursors]);
 
+  /* 换了筛选条件就回到第一页。旧游标是按旧条件算出来的，留着会把新结果集
+     从一个不属于它的位置截断。
+
+     和筛选值在同一次更新里清。放在 effect 里清的话，筛选一变先带着旧游标发
+     一次请求，清完再发一次；前一次晚到，页面写着「第 1 页」却缺最新的行。 */
+  const backToLatest = useCallback(() => {
+    setCursors((current) => (current.length === 0 ? current : []));
+  }, []);
+
+  function applyFilter(set: (value: string) => void, value: string) {
+    set(value);
+    backToLatest();
+  }
+
   // 400ms 后才落到真正的查询词。
   useEffect(() => {
-    const timer = setTimeout(() => setSearch(searchInput), 400);
+    if (searchInput === search) return;
+    const timer = setTimeout(() => {
+      setSearch(searchInput);
+      backToLatest();
+    }, 400);
     return () => clearTimeout(timer);
-  }, [searchInput]);
-
-  /* 换了筛选条件就回到第一页。旧游标是按旧条件算出来的，留着会把新结果集
-     从一个不属于它的位置截断。 */
-  useEffect(() => {
-    setCursors([]);
-  }, [search, clientFilter, statusFilter, upstreamFilter]);
+  }, [searchInput, search, backToLatest]);
 
   /* 渠道下拉要全量渠道，不能从当前页数据里凑——凑出来的话，没出现在这
      50 行里的渠道就根本选不到。 */
@@ -367,9 +385,20 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
     [upstreamFilter, clientFilter, statusFilter, search],
   );
 
-  /* 流推来的新行只在最新页合并；翻到旧页时攒着，靠提示条告知。 */
+  /* 流推来的新行只在最新页合并；翻到旧页时攒着，靠提示条告知。
+
+     只算翻页之后才到的行。拿整个流缓冲来判的话，刚在第 1 页看过的行一翻页
+     就被当成新日志，提示条立刻冒出来，回到第 1 页也不消失。 */
+  const seenNewestId = useRef(0);
   useEffect(() => {
-    if (!onLatestPage && stream.logs.some((log) => logMatchesFilters(log, filters))) setMissedNew(true);
+    if (onLatestPage) {
+      for (const log of stream.logs) seenNewestId.current = Math.max(seenNewestId.current, log.id);
+      setMissedNew(false);
+      return;
+    }
+    if (stream.logs.some((log) => log.id > seenNewestId.current && logMatchesFilters(log, filters))) {
+      setMissedNew(true);
+    }
   }, [stream.logs, onLatestPage, filters]);
 
   const logs = useMemo(() => {
@@ -381,7 +410,9 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
       seen.add(log.id);
       merged.push(log);
     }
-    return merged;
+    /* id 就是写入顺序。流里的行不一定都比这一页新：断线重连补拉后，页里有
+       的比流里攒着的还新，直接拼在前面顺序就乱了。 */
+    return merged.sort((a, b) => b.id - a.id);
   }, [stream.logs, page?.items, onLatestPage, filters]);
 
   /* 在途集合：只在最新页显示。流连着就以它为准，断了退回快照里的那份。 */
@@ -449,7 +480,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
             <select
               aria-label="按渠道筛选日志"
               value={upstreamFilter}
-              onChange={(event) => setUpstreamFilter(event.target.value)}
+              onChange={(event) => applyFilter(setUpstreamFilter, event.target.value)}
             >
               <option value="">全部渠道</option>
               {upstreams.map((item) => (
@@ -476,7 +507,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
             <select
               aria-label="按客户端筛选日志"
               value={clientFilter}
-              onChange={(event) => setClientFilter(event.target.value)}
+              onChange={(event) => applyFilter(setClientFilter, event.target.value)}
             >
               <option value="">全部客户端</option>
               {/* 固定清单，和旧版一致。从当前页数据里凑的话，没出现在这几十行
@@ -492,7 +523,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
             <select
               aria-label="按状态码筛选日志"
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
+              onChange={(event) => applyFilter(setStatusFilter, event.target.value)}
             >
               <option value="">全部状态</option>
               <option value="2xx">2xx</option>
@@ -645,7 +676,11 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
               disabled={!page?.has_more}
               onClick={() => {
                 const last = page?.items.at(-1);
-                if (last) setCursors((stack) => [...stack, { created_at: last.created_at, id: last.id }]);
+                if (!last) return;
+                // 新页到之前 page 还是这一页，连点会把同一个游标压两次，页号和数据错开一页。
+                setCursors((stack) =>
+                  stack.at(-1)?.id === last.id ? stack : [...stack, { created_at: last.created_at, id: last.id }],
+                );
               }}
             >
               下一页
@@ -684,7 +719,10 @@ function ActiveRows({
   sensitiveHidden: boolean;
 }) {
   const [receivedAt, setReceivedAt] = useState(() => Date.now());
-  const signature = active.map((request) => request.id).join(",");
+  /* 带上 elapsed_ms：同一批请求的字段变了（重试换渠道），服务端也会推一份
+     新快照，里面的 elapsed_ms 已经是最新的。只看 id 的话 receivedAt 不重置，
+     已用时会把这段时间再加一遍。 */
+  const signature = active.map((request) => `${request.id}:${request.elapsed_ms}`).join(",");
 
   useEffect(() => {
     setReceivedAt(Date.now());

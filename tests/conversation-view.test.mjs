@@ -358,3 +358,82 @@ test("没有 id 的调用不配对", () => {
     ["tool_use", "tool_result"],
   );
 });
+
+/* ── Responses API 条目 ───────────────────────────────────── */
+
+const sse = (events) => events.map((event) => `data: ${JSON.stringify(event)}\n`).join("\n");
+
+/* 函数调用、结果和推理在 input 里和消息平级，没有 role 和 content。当消息处理
+   会整条丢掉，codex 的会话只剩一问一答；并行调用还要并成一条才配得上结果。 */
+test("Responses 请求里的函数调用与结果按 call_id 配对", () => {
+  const parsed = parseConversationRequest(
+    JSON.stringify({
+      input: [
+        { type: "message", role: "user", content: [{ type: "input_text", text: "列文件" }] },
+        { type: "reasoning", summary: [{ type: "summary_text", text: "先看目录" }] },
+        { type: "function_call", id: "fc_1", call_id: "c1", name: "shell", arguments: '{"command":["ls"]}' },
+        { type: "function_call", id: "fc_2", call_id: "c2", name: "shell", arguments: '{"command":["pwd"]}' },
+        { type: "function_call_output", call_id: "c1", output: "a.txt" },
+        { type: "function_call_output", call_id: "c2", output: "/tmp" },
+      ],
+    }),
+  );
+  const paired = pairToolCalls(parsed.messages);
+  assert.deepEqual(
+    paired.map((message) => `${message.role}:${message.blocks.map((block) => block.kind).join("+")}`),
+    ["user:text", "assistant:thinking+tool_call+tool_call"],
+  );
+  assert.deepEqual(
+    paired[1].blocks.filter((block) => block.kind === "tool_call").map((block) => block.result?.text),
+    ["a.txt", "/tmp"],
+  );
+});
+
+test("Responses 非流式：只调工具的回复不显示成空", () => {
+  assert.equal(
+    parseResponse(
+      JSON.stringify({
+        object: "response",
+        output: [{ type: "function_call", call_id: "c1", name: "shell", arguments: "{}" }],
+      }),
+    ),
+    JSON.stringify({ roles: ["assistant"], kinds: ["tool_use"], complete: true }),
+  );
+});
+
+/* 正文、推理摘要和函数参数的增量都叫 delta，拼在一起读到的是
+   `**Listing files**{"command":["ls"]}done`。 */
+test("Responses 流式：推理、参数与正文各归各的块", () => {
+  const parsed = parseConversationResponse(
+    sse([
+      { type: "response.reasoning_summary_text.delta", output_index: 0, delta: "**Listing files**" },
+      { type: "response.output_item.added", output_index: 1, item: { type: "function_call", name: "shell", call_id: "c9" } },
+      { type: "response.function_call_arguments.delta", output_index: 1, delta: '{"command":["ls"]}' },
+      { type: "response.output_text.delta", output_index: 2, delta: "done" },
+    ]),
+  );
+  const [thinking, call, text] = parsed.messages[0].blocks;
+  assert.deepEqual(thinking, { kind: "thinking", text: "**Listing files**" });
+  assert.deepEqual(call, { kind: "tool_use", name: "shell", id: "c9", input: '{"command":["ls"]}' });
+  assert.deepEqual(text, { kind: "text", text: "done" });
+});
+
+test("chat 流式的 reasoning_content 单独成思考块，不混进正文", () => {
+  const parsed = parseConversationResponse(
+    sse([{ choices: [{ delta: { reasoning_content: "想一想" } }] }, { choices: [{ delta: { content: "答案" } }] }]),
+  );
+  assert.deepEqual(parsed.messages[0].blocks, [
+    { kind: "thinking", text: "想一想" },
+    { kind: "text", text: "答案" },
+  ]);
+});
+
+/* 对象型的 name 会被当成 React 子节点渲染，整个控制台白屏。 */
+test("Anthropic 流里类型不对的 name 和 id 不被带进块", () => {
+  const parsed = parseConversationResponse(
+    sse([{ type: "content_block_start", index: 0, content_block: { type: "tool_use", name: { x: 1 }, id: 7 } }]),
+  );
+  const [block] = parsed.messages[0].blocks;
+  assert.equal(block.name, "工具");
+  assert.equal(block.id, null);
+});
