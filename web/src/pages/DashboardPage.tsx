@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 
 import { UnauthorizedError, fetchDashboard } from "../api";
 import { scaleDashboard } from "../dashboardScale";
+import { formatTimestamp } from "../logFormat";
 import type { LogOverview, RequestLog, TokenUsage, TopItem, TopStats } from "../types";
 
 /* 时间档。值直接进 query，必须是后端 parseDashboardRange 认的词。
@@ -233,11 +234,12 @@ function RankCard({
         {sorted.length === 0 ? (
           <div className="dashboard-chart-empty">暂无数据</div>
         ) : (
-          sorted.map((row) => {
+          sorted.map((row, index) => {
             const display = maskNames ? SENSITIVE_MASK : row.name;
             return (
               <div
-                key={row.name}
+                // 渠道榜按 upstream_id 分组，两个同名渠道各占一行，名字不唯一。
+                key={row.id ?? `${row.name}-${index}`}
                 className="dashboard-rank-row"
                 title={`${display} · ${compact(valueOf(row))}`}
               >
@@ -280,13 +282,19 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
      start_date= 空值的 400，而界面上只会变成一片破折号。 */
   const pending = range === "custom" && !(isDate(custom.start) && isDate(custom.end));
 
+  /* 每次加载一个序号，只收最新那次的结果。先点「全部」再点「今天」，慢的
+     「全部」后到会把「今天」的数据盖掉。 */
+  const loadRequest = useRef(0);
+
   const load = useCallback(async () => {
+    const request = ++loadRequest.current;
     if (pending) {
       setLoading(false);
       return;
     }
     try {
       const raw = await fetchDashboard(range, custom);
+      if (request !== loadRequest.current) return;
       // 全局设置里的显示倍率，所有计数在这里统一乘上。
       const data = { ...raw, ...scaleDashboard(raw, raw.multiplier) };
       setOverview(data.overview);
@@ -300,10 +308,11 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
       );
       setError("");
     } catch (err) {
+      if (request !== loadRequest.current) return;
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (request === loadRequest.current) setLoading(false);
     }
   }, [range, custom, pending, onUnauthorized]);
 
@@ -526,7 +535,7 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                 </span>
               </div>
               <div className="dashboard-chart">
-                <Sparkline values={overview?.request_series.map((bucket) => bucket.count) ?? []} />
+                <Sparkline values={overview?.latency_series.map((bucket) => bucket.avg_ms) ?? []} />
               </div>
             </article>
           </div>
@@ -626,7 +635,8 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                   ) : (
                     recent.map((log) => (
                       <tr key={log.id} className="dashboard-error-row">
-                        <td>{log.created_at.slice(11, 19)}</td>
+                        {/* created_at 是不带时区的 UTC，直接截取和日志页的本地时间对不上。 */}
+                        <td>{formatTimestamp(log.created_at).slice(11)}</td>
                         <td>
                           {log.upstream_name
                             ? maskChannels
