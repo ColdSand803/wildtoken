@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,6 +20,18 @@ const cleanupInterval = 5 * time.Minute
 
 // cleanupStartupDelay keeps the first scan off the busy moment of startup.
 const cleanupStartupDelay = 30 * time.Second
+
+// storedName matches what save writes, relative to the directory, including a
+// temporary file a crash left behind. Cleanup counts and deletes nothing else:
+// the directory is operator-configured, and pointed at one that also holds the
+// database, a cap of zero deleted the database with the images.
+var storedName = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}/[0-9a-f]{32}\.(png|jpg|webp|gif|bin)(\.tmp)?$`)
+
+// servedName is storedName without the temporary files.
+var servedName = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}/[0-9a-f]{32}\.(png|jpg|webp|gif|bin)$`)
+
+// dayName matches the date directories save creates.
+var dayName = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
 type storedFile struct {
 	path    string
@@ -46,7 +59,19 @@ func (s *Store) Enforce(maxBytes int64) (int, int64, error) {
 			}
 			return err
 		}
+		relative, err := filepath.Rel(s.dir, path)
+		if err != nil {
+			return nil
+		}
+		relative = filepath.ToSlash(relative)
 		if entry.IsDir() {
+			// Only the root and its date directories hold what save wrote.
+			if relative != "." && !dayName.MatchString(relative) {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if !storedName.MatchString(relative) {
 			return nil
 		}
 		info, err := entry.Info()
@@ -98,7 +123,7 @@ func (s *Store) removeEmptyDays() {
 		return
 	}
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || !dayName.MatchString(entry.Name()) {
 			continue
 		}
 		folder := filepath.Join(s.dir, entry.Name())
@@ -137,11 +162,14 @@ func RunCleanupLoop(ctx context.Context, store *Store, maxBytes func() int64) {
 
 // Handler serves saved images. Directory listings are refused: the random names
 // are the only thing keeping one caller from another's images.
+//
+// Only names save wrote are served. Any other file in the directory was served
+// to anyone who named it, the database included if the two shared a directory.
 func (s *Store) Handler() http.Handler {
 	files := http.FileServer(http.Dir(s.Dir()))
 	return http.StripPrefix(strings.TrimSuffix(URLPrefix, "/"), http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
-			if s == nil || s.dir == "" || strings.HasSuffix(r.URL.Path, "/") || strings.HasSuffix(r.URL.Path, ".tmp") {
+			if s == nil || s.dir == "" || !servedName.MatchString(strings.TrimPrefix(r.URL.Path, "/")) {
 				http.NotFound(w, r)
 				return
 			}

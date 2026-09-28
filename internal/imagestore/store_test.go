@@ -114,11 +114,16 @@ func writeAged(t *testing.T, path string, size int, age time.Duration) {
 	os.Chtimes(path, stamp, stamp)
 }
 
+// storedFileName is a name in the shape save writes.
+func storedFileName(digit string) string {
+	return strings.Repeat(digit, 32) + ".png"
+}
+
 func TestEnforceDeletesOldestFirstAndDropsEmptyDays(t *testing.T) {
 	store := testStore(t, true)
-	oldest := filepath.Join(store.dir, "2026-09-01", "a.png")
-	middle := filepath.Join(store.dir, "2026-09-02", "b.png")
-	newest := filepath.Join(store.dir, "2026-09-03", "c.png")
+	oldest := filepath.Join(store.dir, "2026-09-01", storedFileName("a"))
+	middle := filepath.Join(store.dir, "2026-09-02", storedFileName("b"))
+	newest := filepath.Join(store.dir, "2026-09-03", storedFileName("c"))
 	writeAged(t, oldest, 100, 3*time.Hour)
 	writeAged(t, middle, 100, 2*time.Hour)
 	writeAged(t, newest, 100, time.Hour)
@@ -140,6 +145,41 @@ func TestEnforceDeletesOldestFirstAndDropsEmptyDays(t *testing.T) {
 	// A cap of zero empties the directory.
 	if removed, _, _ := store.Enforce(0); removed != 1 {
 		t.Errorf("cap 0 removed %d files, want 1", removed)
+	}
+}
+
+// The directory is whatever the operator configured. Pointed at one that also
+// holds the database, the cap must not delete it and the route must not serve it.
+func TestEnforceAndHandlerLeaveForeignFilesAlone(t *testing.T) {
+	store := testStore(t, true)
+	database := filepath.Join(store.dir, "wildtoken.db")
+	notes := filepath.Join(store.dir, "2026-09-01", "notes.txt")
+	nested := filepath.Join(store.dir, "backup", "2026-09-01", storedFileName("d"))
+	image := filepath.Join(store.dir, "2026-09-01", storedFileName("e"))
+	for _, path := range []string{database, notes, nested, image} {
+		writeAged(t, path, 100, time.Hour)
+	}
+
+	removed, _, err := store.Enforce(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Errorf("removed %d files, want only the image", removed)
+	}
+	for _, path := range []string{database, notes, nested} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("%s was deleted", path)
+		}
+	}
+
+	for _, path := range []string{"/images/wildtoken.db", "/images/2026-09-01/notes.txt",
+		"/images/backup/2026-09-01/" + storedFileName("d"), "/images"} {
+		recorder := httptest.NewRecorder()
+		store.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Errorf("%s: status %d, want 404", path, recorder.Code)
+		}
 	}
 }
 
