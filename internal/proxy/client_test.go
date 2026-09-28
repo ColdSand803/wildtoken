@@ -3,6 +3,7 @@ package proxy
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 
@@ -38,6 +39,23 @@ func TestStreamingChatRequestIncludesUsageAndPreservesOptions(t *testing.T) {
 	}
 	if options["include_obfuscation"] != true {
 		t.Error("an existing stream option was dropped")
+	}
+}
+
+// Some SDKs write every unset option as null. Decoded, that is a nil map, and
+// the write that followed panicked and dropped the connection.
+func TestANullStreamOptionsStillRequestsUsage(t *testing.T) {
+	prepared := PrepareUpstreamBody([]byte(`{"model":"m","stream":true,"stream_options":null}`),
+		nil, "chat/completions", nil)
+
+	var decoded struct {
+		StreamOptions map[string]any `json:"stream_options"`
+	}
+	if err := json.Unmarshal(prepared, &decoded); err != nil {
+		t.Fatalf("decode prepared body: %v", err)
+	}
+	if decoded.StreamOptions["include_usage"] != true {
+		t.Errorf("stream_options = %v, want include_usage requested", decoded.StreamOptions)
 	}
 }
 
@@ -156,6 +174,19 @@ func TestOpenAIResponsesUsageDoesNotDoubleCountCachedOrReasoning(t *testing.T) {
 	assertUsage(t, ExtractUsage(body, "application/json"), map[string]any{
 		"prompt": int32(75), "completion": int32(1186), "total": int32(1261),
 		"prompt_cached": int32(0), "completion_reason": int32(1024),
+	})
+}
+
+// LiteLLM answers in OpenAI's shape and adds Anthropic's cache fields beside
+// it. prompt_tokens already includes the cache, so it is not added again.
+func TestLiteLLMUsageKeepsOpenAIsInclusivePrompt(t *testing.T) {
+	body := []byte(`{"usage":{"prompt_tokens":12012,"completion_tokens":5,"total_tokens":12017,
+        "prompt_tokens_details":{"cached_tokens":12000},
+        "cache_creation_input_tokens":0,"cache_read_input_tokens":12000}}`)
+
+	assertUsage(t, ExtractUsage(body, "application/json"), map[string]any{
+		"prompt": int32(12012), "completion": int32(5), "total": int32(12017),
+		"prompt_cached": int32(12000), "cache_creation": int32(0),
 	})
 }
 
@@ -674,5 +705,23 @@ func TestPrepareRequestLeavesBothEffortsUnsetWhenTheRequestNamesNone(t *testing.
 	if prepared.ReasoningEffort != nil || prepared.UpstreamReasoningEffort != nil {
 		t.Errorf("efforts = %v / %v, want both unset",
 			prepared.ReasoningEffort, prepared.UpstreamReasoningEffort)
+	}
+}
+
+// A generated image and its usage share one event. A large image pushed the
+// line past the buffer and the usage was discarded with it.
+func TestTheUsageOfAnOversizedEventIsStillRead(t *testing.T) {
+	image := strings.Repeat("A", maxSSEEventBytes+1024)
+	stream := []byte(`data: {"type":"image_generation.completed","b64_json":"` + image +
+		`","usage":{"input_tokens":10,"output_tokens":20,"total_tokens":30}}` + "\n\n")
+
+	var observation sseObservation
+	for chunk := range slices.Chunk(stream, 32<<10) {
+		observation.observeChunk(chunk, func() int32 { return 0 })
+	}
+	observation.finish(func() int32 { return 0 })
+
+	if total := observation.tokenUsage().TotalTokens; total == nil || *total != 30 {
+		t.Errorf("total = %v, want 30", int32Value(t, total))
 	}
 }

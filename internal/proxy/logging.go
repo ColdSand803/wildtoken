@@ -156,18 +156,26 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 		return
 	}
 
+	// The usage is held against the token's quota until the row commits,
+	// because until then the stored total still understates it. The hold comes
+	// before the send: taken after it, a writer that committed at once settled
+	// a hold not yet there, and the hold then taken stayed for good, refusing
+	// the token early until a restart.
+	tokenID, used, metered := quotaUsage(entry)
+	if metered {
+		w.quotas.Meter(tokenID, used)
+	}
+
 	select {
 	case w.entries <- entry:
-		// The usage is held against the token's quota until the row commits,
-		// because until then the stored total still understates it.
-		if tokenID, used, ok := quotaUsage(entry); ok {
-			w.quotas.Meter(tokenID, used)
-		}
 	default:
 		w.metrics.RecordLogDequeue(1)
 		w.metrics.RecordLogDrop()
 		slog.Warn("request log queue full; dropping request log")
-		w.carryDropped(entry)
+		// Held already; a later batch applies it and settles the hold.
+		if metered {
+			w.carry(tokenID, used)
+		}
 	}
 }
 
@@ -818,15 +826,19 @@ func validTextPrefix(body, slice []byte, originalByteLength int) (string, bool) 
 	}
 
 	// Only a prefix of a longer body is available. A trailing partial rune is
-	// expected here, so it is dropped rather than treated as binary.
-	cutoff := len(slice)
-	for cutoff > 0 && !utf8.Valid(slice[:cutoff]) {
-		cutoff--
+	// expected here, so up to UTFMax-1 bytes of it are dropped; anything invalid
+	// before that is binary, as it is for a whole body. Backing off one byte at
+	// a time instead revalidated the prefix at every step: a stray byte midway
+	// through a 1 MiB capture cost 13 seconds.
+	for back := 0; back < utf8.UTFMax && back <= len(slice); back++ {
+		if prefix := slice[:len(slice)-back]; utf8.Valid(prefix) {
+			if len(prefix) == 0 && len(slice) > 0 {
+				return "", false
+			}
+			return string(prefix), true
+		}
 	}
-	if cutoff == 0 && len(slice) > 0 {
-		return "", false
-	}
-	return string(slice[:cutoff]), true
+	return "", false
 }
 
 // ── Background cleanup ──────────────────────────────────────────────────────

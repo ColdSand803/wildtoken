@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -67,6 +68,27 @@ func TestTextIsTruncatedAtUTF8Boundary(t *testing.T) {
 	}
 	if body["truncated"] != true {
 		t.Error("truncated was not reported")
+	}
+}
+
+// A captured prefix may end mid-rune; that tail is dropped. An invalid byte
+// before it makes the capture binary, found without revalidating the prefix at
+// every byte: that took 13 seconds for a 1 MiB capture.
+func TestAPrefixCaptureIsCheckedInLinearTime(t *testing.T) {
+	partial := truncateBodyWithLength([]byte("a\xc3"), 2, 10)
+	if partial["text"] != "a" {
+		t.Errorf("text = %v, want the partial rune dropped", partial["text"])
+	}
+
+	capture := bytes.Repeat([]byte("x"), 1<<20)
+	capture[len(capture)/2] = 0xff
+	started := time.Now()
+	snapshot := truncateBodyWithLength(capture, len(capture), len(capture)+10)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Errorf("took %v", elapsed)
+	}
+	if snapshot["encoding"] != "base64" {
+		t.Errorf("a capture with an invalid byte midway was rendered as text")
 	}
 }
 

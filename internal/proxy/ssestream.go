@@ -42,12 +42,17 @@ type sseStream struct {
 	// racing the fields this lock does not cover.
 	mu    sync.Mutex
 	entry *LogEntry
+
+	// requestBody is what was sent upstream, for estimating the prompt of a
+	// stream abandoned before its usage arrived.
+	requestBody []byte
 }
 
 func newSSEStream(requestCtx context.Context, upstream io.ReadCloser, attempt *attemptTimeout,
 	start time.Time, status int,
 	responseHeaders map[string]string, logBodyMaxBytes, captureBytes int, entry LogEntry,
-	deps Deps, policy AutoWeightPolicy, autoWeightEnabled bool, upstreamID int64) *sseStream {
+	deps Deps, policy AutoWeightPolicy, autoWeightEnabled bool, upstreamID int64,
+	requestBody []byte) *sseStream {
 	deps.Metrics.StartSSEStream()
 	return &sseStream{
 		upstream:          upstream,
@@ -64,15 +69,17 @@ func newSSEStream(requestCtx context.Context, upstream io.ReadCloser, attempt *a
 		autoWeightEnabled: autoWeightEnabled,
 		upstreamID:        upstreamID,
 		entry:             &entry,
+		requestBody:       requestBody,
 	}
 }
 
 func (s *sseStream) Read(buffer []byte) (int, error) {
+	// The clock runs only while waiting on the upstream, so a long answer is
+	// never cut off for being long, nor a slow reader for being slow.
+	s.attempt.extend()
 	read, err := s.upstream.Read(buffer)
+	s.attempt.pause()
 	if read > 0 {
-		// Progress restarts the attempt's clock, so a long answer is never cut
-		// off for being long.
-		s.attempt.extend()
 		chunk := buffer[:read]
 		s.capture.push(chunk)
 		s.observation.observeChunk(chunk, s.measure)
@@ -97,8 +104,16 @@ func (s *sseStream) Close() error {
 	s.mu.Unlock()
 
 	if pending {
+		// Delivered in full except the events after the last read: the usage
+		// among them is read before the log is written. A terminal event that
+		// only lacks its closing blank line has arrived; finish settles it.
+		drained := false
+		if !s.observation.terminalEventSeen && !s.observation.terminalEventPending {
+			s.drain()
+			drained = true
+		}
 		s.observation.finish(s.measure)
-		if s.observation.terminalEventSeen {
+		if s.observation.terminalEventSeen && !drained {
 			s.finishComplete()
 		} else if s.finishLog(499,
 			ptrTo("client disconnected before the SSE response completed")) {
@@ -110,6 +125,30 @@ func (s *sseStream) Close() error {
 	err := s.upstream.Close()
 	s.attempt.stop()
 	return err
+}
+
+// drain keeps reading an abandoned stream, for at most drainGrace, until its
+// terminal event. The usage comes last: a client that stopped reading at the
+// final content, whether it meant to or not, left before it, and the request
+// was logged without usage and never billed.
+func (s *sseStream) drain() {
+	deadline := time.AfterFunc(drainGrace, s.attempt.cancel)
+	defer deadline.Stop()
+
+	buffer := make([]byte, 32<<10)
+	for !s.observation.terminalEventSeen {
+		s.attempt.extend()
+		read, err := s.upstream.Read(buffer)
+		s.attempt.pause()
+		if read > 0 {
+			chunk := buffer[:read]
+			s.capture.push(chunk)
+			s.observation.observeChunk(chunk, s.measure)
+		}
+		if err != nil {
+			return
+		}
+	}
 }
 
 func (s *sseStream) measure() int32 {
@@ -217,6 +256,18 @@ func (s *sseStream) finishLog(statusCode int32, streamError *string) bool {
 
 	s.observation.finish(s.measure)
 	usage := s.observation.tokenUsage()
+	// A stream the client abandoned before the upstream's final usage is
+	// billed on an estimate. The upstream still charges the operator for the
+	// prompt and what it generated; logged as nothing, stopping just short of
+	// the usage was a way to spend a quota without it counting.
+	if statusCode == 499 && !s.observation.finalUsageSeen {
+		usage = s.estimateUsage(usage)
+		message := "usage estimated"
+		if streamError != nil {
+			message = *streamError + "; " + message
+		}
+		streamError = &message
+	}
 	responseSnapshot := s.snapshotResponse()
 
 	entry.StatusCode = &statusCode
@@ -238,3 +289,24 @@ func (s *sseStream) finishLog(statusCode int32, streamError *string) bool {
 }
 
 func ptrTo[T any](value T) *T { return &value }
+
+// estimateUsage fills what an abandoned stream did not report: the prompt from
+// the request when message_start gave none, the completion from the text that
+// streamed. Anthropic's message_start reports output_tokens 1 as a placeholder,
+// so a reported completion only stands when it is larger.
+func (s *sseStream) estimateUsage(reported TokenUsage) TokenUsage {
+	prompt := reported.PromptTokens
+	if prompt == nil {
+		prompt = ptrTo(clampTokens(estimateRequestTokens(s.requestBody)))
+	}
+	completion := ptrTo(clampTokens(s.observation.outputEstimate))
+	if reported.CompletionTokens != nil && *reported.CompletionTokens > *completion {
+		completion = reported.CompletionTokens
+	}
+
+	estimated := reported
+	estimated.PromptTokens = prompt
+	estimated.CompletionTokens = completion
+	estimated.TotalTokens = sumTokenParts(prompt, completion)
+	return estimated
+}

@@ -32,9 +32,24 @@ type attemptTimeout struct {
 	timer   *time.Timer
 	window  time.Duration
 	expired atomic.Bool
+	// streaming is set once a stream is being relayed. From then on a client
+	// that leaves gets drainGrace of the upstream read for its usage rather
+	// than an immediate cancel.
+	streaming atomic.Bool
+	unfollow  func() bool
 }
 
-func newAttemptTimeout(cancel context.CancelFunc, window time.Duration) *attemptTimeout {
+// drainGrace bounds how long an abandoned stream is still read for its usage.
+// The usage follows the last content within milliseconds; what the grace cuts
+// off is a long answer nobody is waiting for.
+const drainGrace = 2 * time.Second
+
+// newAttemptTimeout starts an attempt whose context follows the client's by
+// hand. Derived from it directly, a client leaving cancelled the upstream read
+// before the usage arriving after the content could be seen, and a stream
+// abandoned there was never billed.
+func newAttemptTimeout(clientCtx context.Context, window time.Duration) (context.Context, *attemptTimeout) {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(clientCtx))
 	timeout := &attemptTimeout{cancel: cancel, window: window}
 	timeout.timer = time.AfterFunc(window, func() {
 		// Recorded before cancelling, so a reader woken by the cancellation
@@ -42,17 +57,30 @@ func newAttemptTimeout(cancel context.CancelFunc, window time.Duration) *attempt
 		timeout.expired.Store(true)
 		cancel()
 	})
-	return timeout
+	timeout.unfollow = context.AfterFunc(clientCtx, func() {
+		if timeout.streaming.Load() {
+			time.AfterFunc(drainGrace, cancel)
+			return
+		}
+		cancel()
+	})
+	return ctx, timeout
 }
 
-// extend restarts the clock after the upstream made progress.
+// extend restarts the clock: the attempt is waiting on the upstream again.
 func (t *attemptTimeout) extend() { t.timer.Reset(t.window) }
+
+// pause stops the clock while the caller is busy downstream. A slow client is
+// not the upstream going quiet; counted as such, it got the channel a 504 and
+// a health penalty.
+func (t *attemptTimeout) pause() { t.timer.Stop() }
 
 // Expired reports whether this timeout ended the attempt.
 func (t *attemptTimeout) Expired() bool { return t.expired.Load() }
 
 // stop releases the timer and the attempt's context.
 func (t *attemptTimeout) stop() {
+	t.unfollow()
 	t.timer.Stop()
 	t.cancel()
 }
@@ -240,8 +268,10 @@ func PrepareUpstreamBody(body []byte, forwardModel *string, path string,
 	if strings.Trim(path, "/") == "chat/completions" && requestsStreaming(request) {
 		streamOptions := map[string]json.RawMessage{}
 		if raw, present := request["stream_options"]; present {
-			if err := json.Unmarshal(raw, &streamOptions); err != nil {
-				// A non-object stream_options is replaced rather than merged.
+			// A non-object stream_options is replaced rather than merged. null
+			// decodes without error into a nil map, which panicked on the write
+			// below and dropped the connection.
+			if err := json.Unmarshal(raw, &streamOptions); err != nil || streamOptions == nil {
 				streamOptions = map[string]json.RawMessage{}
 				changed = true
 			}
@@ -381,8 +411,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	if upstream.TimeoutSeconds > 0 {
 		timeout = time.Duration(upstream.TimeoutSeconds * float64(time.Second))
 	}
-	attemptCtx, cancel := context.WithCancel(ctx)
-	attempt := newAttemptTimeout(cancel, timeout)
+	attemptCtx, attempt := newAttemptTimeout(ctx, timeout)
 
 	request, err := buildUpstreamRequest(attemptCtx, requestCtx.Method, prepared)
 	if err != nil {
@@ -459,7 +488,9 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 			captureBytes = max(captureBytes, imagestore.MaxCaptureBytes)
 		}
 		stream := newSSEStream(ctx, response.Body, attempt, start, status, responseHeaders,
-			requestCtx.LogBodyMaxBytes, captureBytes, entry, deps, policy, autoWeightEnabled, upstream.ID)
+			requestCtx.LogBodyMaxBytes, captureBytes, entry, deps, policy, autoWeightEnabled, upstream.ID,
+			prepared.UpstreamBody)
+		attempt.streaming.Store(true)
 		return &Response{Status: status, Headers: responseHeaders, Body: stream}, nil
 	}
 
@@ -508,9 +539,15 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 
 	responseSnapshot := SnapshotResponse(status, responseHeaders, deps.Images.Rewrite(bodyBytes),
 		requestCtx.LogBodyMaxBytes)
-	usage := ExtractUsage(bodyBytes, contentType)
 	isStream := bytes.HasPrefix(bodyBytes, []byte("data:")) ||
 		strings.Contains(contentType, "event-stream")
+	// A stream sent as text/plain is read as one too; parsed as JSON, its
+	// usage came back empty and the request went unbilled.
+	usageContentType := contentType
+	if isStream {
+		usageContentType = "text/event-stream"
+	}
+	usage := ExtractUsage(bodyBytes, usageContentType)
 
 	// A true streamed time-to-first-token is preferred; buffered detection is
 	// only a fallback, and only for stream bodies.

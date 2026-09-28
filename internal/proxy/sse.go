@@ -255,6 +255,12 @@ func sumTokenParts(parts ...*int32) *int32 {
 //   - completion_tokens/output_tokens already include reasoning
 //   - nested *_details and total_tokens are authoritative; details are never re-added
 func isAnthropicStyleUsage(usage jsonValue) bool {
+	// prompt_tokens is OpenAI's name and always includes the cache. LiteLLM
+	// reports it next to Anthropic's top-level cache fields; read as Anthropic,
+	// the cache was added a second time and the upstream's total ignored.
+	if _, ok := usage["prompt_tokens"]; ok {
+		return false
+	}
 	if _, ok := usage["cache_read_input_tokens"]; ok {
 		return true
 	}
@@ -555,6 +561,14 @@ type sseObservation struct {
 	// that ended normally. streamErrorFault says whether it blames the channel.
 	streamError      *string
 	streamErrorFault bool
+	// overflowTail keeps the end of a line too long to buffer, where an
+	// oversized event carries its usage.
+	overflowTail []byte
+	// finalUsageSeen is set by usage from any event but message_start, whose
+	// output count is a placeholder. outputEstimate approximates the tokens the
+	// stream's deltas carried, for billing one abandoned before its usage.
+	finalUsageSeen bool
+	outputEstimate int64
 }
 
 // tokenUsage is the usage the stream reported so far.
@@ -592,6 +606,10 @@ func (o *sseObservation) observeLine(line []byte, elapsedMs func() int32) {
 		return
 	}
 	o.usage.add(payload)
+	if usageObject(payload) != nil && payload["type"] != "message_start" {
+		o.finalUsageSeen = true
+	}
+	o.outputEstimate += estimateDeltaTokens(payload)
 	if o.streamError == nil {
 		if message, fault, ok := streamErrorFromValue(payload); ok {
 			o.streamError = &message
@@ -620,18 +638,25 @@ func (o *sseObservation) observeChunk(chunk []byte, elapsedMs func() int32) {
 		}
 
 		// An oversized line is discarded rather than buffered, and the discard
-		// continues until its terminating newline arrives.
-		if !o.lineOverflow {
-			if len(o.lineBuf)+len(segment) <= maxSSEEventBytes {
-				o.lineBuf = append(o.lineBuf, segment...)
-			} else {
-				o.lineBuf = o.lineBuf[:0]
-				o.lineOverflow = true
-			}
+		// continues until its terminating newline arrives. Only its tail is
+		// kept, for the usage.
+		switch {
+		case o.lineOverflow:
+			o.keepOverflowTail(segment)
+		case len(o.lineBuf)+len(segment) <= maxSSEEventBytes:
+			o.lineBuf = append(o.lineBuf, segment...)
+		default:
+			o.overflowTail = o.overflowTail[:0]
+			o.keepOverflowTail(o.lineBuf)
+			o.keepOverflowTail(segment)
+			o.lineBuf = o.lineBuf[:0]
+			o.lineOverflow = true
 		}
 
 		if completeLine {
-			if !o.lineOverflow {
+			if o.lineOverflow {
+				o.observeOversizedTail()
+			} else {
 				o.observeLine(o.lineBuf, elapsedMs)
 			}
 			o.lineBuf = o.lineBuf[:0]
@@ -640,9 +665,43 @@ func (o *sseObservation) observeChunk(chunk []byte, elapsedMs func() int32) {
 	}
 }
 
+// overflowTailBytes is how much of an oversized line's end is kept.
+const overflowTailBytes = 64 << 10
+
+func (o *sseObservation) keepOverflowTail(segment []byte) {
+	o.overflowTail = append(o.overflowTail, segment...)
+	if excess := len(o.overflowTail) - overflowTailBytes; excess > 0 {
+		o.overflowTail = append(o.overflowTail[:0], o.overflowTail[excess:]...)
+	}
+}
+
+// observeOversizedTail reads the usage from the end of a line too long to
+// parse. A generated image and its usage share one event, and a large image
+// pushed the event past the buffer: the usage went with it and the request
+// was not billed. The usage object follows the image data, which being base64
+// holds no quote to mistake for a key.
+func (o *sseObservation) observeOversizedTail() {
+	tail := o.overflowTail
+	o.overflowTail = o.overflowTail[:0]
+
+	index := bytes.LastIndex(tail, []byte(`"usage":`))
+	if index < 0 {
+		return
+	}
+	var usage jsonValue
+	decoder := json.NewDecoder(bytes.NewReader(tail[index+len(`"usage":`):]))
+	if err := decoder.Decode(&usage); err != nil || usage == nil {
+		return
+	}
+	o.usage.add(jsonValue{"usage": usage})
+	o.finalUsageSeen = true
+}
+
 // finish observes a trailing partial line and settles a pending terminal event.
 func (o *sseObservation) finish(elapsedMs func() int32) {
-	if !o.lineOverflow && len(o.lineBuf) > 0 {
+	if o.lineOverflow {
+		o.observeOversizedTail()
+	} else if len(o.lineBuf) > 0 {
 		o.observeLine(o.lineBuf, elapsedMs)
 	}
 	o.lineBuf = o.lineBuf[:0]

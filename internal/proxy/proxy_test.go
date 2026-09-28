@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -817,5 +818,202 @@ func TestAStreamThatEndsOnAnErrorEventIsLoggedAsAFailure(t *testing.T) {
 		snapshot.SSEUpstreamErrorsTotal != 4 {
 		t.Errorf("sse metrics = %d completed / %d errors, want 0 / 4",
 			snapshot.SSECompletedTotal, snapshot.SSEUpstreamErrorsTotal)
+	}
+}
+
+// A stream sent as text/plain is still a stream: its usage is read from its
+// events, not parsed as one JSON document and found missing.
+func TestAStreamWithoutAStreamContentTypeIsStillBilled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/plain")
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n" +
+			"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5," +
+			"\"total_tokens\":15}}\n\ndata: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m","stream":true}`),
+		requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	response, err := ProxyRequest(context.Background(), harness.deps, testPolicy(),
+		&upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+	io.ReadAll(response.Body)
+	response.Body.Close()
+	harness.waitForLogs(t, 1)
+
+	var stream int64
+	var totalTokens sql.NullInt64
+	if err := harness.database.QueryRow(`SELECT stream, total_tokens FROM request_logs WHERE id = 1`).
+		Scan(&stream, &totalTokens); err != nil {
+		t.Fatal(err)
+	}
+	if stream != 1 || totalTokens.Int64 != 15 {
+		t.Errorf("stream=%d total=%v, want a billed stream of 15", stream, totalTokens)
+	}
+}
+
+// abandonedStream relays one upstream stream, reads its first chunk and closes
+// it as a client that left would, returning the log row.
+func abandonedStream(t *testing.T, handler http.HandlerFunc, requestBody string,
+	timeoutSeconds float64) (status int64, total sql.NullInt64, prompt sql.NullInt64,
+	completion sql.NullInt64, message sql.NullString) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL, TimeoutSeconds: timeoutSeconds,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(requestBody), requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	clientCtx, leave := context.WithCancel(context.Background())
+	response, err := ProxyRequest(clientCtx, harness.deps, testPolicy(), &upstream, requestCtx, prepared)
+	if err != nil {
+		t.Fatalf("proxy: %v", err)
+	}
+	if _, err := response.Body.Read(make([]byte, 64<<10)); err != nil {
+		t.Fatalf("read first chunk: %v", err)
+	}
+	leave()
+	response.Body.Close()
+	harness.waitForLogs(t, 1)
+
+	if err := harness.database.QueryRow(`SELECT status_code, total_tokens, prompt_tokens,
+        completion_tokens, error FROM request_logs WHERE id = 1`).
+		Scan(&status, &total, &prompt, &completion, &message); err != nil {
+		t.Fatal(err)
+	}
+	return status, total, prompt, completion, message
+}
+
+// The usage follows the last content. A client that left at the content was
+// logged without it and never billed.
+func TestAStreamAbandonedBeforeItsUsageIsStillBilled(t *testing.T) {
+	status, total, _, _, _ := abandonedStream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]}\n\n"))
+		w.(http.Flusher).Flush()
+		time.Sleep(100 * time.Millisecond)
+		w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":5," +
+			"\"total_tokens\":15}}\n\ndata: [DONE]\n\n"))
+	}, `{"model":"m","stream":true}`, 0)
+
+	if status != 499 || total.Int64 != 15 {
+		t.Errorf("status=%d total=%v, want 499 billed at the reported 15", status, total)
+	}
+}
+
+// With no usage by the time the stream ends, the request is billed on an
+// estimate and the log says so.
+func TestAStreamAbandonedWithoutUsageIsBilledOnAnEstimate(t *testing.T) {
+	status, total, prompt, completion, message := abandonedStream(t,
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("content-type", "text/event-stream")
+			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a first part\"}}]}\n\n"))
+			w.(http.Flusher).Flush()
+			time.Sleep(50 * time.Millisecond)
+			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"and more words that follow\"}}]}\n\n"))
+		}, `{"model":"m","stream":true,"messages":[{"role":"user","content":"write something long"}]}`, 0)
+
+	if status != 499 || !total.Valid || total.Int64 != prompt.Int64+completion.Int64 ||
+		prompt.Int64 == 0 || completion.Int64 < 8 {
+		t.Errorf("status=%d prompt=%v completion=%v total=%v, want an estimate", status, prompt,
+			completion, total)
+	}
+	if !strings.Contains(message.String, "usage estimated") {
+		t.Errorf("error = %q, want the estimate noted", message.String)
+	}
+}
+
+// Anthropic's message_start reports the prompt and a placeholder output of 1.
+// The prompt stands; the output is estimated from what streamed.
+func TestAnAbandonedMessagesStreamKeepsItsReportedPrompt(t *testing.T) {
+	_, total, prompt, completion, _ := abandonedStream(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.Write([]byte("event: message_start\ndata: {\"type\":\"message_start\",\"message\":" +
+			"{\"usage\":{\"input_tokens\":100,\"output_tokens\":1}}}\n\n"))
+		w.(http.Flusher).Flush()
+		time.Sleep(50 * time.Millisecond)
+		w.Write([]byte("event: content_block_delta\ndata: {\"type\":\"content_block_delta\"," +
+			"\"delta\":{\"type\":\"text_delta\",\"text\":\"forty characters of streamed answer text\"}}\n\n"))
+	}, `{"model":"m","stream":true}`, 0)
+
+	if prompt.Int64 != 100 || completion.Int64 < 10 || total.Int64 != prompt.Int64+completion.Int64 {
+		t.Errorf("prompt=%v completion=%v total=%v, want 100 plus the estimated output",
+			prompt, completion, total)
+	}
+}
+
+// A client reading slowly is not the upstream going quiet: the timeout covers
+// only the wait on the upstream.
+func TestASlowReaderIsNotAnUpstreamTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		for range 4 {
+			w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"))
+			w.(http.Flusher).Flush()
+			time.Sleep(20 * time.Millisecond)
+		}
+		w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	harness := newProxyHarness(t)
+	upstream := models.UpstreamRow{
+		ID: 1, Name: "channel", BaseURL: server.URL, TimeoutSeconds: 0.2,
+		ExtraHeaders: "{}", AutoWeightEnabled: 1, Enabled: 1, Weight: 100,
+	}
+	harness.registerUpstream(t, &upstream)
+	requestCtx := testRequestContext()
+	prepared, err := PrepareRequest(http.Header{}, &upstream, requestCtx.Method,
+		requestCtx.Path, "", nil, []byte(`{"model":"m","stream":true}`), requestCtx.LogBodyMaxBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := ProxyRequest(context.Background(), harness.deps, testPolicy(), &upstream,
+		requestCtx, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	buffer := make([]byte, 64)
+	for {
+		_, err := response.Body.Read(buffer)
+		if err != nil {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	response.Body.Close()
+	harness.waitForLogs(t, 1)
+
+	var status int64
+	if err := harness.database.QueryRow(`SELECT status_code FROM request_logs WHERE id = 1`).
+		Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != 200 {
+		t.Errorf("status = %d, want 200: the upstream never stalled", status)
 	}
 }
