@@ -272,11 +272,13 @@ func TestForwardedAddressesAreParsedAndAlwaysTreatedAsRemote(t *testing.T) {
 		t.Errorf("client address = %v, want the peer address rather than its own claim", client.Addr)
 	}
 
-	// Only the first entry of a chain is honored.
+	// Only the last entry of a chain is honored: it is the one the proxy wrote.
+	// A proxy that appends leaves the first to the caller, who could name a
+	// fresh address per attempt.
 	chained := requestWithHeaders(map[string]string{"x-forwarded-for": "203.0.113.7, 198.51.100.4"})
 	chained.RemoteAddr = "10.0.0.1:5000"
-	if got := adminClient(chained, "x-forwarded-for").Addr; got != netip.MustParseAddr("203.0.113.7") {
-		t.Errorf("forwarded address = %v, want the first entry of the chain", got)
+	if got := adminClient(chained, "x-forwarded-for").Addr; got != netip.MustParseAddr("198.51.100.4") {
+		t.Errorf("forwarded address = %v, want the last entry of the chain", got)
 	}
 
 	// Without a configured header the peer address decides, so a real loopback

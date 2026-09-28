@@ -216,3 +216,25 @@ func TestHandlerServesImagesButNoListingsOrPartialFiles(t *testing.T) {
 		}
 	}
 }
+
+// Content save could not recognise is stored as .bin. Sniffed, HTML there was
+// served as text/html from the console's origin; it is now a sandboxed
+// download.
+func TestUnrecognisedContentIsServedAsASandboxedDownload(t *testing.T) {
+	store := testStore(t, true)
+	html := base64.StdEncoding.EncodeToString([]byte("<html><script>alert(1)</script></html>"))
+	rewritten := string(store.Rewrite([]byte(`{"data":[{"b64_json":"` + html + `"}]}`)))
+	url := regexp.MustCompile(`/images/2026-09-23/[0-9a-f]{32}\.bin`).FindString(rewritten)
+	if url == "" {
+		t.Fatalf("no .bin saved: %s", rewritten)
+	}
+
+	recorder := httptest.NewRecorder()
+	store.Handler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, url, nil))
+	headers := recorder.Header()
+	if headers.Get("content-type") != "application/octet-stream" ||
+		headers.Get("content-disposition") != "attachment" ||
+		headers.Get("content-security-policy") != "sandbox" {
+		t.Errorf("headers = %v, want a sandboxed octet-stream attachment", headers)
+	}
+}

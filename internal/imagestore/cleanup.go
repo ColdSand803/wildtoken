@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -176,6 +177,25 @@ func (s *Store) Handler() http.Handler {
 			// A file never changes once written; its name is its version.
 			w.Header().Set("cache-control", "public, max-age=31536000, immutable")
 			w.Header().Set("x-content-type-options", "nosniff")
+			// The type is named here rather than sniffed. With no mime table in
+			// the image, a .bin holding HTML was served as text/html from the
+			// console's origin, where its script could read the admin token.
+			// The sandbox keeps anything that does run away from that origin.
+			w.Header().Set("content-security-policy", "sandbox")
+			contentType, known := servedTypes[path.Ext(r.URL.Path)]
+			if !known {
+				contentType = "application/octet-stream"
+				w.Header().Set("content-disposition", "attachment")
+			}
+			w.Header().Set("content-type", contentType)
 			files.ServeHTTP(w, r)
 		}))
+}
+
+// servedTypes are the formats save recognises by their signature.
+var servedTypes = map[string]string{
+	".png":  "image/png",
+	".jpg":  "image/jpeg",
+	".webp": "image/webp",
+	".gif":  "image/gif",
 }

@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -239,6 +240,8 @@ func openDatabase(ctx context.Context, settings config.DatabaseSettings) (*sql.D
 	if err != nil {
 		return nil, err
 	}
+	databasePath, _, _ := strings.Cut(dsn, "?")
+	restrictDatabaseFiles(databasePath)
 
 	database, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -252,6 +255,29 @@ func openDatabase(ctx context.Context, settings config.DatabaseSettings) (*sql.D
 		return nil, fmt.Errorf("connect to database: %w", err)
 	}
 	return database, nil
+}
+
+// restrictDatabaseFiles keeps the database readable by its owner alone. It
+// holds every channel's API key and every token in the clear; left to the
+// umask it was 0644, open to any local user. A new file is created 0600, and
+// SQLite gives the journal files it adds the main file's mode; ones already
+// there lose their group and world access.
+func restrictDatabaseFiles(path string) {
+	if path == "" || strings.HasPrefix(path, ":memory:") || strings.HasPrefix(path, "file:") {
+		return
+	}
+	if file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600); err == nil {
+		file.Close()
+	}
+	for _, name := range []string{path, path + "-wal", path + "-shm", path + "-journal"} {
+		info, err := os.Stat(name)
+		if err != nil || info.Mode().Perm()&0o077 == 0 {
+			continue
+		}
+		if err := os.Chmod(name, info.Mode().Perm()&0o700); err != nil {
+			slog.Warn("could not restrict database file permissions", "path", name, "error", err)
+		}
+	}
 }
 
 // sqliteDSN converts the configured sqlx-style URL into the form the pure-Go
@@ -296,6 +322,26 @@ func sqliteDSN(settings config.DatabaseSettings) (string, error) {
 // is a channel leading the gateway somewhere it was not configured to go.
 const maxUpstreamRedirects = 3
 
+// guardRedirect keeps a channel's credentials on the host they were sent to.
+//
+// Go drops Authorization and Cookie on a redirect to another host, but not
+// x-api-key or a credential an override put in a header of its own: those
+// followed the redirect wherever it pointed. A downgrade to plain HTTP is
+// refused, since it would carry the rest of the request in the clear.
+func guardRedirect(req, original *http.Request) error {
+	if original.URL.Scheme == "https" && req.URL.Scheme != "https" {
+		return fmt.Errorf("upstream redirected from https to %s", req.URL.Scheme)
+	}
+	if req.URL.Host != original.URL.Host {
+		for name := range req.Header {
+			if proxy.IsSensitiveHeaderName(name) {
+				req.Header.Del(name)
+			}
+		}
+	}
+	return nil
+}
+
 func newHTTPClient(runtime func() models.RuntimeSettings) *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.MaxIdleConnsPerHost = 20
@@ -325,7 +371,7 @@ func newHTTPClient(runtime func() models.RuntimeSettings) *http.Client {
 			if len(via) >= maxUpstreamRedirects {
 				return fmt.Errorf("upstream redirected more than %d times", maxUpstreamRedirects)
 			}
-			return nil
+			return guardRedirect(req, via[0])
 		},
 		// Per-request deadlines carry the real timeout, because a streaming
 		// response legitimately outlives any client-wide limit.
