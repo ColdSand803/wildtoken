@@ -1546,3 +1546,13 @@ html[data-theme="gojo"] ::-webkit-scrollbar-corner {
     transition: none !important;
   }
 }
+
+/* 本包的导航不用轨道图标：选中态是 ::before 那根小竖条，编号由 ::after 给出。
+   基础样式给 .nav-link::before 设了 background-color: currentColor 加逐视图的
+   mask-image，本包把 ::before 挪作竖条用却没有清掉 mask，于是底色整块画出来，
+   在竖排里就是一个实色方块（移动端那条顶边同理，它只改尺寸不改 mask）。
+   这里在文件末尾覆盖即可：本包对 ::before 的规则与基础规则特异性相同。 */
+html[data-theme="gojo"] .nav-link::before {
+  mask-image: none;
+  -webkit-mask-image: none;
+}

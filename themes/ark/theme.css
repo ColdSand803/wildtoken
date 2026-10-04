@@ -1189,3 +1189,13 @@ html[data-theme="ark"] .live-indicator:not([hidden]) .live-dot {
     animation: none;
   }
 }
+
+/* 本包的导航不用轨道图标：编号由 .nav-link::after 给出，选中态靠边框和左侧实录条。
+   基础样式给 .nav-link::before 设了 background-color: currentColor 加逐视图的
+   mask-image，本包不接图标就必须把 mask 清掉——否则那层底色会整块画出来，
+   在竖排里就是一个实色方块（移动端底栏那条顶边同理，它用的是 background 简写，
+   不改尺寸）。放在文件末尾即可覆盖：主体规则与基础规则特异性相同。 */
+html[data-theme="ark"] .nav-link::before {
+  mask-image: none;
+  -webkit-mask-image: none;
+}
