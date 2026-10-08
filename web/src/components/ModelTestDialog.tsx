@@ -92,7 +92,7 @@ export function ModelTestDialog({
   const [result, setResult] = useState<ModelTestResult | null>(null);
   const [sending, setSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const dialogRef = useDialog(open);
+  const dialogRef = useDialog(open, onClose);
   const toast = useToast();
   /* 弹窗常驻不卸载，发出去的请求也不会因为关窗而作废。每次打开换一个会话号，
      回来的结果对不上号就丢：测 A 渠道时关窗去测 B，A 的结果和 prompt 会落进
