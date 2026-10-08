@@ -26,16 +26,34 @@ import type {
 
 const ADMIN_TOKEN_KEY = "wildtoken_admin_token";
 
+/* 站点存储被禁用时，碰 localStorage 本身就抛错，控制台一启动就白屏。退到
+   内存里：这次会话照常用，只是刷新后要重新登录。 */
+let memoryToken = "";
+
 export function getAdminToken(): string {
-  return localStorage.getItem(ADMIN_TOKEN_KEY) ?? "";
+  try {
+    return localStorage.getItem(ADMIN_TOKEN_KEY) ?? "";
+  } catch {
+    return memoryToken;
+  }
 }
 
 export function setAdminToken(token: string): void {
-  localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  memoryToken = token;
+  try {
+    localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  } catch {
+    // 见 memoryToken。
+  }
 }
 
 export function clearAdminToken(): void {
-  localStorage.removeItem(ADMIN_TOKEN_KEY);
+  memoryToken = "";
+  try {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
+  } catch {
+    // 见 memoryToken。
+  }
 }
 
 /** 401 时抛这个，让调用方能弹出登录框而不是显示一条普通错误。 */
@@ -60,7 +78,22 @@ export class HTTPError extends Error {
   constructor(message: string, public readonly status: number) { super(message); this.name = "HTTPError"; }
 }
 
-export async function rawApi(path: string, init: RequestInit = {}): Promise<Response> {
+/**
+ * 用 token 发出的请求被拒：令牌还是这把才清掉并广播弹登录框。事件流不走
+ * send()，也要走这里——否则它拿失效的令牌静默重连，每次都在服务端记一次登录
+ * 失败。已经换了新令牌的话什么都不做，下一次请求自然用上新的。
+ */
+export function rejectAdminToken(token: string, message: string): void {
+  if (getAdminToken() !== token) return;
+  clearAdminToken();
+  reportUnauthorized(message);
+}
+
+/**
+ * 发请求、带令牌、把非 2xx 变成异常。返回原始 Response，读法由调用方定——
+ * JSON 走 api()，事件流由调用方自己逐块读。
+ */
+export async function send(path: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);
   if (init.body && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
@@ -71,6 +104,13 @@ export async function rawApi(path: string, init: RequestInit = {}): Promise<Resp
   const response = await fetch(path, { ...init, headers });
 
   if (!response.ok) {
+    /* 令牌在请求路上被换过（重新登录、轮换），这个 401 说的是旧令牌。照它清
+       存储会把新令牌一起清掉、登录框再弹一次。401 在鉴权处就拒了，请求没执行
+       过，拿当前令牌重发是安全的。 */
+    if (response.status === 401) {
+      const current = getAdminToken();
+      if (current && current !== token) return send(path, init);
+    }
     let message = `${response.status} ${response.statusText}`;
     try {
       const data = await response.json();
@@ -89,7 +129,7 @@ export async function rawApi(path: string, init: RequestInit = {}): Promise<Resp
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await rawApi(path, init);
+  const response = await send(path, init);
   if (response.status === 204) return null as T;
   return (await response.json()) as T;
 }
@@ -121,11 +161,20 @@ export function getUpstream(id: number): Promise<Upstream> {
   return api<Upstream>(`/api/admin/upstreams/${id}`);
 }
 
-export function testUpstream(id: number, path = "/v1/models"): Promise<unknown> {
-  return api<unknown>(`/api/admin/upstreams/${id}/test`, {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
+/**
+ * 测连接。和模型测试一样，上游不通或报错也回 200，成败看 ok；不看的话
+ * Key 错、地址不通的渠道也提示「测试连接成功」。
+ */
+export async function testUpstream(id: number, path = "/v1/models"): Promise<void> {
+  const result = await api<{ ok: boolean; status_code: number | null; message?: string; preview?: string }>(
+    `/api/admin/upstreams/${id}/test`,
+    { method: "POST", body: JSON.stringify({ path }) },
+  );
+  if (result.ok) return;
+  const detail = result.message || result.preview?.slice(0, 200) || "";
+  throw new Error(
+    result.status_code === null ? detail || "上游不可达" : `HTTP ${result.status_code}${detail ? `：${detail}` : ""}`,
+  );
 }
 
 export function fetchUpstreamModels(id: number): Promise<{ models: string[] }> {
@@ -211,14 +260,22 @@ export function saveSettings(payload: RuntimeSettings): Promise<RuntimeSettings>
       proxy_url: payload.proxy_url,
       load_balance_strategy: payload.load_balance_strategy,
       default_upstream_timeout_seconds: payload.default_upstream_timeout_seconds,
+      image_storage_max_mb: payload.image_storage_max_mb,
+      dashboard_multiplier: payload.dashboard_multiplier,
       revision: payload.revision,
     }),
   });
 }
 
-/** 轮换管理员令牌。新值只在响应里出现一次。 */
-export function rotateAdminToken(): Promise<{ token: string }> {
-  return api<{ token: string }>("/api/admin/settings/admin-token/rotate", { method: "POST" });
+/**
+ * 更换管理员令牌。新值由管理员自己定，和旧控制台一致；后端要显式确认，
+ * 成功回 204，不回令牌。
+ */
+export function rotateAdminToken(token: string): Promise<null> {
+  return api<null>("/api/admin/settings/admin-token/rotate", {
+    method: "POST",
+    body: JSON.stringify({ confirm: true, token }),
+  });
 }
 
 export function getSystemInfo(): Promise<SystemInfo> {
@@ -273,16 +330,30 @@ export function fetchDashboard(
   top: TopStats;
   usage: TokenUsage;
   recent: RequestLogPage;
+  multiplier: number;
 }> {
   const dates =
     range === "custom" && custom
       ? `&start_date=${encodeURIComponent(custom.start)}&end_date=${encodeURIComponent(custom.end)}`
       : "";
+  const zone = tzOffsetParam();
   return Promise.all([
-    api<LogOverview>(`/api/admin/logs/overview?range=${range === "default" ? "30d" : range}${dates}`),
-    api<TopStats>(`/api/admin/logs/top?window=${range}&limit=5${dates}`),
-    api<TokenUsage>(`/api/admin/logs/token-usage?range=${range}${dates}`),
-  ]).then(async ([overview, top, usage]) => ({ overview, top, usage, recent: await listLogs({ limit: 20, status: "error", start: overview.resolved_start ?? undefined, end: overview.resolved_end ?? undefined }) }));
+    api<LogOverview>(`/api/admin/logs/overview?range=${range === "default" ? "30d" : range}${dates}${zone}`),
+    api<TopStats>(`/api/admin/logs/top?window=${range}&limit=5${dates}${zone}`),
+    api<TokenUsage>(`/api/admin/logs/token-usage?range=${range}${dates}${zone}`),
+    getSettings(),
+  ]).then(async ([overview, top, usage, settings]) => ({
+    overview,
+    top,
+    usage,
+    recent: await listLogs({
+      limit: 20,
+      status: "error",
+      start: overview.resolved_start ?? undefined,
+      end: overview.resolved_end ?? undefined,
+    }),
+    multiplier: settings.dashboard_multiplier,
+  }));
 }
 
 export function listTokens(): Promise<APIToken[]> {
@@ -368,8 +439,18 @@ export function fetchUpstreamStats(): Promise<Record<string, UpstreamStats>> {
 /** 24 小时逐小时健康，同样是一次拿全部。 */
 export function fetchUpstreamHealth(): Promise<Record<string, UpstreamHealth>> {
   return api<{ entries: Record<string, UpstreamHealth> }>(
-    "/api/admin/upstreams/health?hours=24",
+    `/api/admin/upstreams/health?hours=24${tzOffsetParam()}`,
   ).then((payload) => payload.entries ?? {});
+}
+
+/**
+ * 浏览器时区，UTC 以东的分钟数（东八区 480）。
+ *
+ * 看板的「今天」、自定义日期和分桶边界都按操作者的时区切。不带的话按服务器
+ * 时区：容器跑在 UTC 时，东八区早上 8 点才换日。
+ */
+function tzOffsetParam(): string {
+  return `&tz_offset=${-new Date().getTimezoneOffset()}`;
 }
 
 /** 导出文档。后端返回的是带 kind/version 的包装，直接存成文件。 */

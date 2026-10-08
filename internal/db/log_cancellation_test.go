@@ -137,7 +137,7 @@ func TestCancelledAggregationsReleaseTheirConnection(t *testing.T) {
 		run  func(ctx context.Context) error
 	}{
 		{"overview", func(ctx context.Context) error {
-			_, err := LogOverview(ctx, database, LogTopWindowAll, "", "")
+			_, err := LogOverview(ctx, database, LogTopWindowAll, "", "", 0)
 			return err
 		}},
 		{"top stats", func(ctx context.Context) error {
@@ -149,7 +149,7 @@ func TestCancelledAggregationsReleaseTheirConnection(t *testing.T) {
 			return err
 		}},
 		{"upstream health", func(ctx context.Context) error {
-			_, err := UpstreamHealthHistory(ctx, database, 24, nil)
+			_, err := UpstreamHealthHistory(ctx, database, 24, 0, nil)
 			return err
 		}},
 	}

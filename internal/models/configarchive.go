@@ -165,7 +165,10 @@ type ConfigArchiveSettings struct {
 	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
 	ProxyEnabled                      bool   `json:"proxy_enabled"`
 	ProxyURL                          string `json:"proxy_url"`
-	LoadBalanceStrategy               string `json:"load_balance_strategy"`
+	LoadBalanceStrategy               string  `json:"load_balance_strategy"`
+	DefaultUpstreamTimeoutSeconds     int64   `json:"default_upstream_timeout_seconds"`
+	ImageStorageMaxMB                 int64   `json:"image_storage_max_mb"`
+	DashboardMultiplier               float64 `json:"dashboard_multiplier"`
 }
 
 // ConfigArchivePayload is the archive's contents — the part that is encrypted

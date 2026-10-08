@@ -235,3 +235,14 @@ func TestNameLengthIsMeasuredAfterTrimmingLikeStorageDoes(t *testing.T) {
 		t.Error("a whitespace-only name was accepted")
 	}
 }
+
+// 8.2 × 1e6 is 8199999.999… in floating point; truncated, the limit was one
+// token short and showed back as a raw count.
+func TestADecimalLimitIsRoundedNotTruncated(t *testing.T) {
+	for expression, want := range map[string]int64{"8.2M": 8_200_000, "8.2B": 8_200_000_000} {
+		limit, err := ParseQuotaExpression(expression)
+		if err != nil || limit == nil || *limit != want {
+			t.Errorf("%s = %v (%v), want %d", expression, limit, err, want)
+		}
+	}
+}

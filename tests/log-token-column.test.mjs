@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { exactTokens, firstTokenTone, formatCount, formatSeconds } from "../web/src/logFormat.ts";
+import { exactTokens, firstTokenTone, formatCount, formatDuration, formatSeconds } from "../web/src/logFormat.ts";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 const source = read("web/src/pages/LogsPage.tsx");
@@ -126,4 +126,13 @@ test("旧的三列类名没有残留", () => {
   ]) {
     assert.doesNotMatch(read(file), /token-total|token-cached|token-reasoning/, file);
   }
+});
+
+/* 先按显示精度取整再分档：否则 59.96 秒显示成 60.0 秒，119.5 秒拆成 1 分 60 秒。 */
+test("详情耗时在进位边界上不出现 60", () => {
+  assert.equal(formatDuration(59_940), "59.9 秒");
+  assert.equal(formatDuration(59_960), "1 分");
+  assert.equal(formatDuration(119_499), "1 分 59 秒");
+  assert.equal(formatDuration(119_500), "2 分");
+  assert.equal(formatDuration(999.6), "1.0 秒");
 });

@@ -91,6 +91,7 @@ func TestUpdateRuntimeSettingsUsesRevisionCompareAndSwap(t *testing.T) {
 		AutoWeightSuccessIncrement:        8,
 		AutoWeightRecoveryIncrement:       12,
 		AutoWeightRecoveryIntervalSeconds: 90,
+		DashboardMultiplier:               1.5,
 		Revision:                          1,
 	}
 
@@ -103,7 +104,8 @@ func TestUpdateRuntimeSettingsUsesRevisionCompareAndSwap(t *testing.T) {
 		updated.AutoWeightFailurePenalty != 25 ||
 		updated.AutoWeightSuccessIncrement != 8 ||
 		updated.AutoWeightRecoveryIncrement != 12 ||
-		updated.AutoWeightRecoveryIntervalSeconds != 90 {
+		updated.AutoWeightRecoveryIntervalSeconds != 90 ||
+		updated.DashboardMultiplier != 1.5 {
 		t.Errorf("unexpected updated settings: %+v", updated)
 	}
 
@@ -316,6 +318,73 @@ func TestAnOlderDatabaseGainsThePlaintextColumn(t *testing.T) {
 	}
 	if fetched.Token != created.Token {
 		t.Errorf("token after upgrade = %q, want %q", fetched.Token, created.Token)
+	}
+}
+
+// Repair runs whenever a row lacks a digest. Only those rows hold plaintext: a
+// migrated row's token column holds its digest, and hashing that a second time
+// broke every existing token at once.
+func TestRepairingOneLegacyRowLeavesTheMigratedOnesAlone(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:"+t.Name()+"?mode=memory&cache=shared")
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	t.Cleanup(func() { db.Close() })
+
+	// The pre-hashing table, as an old database has it.
+	if _, err := db.Exec(`CREATE TABLE api_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        token TEXT NOT NULL UNIQUE,
+        enabled INTEGER NOT NULL DEFAULT 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO api_tokens (name, token) VALUES ('first', 'first-plaintext')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLegacyTokenStorage(ctx, db); err != nil {
+		t.Fatalf("first migration: %v", err)
+	}
+
+	// A row that arrives without a digest, as an older binary writes one.
+	if _, err := db.Exec(`INSERT INTO api_tokens (name, token) VALUES ('late', 'late-plaintext')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLegacyTokenStorage(ctx, db); err != nil {
+		t.Fatalf("repair: %v", err)
+	}
+
+	for name, plaintext := range map[string]string{"first": "first-plaintext", "late": "late-plaintext"} {
+		var digest string
+		if err := db.QueryRow("SELECT token_hash FROM api_tokens WHERE name = ?", name).
+			Scan(&digest); err != nil {
+			t.Fatal(err)
+		}
+		if digest != TokenDigest(plaintext) {
+			t.Errorf("%s no longer authenticates: its digest was rewritten", name)
+		}
+	}
+}
+
+// An operator who deleted every starting template does not want them back at
+// the next restart.
+func TestDeletedPromptTemplatesStayDeleted(t *testing.T) {
+	ctx := context.Background()
+	db := memoryDB(t)
+	if _, err := db.Exec("DELETE FROM model_test_prompt_templates"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Init(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.QueryRow("SELECT COUNT(*) FROM model_test_prompt_templates").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("restart re-seeded %d deleted templates", count)
 	}
 }
 
@@ -975,12 +1044,13 @@ func TestUpstreamRoundTripsItsJSONColumns(t *testing.T) {
 	input.EffortMappings = map[string]string{"max": "xhigh"}
 	input.ExtraHeaders = map[string]string{"x-tenant": "acme"}
 
-	created, err := CreateUpstream(ctx, db, &input, 300)
+	created, err := CreateUpstream(ctx, db, &input)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if created.TimeoutSeconds != 300 {
-		t.Errorf("timeout = %v, want the default 300", created.TimeoutSeconds)
+	// 0 is the service default, resolved per request.
+	if created.TimeoutSeconds != 0 {
+		t.Errorf("timeout = %v, want 0 for the service default", created.TimeoutSeconds)
 	}
 	if len(created.ModelNames) != 2 || created.ModelMappings["alias"] != "gpt-4o" ||
 		created.ExtraHeaders["x-tenant"] != "acme" ||
@@ -1030,7 +1100,7 @@ func TestUpstreamRateLimitRoundTrips(t *testing.T) {
 
 	// The stored shape is the trimmed expression, so the console echoes back
 	// exactly what the operator wrote.
-	created, err := CreateUpstream(ctx, db, &input, 300)
+	created, err := CreateUpstream(ctx, db, &input)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -1082,7 +1152,7 @@ func TestDeletingAGroupRehomesTheChannelsItWasTheLastGroupOf(t *testing.T) {
 	only.Name = "only-in-team-a"
 	only.BaseURL = "https://api.example.com"
 	only.GroupIDs = []int64{group.ID}
-	onlyCreated, err := CreateUpstream(ctx, db, &only, 300)
+	onlyCreated, err := CreateUpstream(ctx, db, &only)
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
@@ -1091,7 +1161,7 @@ func TestDeletingAGroupRehomesTheChannelsItWasTheLastGroupOf(t *testing.T) {
 	shared.Name = "in-both"
 	shared.BaseURL = "https://api.example.com"
 	shared.GroupIDs = []int64{group.ID, models.DefaultGroupID}
-	sharedCreated, err := CreateUpstream(ctx, db, &shared, 300)
+	sharedCreated, err := CreateUpstream(ctx, db, &shared)
 	if err != nil {
 		t.Fatalf("create shared channel: %v", err)
 	}

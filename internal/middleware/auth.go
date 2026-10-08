@@ -4,6 +4,7 @@ package middleware
 import (
 	"context"
 	"database/sql"
+
 	"errors"
 	"fmt"
 	"net"
@@ -123,8 +124,12 @@ func adminClient(r *http.Request, clientIPHeader string) authstate.Client {
 	if clientIPHeader != "" && couldBeProxy(peer) {
 		forwarded := r.Header.Get(clientIPHeader)
 		if forwarded != "" {
-			first, _, _ := strings.Cut(forwarded, ",")
-			if addr, ok := parseForwardedAddr(first); ok {
+			// The last entry is the one the proxy itself wrote. A proxy that
+			// appends, as nginx's $proxy_add_x_forwarded_for does, leaves the
+			// first to the caller, who could then name a new address per
+			// attempt and never be held back.
+			last := forwarded[strings.LastIndex(forwarded, ",")+1:]
+			if addr, ok := parseForwardedAddr(last); ok {
 				return authstate.Client{Kind: authstate.ClientRemote, Addr: addr}
 			}
 		}

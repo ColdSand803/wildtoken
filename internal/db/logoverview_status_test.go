@@ -30,7 +30,7 @@ func TestLogOverviewErrorDefinitionMatchesStatusFilter(t *testing.T) {
 		t.Fatalf("seed logs: %v", err)
 	}
 
-	overview, err := LogOverview(ctx, database, LogTopWindowOneDay, "", "")
+	overview, err := LogOverview(ctx, database, LogTopWindowOneDay, "", "", 0)
 	if err != nil {
 		t.Fatalf("overview: %v", err)
 	}

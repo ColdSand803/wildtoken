@@ -235,13 +235,16 @@ html[data-density="compact"] button:not(.nav-link):not(.status-switch):not(.toas
   display: none;
 }
 
+.log-table.col-hide-time [data-col="time"],
 .log-table.col-hide-channel [data-col="channel"],
 .log-table.col-hide-token [data-col="token"],
 .log-table.col-hide-client [data-col="client"],
 .log-table.col-hide-model [data-col="model"],
 .log-table.col-hide-reasoning [data-col="reasoning"],
+.log-table.col-hide-status [data-col="status"],
 .log-table.col-hide-duration [data-col="duration"],
-.log-table.col-hide-tokens [data-col="tokens"] {
+.log-table.col-hide-tokens [data-col="tokens"],
+.log-table.col-hide-detail [data-col="detail"] {
   display: none;
 }
 

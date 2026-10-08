@@ -78,12 +78,15 @@ function tsKeys(source, marker, { after = "{" } = {}) {
     }
     // 逗号和分号都是一项的结束：对象字面量用逗号，类型签名用分号。
     if (level === 0 && (char === "," || char === ";" || char === "\n")) {
+      // 没遇到冒号就结束的一项是简写属性（{ confirm: true, token }），它也是一个键。
+      if (atKeyPosition && /^[a-z_][a-z0-9_]*$/i.test(token.trim())) keys.add(token.trim());
       atKeyPosition = true;
       token = "";
       continue;
     }
     if (atKeyPosition) token += char;
   }
+  if (atKeyPosition && /^[a-z_][a-z0-9_]*$/i.test(token.trim())) keys.add(token.trim());
   return keys;
 }
 
@@ -130,6 +133,8 @@ const contracts = [
     fields: goFields(models.upstream, "UpstreamIn"),
     // clear_api_key 在 UpstreamUpdateIn 上，创建时后端也收。
     extraAllowed: new Set(["clear_api_key"]),
+    // archived 只有撤销删除时带；表单不管归档，不带就是不改。
+    allowMissing: new Set(["archived"]),
   },
   {
     name: "令牌创建 APITokenIn",
@@ -172,6 +177,12 @@ const contracts = [
     // 请求体是直接透传的 body 参数，键在类型签名里。
     keys: tsKeys(api, "export function testUpstreamModel", { after: "body: {" }),
     fields: goFields(models.settings, "ModelTestRequest"),
+  },
+  {
+    // 迁到 React 时这里发成了空请求体，严格解码回 400，控制台一次都换不成。
+    name: "更换管理员令牌 AdminTokenRotateIn",
+    keys: tsKeys(api, "export function rotateAdminToken", { after: "JSON.stringify({" }),
+    fields: goFields(models.settings, "AdminTokenRotateIn"),
   },
 ];
 

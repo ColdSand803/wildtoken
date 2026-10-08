@@ -73,7 +73,7 @@ func createChannelIn(t *testing.T, database *sql.DB, name string, groupIDs []int
 		Name: name, BaseURL: "https://" + name + ".example/v1", APIKey: &key,
 		ModelNames: []string{"gpt-4o"}, Priority: 100, Weight: 100, Enabled: true,
 		TimeoutSeconds: &timeout, GroupIDs: groupIDs,
-	}, 300)
+	})
 	if err != nil {
 		t.Fatalf("create channel %s: %v", name, err)
 	}
@@ -623,7 +623,7 @@ func TestSettingsAreAppliedAgainstTheTargetsOwnRevision(t *testing.T) {
 		MaxRetries: 3, SameUpstreamRetryIntervalMs: 500,
 		AutoWeightFailurePenalty: 20, AutoWeightSuccessIncrement: 5,
 		AutoWeightRecoveryIncrement: 10, AutoWeightRecoveryIntervalSeconds: 60,
-		LoadBalanceStrategy: models.LoadBalanceLeastLatency, Revision: 1,
+		LoadBalanceStrategy: models.LoadBalanceLeastLatency, DashboardMultiplier: 1, Revision: 1,
 	}); err != nil {
 		t.Fatalf("update source settings: %v", err)
 	}
@@ -646,7 +646,7 @@ func TestSettingsAreAppliedAgainstTheTargetsOwnRevision(t *testing.T) {
 				MaxRetries: 1, SameUpstreamRetryIntervalMs: 1000,
 				AutoWeightFailurePenalty: 20, AutoWeightSuccessIncrement: 5,
 				AutoWeightRecoveryIncrement: 10, AutoWeightRecoveryIntervalSeconds: 60,
-				LoadBalanceStrategy: models.LoadBalanceWeighted, Revision: current.Revision,
+				LoadBalanceStrategy: models.LoadBalanceWeighted, DashboardMultiplier: 1, Revision: current.Revision,
 			}); err != nil {
 			t.Fatalf("bump target revision: %v", err)
 		}
@@ -802,7 +802,7 @@ func TestEffortMappingsSurviveAMigration(t *testing.T) {
 		ModelNames: []string{"gpt-4o"}, Priority: 100, Weight: 100, Enabled: true,
 		EffortMappings: map[string]string{"high": "medium", "medium": "low"},
 		TimeoutSeconds: &timeout, GroupIDs: []int64{models.DefaultGroupID},
-	}, 300); err != nil {
+	}); err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
 
@@ -854,7 +854,7 @@ func TestAnArchiveWithoutEffortMappingsLeavesTheTargetsAlone(t *testing.T) {
 		ModelNames: []string{"gpt-4o"}, Priority: 100, Weight: 100, Enabled: true,
 		EffortMappings: map[string]string{"high": "low"},
 		TimeoutSeconds: &timeout, GroupIDs: []int64{models.DefaultGroupID},
-	}, 300); err != nil {
+	}); err != nil {
 		t.Fatalf("create target channel: %v", err)
 	}
 
@@ -895,7 +895,7 @@ func TestAnEmptyEffortMappingsObjectClearsTheTargets(t *testing.T) {
 		ModelNames: []string{"gpt-4o"}, Priority: 100, Weight: 100, Enabled: true,
 		EffortMappings: map[string]string{"high": "low"},
 		TimeoutSeconds: &timeout, GroupIDs: []int64{models.DefaultGroupID},
-	}, 300); err != nil {
+	}); err != nil {
 		t.Fatalf("create target channel: %v", err)
 	}
 

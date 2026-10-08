@@ -37,11 +37,21 @@ const SEALED_TITLE = "这个令牌创建于明文保存启用之前，完整值�
 function QuotaCell({ token }: { token: APIToken }) {
   const quota = token.quota;
   const used = Number(quota.used_tokens) || 0;
-  const rateNote = token.rate_limit ? (
-    <span className="muted quota-rate-note" title={`限速 ${token.rate_limit}`}>
-      {token.rate_limit}
-    </span>
-  ) : null;
+  const allowed = token.allowed_models ?? [];
+  const rateNote = (
+    <>
+      {token.rate_limit ? (
+        <span className="muted quota-rate-note" title={`限速 ${token.rate_limit}`}>
+          {token.rate_limit}
+        </span>
+      ) : null}
+      {allowed.length > 0 ? (
+        <span className="muted quota-rate-note" title={`允许的模型：\n${allowed.join("\n")}`}>
+          {allowed.length} 个模型
+        </span>
+      ) : null}
+    </>
+  );
 
   if (quota.limit_tokens === null || quota.limit_tokens === undefined) {
     return (
@@ -130,14 +140,17 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
       .includes(q);
   });
 
-  async function mutate(id: number, run: () => Promise<APIToken>) {
+  /** 返回是否成功：错误在这里就报了，调用方据此决定还要不要报成功。 */
+  async function mutate(id: number, run: () => Promise<APIToken>): Promise<boolean> {
     setPending(id);
     try {
       const updated = await run();
       setTokens((list) => list.map((t) => (t.id === updated.id ? updated : t)));
+      return true;
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else toast(err instanceof Error ? err.message : String(err), { tone: "error" });
+      return false;
     } finally {
       setPending(null);
     }
@@ -147,12 +160,9 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
     const target = editing?.token;
     setSaving(true);
     try {
-      /* 更新不收 enabled：启用状态走独立的开关接口，发过去会被严格解码
-         拒掉整个请求（unknown field "enabled"）。新建才要带。 */
-      const { enabled: _enabled, ...updatePayload } = payload;
-      const saved = target
-        ? await updateToken(target.id, updatePayload)
-        : await createToken(payload);
+      /* 更新也带 enabled：编辑框里有这个开关，原先发送前把它剔掉，
+         改了开关提示已保存，令牌却照旧可用。 */
+      const saved = target ? await updateToken(target.id, payload) : await createToken(payload);
       setEditing(null);
       await reload();
       toast(`令牌 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
@@ -205,8 +215,9 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
       danger: false,
     });
     if (!ok) return;
-    await mutate(token.id, () => resetTokenUsage(token.id));
-    toast("已用额度已清零。", { tone: "ok" });
+    if (await mutate(token.id, () => resetTokenUsage(token.id))) {
+      toast("已用额度已清零。", { tone: "ok" });
+    }
   }
 
   function menuFor(token: APIToken): MenuEntry[] {

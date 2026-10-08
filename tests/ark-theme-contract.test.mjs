@@ -103,11 +103,14 @@ test("pre-paint boot clears the Ark root contract for other themes", () => {
   assert.equal(attributes.get("data-ark-depth"), undefined);
 });
 
-test("Ark primary actions are explicitly opted in, leaving utility controls neutral", () => {
+/* 主操作只认显式的 .primary（5639f9c）。以前是「所有按钮刷成主操作，再用
+   button:not(:where(...)) 白名单把导航、排序、分段控件摘出来」，漏登记一项就
+   多一块实心色块。现在不该再有那种全局规则。 */
+test("Ark paints only explicit primary actions as primary", () => {
   const css = read(ARK_CSS);
+  assert.doesNotMatch(css, /button:not\(:where\(/, "a global primary-action rule is back");
   assert.match(css, /html\[data-theme="ark"\] button\.primary\s*\{/);
   assert.match(css, /html\[data-theme="ark"\] button\.primary:hover\s*\{/);
-  assert.doesNotMatch(css, /button:not\(:where\(/);
 });
 
 test("Ark's shared button geometry does not override inline utility-control sizing or type", () => {

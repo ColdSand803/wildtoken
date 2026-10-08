@@ -427,7 +427,9 @@ html[data-theme="ark"] .view[data-view="upstreams"] > .panel::before { content: 
 html[data-theme="ark"] .view[data-view="logs"] > .panel::before { content: "03"; }
 html[data-theme="ark"] .view[data-view="tokens"] > .panel::before { content: "04"; }
 html[data-theme="ark"] .view[data-view="groups"] > .panel::before { content: "05"; }
-html[data-theme="ark"] .view[data-view="settings"] > .panel::before { content: "06"; }
+html[data-theme="ark"] .view[data-view="debug"] > .panel::before { content: "06"; }
+html[data-theme="ark"] .view[data-view="images"] > .panel::before { content: "07"; }
+html[data-theme="ark"] .view[data-view="settings"] > .panel::before { content: "08"; }
 
 html[data-theme="ark"] .view > .panel > .panel-head {
   align-items: end;
@@ -454,7 +456,9 @@ html[data-theme="ark"] .view[data-view="upstreams"] > .panel > .panel-head::befo
 html[data-theme="ark"] .view[data-view="logs"] > .panel > .panel-head::before { content: "03 / REQUEST ARCHIVE"; }
 html[data-theme="ark"] .view[data-view="tokens"] > .panel > .panel-head::before { content: "04 / ACCESS CONTROL"; }
 html[data-theme="ark"] .view[data-view="groups"] > .panel > .panel-head::before { content: "05 / ROUTING SCOPES"; }
-html[data-theme="ark"] .view[data-view="settings"] > .panel > .panel-head::before { content: "06 / CONSOLE CONFIG"; }
+html[data-theme="ark"] .view[data-view="debug"] > .panel > .panel-head::before { content: "06 / CHANNEL PROBE"; }
+html[data-theme="ark"] .view[data-view="images"] > .panel > .panel-head::before { content: "07 / IMAGE PROBE"; }
+html[data-theme="ark"] .view[data-view="settings"] > .panel > .panel-head::before { content: "08 / CONSOLE CONFIG"; }
 
 /* The label above is this theme's own, numbered to line up with the rail and
    the sector watermark. base.css gives every view header an .eyebrow saying
@@ -674,6 +678,14 @@ html[data-theme="ark"] .eyebrow,
 html[data-theme="ark"] .dashboard-card-meta,
 html[data-theme="ark"] .settings-local-tag {
   color: var(--ark-signal);
+}
+
+/* 排行名走 --font-mono，栈里没有中文字体，中文渠道名落到浏览器默认字体。
+   拉丁字符仍用 Fira Code，中文接 --font-sans 里同一组黑体。中文必须排在
+   通用族 monospace 前面，否则会被它先接走。 */
+html[data-theme="ark"] .dashboard-rank-name {
+  font-family: "Fira Code", "IBM Plex Mono", "SFMono-Regular", Consolas,
+    "Noto Sans SC", "Source Han Sans SC", "PingFang SC", "Microsoft YaHei", monospace;
 }
 
 html[data-theme="ark"] .settings-local-tag,

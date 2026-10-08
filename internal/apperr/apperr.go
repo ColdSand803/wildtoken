@@ -24,6 +24,7 @@ const (
 	// different: the request was well formed and the fix is a smaller body, not a
 	// corrected one.
 	KindTooLarge
+	KindGatewayTimeout
 )
 
 // AppError is the error type every handler returns.
@@ -35,14 +36,15 @@ type AppError struct {
 
 func (e *AppError) Error() string {
 	prefix := map[Kind]string{
-		KindNotFound:   "not found",
-		KindBadRequest: "bad request",
-		KindConflict:   "conflict",
-		KindUpstream:   "upstream error",
-		KindInternal:   "internal error",
-		KindDatabase:   "database error",
-		KindJSON:       "JSON error",
-		KindTooLarge:   "request too large",
+		KindNotFound:       "not found",
+		KindBadRequest:     "bad request",
+		KindConflict:       "conflict",
+		KindUpstream:       "upstream error",
+		KindInternal:       "internal error",
+		KindDatabase:       "database error",
+		KindJSON:           "JSON error",
+		KindTooLarge:       "request too large",
+		KindGatewayTimeout: "gateway timeout",
 	}[e.Kind]
 	if e.Err != nil && e.Msg == "" {
 		return fmt.Sprintf("%s: %v", prefix, e.Err)
@@ -58,6 +60,9 @@ func Conflict(msg string) *AppError   { return &AppError{Kind: KindConflict, Msg
 func Upstream(msg string) *AppError   { return &AppError{Kind: KindUpstream, Msg: msg} }
 func Internal(msg string) *AppError   { return &AppError{Kind: KindInternal, Msg: msg} }
 func TooLarge(msg string) *AppError   { return &AppError{Kind: KindTooLarge, Msg: msg} }
+
+// GatewayTimeout reports an upstream that did not answer in time.
+func GatewayTimeout(msg string) *AppError { return &AppError{Kind: KindGatewayTimeout, Msg: msg} }
 
 // Database wraps a driver failure; the detail stays in the log, not the response.
 func Database(err error) *AppError { return &AppError{Kind: KindDatabase, Err: err} }
@@ -79,6 +84,8 @@ func (e *AppError) StatusAndMessage() (int, string) {
 		return http.StatusBadGateway, e.Msg
 	case KindTooLarge:
 		return http.StatusRequestEntityTooLarge, e.Msg
+	case KindGatewayTimeout:
+		return http.StatusGatewayTimeout, e.Msg
 	case KindDatabase:
 		slog.Error("database error", "error", e.Err)
 		return http.StatusInternalServerError, "internal database error"

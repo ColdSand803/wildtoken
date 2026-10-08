@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchModelsPreview } from "../api";
 import { joinMappingLines, parseMappingLines } from "../mappingLines";
@@ -23,7 +23,8 @@ export interface UpstreamPayload {
   priority: number;
   weight: number;
   auto_weight_enabled: boolean;
-  timeout_seconds: number;
+  /** null 表示不指定：新建时后端按设置页的默认超时落库，编辑时保持原值。 */
+  timeout_seconds: number | null;
   enabled: boolean;
   extra_headers: Record<string, string>;
   rate_limit: string | null;
@@ -33,6 +34,15 @@ export interface UpstreamPayload {
 
 /** 一个渠道不选分组时归进这里。和后端的兜底一致。 */
 const DEFAULT_GROUP_ID = 1;
+
+/** 必填数字。留空不能悄悄换成 100：存下去的就不是表单上看到的值了。 */
+function requiredNumber(value: string, label: string): number {
+  const trimmed = value.trim();
+  if (trimmed === "") throw new Error(`${label}不能为空。`);
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) throw new Error(`${label}必须是数字。`);
+  return parsed;
+}
 
 /** 逗号或换行分隔的列表，去空去重。 */
 function splitList(value: string): string[] {
@@ -179,7 +189,8 @@ function emptyForm(): FormState {
     modelPrefixes: "",
     priority: "100",
     weight: "100",
-    timeoutSeconds: "300",
+    // 留空：新建渠道以设置页的默认上游超时为初始值，而不是写死 300。
+    timeoutSeconds: "",
     enabled: true,
     fixedWeight: false,
     extraHeaders: "",
@@ -202,7 +213,8 @@ function formFromUpstream(upstream: Upstream): FormState {
     modelPrefixes: upstream.model_prefixes.join(","),
     priority: String(upstream.priority),
     weight: String(upstream.weight),
-    timeoutSeconds: String(upstream.timeout_seconds),
+    // 存的 0 表示跟随默认值，显示成留空。
+    timeoutSeconds: upstream.timeout_seconds > 0 ? String(upstream.timeout_seconds) : "",
     enabled: upstream.enabled,
     fixedWeight: !upstream.auto_weight_enabled,
     extraHeaders: joinHeaderLines(upstream.extra_headers ?? {}),
@@ -227,11 +239,13 @@ function payloadFromForm(form: FormState): UpstreamPayload {
         ([key, value]): [string, string] => [key.toLowerCase(), value],
       ),
     ),
-    priority: Number(form.priority || 100),
-    weight: Number(form.weight || 100),
+    priority: requiredNumber(form.priority, "优先级"),
+    weight: requiredNumber(form.weight, "基础权重"),
     // UI 勾的是「固定权重」，后端要的是「自动权重」。
     auto_weight_enabled: !form.fixedWeight,
-    timeout_seconds: Number(form.timeoutSeconds || 300),
+    /* 留空发 0，按设置页的默认值走，默认值改了也跟着变。发 null 的话后端
+       保留原值：清空提示说用默认，存下去的还是旧数。 */
+    timeout_seconds: form.timeoutSeconds.trim() === "" ? 0 : Number(form.timeoutSeconds),
     enabled: form.enabled,
     extra_headers: parseHeaderLines(form.extraHeaders),
     rate_limit: form.rateLimit.trim() || null,
@@ -310,8 +324,18 @@ export function UpstreamDialog({
   const dialogRef = useDialog(open, onClose);
   const toast = useToast();
 
-  /* 每次打开都按当前渠道重置。不重置的话，关掉再开会留着上一个渠道的值。 */
+  /* 拉取模型的序号，结果回来时读的是最新的表单。 */
+  const fetchRequest = useRef(0);
+  const formRef = useRef(form);
+  formRef.current = form;
+
+  /* 每次打开都按当前渠道重置。不重置的话，关掉再开会留着上一个渠道的值。
+     在途的拉取一并作废：晚到的结果会带着上一个渠道的目录弹进这一个的选择器，
+     点「移除未返回」就删掉这个渠道的真实模型。 */
   useEffect(() => {
+    fetchRequest.current += 1;
+    setPicker(null);
+    setFetching(false);
     if (!open) return;
     setForm(upstream ? formFromUpstream(upstream) : emptyForm());
     // 配过高级项的渠道直接展开，否则那些值藏起来像丢了。
@@ -332,13 +356,17 @@ export function UpstreamDialog({
    * 把手动输入框里的模型名并进列表。
    *
    * 保存时也要先走一遍：框里还留着字就点保存，那些字应该算数，而不是被
-   * 悄悄丢掉。只收名字；映射有自己的文本框，写到这里的 `=>` 不认。
+   * 悄悄丢掉。只收名字；写了 `=>` 的是映射，报错而不是拆开——原先按空白拆，
+   * `a => b` 成了两个精确模型名，不带空格的整段被悄悄丢掉。
    */
   function commitManual(current: FormState): FormState {
+    if (current.manual.includes("=>")) {
+      throw new Error("「手动添加」只收模型名，映射请写到「模型映射」里。");
+    }
     const names = current.manual
       .split(/[\s,，]+/)
       .map((name) => name.trim())
-      .filter((name) => name && !name.includes("=>"));
+      .filter(Boolean);
     if (names.length === 0) return current;
     return {
       ...current,
@@ -348,31 +376,29 @@ export function UpstreamDialog({
   }
 
   function addManual() {
-    setForm((current) => {
-      const next = commitManual(current);
-      if (next === current) return current;
-      const added = next.modelNames.length - current.modelNames.length;
-      toast(added > 0 ? `已添加 ${added} 项，保存渠道后生效。` : "输入的模型名都已在列表中。", {
-        tone: added > 0 ? "ok" : "neutral",
-      });
-      return next;
+    let next: FormState;
+    try {
+      next = commitManual(form);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), { tone: "error" });
+      return;
+    }
+    if (next === form) return;
+    const added = next.modelNames.length - form.modelNames.length;
+    setForm(next);
+    toast(added > 0 ? `已添加 ${added} 项，保存渠道后生效。` : "输入的模型名都已在列表中。", {
+      tone: added > 0 ? "ok" : "neutral",
     });
   }
 
   /**
    * 当前表单里的选择，开选择器时带进去。
    *
-   * 映射文本解不开的行这里不报错，直接丢——选择器只是个参考，真正的校验
-   * 在保存时。
+   * 映射解不开时抛错，由调用方提示、不开选择器。原先当成没有映射：选择器
+   * 保存时拿空映射覆盖文本框，一行写错就清掉了全部映射。
    */
   function currentSelection(state: FormState): ModelSelection {
-    let mappings: Record<string, string> = {};
-    try {
-      mappings = parseMappingLines(state.modelMappings, "模型映射");
-    } catch {
-      // 解不开就当没有。
-    }
-    return { names: state.modelNames, mappings };
+    return { names: state.modelNames, mappings: parseMappingLines(state.modelMappings, "模型映射") };
   }
 
   /**
@@ -396,34 +422,41 @@ export function UpstreamDialog({
     let headers: Record<string, string>;
     try {
       headers = parseHeaderLines(form.extraHeaders);
+      currentSelection(form);
     } catch (err) {
       setAdvanced(true);
       toast(err instanceof Error ? err.message : String(err), { tone: "error" });
       return;
     }
 
+    // 0 和留空一样是「用默认」，都不带；带 0 的话预览接口按超出范围拒掉。
+    const timeout = Number(form.timeoutSeconds);
+    const request = ++fetchRequest.current;
     setFetching(true);
     try {
       const result = await fetchModelsPreview(baseUrl, probeApiKey(), {
         extraHeaders: headers,
-        timeoutSeconds: Number(form.timeoutSeconds || 300),
+        timeoutSeconds: form.timeoutSeconds.trim() !== "" && timeout > 0 ? timeout : undefined,
       });
-      setForm((current) => {
-        setPicker({ catalog: result.models, selection: currentSelection(current) });
-        return current;
-      });
+      if (request !== fetchRequest.current) return;
+      setPicker({ catalog: result.models, selection: currentSelection(formRef.current) });
       toast(`已拉取 ${result.models.length} 个模型。`, { tone: "ok" });
     } catch (err) {
+      if (request !== fetchRequest.current) return;
       if (!(err instanceof UnauthorizedError)) {
         toast(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
       }
     } finally {
-      setFetching(false);
+      if (request === fetchRequest.current) setFetching(false);
     }
   }
 
   function openManager() {
-    setPicker({ catalog: null, selection: currentSelection(form) });
+    try {
+      setPicker({ catalog: null, selection: currentSelection(form) });
+    } catch (err) {
+      toast(err instanceof Error ? err.message : String(err), { tone: "error" });
+    }
   }
 
   /* 选择器只写回表单，不碰服务端——这个渠道可能还没存下来。
@@ -438,12 +471,13 @@ export function UpstreamDialog({
   }
 
   function submit() {
-    const committed = commitManual(form);
+    let committed: FormState;
     let payload: UpstreamPayload;
     try {
+      committed = commitManual(form);
       payload = payloadFromForm(committed);
     } catch (err) {
-      // 解析失败的两项都在高级区，收着的话看不到错在哪。
+      // 解析失败的两项都在高级区，收着的话看不到错在哪。数字项不在，多展开无妨。
       setAdvanced(true);
       toast(err instanceof Error ? err.message : String(err), { tone: "error" });
       return;
@@ -716,11 +750,14 @@ export function UpstreamDialog({
                 <span className="field-label">超时秒数</span>
                 <input
                   type="number"
-                  min={1}
+                  min={0}
                   max={3600}
+                  step="any"
+                  placeholder="默认"
                   value={form.timeoutSeconds}
                   onChange={(event) => set("timeoutSeconds", event.target.value)}
                 />
+                <span className="field-hint">留空用设置页的默认上游超时。</span>
               </label>
 
               <div className="toggle-list span-2">
@@ -728,11 +765,15 @@ export function UpstreamDialog({
                   <input
                     type="checkbox"
                     checked={form.enabled}
+                    disabled={Boolean(upstream?.archived)}
                     onChange={(event) => set("enabled", event.target.checked)}
                   />
                   <span>
                     <strong>启用</strong>
-                    <small>保存后参与路由选择。</small>
+                    {/* 归档期间后端固定为停用，这里改了也存不进去。 */}
+                    <small>
+                      {upstream?.archived ? "已归档，恢复时回到归档前的启用状态。" : "保存后参与路由选择。"}
+                    </small>
                   </span>
                 </label>
                 <label className="toggle-row">
