@@ -76,7 +76,7 @@ func createChannel(t *testing.T, state *appstate.State, name, baseURL string,
 	input.ModelNames = []string{"test-model"}
 	input.Priority = priority
 	input.RateLimit = rateLimit
-	if _, err := db.CreateUpstream(context.Background(), state.DB, &input, 30); err != nil {
+	if _, err := db.CreateUpstream(context.Background(), state.DB, &input); err != nil {
 		t.Fatalf("create channel %s: %v", name, err)
 	}
 }

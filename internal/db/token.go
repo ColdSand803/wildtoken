@@ -40,7 +40,8 @@ const tokenColumns = `t.id, t.name, t.description, t.token_preview,
     t.expires_at, t.created_at, t.updated_at,
     COALESCE(t.group_id, 1),
     COALESCE((SELECT g.name FROM groups g WHERE g.id = t.group_id), 'default'),
-    COALESCE(t.used_tokens, 0), t.limit_tokens, t.rate_limit, t.allowed_models,
+    COALESCE(t.used_tokens, 0), t.limit_tokens, t.rate_limit,
+    COALESCE(t.allowed_models, '[]'),
     t.quota_period, t.quota_timezone, t.quota_period_key`
 
 // tokenFrom is the FROM clause matching tokenColumns.
@@ -314,8 +315,12 @@ func countMissingTokenHashes(ctx context.Context, tx *sql.Tx) (int64, error) {
 
 // hashLegacyPlaintextTokens replaces every plaintext value with its digest,
 // using a collision-free marker for the legacy UNIQUE column.
+//
+// Only rows without a digest hold plaintext. A migrated row's token column
+// holds its digest, and hashing that again broke every such token at once.
 func hashLegacyPlaintextTokens(ctx context.Context, tx *sql.Tx) error {
-	rows, err := tx.QueryContext(ctx, "SELECT id, token FROM api_tokens ORDER BY id")
+	rows, err := tx.QueryContext(ctx,
+		"SELECT id, token FROM api_tokens WHERE token_hash IS NULL ORDER BY id")
 	if err != nil {
 		return err
 	}
@@ -602,6 +607,10 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
 	args := []any{trimSpace(input.Name), trimSpace(input.Description),
 		expiresAt, groupID, limitTokens, rateLimit, allowedModels,
 		quotaPeriod, quotaTimezone}
+	if input.Enabled != nil {
+		query += ", enabled = ?"
+		args = append(args, boolToInt64(*input.Enabled))
+	}
 	if replacement != "" {
 		// The same four columns CreateToken writes, kept in step: the legacy
 		// `token` column takes the digest because the startup migration
@@ -696,6 +705,11 @@ func reloadToken(ctx context.Context, db Queryer, id int64) (models.APITokenOut,
 }
 
 func DeleteToken(ctx context.Context, db *sql.DB, id int64) (bool, error) {
+	// Finished even if the caller leaves, as DeleteUpstream is.
+	ctx = context.WithoutCancel(ctx)
+	if err := detachLogs(ctx, db, "downstream_token_id", id); err != nil {
+		return false, err
+	}
 	return execAffectsAny(ctx, db, "DELETE FROM api_tokens WHERE id = ?", id)
 }
 

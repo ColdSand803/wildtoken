@@ -68,7 +68,7 @@ curl -fsS http://127.0.0.1:3100/health
 打开管理后台：
 
 ```text
-http://127.0.0.1:3100/admin
+http://127.0.0.1:3100/console
 ```
 
 Compose 会把 SQLite 数据保存到 `wildtoken-data` 卷，并发布 `3100` 端口。它还会把宿主机 `./themes` 只读挂载进容器，方便修改主题而不重建镜像。
@@ -105,7 +105,7 @@ Linux、macOS 和 Docker 版本仍按前台服务方式运行。
 
 ## ✅ 首次配置
 
-1. 打开 `/admin`，使用 Admin Token 登录。
+1. 打开 `/console`，使用 Admin Token 登录。
 2. 创建上游渠道，填写 Base URL、提供商 API Key、模型、模型映射、优先级、权重和可选 Header 覆盖。
 3. 使用渠道测试或模型测试确认上游可用。
 4. 在令牌页创建下游 Token。

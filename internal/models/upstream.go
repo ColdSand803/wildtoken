@@ -1,6 +1,8 @@
 package models
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/url"
 	"strings"
 	"unicode"
@@ -59,6 +61,10 @@ type UpstreamIn struct {
 	// GroupIDs are the groups this channel serves. An empty selection falls
 	// back to the default group, because a channel in no group is unreachable.
 	GroupIDs []int64 `json:"group_ids"`
+	// Archived is the state a write carries, applied in the same transaction:
+	// nil leaves it as it is. An undo re-creates an archived channel with it,
+	// never visible unarchived in between.
+	Archived *bool `json:"archived"`
 }
 
 // DefaultUpstreamIn supplies the field defaults serde applied when a key is absent.
@@ -251,6 +257,33 @@ type UpstreamUpdate struct {
 	ClearAPIKey bool `json:"clear_api_key"`
 }
 
+// upstreamUpdateRequired are the fields a replacing update must carry as values.
+// Decoded from their absence, a missing enabled switched a disabled channel back
+// on and a missing group_ids moved it to the default group. rate_limit may be
+// null: that is how unlimited is said.
+var upstreamUpdateRequired = []string{
+	"name", "base_url", "model_names", "model_prefixes", "model_mappings",
+	"effort_mappings", "priority", "weight", "auto_weight_enabled", "enabled",
+	"extra_headers", "rate_limit", "group_ids",
+}
+
+// upstreamUpdateOptional may be left out: a missing key, timeout or archive
+// keeps the stored one, and clear_api_key defaults to false.
+var upstreamUpdateOptional = []string{"api_key", "timeout_seconds", "clear_api_key", "archived"}
+
+// MissingUpstreamFields names the required fields a replacing update left out
+// or sent as null.
+func MissingUpstreamFields(body map[string]json.RawMessage) []string {
+	var missing []string
+	for _, name := range upstreamUpdateRequired {
+		value, ok := body[name]
+		if !ok || (name != "rate_limit" && bytes.Equal(bytes.TrimSpace(value), []byte("null"))) {
+			missing = append(missing, name)
+		}
+	}
+	return missing
+}
+
 // UpstreamEnabledIn toggles a channel.
 //
 // The field is a pointer so that "not mentioned" is distinguishable from
@@ -326,6 +359,10 @@ type UpstreamOut struct {
 	EffectiveWeight                float64           `json:"effective_weight"`
 	HealthRecoveryRemainingSeconds *int64            `json:"health_recovery_remaining_seconds,omitempty"`
 	GroupIDs                       []int64           `json:"group_ids"`
+	// EnabledBeforeArchive is what unarchiving restores, set only while
+	// archived. An undo or an export carries it, so the channel comes back as
+	// it was rather than disabled.
+	EnabledBeforeArchive *bool `json:"enabled_before_archive,omitempty"`
 }
 
 // ExportUpstreamsRequest is the request payload for /api/admin/upstreams/export.
@@ -348,9 +385,44 @@ type ChannelExportItem struct {
 	AutoWeightEnabled bool              `json:"auto_weight_enabled"`
 	Enabled           bool              `json:"enabled"`
 	ExtraHeaders      map[string]string `json:"extra_headers"`
-	TimeoutSeconds    float64           `json:"timeout_seconds"`
+	TimeoutSeconds    *float64          `json:"timeout_seconds"`
 	RateLimit         *string           `json:"rate_limit,omitempty"`
 	GroupIDs          []int64           `json:"group_ids"`
+	// GroupNames name the same groups. Ids differ between instances, so an
+	// import binds by name when it has one; GroupIDs serve older documents.
+	GroupNames []string `json:"group_names,omitempty"`
+	// Archived is nil in older documents, and an import then leaves an
+	// existing channel's state alone.
+	Archived *bool `json:"archived,omitempty"`
+	// EnabledBeforeArchive is what unarchiving restores. enabled is always
+	// false for an archived channel, so without it one came back disabled.
+	EnabledBeforeArchive *bool `json:"enabled_before_archive,omitempty"`
+}
+
+// UnmarshalJSON starts an imported channel from the defaults a created one
+// gets. Decoded onto the zero value, a document that left fields out stored a
+// disabled channel with weight 0 and priority 0, and null model lists the
+// console could not render. A missing timeout stays nil, so the channel takes
+// the service default as a created one does.
+func (c *ChannelExportItem) UnmarshalJSON(data []byte) error {
+	type plain ChannelExportItem
+	defaults := DefaultUpstreamIn()
+	item := plain{
+		ModelNames:        defaults.ModelNames,
+		ModelPrefixes:     defaults.ModelPrefixes,
+		ModelMappings:     defaults.ModelMappings,
+		EffortMappings:    defaults.EffortMappings,
+		Priority:          defaults.Priority,
+		Weight:            defaults.Weight,
+		AutoWeightEnabled: defaults.AutoWeightEnabled,
+		Enabled:           defaults.Enabled,
+		ExtraHeaders:      defaults.ExtraHeaders,
+	}
+	if err := json.Unmarshal(data, &item); err != nil {
+		return err
+	}
+	*c = ChannelExportItem(item)
+	return nil
 }
 
 // ExportUpstreamsResponse is the response envelope for /api/admin/upstreams/export.
@@ -414,6 +486,10 @@ type UpstreamDetailOut struct {
 	EffectiveWeight                float64           `json:"effective_weight"`
 	HealthRecoveryRemainingSeconds *int64            `json:"health_recovery_remaining_seconds,omitempty"`
 	GroupIDs                       []int64           `json:"group_ids"`
+	// Archived lets the edit form say that enabled cannot change while the
+	// channel is parked; the undo of a delete re-creates it with both.
+	Archived             bool  `json:"archived"`
+	EnabledBeforeArchive *bool `json:"enabled_before_archive,omitempty"`
 }
 
 // UpstreamLatencyOut is one channel's routing latency as the console shows it.

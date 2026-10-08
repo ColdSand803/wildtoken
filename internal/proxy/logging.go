@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -25,6 +26,7 @@ const (
 	logWriteBatchSize           = 20
 	logWriteBatchInterval       = 50 * time.Millisecond
 	logWriteTimeout             = 15 * time.Second
+	carriedUsageRetryInterval   = 5 * time.Second
 	logEventChannelCapacity     = 1024
 	cleanupStartupDelay         = 120 * time.Second
 	logBodyCleanupInterval      = 60 * time.Second
@@ -161,6 +163,18 @@ type LogWriter struct {
 	closeMu   sync.RWMutex
 	closed    bool
 	closeOnce sync.Once
+
+	// carried is usage whose row was dropped or failed to commit.
+	// The period stays with the amount so the in-memory hold settles against
+	// the cycle it was metered in.
+	carriedMu sync.Mutex
+	carried   map[carriedKey]int64
+}
+
+// carriedKey identifies usage owed to one token in one quota period.
+type carriedKey struct {
+	tokenID int64
+	period  string
 }
 
 // NewLogWriter starts the background writer. It stops when Close is called,
@@ -201,21 +215,30 @@ func (w *LogWriter) Schedule(entry LogEntry) {
 		w.metrics.RecordLogDequeue(1)
 		w.metrics.RecordLogDrop()
 		slog.Warn("request log queue closed; dropping request log")
+		w.carryDropped(entry)
 		return
+	}
+
+	// The usage is held against the token's quota until the row commits,
+	// because until then the stored total still understates it. The hold comes
+	// before the send: taken after it, a writer that committed at once settled
+	// a hold not yet there, and the hold then taken stayed for good, refusing
+	// the token early until a restart.
+	tokenID, used, metered := quotaUsage(entry)
+	if metered {
+		w.quotas.Meter(tokenID, entry.QuotaPeriodStamp, used)
 	}
 
 	select {
 	case w.entries <- entry:
-		// The usage is held against the token's quota until the row commits,
-		// because until then the stored total still understates it. A dropped
-		// entry holds nothing: it will never reach the total either.
-		if tokenID, used, ok := quotaUsage(entry); ok {
-			w.quotas.Meter(tokenID, entry.QuotaPeriodStamp, used)
-		}
 	default:
 		w.metrics.RecordLogDequeue(1)
 		w.metrics.RecordLogDrop()
 		slog.Warn("request log queue full; dropping request log")
+		// Held already; a later batch applies it and settles the hold.
+		if metered {
+			w.carry(tokenID, entry.QuotaPeriodStamp, used)
+		}
 	}
 }
 
@@ -296,6 +319,37 @@ func int32PtrToInt64Value(value *int32) int64 {
 	return int64(*value)
 }
 
+// carryDropped keeps the usage of an entry that will not be written.
+//
+// Dropping it with its row let a token under load spend without the quota ever
+// seeing it: the busier the gateway, the more usage went uncounted.
+func (w *LogWriter) carryDropped(entry LogEntry) {
+	tokenID, used, ok := quotaUsage(entry)
+	if !ok {
+		return
+	}
+	w.quotas.Meter(tokenID, entry.QuotaPeriodStamp, used)
+	w.carry(tokenID, entry.QuotaPeriodStamp, used)
+}
+
+func (w *LogWriter) carry(tokenID int64, period string, used int64) {
+	w.carriedMu.Lock()
+	defer w.carriedMu.Unlock()
+	if w.carried == nil {
+		w.carried = map[carriedKey]int64{}
+	}
+	w.carried[carriedKey{tokenID, period}] += used
+}
+
+// takeCarried hands everything owed to one batch.
+func (w *LogWriter) takeCarried() map[carriedKey]int64 {
+	w.carriedMu.Lock()
+	defer w.carriedMu.Unlock()
+	carried := w.carried
+	w.carried = nil
+	return carried
+}
+
 // quotaUsage reports the token and amount a log entry contributes to a quota.
 //
 // It is the single definition of what counts, so the hold taken at enqueue and
@@ -308,9 +362,8 @@ func quotaUsage(entry LogEntry) (tokenID int64, used int64, ok bool) {
 	return *entry.DownstreamTokenID, int64(*entry.TotalTokens), true
 }
 
-// Subscribe returns a channel of committed rows and the function that releases
-// it.
-func (w *LogWriter) Subscribe() (<-chan LogStreamEvent, func()) {
+// Subscribe returns a feed of committed rows. Close releases it.
+func (w *LogWriter) Subscribe() *LogSubscription {
 	return w.events.subscribe()
 }
 
@@ -353,10 +406,23 @@ func (w *LogWriter) CloseWithin(limit time.Duration) bool {
 func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogStatsCache) {
 	defer close(w.done)
 
+	// Carried usage normally rides with the next batch; the tick applies it
+	// when no batch is coming.
+	carriedRetry := time.NewTicker(carriedUsageRetryInterval)
+	defer carriedRetry.Stop()
+
 	batch := make([]LogEntry, 0, logWriteBatchSize)
 	for {
-		entry, ok := <-w.entries
+		var entry LogEntry
+		var ok bool
+		select {
+		case entry, ok = <-w.entries:
+		case <-carriedRetry.C:
+			w.flush(ctx, database, logStats, nil)
+			continue
+		}
 		if !ok {
+			w.flush(ctx, database, logStats, nil)
 			return
 		}
 		batch = append(batch, entry)
@@ -395,19 +461,10 @@ func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.Lo
 	entryCount := uint64(len(entries))
 	w.metrics.RecordLogDequeue(entryCount)
 
-	// The hold each entry took at enqueue is released however the write turns
-	// out: a committed row is in the stored total, and an abandoned one never
-	// will be.
-	defer func() {
-		for _, entry := range entries {
-			if tokenID, used, ok := quotaUsage(entry); ok {
-				// Released against the same period the hold was taken in. Using the
-				// current period would leave the closed period's hold outstanding
-				// forever, permanently shrinking the budget it applied to.
-				w.quotas.Settle(tokenID, entry.QuotaPeriodStamp, used)
-			}
-		}
-	}()
+	carried := w.takeCarried()
+	if len(entries) == 0 && len(carried) == 0 {
+		return
+	}
 
 	// Shutdown cancels the jobs context, but the batch it interrupts still has
 	// to reach the database: these rows carry the quota increments, so a write
@@ -417,11 +474,31 @@ func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.Lo
 	defer cancel()
 
 	startedAt := time.Now()
-	records, err := insertLogBatchWithRetry(writeCtx, database, entries)
+	records, err := insertLogBatchWithRetry(writeCtx, database, entries, carried)
 	if err != nil {
 		w.metrics.RecordLogWriteFailureCount(entryCount)
 		slog.Error("failed to persist request logs", "error", err, "entry_count", entryCount)
+
+		// The rows are lost; the usage they carry is not. It stays held and
+		// goes to a later batch, which applies it without them.
+		for _, entry := range entries {
+			if tokenID, used, ok := quotaUsage(entry); ok {
+				w.carry(tokenID, entry.QuotaPeriodStamp, used)
+			}
+		}
+		for key, used := range carried {
+			w.carry(key.tokenID, key.period, used)
+		}
 	} else {
+		// Committed, so the stored total carries it and the hold can go.
+		for _, entry := range entries {
+			if tokenID, used, ok := quotaUsage(entry); ok {
+				w.quotas.Settle(tokenID, entry.QuotaPeriodStamp, used)
+			}
+		}
+		for key, used := range carried {
+			w.quotas.Settle(key.tokenID, key.period, used)
+		}
 		w.metrics.RecordLogWritten(entryCount)
 		w.publish(writeCtx, database, logStats, records)
 	}
@@ -466,13 +543,14 @@ func (w *LogWriter) publish(ctx context.Context, database *sql.DB, logStats *db.
 	}
 }
 
-func insertLogBatchWithRetry(ctx context.Context, database *sql.DB, entries []LogEntry) ([]persistedLogRecord, error) {
-	if len(entries) == 0 {
+func insertLogBatchWithRetry(ctx context.Context, database *sql.DB, entries []LogEntry,
+	carried map[carriedKey]int64) ([]persistedLogRecord, error) {
+	if len(entries) == 0 && len(carried) == 0 {
 		return nil, nil
 	}
 
 	for attempt := 0; ; attempt++ {
-		records, err := insertLogBatch(ctx, database, entries)
+		records, err := insertLogBatch(ctx, database, entries, carried)
 		if err == nil {
 			return records, nil
 		}
@@ -501,12 +579,22 @@ func isDatabaseLocked(err error) bool {
 		strings.Contains(err.Error(), "SQLITE_BUSY")
 }
 
-func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) ([]persistedLogRecord, error) {
+func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
+	carried map[carriedKey]int64) ([]persistedLogRecord, error) {
 	tx, err := database.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, apperr.Database(err)
 	}
 	defer tx.Rollback()
+
+	// Usage owed by rows that were dropped or failed earlier.
+	for key, used := range carried {
+		if _, err := tx.ExecContext(ctx,
+			"UPDATE api_tokens SET used_tokens = used_tokens + ? WHERE id = ?",
+			used, key.tokenID); err != nil {
+			return nil, apperr.Database(err)
+		}
+	}
 
 	records := make([]persistedLogRecord, 0, len(entries))
 	for _, entry := range entries {
@@ -523,6 +611,11 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
 		requestPayload := encodeSnapshotPair(entry.DownstreamRequest, entry.UpstreamRequest)
 		responsePayload := encodeSnapshotPair(entry.UpstreamResponse, entry.DownstreamResponse)
 
+		// The token and channel ids were resolved when the request began, and
+		// either row may have been deleted since. A dangling id failed the
+		// foreign key and rolled back the whole batch, other tokens' rows and
+		// quota increments with it, so a vanished parent is stored as NULL:
+		// what ON DELETE SET NULL would have left had the row been older.
 		result, err := tx.ExecContext(ctx, `INSERT INTO request_logs
         (method, path, downstream_token_id, downstream_token_name, client_ip,
          client_type,
@@ -535,8 +628,10 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry) (
          request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
          failure_stage, failure_retryable,
          error, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    VALUES (?, ?, (SELECT id FROM api_tokens WHERE id = ?), ?, ?, ?,
+            (SELECT id FROM upstreams WHERE id = ?),
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			entry.ClientIP,
 			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,
@@ -697,44 +792,66 @@ func int32PtrToInt64Ptr(value *int32) *int64 {
 // eventBroker fans committed log rows out to the console's SSE subscribers.
 type eventBroker struct {
 	mu          sync.Mutex
-	subscribers map[int64]chan LogStreamEvent
+	subscribers map[int64]*LogSubscription
 	nextID      int64
 }
 
-func newEventBroker() *eventBroker {
-	return &eventBroker{subscribers: map[int64]chan LogStreamEvent{}}
+// LogSubscription is one console's feed of committed rows.
+type LogSubscription struct {
+	broker *eventBroker
+	id     int64
+	events chan LogStreamEvent
+	// missed is set when publish drops an event this subscriber had no room for.
+	missed atomic.Bool
 }
 
-func (b *eventBroker) subscribe() (<-chan LogStreamEvent, func()) {
+func newEventBroker() *eventBroker {
+	return &eventBroker{subscribers: map[int64]*LogSubscription{}}
+}
+
+func (b *eventBroker) subscribe() *LogSubscription {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	id := b.nextID
+	subscription := &LogSubscription{
+		broker: b,
+		id:     b.nextID,
+		events: make(chan LogStreamEvent, logEventChannelCapacity),
+	}
 	b.nextID++
-	events := make(chan LogStreamEvent, logEventChannelCapacity)
-	b.subscribers[id] = events
+	b.subscribers[subscription.id] = subscription
+	return subscription
+}
 
-	return events, func() {
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		if existing, ok := b.subscribers[id]; ok {
-			delete(b.subscribers, id)
-			close(existing)
-		}
+// Events delivers committed rows until Close.
+func (s *LogSubscription) Events() <-chan LogStreamEvent { return s.events }
+
+// TakeMissed reports whether rows were dropped since it last said so. A dropped
+// row is never sent late; the console reloads from the database instead.
+func (s *LogSubscription) TakeMissed() bool { return s.missed.Swap(false) }
+
+// Close stops delivery and closes the Events channel. A repeat is a no-op.
+func (s *LogSubscription) Close() {
+	s.broker.mu.Lock()
+	defer s.broker.mu.Unlock()
+	if _, ok := s.broker.subscribers[s.id]; ok {
+		delete(s.broker.subscribers, s.id)
+		close(s.events)
 	}
 }
 
 // publish delivers without blocking. A subscriber that cannot keep up loses the
-// event rather than stalling the writer; the database stays authoritative and
-// the console reloads from it.
+// event rather than stalling the writer, and is marked to reload: the database
+// stays authoritative.
 func (b *eventBroker) publish(event LogStreamEvent) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	for _, events := range b.subscribers {
+	for _, subscription := range b.subscribers {
 		select {
-		case events <- event:
+		case subscription.events <- event:
 		default:
+			subscription.missed.Store(true)
 		}
 	}
 }
@@ -865,15 +982,19 @@ func validTextPrefix(body, slice []byte, originalByteLength int) (string, bool) 
 	}
 
 	// Only a prefix of a longer body is available. A trailing partial rune is
-	// expected here, so it is dropped rather than treated as binary.
-	cutoff := len(slice)
-	for cutoff > 0 && !utf8.Valid(slice[:cutoff]) {
-		cutoff--
+	// expected here, so up to UTFMax-1 bytes of it are dropped; anything invalid
+	// before that is binary, as it is for a whole body. Backing off one byte at
+	// a time instead revalidated the prefix at every step: a stray byte midway
+	// through a 1 MiB capture cost 13 seconds.
+	for back := 0; back < utf8.UTFMax && back <= len(slice); back++ {
+		if prefix := slice[:len(slice)-back]; utf8.Valid(prefix) {
+			if len(prefix) == 0 && len(slice) > 0 {
+				return "", false
+			}
+			return string(prefix), true
+		}
 	}
-	if cutoff == 0 && len(slice) > 0 {
-		return "", false
-	}
-	return string(slice[:cutoff]), true
+	return "", false
 }
 
 // ── Background cleanup ──────────────────────────────────────────────────────
@@ -936,6 +1057,10 @@ func RunCleanupPass(ctx context.Context, database *sql.DB, settings *models.Runt
 	if runRetentionCleanup {
 		deleteStartedAt := time.Now()
 		if err := db.DeleteOldLogs(ctx, database, settings.LogRetentionDays); err != nil {
+			if errors.Is(err, context.Canceled) {
+				slog.Info("log retention stopped for shutdown")
+				return
+			}
 			cleanupSucceeded = false
 			slog.Error("deleting old logs failed", "error", err)
 		}

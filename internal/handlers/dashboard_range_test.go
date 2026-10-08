@@ -12,7 +12,7 @@ import (
 )
 
 func TestParseDashboardRangeBuildsUTCDateBounds(t *testing.T) {
-	selection, err := parseDashboardRange("custom", "2026-08-01", "2026-08-01", "default")
+	selection, err := parseDashboardRange("custom", "2026-08-01", "2026-08-01", "default", time.Local)
 	if err != nil {
 		t.Fatalf("parse custom range: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestParseDashboardRangeBuildsUTCDateBounds(t *testing.T) {
 // would silently widen the window the operator asked for.
 func TestParseDashboardRangeKeepsExplicitTimes(t *testing.T) {
 	selection, err := parseDashboardRange("custom",
-		"2026-08-01T09:30:00", "2026-08-01T17:45:30", "default")
+		"2026-08-01T09:30:00", "2026-08-01T17:45:30", "default", time.Local)
 	if err != nil {
 		t.Fatalf("parse custom range: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestParseDashboardRangeKeepsExplicitTimes(t *testing.T) {
 // Minute precision is what a datetime-local field submits without a step.
 func TestParseDashboardRangeAcceptsMinutePrecision(t *testing.T) {
 	if _, err := parseDashboardRange("custom",
-		"2026-08-01T09:30", "2026-08-01T10:00", "default"); err != nil {
+		"2026-08-01T09:30", "2026-08-01T10:00", "default", time.Local); err != nil {
 		t.Fatalf("minute precision rejected: %v", err)
 	}
 }
@@ -71,10 +71,46 @@ func TestParseDashboardRangeRejectsInvalidCustomDates(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			if _, err := parseDashboardRange("custom", testCase.start, testCase.end, "default"); err == nil {
+			if _, err := parseDashboardRange("custom", testCase.start, testCase.end, "default",
+				time.Local); err == nil {
 				t.Fatal("invalid custom range was accepted")
 			}
 		})
+	}
+}
+
+// The dashboard's days are the operator's. Read in the server's zone, a date
+// picked in a browser eight hours ahead covered the wrong eight hours.
+func TestParseDashboardRangeFollowsTheOperatorsZone(t *testing.T) {
+	zone, err := dashboardZone("480")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection, err := parseDashboardRange("custom", "2026-08-01", "2026-08-01", "default", zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selection.StartAt != "2026-07-31 16:00:00" || selection.EndAt != "2026-08-01 16:00:00" {
+		t.Errorf("bounds = %s .. %s, want the UTC+8 day", selection.StartAt, selection.EndAt)
+	}
+	if selection.OffsetSeconds != 8*3600 {
+		t.Errorf("offset = %d, want 28800", selection.OffsetSeconds)
+	}
+
+	today, err := parseDashboardRange("today", "", "", "default", zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().In(zone)
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone)
+	if today.StartAt != midnight.UTC().Format(models.TimestampFormat) {
+		t.Errorf("today starts at %s, want the operator's midnight", today.StartAt)
+	}
+
+	for _, value := range []string{"abc", "900", "-841"} {
+		if _, err := dashboardZone(value); err == nil {
+			t.Errorf("tz_offset %q was accepted", value)
+		}
 	}
 }
 

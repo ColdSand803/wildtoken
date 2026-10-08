@@ -1,6 +1,7 @@
 package app
 
 import (
+	"net"
 	"net/http"
 	"net/netip"
 	"os"
@@ -42,6 +43,9 @@ func NewRouter(state *appstate.State) http.Handler {
 		noDirectoryListing(http.FileServer(http.Dir("static"))))))
 	router.Mount("/theme-packs", noStore(http.StripPrefix("/theme-packs",
 		serveThemePackCSS(state.Settings.Themes.Dir))))
+	// Saved generated images. Public on purpose: <img> and a pasted link cannot
+	// send the admin header, and the 128-bit random name is the access check.
+	router.Mount("/images", state.Images.Handler())
 
 	router.Group(func(admin chi.Router) {
 		admin.Use(middleware.RequireAdmin(state.Credentials, state.Settings.Admin.ClientIPHeader))
@@ -117,6 +121,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			upstreams.Patch("/{id}/priority", handlers.AdminSetUpstreamPriority(state))
 			upstreams.Post("/{id}/test", handlers.AdminTestUpstream(state))
 			upstreams.Post("/{id}/test-model", handlers.AdminTestUpstreamModel(state))
+			upstreams.Post("/{id}/debug", handlers.AdminDebugUpstream(state))
 			upstreams.Post("/{id}/models", handlers.AdminFetchUpstreamModels(state))
 			upstreams.Post("/{id}/balance", handlers.AdminFetchUpstreamBalance(state))
 			upstreams.Post("/{id}/balance/sub2api", handlers.AdminFetchUpstreamSub2APIBalance(state))
@@ -184,9 +189,12 @@ func serveThemePackCSS(dir string) http.Handler {
 //
 // The console needs the files under /static by name; nothing needs an index of
 // them, and this route is outside the admin credential like the theme one.
+//
+// The mount point itself arrives with an empty path once its prefix is
+// stripped, which the FileServer turns into "/" and lists.
 func noDirectoryListing(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/") {
+		if r.URL.Path == "" || strings.HasSuffix(r.URL.Path, "/") {
 			http.NotFound(w, r)
 			return
 		}
@@ -206,7 +214,15 @@ func allowAnyOrigin(next http.Handler) http.Handler {
 		header := w.Header()
 		header.Set("access-control-allow-origin", "*")
 		header.Set("access-control-allow-methods", "*")
-		header.Set("access-control-allow-headers", "*")
+		// The wildcard never covers Authorization, which is how most clients
+		// send their key, so a preflight is answered with the headers it asked
+		// for. Answered with "*" alone, a browser refused every Bearer request.
+		if requested := r.Header.Get("access-control-request-headers"); requested != "" {
+			header.Set("access-control-allow-headers", requested)
+			header.Add("vary", "access-control-request-headers")
+		} else {
+			header.Set("access-control-allow-headers", "*")
+		}
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -243,7 +259,8 @@ func AdminURLFromSettings(host string, port uint16) string {
 	case "0.0.0.0", "::", "[::]":
 		host = "127.0.0.1"
 	}
-	return "http://" + host + ":" + strconv.Itoa(int(port)) + "/console"
+	// JoinHostPort brackets an IPv6 host; "::1:3100" is no address at all.
+	return "http://" + net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(int(port))) + "/console"
 }
 
 // IsLoopbackBindHost reports whether a configured bind host only accepts local

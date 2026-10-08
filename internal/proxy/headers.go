@@ -235,6 +235,13 @@ func ApplyHeaderOverrides(headers map[string]string, overrides map[string]string
 	}
 
 	for name, value := range overrides {
+		// The gateway reads usage from the body text and its transport does not
+		// decompress: a channel asking for gzip had the compressed body reach the
+		// client with its Content-Encoding stripped.
+		if strings.EqualFold(name, "accept-encoding") {
+			continue
+		}
+
 		source, isPlaceholder, err := parseClientHeaderPlaceholder(value)
 		if err != nil {
 			continue

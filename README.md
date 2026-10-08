@@ -96,7 +96,7 @@ curl -fsS http://127.0.0.1:3100/health
 Open the admin console:
 
 ```text
-http://127.0.0.1:3100/admin
+http://127.0.0.1:3100/console
 ```
 
 The Compose file stores SQLite data in the `wildtoken-data` volume and publishes
@@ -141,7 +141,7 @@ Linux, macOS, and Docker builds keep the foreground service behavior.
 
 ## ✅ First Configuration
 
-1. Open `/admin` and log in with the Admin Token.
+1. Open `/console` and log in with the Admin Token.
 2. Create an upstream channel with its base URL, provider API key, models, model
    mappings, priority, weight, and optional header overrides.
 3. Use the channel test or model test action to verify provider connectivity.

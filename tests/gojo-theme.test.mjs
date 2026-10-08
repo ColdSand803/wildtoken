@@ -37,7 +37,7 @@ test("Gojo defines a scoped Six Eyes theme without external assets", () => {
 });
 
 test("Gojo covers every console view with a distinct domain mark", () => {
-  const views = ["dashboard", "upstreams", "logs", "tokens", "groups", "settings"];
+  const views = ["dashboard", "upstreams", "logs", "tokens", "groups", "debug", "images", "settings"];
   for (const view of views) {
     assert.match(css, new RegExp(`\\[data-view="${view}"\\]`), `missing ${view}`);
   }
@@ -58,7 +58,7 @@ test("Gojo is registered for both pre-paint and runtime theme selection", () => 
 });
 
 test("Gojo keeps the mobile dock stable and honors reduced motion", () => {
-  assert.match(css, /grid-template-columns:\s*repeat\(6, minmax\(0, 1fr\)\)/);
+  assert.match(css, /grid-template-columns:\s*repeat\(8, minmax\(0, 1fr\)\)/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(css, /animation:\s*none !important/);
 });
@@ -98,6 +98,7 @@ test("Gojo renders the log view picker as a themed segmented control", () => {
   assert.match(css, /\.log-view-mode-button\[aria-pressed="true"\][\s\S]*?linear-gradient\(135deg/);
   assert.match(css, /\.log-view-mode-button:focus-visible \{[\s\S]*?box-shadow: var\(--focus-ring\)/);
 
-  assert.match(css, /button\.primary/);
-  assert.doesNotMatch(css, /button:not\(:where\(/);
+  // 主操作只认显式的 .primary（5639f9c），日志视图切换不会再被全局规则刷成主按钮。
+  assert.doesNotMatch(css, /button:not\(:where\(/, "a global primary-action rule is back");
+  assert.match(css, /html\[data-theme="gojo"\] button\.primary\s*\{/);
 });

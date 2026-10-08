@@ -173,6 +173,15 @@ func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWin
 		}
 		query.WriteString("created_at >= ? AND created_at < ?")
 		args = append(args, startAt, endAt)
+	case LogTopWindowToday:
+		// A caller that knows the operator's zone passes the start of their day;
+		// without one, "today" is the server's.
+		if startAt == "" {
+			fmt.Fprintf(query, "created_at >= %s", window.cutoffExpression())
+		} else {
+			query.WriteString("created_at >= ?")
+			args = append(args, startAt)
+		}
 	default:
 		cutoff := window.cutoffExpression()
 		if cutoff == "" {
@@ -181,6 +190,37 @@ func appendLogTimePredicate(query *strings.Builder, args []any, window LogTopWin
 		fmt.Fprintf(query, "created_at >= %s", cutoff)
 	}
 	return args, nil
+}
+
+// detachLogBatch bounds one pass of detachLogs.
+const detachLogBatch = 5000
+
+// detachLogs clears one row's references from request_logs in short
+// transactions, ahead of deleting that row.
+//
+// ON DELETE SET NULL does the same inside the DELETE, as one statement holding
+// the write lock throughout: 0.9s per 300k logs on a desktop. Past the
+// five-second busy timeout an edit made meanwhile fails as "database is
+// locked"; past the log writer's fifteen-second deadline a batch of logs is
+// lost. The DELETE afterwards only has what arrived in between left to clear.
+//
+// column is one of this package's own column names, never caller input.
+func detachLogs(ctx context.Context, database *sql.DB, column string, id int64) error {
+	query := fmt.Sprintf(`UPDATE request_logs SET %[1]s = NULL
+        WHERE id IN (SELECT id FROM request_logs WHERE %[1]s = ? LIMIT ?)`, column)
+	for {
+		result, err := database.ExecContext(ctx, query, id, detachLogBatch)
+		if err != nil {
+			return apperr.Database(err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return apperr.Database(err)
+		}
+		if affected < detachLogBatch {
+			return nil
+		}
+	}
 }
 
 // LogFilter narrows a log listing. A nil field means the filter is not applied.
@@ -743,6 +783,13 @@ func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, lim
 	return topLogStats(ctx, database, window, "", "", limit)
 }
 
+// TopLogStatsRange ranks logs in a window the caller resolved: a custom
+// interval, or "today" from the operator's own midnight.
+func TopLogStatsRange(ctx context.Context, database *sql.DB, window LogTopWindow,
+	startAt, endAt string, limit int64) (models.RequestLogTopStatsOut, error) {
+	return topLogStats(ctx, database, window, startAt, endAt, limit)
+}
+
 // TopLogStatsCustom ranks logs in the half-open UTC interval [startAt, endAt).
 func TopLogStatsCustom(ctx context.Context, database *sql.DB, startAt, endAt string,
 	limit int64) (models.RequestLogTopStatsOut, error) {
@@ -1052,8 +1099,10 @@ func clearSnapshotBody(snapshot sql.NullString, shouldClear bool) any {
 		return snapshot.String
 	}
 
+	// A JSON null decodes without error into a nil map, and assigning to that
+	// panicked the cleanup goroutine, taking the whole process down.
 	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(snapshot.String), &decoded); err != nil {
+	if err := json.Unmarshal([]byte(snapshot.String), &decoded); err != nil || decoded == nil {
 		return clearedBodySnapshot
 	}
 	decoded["body"] = json.RawMessage(`{"cleared":true}`)
@@ -1127,10 +1176,12 @@ func DeleteOldLogs(ctx context.Context, database *sql.DB, retentionDays int64) e
 		}
 
 		// Yield the write lock between batches so a proxied request's log does
-		// not wait out the whole cleanup.
+		// not wait out the whole cleanup. A cancellation is reported: taken as
+		// done, the caller went on to queries the cancellation failed, and a
+		// shutdown was logged as a cleanup error.
 		select {
 		case <-ctx.Done():
-			return nil
+			return ctx.Err()
 		case <-time.After(logDeleteBatchPause):
 		}
 	}

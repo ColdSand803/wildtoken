@@ -14,12 +14,14 @@ export interface TokenPayload {
   /** “100M”“1B”这类表达式，空串表示不限额。后端负责解析。 */
   limit_expression: string;
   rate_limit: string | null;
+  /** 空数组表示不限模型。 */
   allowed_models: string[];
   quota_period: string;
   quota_timezone: string;
   /** 只在新建时允许，留空由后端生成。 */
   token?: string | null;
 }
+
 
 /** 快捷档。填进输入框而不是替代它——填完还能接着改。 */
 const EXPIRY_PRESETS = [
@@ -66,8 +68,8 @@ export function TokenDialog({
   const [groupId, setGroupId] = useState(1);
   const [limit, setLimit] = useState("");
   const [rateLimit, setRateLimit] = useState("");
-  const [custom, setCustom] = useState("");
   const [allowedModels, setAllowedModels] = useState("");
+  const [custom, setCustom] = useState("");
   const [quotaPeriod, setQuotaPeriod] = useState("none");
   const [quotaTimezone, setQuotaTimezone] = useState("Asia/Shanghai");
 
@@ -80,6 +82,7 @@ export function TokenDialog({
     // 回填服务端算好的最短表达式，这样不动表单再保存不会改变限额。
     setLimit(token?.quota.limit_expression ?? "");
     setRateLimit(token?.rate_limit ?? "");
+    setAllowedModels((token?.allowed_models ?? []).join("\n"));
     setCustom("");
     setAllowedModels((token?.allowed_models ?? []).join("\n"));
     setQuotaPeriod(token?.quota_period_state?.period ?? "none");
@@ -258,6 +261,30 @@ export function TokenDialog({
               </label>
             </div>
           </section>
+          <section className="form-section">
+            <div className="form-section-head">
+              <div>
+                <h3>模型限制</h3>
+                <p>留空则可以请求分组内的任意模型。</p>
+              </div>
+            </div>
+            <div className="form-grid">
+              <label className="field span-2">
+                <span className="field-label">允许的模型（可选）</span>
+                <textarea
+                  rows={4}
+                  spellCheck={false}
+                  value={allowedModels}
+                  onChange={(e) => setAllowedModels(e.target.value)}
+                  placeholder={"gpt-4o\nclaude-*"}
+                />
+                <span className="field-hint">
+                  每行或逗号分隔一个，不区分大小写；结尾加 * 按前缀匹配。不在列表里的模型会被 403 拒绝，/v1/models 也只列出允许的。
+                </span>
+              </label>
+            </div>
+          </section>
+
           <section className="form-section">
             <div className="form-section-head">
               <div>

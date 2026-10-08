@@ -6,6 +6,8 @@ import type { LogFilters } from "../logFilters";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchDashboard } from "../api";
+import { compactCount, scaleDashboard } from "../dashboardScale";
+import { formatTimestamp } from "../logFormat";
 import type { LogOverview, RequestLog, TokenUsage, TopItem, TopStats } from "../types";
 
 /* 时间档。值直接进 query，必须是后端 parseDashboardRange 认的词。
@@ -87,11 +89,7 @@ function readRange(): string {
    泄露出去，那恰恰是遮罩要藏的东西。 */
 const SENSITIVE_MASK = "******";
 
-function compact(value: number): string {
-  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
-  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`;
-  return String(Math.round(value));
-}
+const compact = compactCount;
 
 function formatMs(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "—";
@@ -304,11 +302,12 @@ function RankCard({
         {sorted.length === 0 ? (
           <div className="dashboard-chart-empty">暂无数据</div>
         ) : (
-          sorted.map((row) => {
+          sorted.map((row, index) => {
             const display = maskNames ? SENSITIVE_MASK : row.name;
             return (
               <div
-                key={row.name}
+                // 渠道榜按 upstream_id 分组，两个同名渠道各占一行，名字不唯一。
+                key={row.id ?? `${row.name}-${index}`}
                 className="dashboard-rank-row"
                 role="button" tabIndex={0} onClick={() => onSelect(row)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelect(row); } }}
                 title={`${display} · ${compact(valueOf(row))}`}
@@ -337,7 +336,6 @@ function RankCard({
 export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
   const [range, setRange] = useState(readRange);
   const [refreshSeconds, setRefreshSeconds] = useState(() => { const stored = Number(readStored("wildtoken_dashboard_refresh_interval") ?? 15000) / 1000; return [0, 5, 15, 30, 60].includes(stored) ? stored : 15; });
-  const loadVersion = useRef(0);
   const [custom, setCustom] = useState(readCustomRange);
   /* 草稿和已生效的区间分开。日期框每改一下就发请求的话，输到一半的月份会
      打出一堆没人要的查询。点「应用」才落到 custom。 */
@@ -354,15 +352,21 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
      start_date= 空值的 400，而界面上只会变成一片破折号。 */
   const pending = range === "custom" && !(isDate(custom.start) && isDate(custom.end));
 
+  /* 每次加载一个序号，只收最新那次的结果。先点「全部」再点「今天」，慢的
+     「全部」后到会把「今天」的数据盖掉。 */
+  const loadRequest = useRef(0);
+
   const load = useCallback(async () => {
+    const request = ++loadRequest.current;
     if (pending) {
       setLoading(false);
       return;
     }
     try {
-      const version = ++loadVersion.current;
-      const data = await fetchDashboard(range, custom);
-      if (version !== loadVersion.current) return;
+      const raw = await fetchDashboard(range, custom);
+      if (request !== loadRequest.current) return;
+      // 全局设置里的显示倍率，所有计数在这里统一乘上。
+      const data = { ...raw, ...scaleDashboard(raw, raw.multiplier) };
       setOverview(data.overview);
       setTop(data.top);
       setUsage(data.usage);
@@ -374,10 +378,11 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
       );
       setError("");
     } catch (err) {
+      if (request !== loadRequest.current) return;
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setLoading(false);
+      if (request === loadRequest.current) setLoading(false);
     }
   }, [range, custom, pending, onUnauthorized]);
 
@@ -761,7 +766,8 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                   ) : (
                     recent.map((log) => (
                       <tr key={log.id} className="dashboard-error-row" tabIndex={0} onClick={() => drillDown({ search: String(log.id) })} onKeyDown={(event) => { if (event.key === "Enter") drillDown({ search: String(log.id) }); }}>
-                        <td>{log.created_at.slice(11, 19)}</td>
+                        {/* created_at 是不带时区的 UTC，直接截取和日志页的本地时间对不上。 */}
+                        <td>{formatTimestamp(log.created_at).slice(11)}</td>
                         <td>
                           {log.upstream_name
                             ? maskChannels

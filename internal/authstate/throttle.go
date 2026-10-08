@@ -216,6 +216,12 @@ func (t *Throttle) RecordFailure(client Client) {
 		state = &clientState{lastFailure: now}
 		t.clients[addr] = state
 	}
+	// A streak quiet for clientResetAfter is over. Only pruning a full map
+	// forgot one before, so a client's old failures counted against it days
+	// later.
+	if now.Sub(state.lastFailure) >= clientResetAfter {
+		state.failures = 0
+	}
 	state.failures++
 	state.lastFailure = now
 	if delay, penalized := backoff(state.failures); penalized {

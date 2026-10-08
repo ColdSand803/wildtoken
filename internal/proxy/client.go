@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/apperr"
+	"github.com/liguangsheng/wildtoken/internal/imagestore"
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 )
@@ -31,9 +32,24 @@ type attemptTimeout struct {
 	timer   *time.Timer
 	window  time.Duration
 	expired atomic.Bool
+	// streaming is set once a stream is being relayed. From then on a client
+	// that leaves gets drainGrace of the upstream read for its usage rather
+	// than an immediate cancel.
+	streaming atomic.Bool
+	unfollow  func() bool
 }
 
-func newAttemptTimeout(cancel context.CancelFunc, window time.Duration) *attemptTimeout {
+// drainGrace bounds how long an abandoned stream is still read for its usage.
+// The usage follows the last content within milliseconds; what the grace cuts
+// off is a long answer nobody is waiting for.
+const drainGrace = 2 * time.Second
+
+// newAttemptTimeout starts an attempt whose context follows the client's by
+// hand. Derived from it directly, a client leaving cancelled the upstream read
+// before the usage arriving after the content could be seen, and a stream
+// abandoned there was never billed.
+func newAttemptTimeout(clientCtx context.Context, window time.Duration) (context.Context, *attemptTimeout) {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(clientCtx))
 	timeout := &attemptTimeout{cancel: cancel, window: window}
 	timeout.timer = time.AfterFunc(window, func() {
 		// Recorded before cancelling, so a reader woken by the cancellation
@@ -41,19 +57,44 @@ func newAttemptTimeout(cancel context.CancelFunc, window time.Duration) *attempt
 		timeout.expired.Store(true)
 		cancel()
 	})
-	return timeout
+	timeout.unfollow = context.AfterFunc(clientCtx, func() {
+		if timeout.streaming.Load() {
+			time.AfterFunc(drainGrace, cancel)
+			return
+		}
+		cancel()
+	})
+	return ctx, timeout
 }
 
-// extend restarts the clock after the upstream made progress.
+// extend restarts the clock: the attempt is waiting on the upstream again.
 func (t *attemptTimeout) extend() { t.timer.Reset(t.window) }
+
+// pause stops the clock while the caller is busy downstream. A slow client is
+// not the upstream going quiet; counted as such, it got the channel a 504 and
+// a health penalty.
+func (t *attemptTimeout) pause() { t.timer.Stop() }
 
 // Expired reports whether this timeout ended the attempt.
 func (t *attemptTimeout) Expired() bool { return t.expired.Load() }
 
 // stop releases the timer and the attempt's context.
 func (t *attemptTimeout) stop() {
+	t.unfollow()
 	t.timer.Stop()
 	t.cancel()
+}
+
+// IsChannelFault reports whether a failed status is the channel's own doing,
+// to be charged to its health at once.
+//
+// A 5xx, 408 or 429 is: the channel is down, slow or saturated. Any other 4xx
+// may be the request's fault instead — a prompt too long for any model — and
+// charging those let a few bad requests take every channel out of routing. The
+// caller charges them only once another channel has served the same request.
+func IsChannelFault(status int) bool {
+	return status < 400 || status >= 500 ||
+		status == http.StatusRequestTimeout || status == http.StatusTooManyRequests
 }
 
 // BuildUpstreamURL builds the full upstream URL for a proxied path.
@@ -227,8 +268,10 @@ func PrepareUpstreamBody(body []byte, forwardModel *string, path string,
 	if strings.Trim(path, "/") == "chat/completions" && requestsStreaming(request) {
 		streamOptions := map[string]json.RawMessage{}
 		if raw, present := request["stream_options"]; present {
-			if err := json.Unmarshal(raw, &streamOptions); err != nil {
-				// A non-object stream_options is replaced rather than merged.
+			// A non-object stream_options is replaced rather than merged. null
+			// decodes without error into a nil map, which panicked on the write
+			// below and dropped the connection.
+			if err := json.Unmarshal(raw, &streamOptions); err != nil || streamOptions == nil {
 				streamOptions = map[string]json.RawMessage{}
 				changed = true
 			}
@@ -333,8 +376,18 @@ type Deps struct {
 	// Latency collects the rolling measurements least-latency routing ranks by.
 	// It may be nil, which every method on it tolerates: a caller that does not
 	// route — an admin probe, a test harness — has nothing to contribute.
-	Latency        *LatencyTracker
+	Latency *LatencyTracker
+	// Images moves generated images out of logged bodies into files. Nil or
+	// disabled leaves bodies as they are.
+	Images         *imagestore.Store
 	DefaultTimeout time.Duration
+}
+
+// IsImagePath reports whether a proxied path is an image endpoint
+// (images/generations, images/edits, …), whose responses carry base64 images.
+func IsImagePath(path string) bool {
+	return strings.HasPrefix(strings.TrimPrefix(path, "/v1/"), "images/") ||
+		strings.HasPrefix(strings.TrimPrefix(path, "/"), "images/")
 }
 
 // RequestContext identifies the caller and the model for one proxied request.
@@ -387,8 +440,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	if upstream.TimeoutSeconds > 0 {
 		timeout = time.Duration(upstream.TimeoutSeconds * float64(time.Second))
 	}
-	attemptCtx, cancel := context.WithCancel(ctx)
-	attempt := newAttemptTimeout(cancel, timeout)
+	attemptCtx, attempt := newAttemptTimeout(ctx, timeout)
 
 	request, err := buildUpstreamRequest(attemptCtx, requestCtx.Method, prepared)
 	if err != nil {
@@ -412,10 +464,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.SetFailure(FailureStageRequestBuild, statusCode)
 		deps.LogWriter.Schedule(entry)
 
-		// Returned unwrapped: buildUpstreamRequest already answers with an
-		// upstream error, and wrapping it again repeated the prefix in both the
-		// response and the log.
-		return nil, err
+		return nil, apperr.Upstream("the channel's base URL is invalid")
 	}
 
 	response, err := deps.HTTPClient.Do(request)
@@ -455,7 +504,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.SetFailure(stage, statusCode)
 		deps.LogWriter.Schedule(entry)
 
-		return nil, apperr.Upstream(message)
+		return nil, attemptFailure(statusCode)
 	}
 
 	responseHeaders := flattenHeaders(response.Header)
@@ -492,13 +541,20 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 			}
 		}
 
+		// An image stream is kept whole so its images can be saved; anything
+		// else keeps only the part the log can hold.
+		captureBytes := requestCtx.LogBodyMaxBytes
+		if deps.Images.Enabled() && IsImagePath(requestCtx.Path) {
+			captureBytes = max(captureBytes, imagestore.MaxCaptureBytes)
+		}
 		stream := newSSEStream(ctx, response.Body, attempt, start, status, responseHeaders,
-			requestCtx.LogBodyMaxBytes, entry, deps, policy, autoWeightEnabled, upstream.ID,
-			lead)
+			requestCtx.LogBodyMaxBytes, captureBytes, entry, deps, policy, autoWeightEnabled, upstream.ID,
+			prepared.UpstreamBody, lead)
+		attempt.streaming.Store(true)
 		return &Response{Status: status, Headers: responseHeaders, Body: stream}, nil
 	}
 
-	bodyBytes, streamedFirstTokenMs, err := readResponseBody(response.Body, start, attempt.extend)
+	bodyBytes, observation, err := readResponseBody(response.Body, start, attempt.extend)
 	response.Body.Close()
 	attempt.stop()
 	if err != nil {
@@ -529,32 +585,49 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
 		deps.LogWriter.Schedule(entry)
-		return nil, apperr.Upstream(message)
+		return nil, attemptFailure(statusCode)
 	}
 
 	succeeded := status >= 200 && status < 300
+	// A 2xx body that is a stream can still end on an error event.
+	var streamError *string
 	if succeeded {
+		streamError = observation.streamError
+	}
+
+	switch {
+	case streamError != nil:
+		if observation.streamErrorFault {
+			deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
+		}
+	case succeeded:
 		deps.AutoWeight.RecordSuccess(upstream.ID, autoWeightEnabled, policy)
 		// Header arrival is the latency sample for a buffered answer: it is when
 		// the channel started responding, which is independent of how long the
 		// answer itself was. Total duration would rank a channel by the size of
 		// the replies it happened to be asked for.
 		deps.Latency.Record(upstream.ID, headersMs)
-	} else {
+	case IsChannelFault(status):
 		deps.AutoWeight.RecordFailure(upstream.ID, autoWeightEnabled, policy)
 	}
 
-	responseSnapshot := SnapshotResponse(status, responseHeaders, bodyBytes,
+	responseSnapshot := SnapshotResponse(status, responseHeaders, deps.Images.Rewrite(bodyBytes),
 		requestCtx.LogBodyMaxBytes)
-	usage := ExtractUsage(bodyBytes, contentType)
 	isStream := bytes.HasPrefix(bodyBytes, []byte("data:")) ||
 		strings.Contains(contentType, "event-stream")
+	// A stream sent as text/plain is read as one too; parsed as JSON, its
+	// usage came back empty and the request went unbilled.
+	usageContentType := contentType
+	if isStream {
+		usageContentType = "text/event-stream"
+	}
+	usage := ExtractUsage(bodyBytes, usageContentType)
 
 	// A true streamed time-to-first-token is preferred; buffered detection is
 	// only a fallback, and only for stream bodies.
 	var firstTokenMs *int32
 	if isStream {
-		firstTokenMs = streamedFirstTokenMs
+		firstTokenMs = observation.firstTokenMs
 		if firstTokenMs == nil && HasVisibleToken(bodyBytes) {
 			firstTokenMs = elapsedMs(start)
 		}
@@ -564,6 +637,11 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	statusCode := int32(status)
 	entry.StatusCode = &statusCode
 	entry.UpstreamHeadersMs = headersMs
+	if streamError != nil {
+		failed := int32(http.StatusBadGateway)
+		entry.StatusCode = &failed
+		entry.Error = streamError
+	}
 	entry.Stream = isStream
 	entry.ResponseReasoningEffort = ExtractResponseReasoningEffort(bodyBytes, contentType)
 	entry.PromptTokens = usage.PromptTokens
@@ -600,7 +678,8 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 // The status it writes is the one that describes who ended it, not the 2xx the
 // upstream sent: a row saying 200 for a stream that delivered nothing is how the
 // console came to show these as successes. The upstream's own status stays in the
-// response snapshot.
+// response snapshot. The caller hears the generic failure, not the transport
+// error, which names the upstream.
 func logFirstEventFailure(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	upstream *models.UpstreamRow, autoWeightEnabled bool, attempt *attemptTimeout,
 	entry LogEntry, start time.Time, cause error) error {
@@ -629,7 +708,18 @@ func logFirstEventFailure(ctx context.Context, deps Deps, policy AutoWeightPolic
 	entry.SetFailure(stage, statusCode)
 	deps.LogWriter.Schedule(entry)
 
-	return apperr.Upstream(message)
+	return attemptFailure(statusCode)
+}
+
+// attemptFailure is what the caller is told about an attempt that got no
+// answer. The transport's error names the upstream URL, query and all, which
+// is the operator's to read in the log; returned as is, it went to whoever
+// held a token. A timeout answers 504, as the log records it.
+func attemptFailure(statusCode int32) error {
+	if statusCode == http.StatusGatewayTimeout {
+		return apperr.GatewayTimeout("the upstream did not respond in time")
+	}
+	return apperr.Upstream("the upstream request failed")
 }
 
 func buildUpstreamRequest(ctx context.Context, method string, prepared *PreparedRequest) (*http.Request, error) {
@@ -745,12 +835,12 @@ const MaxUpstreamResponseBytes = 128 << 20
 // ErrUpstreamResponseTooLarge reports a buffered response that ran past the cap.
 var ErrUpstreamResponseTooLarge = errors.New("upstream response exceeded the maximum buffered size")
 
-// readResponseBody reads a full upstream body while recording the true
-// time-to-first-token for SSE streams.
+// readResponseBody reads a full upstream body while observing it as an SSE
+// stream, for the true time-to-first-token and any error event it carries.
 //
 // progress is called for each chunk, so the attempt's clock measures silence
 // from the upstream rather than the total time a long body takes to arrive.
-func readResponseBody(body io.Reader, start time.Time, progress func()) ([]byte, *int32, error) {
+func readResponseBody(body io.Reader, start time.Time, progress func()) ([]byte, *sseObservation, error) {
 	var collected bytes.Buffer
 	observation := &sseObservation{}
 	measure := func() int32 { return int32(time.Since(start).Milliseconds()) }
@@ -778,5 +868,5 @@ func readResponseBody(body io.Reader, start time.Time, progress func()) ([]byte,
 	// The final partial line is observed too, keeping parity with buffered
 	// detection.
 	observation.finish(measure)
-	return collected.Bytes(), observation.firstTokenMs, nil
+	return collected.Bytes(), observation, nil
 }

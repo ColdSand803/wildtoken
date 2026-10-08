@@ -2,6 +2,9 @@ services:
   wildtoken:
     build: .
     restart: unless-stopped
+    # 关停先等在途请求最多 15 秒，再等日志队列写完最多 30 秒。Docker 默认 10 秒
+    # 就 SIGKILL，写日志那一步跑不到，队列里的日志和额度增量随之丢失。
+    stop_grace_period: 50s
     env_file:
       - .env
     environment:
@@ -11,6 +14,8 @@ services:
       APP__UPSTREAM__DEFAULT_TIMEOUT_SECONDS: "300"
       WILDTOKEN_LOG: info
       WILDTOKEN_THEME_DIR: /app/themes
+      # 生图结果存成文件，和数据库同一个卷，重建容器不丢。
+      WILDTOKEN_IMAGE_DIR: /data/images
     ports:
       - "3100:3100"
     # 容器默认继承宿主机的解析器。部分上游域名的权威 NS 会拒绝一部分解析器的

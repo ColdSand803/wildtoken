@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchUpstreamModels, listPromptTemplates, testUpstreamModel } from "../api";
 import type { ModelTestResult, PromptTemplate, Upstream } from "../types";
@@ -31,7 +31,7 @@ function sorted(models: string[]): string[] {
 }
 
 /** 按 HTTP 报文的样子排版，照抄旧版 formatHttpRequest。 */
-function formatRequest(request: ModelTestResult["request"]): string {
+export function formatRequest(request: ModelTestResult["request"]): string {
   if (!request) return "";
   let host = "";
   try {
@@ -92,16 +92,23 @@ export function ModelTestDialog({
   const [result, setResult] = useState<ModelTestResult | null>(null);
   const [sending, setSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const dialogRef = useDialog(open);
+  const dialogRef = useDialog(open, onClose);
   const toast = useToast();
+  /* 弹窗常驻不卸载，发出去的请求也不会因为关窗而作废。每次打开换一个会话号，
+     回来的结果对不上号就丢：测 A 渠道时关窗去测 B，A 的结果和 prompt 会落进
+     B 的窗口，B 的发送按钮也一直停在「测试中…」。 */
+  const session = useRef(0);
 
   useEffect(() => {
+    session.current += 1;
     if (!open || !upstream) return;
     const available = sorted(configuredModels(upstream));
     setModels(available);
     setModel(available[0] ?? "");
     setProtocol(PROTOCOLS[0].value);
     setResult(null);
+    setSending(false);
+    setRefreshing(false);
 
     let cancelled = false;
     listPromptTemplates()
@@ -133,23 +140,27 @@ export function ModelTestDialog({
   /** 从上游重拉一份候选。当前选中的还在列表里就保留。 */
   async function refreshModels() {
     if (!upstream) return;
+    const started = session.current;
     setRefreshing(true);
     try {
       const fetched = await fetchUpstreamModels(upstream.id);
+      if (started !== session.current) return;
       const available = sorted(fetched.models ?? []);
       setModels(available);
       setModel((current) => (available.includes(current) ? current : (available[0] ?? "")));
     } catch (err) {
+      if (started !== session.current) return;
       if (!(err instanceof UnauthorizedError)) {
         toast(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
       }
     } finally {
-      setRefreshing(false);
+      if (started === session.current) setRefreshing(false);
     }
   }
 
   async function send() {
     if (!upstream) return;
+    const started = session.current;
     setSending(true);
     setResult(null);
     try {
@@ -159,11 +170,12 @@ export function ModelTestDialog({
         prompt_template_id: Number(templateId),
         prompt: prompt.trim(),
       });
+      if (started !== session.current) return;
       setResult(outcome);
       // 留空时后端会去模板里取，把它实际用的那段回填，不然框里还是空的。
       if (outcome.prompt) setPrompt(outcome.prompt);
     } catch (err) {
-      if (err instanceof UnauthorizedError) return;
+      if (started !== session.current || err instanceof UnauthorizedError) return;
       /* 请求本身失败（网络断了、401 以外的错）也要在结果区说清楚，
          不能只弹一条 toast 就没了——这个窗口存在的意义就是看细节。 */
       setResult({
@@ -172,7 +184,7 @@ export function ModelTestDialog({
         message: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setSending(false);
+      if (started === session.current) setSending(false);
     }
   }
 
@@ -182,7 +194,9 @@ export function ModelTestDialog({
     return `测试失败${result.status_code ? ` · HTTP ${result.status_code}` : ""}`;
   }, [result]);
 
-  const canSend = model !== "" && templateId !== "" && !sending;
+  /* 手写了 prompt 就不需要模板，和后端一致。原先非要选模板，模板删光后
+     这个窗口就发不出去了。 */
+  const canSend = model !== "" && (templateId !== "" || prompt.trim() !== "") && !sending;
 
   return (
     <dialog className="upstream-dialog dialog--drawer" ref={dialogRef} onCancel={onClose} aria-label="测试模型">
@@ -246,7 +260,7 @@ export function ModelTestDialog({
 
           <label className="field">
             <span className="field-label">Prompt 模板</span>
-            <select value={templateId} onChange={(event) => pickTemplate(event.target.value)} required>
+            <select value={templateId} onChange={(event) => pickTemplate(event.target.value)}>
               {templates.length === 0 ? (
                 <option value="" disabled>
                   尚未配置 Prompt 模板

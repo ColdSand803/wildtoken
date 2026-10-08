@@ -1,6 +1,6 @@
 import { formatUpstreamClipboardText } from "../channelTransfer";
 import { ChannelDiagnostics, ChannelDiagnosticBadge, useChannelDiagnostics } from "../components/ChannelDiagnostics";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   UnauthorizedError,
@@ -114,7 +114,14 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [editing, setEditing] = useState<{ upstream: Upstream | null } | null>(null);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
-  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>(() => readStoredSort(localStorage));
+  // 站点存储被禁用时，取 localStorage 这个全局本身就会抛错。
+  const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>(() => {
+    try {
+      return readStoredSort(localStorage);
+    } catch {
+      return readStoredSort(undefined);
+    }
+  });
 
   /* 排序偏好跟着列显隐一起落 localStorage：切页、刷新、换标签页都不丢，换设备
      归默认。写不进存储时当前页面仍然生效。 */
@@ -142,6 +149,9 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [exportDoc, setExportDoc] = useState<ChannelExportDocument | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [exportIncludeKeys, setExportIncludeKeys] = useState(true);
+  /* 每次导出一个序号，只收最新那次的结果。带 Key 的导出要逐个查渠道、更慢，
+     快速切换时它可能最后到，勾选框写着不含 Key，文件里却有。 */
+  const exportRequest = useRef(0);
   const [importOpen, setImportOpen] = useState(false);
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -283,8 +293,15 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   /** 优先级行内编辑提交。值没变就不发请求。 */
   async function savePriority(upstream: Upstream, raw: string) {
     setEditingPriority(null);
+    // 清空是放弃编辑，不是 0：Number("") 为 0，失焦就把渠道静默降到最低层。
+    if (raw.trim() === "") return;
     const next = Number(raw);
-    if (!Number.isFinite(next) || next === upstream.priority) return;
+    if (!Number.isInteger(next) || next === upstream.priority) return;
+    // 和编辑抽屉同一范围。超出的值行内存得进去，之后抽屉却因为它保存不了。
+    if (next < 0 || next > 100000) {
+      toast("优先级需在 0 到 100000 之间。", { tone: "error" });
+      return;
+    }
     await mutate(upstream.id, () => setUpstreamPriority(upstream.id, next));
   }
 
@@ -294,16 +311,21 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
    * 带不带密钥是服务端决定的，所以开关一变就得重新取一份，不能在前端裁。
    */
   async function runExport(includeKeys = exportIncludeKeys) {
+    const request = ++exportRequest.current;
     setBusyDialog(true);
     setExportOpen(true);
+    // 新文档回来之前旧的不能再下载：切掉「包含 API Key」后拿到的还是带 Key 的那份。
+    setExportDoc(null);
     try {
-      setExportDoc(await exportUpstreams(visibleSelected.map((u) => u.id), includeKeys));
+      const doc = await exportUpstreams(visibleSelected.map((u) => u.id), includeKeys);
+      if (request === exportRequest.current) setExportDoc(doc);
     } catch (err) {
+      if (request !== exportRequest.current) return;
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else toast(`导出失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
       setExportOpen(false);
     } finally {
-      setBusyDialog(false);
+      if (request === exportRequest.current) setBusyDialog(false);
     }
   }
 
@@ -313,6 +335,10 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       const result = await importUpstreams(doc, mode);
       setImportResult(result);
       await reload();
+      // 导入可能按名字新建了分组；不重拉的话分组列显示成 #id，编辑时也选不到。
+      void listGroups()
+        .then(setGroups)
+        .catch(() => undefined);
       const tone = result.failed > 0 ? "warn" : "ok";
       toast(`新建 ${result.created} · 更新 ${result.updated} · 跳过 ${result.skipped} · 失败 ${result.failed}`, { tone });
     } catch (err) {
@@ -323,38 +349,50 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     }
   }
 
-  async function runQuickImport(name: string, baseUrl: string, apiKey: string | null) {
-    setBusyDialog(true);
-    try {
-      /* 快速导入只填必填项，其余走后端默认值。模型列表留空，
-         表示接收全部模型——与旧版一致。 */
-      const created = await createUpstream({
+  /**
+   * 快速导入：不建渠道，只把识别到的值填进新增表单，由用户过一眼再保存。
+   *
+   * 走克隆那条已验证的路径——id 0 的草稿在表单里按新建对待。这样识别错了
+   * 还能就地改，也能顺手配分组和高级项，而不是先落库再回头编辑。
+   * 优先级给 999 而不是目录默认的 100：快速导入建的多是临时/测试渠道，
+   * 要压过手工配的；它只是预填，用户可以改。
+   */
+  function runQuickImport(
+    name: string,
+    baseUrl: string,
+    apiKey: string | null,
+    modelNames: string[],
+  ) {
+    setQuickOpen(false);
+    setEditing({
+      upstream: {
+        id: 0,
         name,
         base_url: baseUrl,
         api_key: apiKey,
-        model_names: [],
+        /* 表单只用它决定要不要显示「清空 API Key」。草稿还没有已存的密钥，
+           给 true 会让那个勾选框冒出来，勾了还会把刚填的 Key 清掉。 */
+        api_key_set: false,
+        model_names: modelNames,
         model_prefixes: [],
         model_mappings: {},
         effort_mappings: {},
-        priority: 100,
+        priority: 999,
         weight: 100,
         auto_weight_enabled: true,
-        timeout_seconds: 300,
         enabled: true,
+        archived: false,
         extra_headers: {},
+        // 0 让表单留空，保存时按设置页的默认超时落库。
+        timeout_seconds: 0,
         rate_limit: null,
-        clear_api_key: false,
+        created_at: "",
+        updated_at: "",
+        runtime_health_score: 1,
+        effective_weight: 100,
         group_ids: [],
-      });
-      setQuickOpen(false);
-      await reload();
-      toast(`渠道 ${created.name} 已创建。`, { tone: "ok" });
-    } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`创建失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
-    } finally {
-      setBusyDialog(false);
-    }
+      },
+    });
   }
 
   async function mutate(id: number, run: () => Promise<Upstream>) {
@@ -504,10 +542,21 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         actionLabel: snapshot ? "撤销" : undefined,
         onAction: snapshot
           ? async () => {
+              /* 快照来自详情，带着 Key。归档的渠道带上归档状态和归档前的启用
+                 状态，后端在同一个事务里重建并归档，恢复出来还在归档区。 */
               const { id: _id, api_key_set: _set, ...rest } = snapshot;
-              await createUpstream(rest);
-              await reload();
-              toast(`已恢复渠道「${snapshot.name}」，API Key 需重新填写。`, { tone: "ok" });
+              try {
+                await createUpstream({
+                  ...rest,
+                  enabled: snapshot.archived ? Boolean(snapshot.enabled_before_archive) : snapshot.enabled,
+                });
+                await reload();
+                toast(`已恢复渠道「${snapshot.name}」。`, { tone: "ok" });
+              } catch (err) {
+                // 提示条的按钮不接异常，这里不报的话，失败时提示条直接消失。
+                if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+                else toast(`恢复失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+              }
             }
           : undefined,
       });
@@ -915,8 +964,11 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
           void runExport(next);
         }}
         onClose={() => {
+          // 关窗后晚到的结果不该再写进下一次打开的窗口。
+          exportRequest.current += 1;
           setExportOpen(false);
           setExportDoc(null);
+          setBusyDialog(false);
         }}
       />
 
@@ -930,9 +982,11 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
 
       <QuickImportDialog
         open={quickOpen}
-        busy={busyDialog}
-        onSubmit={(name, baseUrl, apiKey) => void runQuickImport(name, baseUrl, apiKey)}
+        onSubmit={(name, baseUrl, apiKey, modelNames) =>
+          runQuickImport(name, baseUrl, apiKey, modelNames)
+        }
         onClose={() => setQuickOpen(false)}
+        onUnauthorized={onUnauthorized}
       />
 
       <ModelTestDialog open={testing !== null} upstream={testing} onClose={() => setTesting(null)} />

@@ -22,6 +22,7 @@ type Settings struct {
 	Admin    AdminSettings    `toml:"admin"`
 	Themes   ThemeSettings    `toml:"themes"`
 	Metrics  MetricsSettings  `toml:"metrics"`
+	Images   ImageSettings    `toml:"images"`
 }
 
 type ServerSettings struct {
@@ -83,6 +84,13 @@ func (m MetricsSettings) EnabledWithoutToken() bool {
 	return m.Enabled && strings.TrimSpace(m.Token) == ""
 }
 
+// ImageSettings is where generated images are saved. The size cap and the
+// on/off switch are runtime settings; only the location is startup config,
+// because moving it means moving files.
+type ImageSettings struct {
+	Dir string `toml:"dir"`
+}
+
 // Default returns the settings used when no file or environment overrides apply.
 func Default() Settings {
 	return Settings{
@@ -102,6 +110,7 @@ func Default() Settings {
 		// Off unless the operator asks for it. An upgrade must not begin publishing
 		// traffic volumes and channel health to whatever can reach the port.
 		Metrics: MetricsSettings{Enabled: false},
+		Images:  ImageSettings{Dir: "images"},
 	}
 }
 
@@ -137,6 +146,9 @@ func Load() (Settings, error) {
 	}
 	if dir := os.Getenv("WILDTOKEN_THEME_DIR"); dir != "" {
 		settings.Themes.Dir = dir
+	}
+	if dir := os.Getenv("WILDTOKEN_IMAGE_DIR"); dir != "" {
+		settings.Images.Dir = dir
 	}
 
 	return settings, nil
@@ -212,6 +224,7 @@ func applyEnvOverrides(settings *Settings) error {
 			return nil
 		}},
 		{"APP__METRICS__TOKEN", func(s *Settings, v string) error { s.Metrics.Token = v; return nil }},
+		{"APP__IMAGES__DIR", func(s *Settings, v string) error { s.Images.Dir = v; return nil }},
 	}
 
 	for _, override := range overrides {

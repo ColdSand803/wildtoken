@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-import { getAdminToken } from "./api";
+import { getAdminToken, rejectAdminToken } from "./api";
 import type { ActiveRequest, RequestLog } from "./types";
 
 const STREAM_PATH = "/api/admin/logs/stream";
@@ -49,6 +49,9 @@ export interface LogStreamState {
   connected: boolean;
   rpm: number | null;
   tpm: number | null;
+  /** 被 200 条上限挤出去的行里最新的 id，0 表示还没挤过。比调用方当前页的
+      最新一行还新，就说明流和页之间断了一截。 */
+  evictedNewestId: number;
 }
 
 /**
@@ -57,9 +60,10 @@ export interface LogStreamState {
  * 用 fetch + ReadableStream 而不是 EventSource：认证走 x-admin-token 头，
  * 原生 EventSource 不支持自定义请求头。
  *
- * 三种事件：
+ * 四种事件：
  *   log     一条新日志
  *   active  在途请求全量快照
+ *   rate    近一分钟的 RPM/TPM，没有新日志时也会随窗口滑动更新
  *   resync  服务端要求重新拉取（本 hook 只置标志，拉取由调用方做）
  */
 export function useLogStream(enabled: boolean, onResync: () => void, filterQuery = ""): LogStreamState {
@@ -70,6 +74,7 @@ export function useLogStream(enabled: boolean, onResync: () => void, filterQuery
     connected: false,
     rpm: null,
     tpm: null,
+    evictedNewestId: 0,
   });
 
   /* onResync 放进 ref：把它列进 deps 会让调用方每次重渲染都重连，
@@ -78,7 +83,7 @@ export function useLogStream(enabled: boolean, onResync: () => void, filterQuery
   resyncRef.current = onResync;
 
   useEffect(() => {
-    setState({ logs: [], active: [], activeTotal: 0, connected: false, rpm: null, tpm: null });
+    setState({ logs: [], active: [], activeTotal: 0, connected: false, rpm: null, tpm: null, evictedNewestId: 0 });
     if (!enabled) {
       return;
     }
@@ -99,9 +104,16 @@ export function useLogStream(enabled: boolean, onResync: () => void, filterQuery
       pending = [];
       setState((prev) => {
         const seen = new Set(prev.logs.map((log) => log.id));
-        const fresh = incoming.filter((log) => !seen.has(log.id));
+        // 到达顺序是升序，列表要最新在前：不倒过来的话一批 101、102、103 排成 101 在顶。
+        const fresh = incoming.filter((log) => !seen.has(log.id)).sort((a, b) => b.id - a.id);
         if (fresh.length === 0) return prev;
-        return { ...prev, logs: [...fresh, ...prev.logs].slice(0, 200) };
+        const merged = [...fresh, ...prev.logs];
+        const evicted = merged.slice(200).reduce((newest, log) => Math.max(newest, log.id), 0);
+        return {
+          ...prev,
+          logs: merged.slice(0, 200),
+          evictedNewestId: Math.max(prev.evictedNewestId, evicted),
+        };
       });
     };
 
@@ -114,6 +126,18 @@ export function useLogStream(enabled: boolean, onResync: () => void, filterQuery
       if (stopped) return;
       if (event.type === "resync") {
         resyncRef.current();
+        return;
+      }
+      if (event.type === "rate") {
+        try {
+          const rate = JSON.parse(event.data) as { recent_rpm?: number; recent_tpm?: number };
+          if (typeof rate.recent_rpm === "number" && typeof rate.recent_tpm === "number") {
+            const { recent_rpm: rpm, recent_tpm: tpm } = rate;
+            setState((prev) => ({ ...prev, rpm, tpm }));
+          }
+        } catch {
+          // 坏帧丢掉，下一次刷新会补上。
+        }
         return;
       }
       if (event.type === "active") {
@@ -215,6 +239,12 @@ export function useLogStream(enabled: boolean, onResync: () => void, filterQuery
           headers: { Accept: "text/event-stream", "x-admin-token": token },
           signal: controller.signal,
         });
+        if (response.status === 401) {
+          /* 令牌失效不是断线：清掉并弹登录框。退避重连会等到有了新令牌再连，
+             而不是拿旧的一直试。 */
+          rejectAdminToken(token, "登录已失效，请重新输入管理员令牌。");
+          throw new Error("401 Unauthorized");
+        }
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
         if (!response.body) throw new Error("日志流不可用");
         openedAt = Date.now();

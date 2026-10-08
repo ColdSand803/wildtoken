@@ -94,6 +94,38 @@ func CreateGroup(ctx context.Context, database *sql.DB, input *models.GroupIn) (
 	return group, nil
 }
 
+// EnsureGroups returns the ids of the named groups, creating the missing ones.
+//
+// An import binds channels to groups by name: ids are per instance, and "vip"
+// may be 2 where the export was made and name some other group where it lands.
+// Names are expected validated.
+func EnsureGroups(ctx context.Context, database *sql.DB, names []string) ([]int64, error) {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, apperr.Database(err)
+	}
+	defer tx.Rollback()
+
+	ids := make([]int64, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO groups (name, created_at, updated_at)
+            VALUES (?, datetime('now'), datetime('now')) ON CONFLICT (name) DO NOTHING`, name); err != nil {
+			return nil, apperr.Database(err)
+		}
+
+		var id int64
+		if err := tx.QueryRowContext(ctx, "SELECT id FROM groups WHERE name = ?", name).Scan(&id); err != nil {
+			return nil, apperr.Database(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, apperr.Database(err)
+	}
+	return ids, nil
+}
+
 // UpdateGroup renames a group. found=false when no group carries the id.
 func UpdateGroup(ctx context.Context, database *sql.DB, id int64, input *models.GroupIn) (models.Group, bool, error) {
 	tx, err := database.BeginTx(ctx, nil)

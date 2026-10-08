@@ -273,6 +273,31 @@ func selectForwardModel(upstream *parsedUpstream, requestedModel *string) *strin
 type Selection struct {
 	Upstream     models.UpstreamRow
 	ForwardModel *string
+	// Mapped reports that ForwardModel comes from the channel's explicit model
+	// mapping, written by an operator, rather than from fuzzy name matching.
+	Mapped bool
+}
+
+func newSelection(upstream *parsedUpstream, model *string) *Selection {
+	return &Selection{
+		Upstream:     upstream.row,
+		ForwardModel: selectForwardModel(upstream, model),
+		Mapped:       mapsModel(upstream, model),
+	}
+}
+
+// mapsModel reports whether the channel's explicit mapping rewrites a model.
+func mapsModel(upstream *parsedUpstream, model *string) bool {
+	if model == nil {
+		return false
+	}
+	request := normalizeModelMatch(*model)
+	for _, mapping := range upstream.modelMappings {
+		if mapping.keyNormalized == request && mapping.value != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // SelectionPolicy is how routing should choose within a priority tier.
@@ -407,12 +432,12 @@ func selectDirect(snapshot *routingSnapshot, selector string, model *string,
 	if id, err := strconv.ParseInt(selector, 10, 64); err == nil {
 		if upstream, ok := snapshot.byID[id]; ok && !exclude[id] &&
 			upstream.servesGroup(groupID) && matchesModel(upstream, model) {
-			return &Selection{Upstream: upstream.row, ForwardModel: selectForwardModel(upstream, model)}
+			return newSelection(upstream, model)
 		}
 	}
 	if upstream, ok := snapshot.byName[selector]; ok && !exclude[upstream.row.ID] &&
 		upstream.servesGroup(groupID) && matchesModel(upstream, model) {
-		return &Selection{Upstream: upstream.row, ForwardModel: selectForwardModel(upstream, model)}
+		return newSelection(upstream, model)
 	}
 	return nil
 }
@@ -520,7 +545,7 @@ func selectWeightedByPriority(
 		}
 
 		chosen := selectable[weightedIndex(weights, total)]
-		return &Selection{Upstream: chosen.row, ForwardModel: selectForwardModel(chosen, model)}
+		return newSelection(chosen, model)
 	}
 
 	return nil

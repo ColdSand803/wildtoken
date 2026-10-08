@@ -30,13 +30,19 @@ func ensureColumn(ctx context.Context, db *sql.DB, table, column, definition str
 // duplicate. ON CONFLICT(name) DO NOTHING protects a row that still exists; it
 // says nothing about one that was removed on purpose. These rows are starting
 // examples, not an invariant to restore.
+//
+// An empty table is not proof of a new one: the operator may have deleted every
+// row. AUTOINCREMENT leaves a sqlite_sequence entry behind once any row was
+// written, which is what tells the two apart.
 func seedPromptTemplatesOnce(ctx context.Context, db *sql.DB) error {
-	var existing int64
+	var used int64
 	if err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM model_test_prompt_templates").Scan(&existing); err != nil {
+		`SELECT (SELECT COUNT(*) FROM model_test_prompt_templates) +
+		        (SELECT COUNT(*) FROM sqlite_sequence WHERE name = 'model_test_prompt_templates')`).
+		Scan(&used); err != nil {
 		return fmt.Errorf("count prompt templates: %w", err)
 	}
-	if existing != 0 {
+	if used != 0 {
 		return nil
 	}
 	if _, err := db.ExecContext(ctx, seedModelTestPromptTemplates); err != nil {
@@ -226,6 +232,8 @@ func Init(ctx context.Context, db *sql.DB) error {
 			"CHECK (load_balance_strategy IN ('weighted', 'least_latency'))"},
 		// 0 means "inherit the startup config"; existing rows keep behaving as before.
 		{"default_upstream_timeout_seconds", "INTEGER NOT NULL DEFAULT 0 CHECK (default_upstream_timeout_seconds BETWEEN 0 AND 3600)"},
+		{"image_storage_max_mb", "INTEGER NOT NULL DEFAULT 10240 CHECK (image_storage_max_mb BETWEEN 0 AND 1048576)"},
+		{"dashboard_multiplier", "REAL NOT NULL DEFAULT 1 CHECK (dashboard_multiplier > 0 AND dashboard_multiplier <= 1000)"},
 	} {
 		if err := ensureColumn(ctx, db, "runtime_settings", column.name, column.definition); err != nil {
 			return err

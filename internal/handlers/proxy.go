@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -146,6 +147,18 @@ func writeModelNotAllowedRejection(w http.ResponseWriter, anthropic bool, detail
 		}
 	}
 	apperr.WriteJSON(w, http.StatusForbidden, body)
+}
+
+// writeProxyError answers a failed proxied request in the caller's protocol, as
+// every other refusal on this path is. A bare {"error": "..."} left an
+// Anthropic SDK unable to read the failure at all.
+func writeProxyError(w http.ResponseWriter, path string, err error) {
+	var appErr *apperr.AppError
+	if !errors.As(err, &appErr) {
+		appErr = apperr.Internal(err.Error())
+	}
+	status, message := appErr.StatusAndMessage()
+	writeProtocolError(w, status, path, message, "api_error")
 }
 
 // UpstreamRateLimitedCode identifies "every routable channel is rate-limited"
@@ -394,6 +407,22 @@ func (g *abortLogGuard) setPreparedRequest(prepared *proxy.PreparedRequest) {
 // disarm gives up ownership of the log, because the proxy already wrote one.
 func (g *abortLogGuard) disarm() { g.entry = nil }
 
+// logAttempt records one failed attempt on a row of its own and stays armed:
+// the request goes on to another channel, which logs how it ended.
+func (g *abortLogGuard) logAttempt(upstream *models.UpstreamRow, statusCode int32, message string) {
+	if g.entry == nil {
+		return
+	}
+	entry := *g.entry
+	upstreamID, upstreamName := upstream.ID, upstream.Name
+	entry.UpstreamID = &upstreamID
+	entry.UpstreamName = &upstreamName
+	entry.StatusCode = &statusCode
+	entry.Error = &message
+	entry.DurationMs = g.elapsed()
+	g.logWriter.Schedule(entry)
+}
+
 // logAndDisarm records a specific failure instead of the default abort.
 func (g *abortLogGuard) logAndDisarm(statusCode int32, message string, stage proxy.FailureStage) {
 	entry := g.entry
@@ -455,15 +484,24 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		guard.setQuotaPeriod(auth.QuotaPeriodStamp)
 		guard.setClientIP(clientIP(r))
 
+		if !models.ProxyEndpointAllowed(r.Method, path) {
+			guard.logAndDisarm(http.StatusNotFound, "endpoint is not relayed", proxy.FailureStageGateway)
+			writeProtocolError(w, http.StatusNotFound, r.URL.Path,
+				"this endpoint is not available through the gateway", "not_found_error")
+			return
+		}
+
 		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDownstreamBodyBytes))
 		if err != nil {
 			// A body that exceeded the cap is the caller's error; anything else
 			// means the caller went away mid-upload.
 			var maxBytesError *http.MaxBytesError
 			if errors.As(err, &maxBytesError) {
-				guard.logAndDisarm(400, "failed to read downstream request body: "+err.Error(),
+				guard.logAndDisarm(http.StatusRequestEntityTooLarge,
+					"failed to read downstream request body: "+err.Error(),
 					proxy.FailureStageGateway)
-				apperr.BadRequest("failed to read body: " + err.Error()).Write(w)
+				writeProtocolError(w, http.StatusRequestEntityTooLarge, r.URL.Path,
+					"request body exceeds 50 MiB", "request_too_large")
 				return
 			}
 			guard.logAndDisarm(499,
@@ -503,7 +541,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			if err != nil {
 				guard.logAndDisarm(500, "upstream selection failed: "+err.Error(),
 					proxy.FailureStageGateway)
-				apperr.WriteError(w, err)
+				writeProxyError(w, r.URL.Path, err)
 				return
 			}
 		}
@@ -513,6 +551,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			auth:            auth,
 			groupName:       resolveGroupName(r.Context(), state, auth.GroupID),
 			path:            path,
+			query:           withoutQueryParam(r.URL.RawQuery, "upstream"),
 			body:            body,
 			model:           model,
 			selector:        selector,
@@ -528,7 +567,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			// disconnect for what was an upstream failure and leaving the
 			// console unable to tell the two apart.
 			guard.disarm()
-			apperr.WriteError(w, err)
+			writeProxyError(w, r.URL.Path, err)
 			return
 		}
 		if response == nil {
@@ -548,6 +587,7 @@ type proxyAttemptConfig struct {
 	// not query it per attempt.
 	groupName       string
 	path            string
+	query           string // the caller's, minus this gateway's ?upstream= hint
 	body            []byte
 	model           *string
 	selector        *string
@@ -569,17 +609,19 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 	var previousUpstreamID *int64
 	var lastFailure *attemptResult
 
-	// rateLimited collects the channels whose rate limit refused this request.
-	// A refused channel stays out of routing for the rest of the request, so
-	// re-selection falls over to the remaining candidates instead of drawing the
-	// same channel again. Nil until the first refusal.
-	var rateLimited map[int64]bool
-	// failedUpstreams collects the channels that already failed this request.
-	// They are preferred against rather than banned: routing tries to find one
-	// that has not failed yet, and only if there is none does it come back to a
-	// channel that has. A hard ban would break the single-channel case the retry
-	// interval exists for, where trying the same channel again after a pause is
-	// the whole point.
+	// excluded collects the channels that stay out of routing for the rest of
+	// this request: a channel whose rate limit refused the request, one that
+	// rejected it with a caller-side 4xx, and one that would forward a model
+	// the token may not use. anyRateLimited turns "nothing left" into a 429.
+	excluded := map[int64]bool{}
+	anyRateLimited := false
+	anyMisconfigured := false
+	// rejected are the channels that answered this request with a 4xx that
+	// may be its own fault. They are charged only if another channel then
+	// serves it: then the refusal was theirs, not the request's.
+	var rejected []models.UpstreamRow
+	// failedUpstreams are preferred against rather than banned, so a
+	// single-channel deployment can still retry the same channel after a pause.
 	var failedUpstreams map[int64]bool
 
 	for attempt := 0; ; attempt++ {
@@ -587,28 +629,50 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		// admission records the request, refusal excludes the channel. The loop
 		// terminates because every refusal shrinks the candidate set.
 		var selected *proxy.Selection
+		var prepared *proxy.PreparedRequest
 		for {
 			selected = config.directSelection
 			if config.selector == nil {
 				var err error
-				selected, err = selectWithFailover(r, state, config, rateLimited, failedUpstreams)
+				selected, err = selectWithFailover(r, state, config, excluded, failedUpstreams)
 				if err != nil {
 					config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error(),
 						proxy.FailureStageGateway)
 					return nil, err
 				}
-			} else if selected != nil && rateLimited[selected.Upstream.ID] {
+			} else if selected != nil && excluded[selected.Upstream.ID] {
 				// A direct selector has no other candidate behind it.
 				selected = nil
 			}
-			if selected == nil ||
-				proxy.UpstreamRateLimitAdmits(state.UpstreamRateLimiter, &selected.Upstream) {
+			if selected == nil {
 				break
 			}
-			if rateLimited == nil {
-				rateLimited = map[int64]bool{}
+			// The allowlist admitted the name asked for, not whichever name a
+			// channel's list happens to start or end with it.
+			if !forwardModelAllowed(config.auth.AllowedModels, config.model, selected) {
+				excluded[selected.Upstream.ID] = true
+				continue
 			}
-			rateLimited[selected.Upstream.ID] = true
+			// A channel whose stored headers no longer build a request fails
+			// every request it is given, so it is charged, logged and passed
+			// over. Ending the request here refused it with healthy channels
+			// left, and told the caller the channel's name.
+			var err error
+			prepared, err = proxy.PrepareRequest(r.Header, &selected.Upstream, r.Method,
+				config.path, config.query, selected.ForwardModel, config.body, logBodyMaxBytes)
+			if err != nil {
+				state.AutoWeight.RecordFailure(selected.Upstream.ID,
+					selected.Upstream.AutoWeightEnabled == 1, config.policy)
+				config.guard.logAttempt(&selected.Upstream, 502, err.Error())
+				excluded[selected.Upstream.ID] = true
+				anyMisconfigured = true
+				continue
+			}
+			if proxy.UpstreamRateLimitAdmits(state.UpstreamRateLimiter, &selected.Upstream) {
+				break
+			}
+			excluded[selected.Upstream.ID] = true
+			anyRateLimited = true
 		}
 
 		if selected == nil {
@@ -616,13 +680,20 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			if lastFailure != nil {
 				return lastFailure.response, lastFailure.err
 			}
-			if len(rateLimited) > 0 {
+			if anyRateLimited {
 				// Routing had candidates, but every one of them refused: the
 				// request is only deferred, not unroutable, so the answer is a
 				// 429 rather than the no-route 503.
 				config.guard.logAndDisarm(429, "all candidate channels are rate limited",
 					proxy.FailureStageRateLimited)
 				writeUpstreamRateLimitRejection(w, config.path)
+				return nil, nil
+			}
+			if anyMisconfigured {
+				// Each channel's failure is already on a row of its own.
+				config.guard.disarm()
+				writeProtocolError(w, http.StatusBadGateway, config.path,
+					"no usable upstream channel", "api_error")
 				return nil, nil
 			}
 			reason := noRouteReason(config.selector, config.model, config.groupName)
@@ -655,19 +726,6 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		lastFailure = nil
 
 		config.guard.setUpstream(selected.Upstream.ID, selected.Upstream.Name, selected.ForwardModel)
-
-		prepared, err := proxy.PrepareRequest(r.Header, &selected.Upstream, r.Method,
-			config.path, r.URL.RawQuery, selected.ForwardModel, config.body, logBodyMaxBytes)
-		if err != nil {
-			// The channel's stored header configuration is what fails here, so
-			// the channel is charged for it. A channel that cannot build a
-			// request fails every one it is given, and without a penalty it
-			// keeps full weight and keeps being chosen to fail again.
-			state.AutoWeight.RecordFailure(selected.Upstream.ID,
-				selected.Upstream.AutoWeightEnabled == 1, config.policy)
-			config.guard.logAndDisarm(502, err.Error(), proxy.FailureStageRequestBuild)
-			return nil, err
-		}
 		config.guard.setPreparedRequest(prepared)
 
 		// Whether another attempt could follow is decided before this one runs,
@@ -692,7 +750,14 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				ClientIP:            clientIP(r),
 			}, prepared)
 
-		if !shouldFailover(r, response, err) || attempt >= maxRetries {
+		anotherChannelMayAccept := response != nil && err == nil && response.Status == http.StatusBadRequest
+		if (!shouldFailover(r, response, err) && !anotherChannelMayAccept) || attempt >= maxRetries {
+			if err == nil && response != nil && response.Status >= 200 && response.Status < 300 {
+				for _, upstream := range rejected {
+					state.AutoWeight.RecordFailure(upstream.ID, upstream.AutoWeightEnabled == 1,
+						config.policy)
+				}
+			}
 			return response, err
 		}
 
@@ -703,6 +768,12 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		// only explanation of what went wrong.
 		if response != nil {
 			response.Body = bufferFailedBody(response.Body)
+		}
+
+		// Asked again, the channel would refuse the request the same way.
+		if err == nil && !proxy.IsChannelFault(response.Status) {
+			excluded[selected.Upstream.ID] = true
+			rejected = append(rejected, selected.Upstream)
 		}
 
 		upstreamID := selected.Upstream.ID
@@ -718,21 +789,19 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 // selectWithFailover routes an attempt, preferring a channel that has not
 // already failed this request.
 //
-// Two passes rather than one exclusion set: the first asks for a channel that is
-// neither rate-limited nor already failed, and only when there is none does the
-// second allow a channel that failed to be tried again. Banning failed channels
+// hardExclude stays out for good: rate limits, caller-side 4xx, and channels
+// that cannot build a request. failed is only a preference. Banning those
 // outright would turn a single-channel deployment's retry into an immediate
-// no-route, and preferring nothing would keep drawing the broken channel while a
-// healthy one sat unused — routing draws by weight, and one failure barely moves
-// a weight.
+// no-route, and preferring nothing would keep drawing the broken channel while
+// a healthy one sat unused.
 func selectWithFailover(r *http.Request, state *appstate.State, config proxyAttemptConfig,
-	rateLimited, failedUpstreams map[int64]bool) (*proxy.Selection, error) {
-	if len(failedUpstreams) > 0 {
-		exclude := make(map[int64]bool, len(rateLimited)+len(failedUpstreams))
-		for id := range rateLimited {
+	hardExclude, failed map[int64]bool) (*proxy.Selection, error) {
+	if len(failed) > 0 {
+		exclude := make(map[int64]bool, len(hardExclude)+len(failed))
+		for id := range hardExclude {
 			exclude[id] = true
 		}
-		for id := range failedUpstreams {
+		for id := range failed {
 			exclude[id] = true
 		}
 		selected, err := proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
@@ -744,7 +813,7 @@ func selectWithFailover(r *http.Request, state *appstate.State, config proxyAtte
 	}
 	return proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
 		state.AutoWeight, config.policy, config.selectionPolicy, nil, config.model,
-		config.auth.GroupID, rateLimited)
+		config.auth.GroupID, hardExclude)
 }
 
 // shouldFailover decides whether an attempt's outcome earns another channel.
@@ -778,6 +847,38 @@ func shouldFailover(r *http.Request, response *proxy.Response, err error) bool {
 		return false
 	}
 	return proxy.IsRetryableUpstreamStatus(response.Status)
+}
+
+// forwardModelAllowed reports whether a selection forwards a model the token
+// may use. An operator's explicit mapping is honored as written; a fuzzy name
+// match must pass the allowlist itself, or a token limited to "gpt-4" could be
+// forwarded as "gpt-4.5-preview".
+func forwardModelAllowed(allowed models.AllowedModelsPolicy, requested *string, selected *proxy.Selection) bool {
+	if allowed.Unrestricted() || selected.Mapped || selected.ForwardModel == nil {
+		return true
+	}
+	if requested != nil && *selected.ForwardModel == *requested {
+		return true
+	}
+	return allowed.Permits(*selected.ForwardModel)
+}
+
+// withoutQueryParam drops one parameter from a raw query and leaves the rest
+// exactly as the caller wrote them.
+func withoutQueryParam(rawQuery, name string) string {
+	if rawQuery == "" {
+		return ""
+	}
+	parts := strings.Split(rawQuery, "&")
+	kept := parts[:0]
+	for _, part := range parts {
+		key, _, _ := strings.Cut(part, "=")
+		if unescaped, err := url.QueryUnescape(key); err == nil && unescaped == name {
+			continue
+		}
+		kept = append(kept, part)
+	}
+	return strings.Join(kept, "&")
 }
 
 type attemptResult struct {
@@ -898,7 +999,8 @@ func OpenAIModelsListResponse(ids []string) json.RawMessage {
 func resolveEnabledUpstreamForModels(ctx context.Context, state *appstate.State,
 	selector string, groupID int64) (models.UpstreamRow, error) {
 	reachable := func(upstream models.UpstreamRow) (bool, error) {
-		if upstream.Enabled != 1 {
+		// An archived channel does not route, so it lists no models either.
+		if upstream.Enabled != 1 || upstream.Archived != 0 {
 			return false, nil
 		}
 		groupIDs, err := db.ListUpstreamGroupIDs(ctx, state.DB, upstream.ID)
@@ -989,6 +1091,7 @@ func ListModelsHandler(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		revision := state.ModelsCache.Revision()
 		upstreams, err := db.ListEnabledUpstreamsInGroup(r.Context(), state.DB, auth.GroupID)
 		if err != nil {
 			apperr.WriteError(w, err)
@@ -1002,7 +1105,7 @@ func ListModelsHandler(state *appstate.State) http.HandlerFunc {
 			writeRawJSON(w, cached)
 			return
 		}
-		state.ModelsCache.Set(cacheKey, response)
+		state.ModelsCache.Set(cacheKey, response, revision)
 		writeRawJSON(w, response)
 	}
 }

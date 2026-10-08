@@ -140,7 +140,7 @@ func TestTheWhitelistIsJudgedOnTheClientsModelNotTheMappedOne(t *testing.T) {
 	input.BaseURL = upstream.URL
 	input.ModelNames = []string{"upstream-only-model"}
 	input.ModelMappings = map[string]string{"client-model": "upstream-only-model"}
-	if _, err := db.CreateUpstream(context.Background(), state.DB, &input, 30); err != nil {
+	if _, err := db.CreateUpstream(context.Background(), state.DB, &input); err != nil {
 		t.Fatalf("create channel: %v", err)
 	}
 	router := proxyRateLimitRouter(state)
@@ -284,7 +284,7 @@ func channelServingModels(t *testing.T, state *appstate.State, name string, mode
 	input.Name = name
 	input.BaseURL = "http://127.0.0.1:1/v1"
 	input.ModelNames = modelNames
-	if _, err := db.CreateUpstream(context.Background(), state.DB, &input, 30); err != nil {
+	if _, err := db.CreateUpstream(context.Background(), state.DB, &input); err != nil {
 		t.Fatalf("create channel %s: %v", name, err)
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/liguangsheng/wildtoken/internal/authstate"
 	"github.com/liguangsheng/wildtoken/internal/config"
 	"github.com/liguangsheng/wildtoken/internal/db"
+	"github.com/liguangsheng/wildtoken/internal/imagestore"
 	"github.com/liguangsheng/wildtoken/internal/metrics"
 	"github.com/liguangsheng/wildtoken/internal/models"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
@@ -52,9 +53,13 @@ func (s *SettingsStore) Set(settings models.RuntimeSettings) {
 //
 // It is invalidated explicitly on upstream and group write operations.
 // Concurrent misses may reload the same value, which is intentional and harmless.
+//
+// A load that raced an invalidation must not store what it read, or the stale
+// list stays until the next write. The revision is what tells it.
 type ModelsListCache struct {
-	mu      sync.RWMutex
-	byGroup map[ModelsCacheKey]json.RawMessage
+	mu       sync.RWMutex
+	byGroup  map[ModelsCacheKey]json.RawMessage
+	revision uint64
 }
 
 // ModelsCacheKey identifies one cached model list.
@@ -86,9 +91,21 @@ func (c *ModelsListCache) Get(key ModelsCacheKey) json.RawMessage {
 	return c.byGroup[key]
 }
 
-func (c *ModelsListCache) Set(key ModelsCacheKey, value json.RawMessage) {
+// Revision is read before a load and handed back to Set.
+func (c *ModelsListCache) Revision() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.revision
+}
+
+// Set stores a loaded list, unless the cache was invalidated after the load
+// began at revision.
+func (c *ModelsListCache) Set(key ModelsCacheKey, value json.RawMessage, revision uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if revision != c.revision {
+		return
+	}
 	c.byGroup[key] = value
 }
 
@@ -97,6 +114,7 @@ func (c *ModelsListCache) Set(key ModelsCacheKey, value json.RawMessage) {
 func (c *ModelsListCache) Invalidate() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.revision++
 	clear(c.byGroup)
 }
 
@@ -245,7 +263,14 @@ type State struct {
 	// the endpoints refuse rather than guess when it is.
 	DatabasePath string
 
+	// Images saves generated images out of logged responses. Nil when no
+	// directory is configured; every method treats nil as "off".
+	Images    *imagestore.Store
 	StartedAt time.Time
+	// Stopping closes when shutdown begins. A stream with no end of its own,
+	// such as the console's live log, returns on it; otherwise it held the
+	// request drain open until the drain timed out. Nil never closes.
+	Stopping <-chan struct{}
 }
 
 // EffectiveUpstreamTimeoutSeconds is the fallback timeout for channels that
@@ -266,6 +291,7 @@ func (s *State) ProxyDeps() proxy.Deps {
 		Metrics:        s.Metrics,
 		LogWriter:      s.LogWriter,
 		Latency:        s.Latency,
+		Images:         s.Images,
 		DefaultTimeout: time.Duration(s.EffectiveUpstreamTimeoutSeconds() * float64(time.Second)),
 	}
 }

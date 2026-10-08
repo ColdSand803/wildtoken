@@ -2,6 +2,7 @@ package models
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 )
@@ -71,9 +72,11 @@ func ParseQuotaExpression(raw string) (*int64, error) {
 	if scaled > float64(QuotaMaxTokens) {
 		return nil, ErrString("limit is too large")
 	}
-	// A limit that rounds down to zero would block every request, which no
-	// operator means by typing a number.
-	limit := int64(scaled)
+	// Rounded rather than truncated: 8.2 × 1e6 is 8199999.999…, which int64
+	// alone stored as 8199999 and showed back as that instead of 8.2M. A limit
+	// that rounds to zero would block every request, which no operator means
+	// by typing a number.
+	limit := int64(math.Round(scaled))
 	if limit <= 0 {
 		return nil, ErrString("limit must be at least 1 token")
 	}

@@ -72,7 +72,7 @@ func seedChannel(t *testing.T, state *appstate.State, name string) {
 		Name: name, BaseURL: "https://" + name + ".example/v1", APIKey: &key,
 		ModelNames: []string{"gpt-4o"}, Priority: 100, Weight: 100, Enabled: true,
 		TimeoutSeconds: &timeout, GroupIDs: []int64{models.DefaultGroupID},
-	}, 300); err != nil {
+	}); err != nil {
 		t.Fatalf("seed channel: %v", err)
 	}
 }
@@ -366,7 +366,7 @@ func TestAnImportedRoutingChangeTakesEffectWithoutARestart(t *testing.T) {
 	// Warm the model list an unrestricted token would read, so an invalidation is
 	// observable rather than indistinguishable from a cache that was never filled.
 	key := appstate.ModelsCacheKey{GroupID: models.DefaultGroupID}
-	target.ModelsCache.Set(key, json.RawMessage(`{"data":[{"id":"stale-model"}]}`))
+	target.ModelsCache.Set(key, json.RawMessage(`{"data":[{"id":"stale-model"}]}`), target.ModelsCache.Revision())
 
 	status, report := importArchive(t, target, models.ConfigImportRequest{
 		Archive: archive, OnConflict: models.ConfigConflictSkip,

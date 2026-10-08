@@ -404,3 +404,21 @@ func TestThrottledClientsNeverReachVerification(t *testing.T) {
 		t.Error("a blocked client bypassed the backoff with a valid token")
 	}
 }
+
+// A failure streak quiet for clientResetAfter is over. Only a full map's
+// pruning forgot one before, so a client's old failures counted days later.
+func TestAQuietFailureStreakIsForgotten(t *testing.T) {
+	throttle := NewThrottle()
+	now := time.Now()
+	throttle.now = func() time.Time { return now }
+	client := Client{Kind: ClientRemote, Addr: netip.MustParseAddr("203.0.113.9")}
+
+	for range freeAttempts {
+		throttle.RecordFailure(client)
+	}
+	now = now.Add(clientResetAfter)
+	throttle.RecordFailure(client)
+	if !throttle.Admit(client) {
+		t.Error("one failure after a quiet period was penalised for the streak before it")
+	}
+}

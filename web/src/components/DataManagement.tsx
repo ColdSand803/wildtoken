@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, rawApi } from "../api";
+import { api, send } from "../api";
 import { backupFileName, downloadBlob, parseBackup } from "../archiveTools";
 import { ConfigMigration } from "./ConfigMigration";
 import { useConfirm } from "./feedback";
@@ -31,7 +31,7 @@ export function DataManagement({ onChanged }: { onChanged: () => Promise<void> }
     if (backupPassword && backupPassword.trim().length < 8) { setMessage("备份密码至少 8 位，留空表示不加密。"); return; }
     setBusy(true); setMessage("正在生成一致性数据库快照…");
     try {
-      const response = await rawApi("/api/admin/disaster-recovery/backup", { method: "POST", body: JSON.stringify({ password: backupPassword }) });
+      const response = await send("/api/admin/disaster-recovery/backup", { method: "POST", body: JSON.stringify({ password: backupPassword }) });
       downloadBlob(await response.blob(), backupFileName(response)); setBackupPassword(""); setMessage("数据库备份已下载，请安全保存。");
     } catch (err) { setMessage(err instanceof Error ? err.message : String(err)); }
     finally { setBusy(false); }

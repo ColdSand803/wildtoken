@@ -4,7 +4,13 @@
  * 超过它，截断保留开头、丢弃结尾。所以标准 JSON.parse 对绝大多数日志都会失败,
  * 下面这套扫描器的存在意义就是从残缺 JSON 里尽量多地抢救出消息。
  *
+ * 生图请求没有 messages，只有 prompt；它的响应是图而不是文字。两者也按会话
+ * 摊开：prompt 算用户消息，图算助手回复。
+ *
  * 纯函数，不碰 DOM。渲染在 components/Conversation.tsx。 */
+
+// 带 .ts 扩展名：测试用 node 直接加载这个文件，node 的 ESM 不补扩展名。
+import { formatBytes, parseImageResponse } from "./imageRequest.ts";
 
 export type Block =
   | { kind: "text"; text: string }
@@ -19,7 +25,11 @@ export type Block =
       input: unknown;
       result: { isError: boolean; text: string } | null;
     }
-  | { kind: "image"; text: string }
+  /**
+   * src 有值时直接画图（生图的结果）；没有时 text 是一句描述（请求里的图）。
+   * download 是服务端存下的文件路径，可直接下载。
+   */
+  | { kind: "image"; text: string; src?: string; download?: string }
   | { kind: "error"; text: string }
   | { kind: "other"; label: string; input: unknown };
 
@@ -372,6 +382,53 @@ function normalizeContentBlocks(content: unknown): Block[] {
   return blocks;
 }
 
+/** 推理条目的摘要。只有加密内容、没有摘要的推理读不出东西，返回空串。 */
+function reasoningSummaryText(item: JSONObject): string {
+  const parts = Array.isArray(item.summary) ? item.summary : Array.isArray(item.content) ? item.content : [];
+  return parts
+    .map((part) => (part && typeof (part as JSONObject).text === "string" ? ((part as JSONObject).text as string) : ""))
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+/**
+ * Responses API 里和消息平级的条目：函数调用、调用结果、推理。
+ *
+ * 它们没有 role 也没有 content，当消息处理会整条被丢，codex 的会话就只剩一问
+ * 一答。调用和结果靠 call_id 对应，id 是条目自己的，拿它配对永远配不上。
+ * 返回 null 表示这条读不出可显示的内容；undefined 表示它不是这类条目。
+ */
+function responsesItemMessage(item: JSONObject): Message | null | undefined {
+  const callId = typeof item.call_id === "string" ? item.call_id : null;
+  switch (item.type) {
+    case "function_call":
+    case "custom_tool_call":
+      return {
+        role: "assistant",
+        blocks: [
+          {
+            kind: "tool_use",
+            name: typeof item.name === "string" ? item.name : "工具",
+            id: callId,
+            input: item.arguments ?? item.input ?? null,
+          },
+        ],
+      };
+    case "function_call_output":
+    case "custom_tool_call_output":
+      return {
+        role: "tool",
+        blocks: [{ kind: "tool_result", id: callId, isError: false, text: stringifyToolResult(item.output) }],
+      };
+    case "reasoning": {
+      const text = reasoningSummaryText(item);
+      return text ? { role: "assistant", blocks: [{ kind: "thinking", text }] } : null;
+    }
+    default:
+      return undefined;
+  }
+}
+
 /** system 可以是字符串，也可以是 [{type:"text"}]（Anthropic 的写法）。 */
 function normalizeSystemPrompt(system: unknown, instructions: unknown): Message | null {
   const source = system ?? instructions;
@@ -450,6 +507,30 @@ export function pairToolCalls(messages: Message[]): Message[] {
   return out;
 }
 
+/**
+ * 生图请求：prompt 是用户消息，其余参数（尺寸、数量、质量…）排成一行附在
+ * 后面——看一条生图日志，最先想知道的就是「画了什么、按什么参数画」。
+ */
+function parseImageGenerationRequest(body: JSONObject, complete: boolean): Conversation | null {
+  if (typeof body.prompt !== "string") return null;
+
+  const params = Object.entries(body)
+    .filter(([key]) => key !== "model" && key !== "prompt")
+    .map(([key, value]) => `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`);
+  const blocks: Block[] = [{ kind: "text", text: body.prompt }];
+  if (params.length > 0) blocks.push({ kind: "text", text: `参数：${params.join(" · ")}` });
+
+  return {
+    kind: "request",
+    model: typeof body.model === "string" ? body.model : null,
+    messages: [{ role: "user", blocks }],
+    toolCount: 0,
+    stopReason: null,
+    stream: body.stream === true,
+    complete,
+  };
+}
+
 /** 返回 null 表示这不是一个能识别的会话请求。 */
 export function parseConversationRequest(bodyText: string): Conversation | null {
   const root = parseLenientRoot(bodyText, ["messages", "input"]);
@@ -461,15 +542,33 @@ export function parseConversationRequest(bodyText: string): Conversation | null 
     : Array.isArray(body.input)
       ? body.input
       : null;
-  if (!rawMessages) return null;
+  if (!rawMessages) return parseImageGenerationRequest(body, root.complete);
 
   const messages: Message[] = [];
   const system = normalizeSystemPrompt(body.system, body.instructions);
   if (system) messages.push(system);
 
+  /* 连着的几条调用（并行工具调用）并成一条消息，结果也并成一条：pairToolCalls
+     按「一条调用消息，后面跟着装结果的消息」配对，一条一条拆开就配不上。 */
+  const fromItems = new Set<Message>();
+
   for (const raw of rawMessages) {
     if (!raw || typeof raw !== "object") continue;
     const entry = raw as JSONObject;
+
+    const item = responsesItemMessage(entry);
+    if (item !== undefined) {
+      if (!item) continue;
+      const last = messages.at(-1);
+      if (last && fromItems.has(last) && last.role === item.role) {
+        last.blocks.push(...item.blocks);
+      } else {
+        messages.push(item);
+        fromItems.add(item);
+      }
+      continue;
+    }
+
     const blocks = normalizeContentBlocks(entry.content);
 
     // chat/completions 把工具调用放在消息对象上而不是 content 里。
@@ -590,13 +689,14 @@ function reassembleAnthropicStream(payloads: JSONObject[]): Assembled | null {
     if (type === "content_block_start") {
       sawStream = true;
       const start = (event.content_block ?? {}) as JSONObject;
+      // 类型不对的字段一律不收：一个对象型的 name 会被当成 React 子节点渲染，整页白屏。
       ensure(event.index as number, {
         ...blank(),
-        type: (start.type as string) || "text",
+        type: typeof start.type === "string" && start.type ? start.type : "text",
         text: typeof start.text === "string" ? start.text : "",
         thinking: typeof start.thinking === "string" ? start.thinking : "",
-        name: (start.name as string) || null,
-        id: (start.id as string) || null,
+        name: typeof start.name === "string" && start.name ? start.name : null,
+        id: typeof start.id === "string" && start.id ? start.id : null,
       });
     } else if (type === "content_block_delta") {
       sawStream = true;
@@ -627,6 +727,8 @@ function reassembleAnthropicStream(payloads: JSONObject[]): Assembled | null {
 /** OpenAI 流式：把 choices[].delta 累积起来。 */
 function reassembleOpenAIStream(payloads: JSONObject[]): Assembled | null {
   let text = "";
+  // 推理单独成块：拼进正文的话，读不出哪句是思考、哪句是回答。
+  let thinking = "";
   const toolCalls = new Map<string | number, { name: string; id: string | null; args: string }>();
   let finishReason: string | null = null;
   let sawStream = false;
@@ -638,7 +740,8 @@ function reassembleOpenAIStream(payloads: JSONObject[]): Assembled | null {
     if (choice.finish_reason) finishReason = String(choice.finish_reason);
     const delta = (choice.delta ?? {}) as JSONObject;
     if (typeof delta.content === "string") text += delta.content;
-    if (typeof delta.reasoning_content === "string") text += delta.reasoning_content;
+    if (typeof delta.reasoning_content === "string") thinking += delta.reasoning_content;
+    else if (typeof delta.reasoning === "string") thinking += delta.reasoning;
 
     for (const item of Array.isArray(delta.tool_calls) ? delta.tool_calls : []) {
       const call = (item ?? {}) as JSONObject;
@@ -654,6 +757,7 @@ function reassembleOpenAIStream(payloads: JSONObject[]): Assembled | null {
   if (!sawStream) return null;
 
   const blocks: Block[] = [];
+  if (thinking) blocks.push({ kind: "thinking", text: thinking });
   if (text) blocks.push({ kind: "text", text });
   for (const call of toolCalls.values()) {
     blocks.push({ kind: "tool_use", name: call.name || "工具", id: call.id, input: call.args });
@@ -661,18 +765,86 @@ function reassembleOpenAIStream(payloads: JSONObject[]): Assembled | null {
   return { blocks, stopReason: finishReason };
 }
 
-/** Responses API 流式：增量事件带 delta 字符串。 */
+/**
+ * Responses API 流式：按输出条目和增量类型分开累积。
+ *
+ * 正文、推理摘要和函数参数的增量都叫 delta，一股脑拼起来读到的就是
+ * `**Listing files**{"command":["ls"]}done`。按 output_index 排，和最终输出的
+ * 条目顺序一致。
+ */
 function reassembleResponsesStream(payloads: JSONObject[]): Assembled | null {
-  let text = "";
+  type Part = { kind: "thinking" | "text" | "tool"; order: number; text: string; name: string | null; id: string | null };
+  const parts = new Map<string, Part>();
+  const errors: string[] = [];
+  let stopReason: string | null = null;
   let sawStream = false;
+
+  const part = (event: JSONObject, kind: Part["kind"]): Part => {
+    const order = typeof event.output_index === "number" ? event.output_index : 0;
+    const key = `${order}:${kind}`;
+    if (!parts.has(key)) parts.set(key, { kind, order, text: "", name: null, id: null });
+    return parts.get(key) as Part;
+  };
+
   for (const event of payloads) {
-    if (typeof event.type !== "string" || !event.type.startsWith("response.")) continue;
-    if (typeof event.delta === "string") {
+    const type = event.type;
+    if (type === "error") {
       sawStream = true;
-      text += event.delta;
+      errors.push(String(event.message || event.code || "上游返回错误"));
+      continue;
+    }
+    if (typeof type !== "string" || !type.startsWith("response.")) continue;
+    sawStream = true;
+    const delta = typeof event.delta === "string" ? event.delta : "";
+
+    switch (type) {
+      case "response.output_text.delta":
+      case "response.refusal.delta":
+        part(event, "text").text += delta;
+        break;
+      case "response.reasoning_summary_text.delta":
+      case "response.reasoning_text.delta":
+        part(event, "thinking").text += delta;
+        break;
+      case "response.function_call_arguments.delta":
+      case "response.custom_tool_call_input.delta":
+        part(event, "tool").text += delta;
+        break;
+      case "response.output_item.added":
+      case "response.output_item.done": {
+        const item = (event.item ?? {}) as JSONObject;
+        if (item.type !== "function_call" && item.type !== "custom_tool_call") break;
+        const call = part(event, "tool");
+        if (typeof item.name === "string") call.name = item.name;
+        if (typeof item.call_id === "string") call.id = item.call_id;
+        // 条目收尾时带着完整参数，比拼出来的增量可靠。
+        const whole = item.arguments ?? item.input;
+        if (type === "response.output_item.done" && typeof whole === "string") call.text = whole;
+        break;
+      }
+      case "response.completed":
+      case "response.incomplete":
+      case "response.failed": {
+        const response = (event.response ?? {}) as JSONObject;
+        if (typeof response.status === "string") stopReason = response.status;
+        const error = response.error as JSONObject | null | undefined;
+        if (error && typeof error === "object") errors.push(String(error.message || error.code || "上游返回错误"));
+        break;
+      }
     }
   }
-  return sawStream ? { blocks: text ? [{ kind: "text", text }] : [], stopReason: null } : null;
+  if (!sawStream) return null;
+
+  const rank = { thinking: 0, text: 1, tool: 2 };
+  const blocks: Block[] = [...parts.values()]
+    .sort((a, b) => a.order - b.order || rank[a.kind] - rank[b.kind])
+    .flatMap((entry): Block[] => {
+      if (entry.kind === "tool") return [{ kind: "tool_use", name: entry.name || "工具", id: entry.id, input: entry.text }];
+      if (!entry.text) return [];
+      return [{ kind: entry.kind, text: entry.text }];
+    });
+  for (const text of errors) blocks.push({ kind: "error", text });
+  return { blocks, stopReason };
 }
 
 /** 非流式响应：Anthropic 的 content[]，OpenAI 的 choices[].message。 */
@@ -703,8 +875,12 @@ function parseNonStreamResponse(body: JSONObject): Assembled | null {
 
   if (Array.isArray(body.output)) {
     const blocks: Block[] = [];
-    for (const item of body.output) {
-      blocks.push(...normalizeContentBlocks((item as JSONObject)?.content));
+    for (const raw of body.output) {
+      if (!raw || typeof raw !== "object") continue;
+      // 函数调用和推理没有 content，只读 content 的话一次只调工具的回复显示成空。
+      const item = responsesItemMessage(raw as JSONObject);
+      if (item !== undefined) blocks.push(...(item?.blocks ?? []));
+      else blocks.push(...normalizeContentBlocks((raw as JSONObject).content));
     }
     return { blocks, stopReason: (body.status as string) ?? null };
   }
@@ -719,10 +895,53 @@ function parseNonStreamResponse(body: JSONObject): Assembled | null {
   return null;
 }
 
+/**
+ * 生图响应：每张图一个图片块，附格式、大小；日志截断了的标出来，免得把只剩
+ * 上半截的图当成出图有问题。
+ */
+function parseImageGenerationResponse(raw: string): Conversation | null {
+  // 先粗筛，别让每条对话日志都过一遍图片解析。
+  if (!/"b64_json"|image_generation\.|"data"\s*:\s*\[\s*\{\s*"url"/.test(raw)) return null;
+
+  const result = parseImageResponse(raw);
+  if (result.images.length === 0) return null;
+
+  const blocks: Block[] = [];
+  for (const image of result.images) {
+    const caption = [
+      image.format?.toUpperCase() ?? "图片",
+      image.bytes !== null ? formatBytes(image.bytes) : null,
+      image.partialIndex !== null ? `中间帧 #${image.partialIndex}` : null,
+      image.stored ? "已存为文件" : null,
+      image.truncated ? "日志正文被截断，只存下了这张图的前一部分，缺的部分显示为空白" : null,
+    ].filter(Boolean);
+    blocks.push({
+      kind: "image",
+      text: caption.join(" · "),
+      src: image.src,
+      ...(image.stored ? { download: image.src } : {}),
+    });
+    if (image.revisedPrompt) blocks.push({ kind: "text", text: `改写后的 prompt：${image.revisedPrompt}` });
+  }
+
+  return {
+    kind: "response",
+    model: null,
+    messages: [{ role: "assistant", blocks }],
+    toolCount: 0,
+    stopReason: null,
+    stream: /^data:/m.test(raw),
+    complete: !result.images.some((image) => image.truncated),
+  };
+}
+
 /** 返回 null 表示识别不了。 */
 export function parseConversationResponse(bodyText: string): Conversation | null {
   const raw = String(bodyText || "").trim();
   if (!raw) return null;
+
+  const images = parseImageGenerationResponse(raw);
+  if (images) return images;
 
   if (/^data:/m.test(raw)) {
     const payloads = readSsePayloads(raw);

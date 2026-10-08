@@ -233,6 +233,9 @@ func exportSettings(ctx context.Context, database *sql.DB) (*models.ConfigArchiv
 		ProxyEnabled:                      settings.ProxyEnabled,
 		ProxyURL:                          settings.ProxyURL,
 		LoadBalanceStrategy:               settings.LoadBalanceStrategy,
+		DefaultUpstreamTimeoutSeconds:     settings.DefaultUpstreamTimeoutSeconds,
+		ImageStorageMaxMB:                 settings.ImageStorageMaxMB,
+		DashboardMultiplier:               settings.DashboardMultiplier,
 	}, nil
 }
 
@@ -890,9 +893,15 @@ func (a *configApplier) applySettings(settings *models.ConfigArchiveSettings) er
 		ProxyEnabled:                      settings.ProxyEnabled,
 		ProxyURL:                          settings.ProxyURL,
 		LoadBalanceStrategy:               settings.LoadBalanceStrategy,
+		DefaultUpstreamTimeoutSeconds:     settings.DefaultUpstreamTimeoutSeconds,
+		ImageStorageMaxMB:                 settings.ImageStorageMaxMB,
+		DashboardMultiplier:               settings.DashboardMultiplier,
 		// Set only to satisfy the payload validator's own revision check; the value
 		// written comes from the row read below.
 		Revision: 1,
+	}
+	if input.DashboardMultiplier == 0 {
+		input.DashboardMultiplier = 1
 	}
 	if err := input.Validate(); err != nil {
 		return refuse(models.ConfigScopeSettings, "runtime_settings", err.Error())

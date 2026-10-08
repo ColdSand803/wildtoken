@@ -44,13 +44,17 @@ type UpstreamHealthOut struct {
 // counting them here would let an operator move the number this card reports
 // just by clicking "test" — and a batch probe across every channel would move it
 // a lot. The caller passes the set because it owns those client_type values.
-func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours int64,
+//
+// offsetSeconds is the operator's UTC offset. Hours are aligned to it, which
+// only shows in a zone with a fractional offset: UTC+5:30 read UTC's hours as
+// half past.
+func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours, offsetSeconds int64,
 	excludeClientTypes []string) (map[int64]*UpstreamHealthOut, error) {
 	hours = min(max(hours, 1), 24*7)
 	cutoff := fmt.Sprintf("-%d hours", hours)
 
 	var exclusion strings.Builder
-	args := []any{cutoff}
+	args := []any{offsetSeconds, offsetSeconds, cutoff}
 	if len(excludeClientTypes) > 0 {
 		exclusion.WriteString(" AND client_type NOT IN (")
 		for index, clientType := range excludeClientTypes {
@@ -65,7 +69,7 @@ func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours int64,
 
 	rows, err := database.QueryContext(ctx, `
 		SELECT upstream_id,
-			(CAST(strftime('%s', created_at) AS INTEGER) / 3600) * 3600 AS bucket_epoch,
+			((CAST(strftime('%s', created_at) AS INTEGER) + ?) / 3600) * 3600 - ? AS bucket_epoch,
 			COUNT(*),
 			COALESCE(SUM(CASE WHEN (status_code IS NULL OR status_code < 200 OR status_code >= 300) AND (status_code IS NULL OR status_code <> 499) THEN 1 ELSE 0 END), 0),
 			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END),

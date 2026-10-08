@@ -16,18 +16,28 @@ const upstreamColumns = `id, name, base_url, api_key, model_names, model_prefixe
     archived, archived_prev_enabled,
     extra_headers, timeout_seconds, rate_limit, created_at, updated_at`
 
+// parseJSONArray decodes a stored list. A stored null reads as empty: decoding
+// it leaves the slice nil, which the API sent on as null and the console's
+// channel page crashed on.
 func parseJSONArray(value string) ([]string, error) {
 	parsed := []string{}
 	if err := json.Unmarshal([]byte(value), &parsed); err != nil {
 		return nil, apperr.JSON(err)
 	}
+	if parsed == nil {
+		parsed = []string{}
+	}
 	return parsed, nil
 }
 
+// parseJSONMap decodes a stored map, reading null as empty for the same reason.
 func parseJSONMap(value string) (map[string]string, error) {
 	parsed := map[string]string{}
 	if err := json.Unmarshal([]byte(value), &parsed); err != nil {
 		return nil, apperr.JSON(err)
+	}
+	if parsed == nil {
+		parsed = map[string]string{}
 	}
 	return parsed, nil
 }
@@ -86,7 +96,7 @@ func RowToUpstreamOut(row *models.UpstreamRow) (models.UpstreamOut, error) {
 		return models.UpstreamOut{}, err
 	}
 
-	return models.UpstreamOut{
+	out := models.UpstreamOut{
 		ID:                 row.ID,
 		Name:               row.Name,
 		BaseURL:            row.BaseURL,
@@ -107,7 +117,19 @@ func RowToUpstreamOut(row *models.UpstreamRow) (models.UpstreamOut, error) {
 		UpdatedAt:          row.UpdatedAt,
 		RuntimeHealthScore: 100,
 		EffectiveWeight:    float64(row.Weight),
-	}, nil
+	}
+	out.EnabledBeforeArchive = EnabledBeforeArchive(row)
+	return out, nil
+}
+
+// EnabledBeforeArchive is what unarchiving a row would restore, nil while it
+// is not archived.
+func EnabledBeforeArchive(row *models.UpstreamRow) *bool {
+	if row.Archived != 1 {
+		return nil
+	}
+	enabled := row.ArchivedPrevEnabled != nil && *row.ArchivedPrevEnabled == 1
+	return &enabled
 }
 
 func queryUpstreamRows(ctx context.Context, db *sql.DB, query string, args ...any) ([]models.UpstreamRow, error) {
@@ -172,23 +194,35 @@ func ListEnabledUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamRow
 // unarchiving would switch on every channel it touched, including ones an
 // operator had taken out of service for their own reasons.
 func SetUpstreamArchived(ctx context.Context, db *sql.DB, id int64, archived bool) (models.UpstreamOut, error) {
+	if err := setArchived(ctx, db, id, archived); err != nil {
+		return models.UpstreamOut{}, err
+	}
+	return reloadUpstreamOut(ctx, db, id)
+}
+
+// setArchived is SetUpstreamArchived's write, for callers inside a transaction.
+func setArchived(ctx context.Context, db Queryer, id int64, archived bool) error {
+	// Each statement only touches a row not already in the requested state, so
+	// a repeat is a no-op. Without that, archiving twice recorded the parked
+	// channel's enabled=0 as its previous state, and unarchiving a channel that
+	// was never archived switched it off.
 	var query string
 	if archived {
 		query = `UPDATE upstreams
 			SET archived = 1, enabled = 0, archived_prev_enabled = enabled,
 				updated_at = datetime('now')
-			WHERE id = ?`
+			WHERE id = ? AND archived = 0`
 	} else {
 		query = `UPDATE upstreams
 			SET archived = 0, enabled = COALESCE(archived_prev_enabled, 0),
 				archived_prev_enabled = NULL,
 				updated_at = datetime('now')
-			WHERE id = ?`
+			WHERE id = ? AND archived = 1`
 	}
 	if _, err := db.ExecContext(ctx, query, id); err != nil {
-		return models.UpstreamOut{}, apperr.Database(err)
+		return apperr.Database(err)
 	}
-	return reloadUpstreamOut(ctx, db, id)
+	return nil
 }
 
 // ListUpstreamRows returns every channel as a raw row, enabled or not.
@@ -274,8 +308,12 @@ func boolToInt64(value bool) int64 {
 	return 0
 }
 
-func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, defaultTimeout float64) (models.UpstreamOut, error) {
-	timeout := defaultTimeout
+// CreateUpstream stores a new channel. A missing timeout is stored as 0, which
+// requests resolve to the service default when they run. Stored as the
+// default's value on the day, a channel created blank never followed a later
+// change to it, and nothing in the console could make it.
+func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn) (models.UpstreamOut, error) {
+	var timeout float64
 	if input.TimeoutSeconds != nil {
 		timeout = *input.TimeoutSeconds
 	}
@@ -315,6 +353,14 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn, d
 	// belonging to a group and therefore being unreachable.
 	if err := ReplaceUpstreamGroups(ctx, tx, id, input.GroupIDs); err != nil {
 		return models.UpstreamOut{}, err
+	}
+
+	// An imported archived channel is never visible unarchived, so it never
+	// routes between the insert and the archiving.
+	if input.Archived != nil && *input.Archived {
+		if err := setArchived(ctx, tx, id, true); err != nil {
+			return models.UpstreamOut{}, err
+		}
 	}
 
 	// Read back inside the transaction, so the response describes the channel
@@ -383,11 +429,21 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 		timeout = *input.TimeoutSeconds
 	}
 
+	// Unarchived first, so the enabled below is the one that sticks rather than
+	// the one unarchiving restores.
+	if input.Archived != nil && !*input.Archived {
+		if err := setArchived(ctx, tx, id, false); err != nil {
+			return models.UpstreamOut{}, err
+		}
+	}
+
+	// An archived channel stays off whatever the edit says, as archiving
+	// guarantees; unarchiving restores what it was.
 	_, err = tx.ExecContext(ctx, `UPDATE upstreams
         SET name = ?, base_url = ?, api_key = ?,
             model_names = ?, model_prefixes = ?, model_mappings = ?,
             effort_mappings = ?, priority = ?, weight = ?, auto_weight_enabled = ?,
-            enabled = ?, extra_headers = ?,
+            enabled = CASE WHEN archived = 1 THEN 0 ELSE ? END, extra_headers = ?,
             timeout_seconds = ?, rate_limit = ?, updated_at = datetime('now')
         WHERE id = ?`,
 		input.Name, input.BaseURL, apiKey, encoded.Names, encoded.Prefixes,
@@ -399,6 +455,13 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 	}
 	if err := ReplaceUpstreamGroups(ctx, tx, id, input.GroupIDs); err != nil {
 		return models.UpstreamOut{}, err
+	}
+
+	// Archived last, so it remembers the enabled this edit wrote.
+	if input.Archived != nil && *input.Archived {
+		if err := setArchived(ctx, tx, id, true); err != nil {
+			return models.UpstreamOut{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return models.UpstreamOut{}, apperr.Database(err)
@@ -444,5 +507,11 @@ func reloadUpstreamOut(ctx context.Context, db *sql.DB, id int64) (models.Upstre
 }
 
 func DeleteUpstream(ctx context.Context, db *sql.DB, id int64) (bool, error) {
+	// Finished even if the caller leaves: stopping between the batches and the
+	// delete left the channel standing with part of its history cut away.
+	ctx = context.WithoutCancel(ctx)
+	if err := detachLogs(ctx, db, "upstream_id", id); err != nil {
+		return false, err
+	}
 	return execAffectsAny(ctx, db, "DELETE FROM upstreams WHERE id = ?", id)
 }

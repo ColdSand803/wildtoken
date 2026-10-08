@@ -1,6 +1,8 @@
 package models
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"time"
 	"unicode"
@@ -22,6 +24,10 @@ const (
 	// empty, or too long.
 	APITokenMinBytes = 1
 	APITokenMaxBytes = 256
+
+	// Bounds on a token's model allowlist.
+	APITokenAllowedModelsMax     = 500
+	APITokenAllowedModelMaxChars = 200
 )
 
 // TimestampFormat is the shape SQLite's `datetime('now')` produces, and the only
@@ -136,8 +142,8 @@ type APITokenIn struct {
 	// RateLimit is a rate limit expression such as "100/m" or "1000/h". Blank means no limit.
 	RateLimit *string `json:"rate_limit"`
 	// AllowedModels restricts which models this credential may call. An absent
-	// field, null and an empty array all mean unrestricted — the console can send
-	// whichever its form produces without changing the outcome.
+	// field, null and an empty array all mean unrestricted. A trailing "*" matches
+	// by prefix: "gpt-4*" covers "gpt-4o".
 	AllowedModels []string `json:"allowed_models"`
 	// QuotaPeriod is the reset cycle: none, daily, weekly or monthly. Absent or
 	// blank means none, so a client that does not send the field gets the legacy
@@ -166,12 +172,45 @@ type APITokenUpdateIn struct {
 	// AllowedModels is a full replacement, like ExpiresAt and unlike Token: an
 	// absent or empty array clears the restriction. That is what the console's
 	// "clear the whitelist" action produces, and reading it as "leave it alone"
-	// would make a restriction impossible to remove.
+	// would make a restriction impossible to remove. A trailing "*" matches by
+	// prefix.
 	AllowedModels []string `json:"allowed_models"`
 	// QuotaPeriod and QuotaTimezone are full replacements too. An absent period
 	// means none, which is how an operator turns automatic resets off.
 	QuotaPeriod   string `json:"quota_period"`
 	QuotaTimezone string `json:"quota_timezone"`
+	// Enabled switches the token as part of the edit; absent keeps it. The
+	// console's edit form shows the switch, and without this field its change
+	// was dropped while the save reported success.
+	Enabled *bool `json:"enabled"`
+}
+
+// tokenUpdateRequired are the fields a replacing edit must carry as values.
+// Absent, each decoded to its most permissive setting — no quota, any model,
+// no rate limit, no expiry, the default group — so a script renaming a token
+// lifted every restriction on it. expires_at and rate_limit may be null: that
+// is how "never" and "unlimited" are said.
+var tokenUpdateRequired = []string{
+	"name", "description", "expires_at", "group_id", "limit_expression",
+	"rate_limit", "allowed_models",
+}
+
+// tokenUpdateOptional may be left out: a missing token or enabled keeps the
+// current one.
+var tokenUpdateOptional = []string{"token", "enabled", "quota_period", "quota_timezone"}
+
+// MissingTokenFields names the required fields a token edit left out or sent
+// as null where null means nothing.
+func MissingTokenFields(body map[string]json.RawMessage) []string {
+	var missing []string
+	for _, name := range tokenUpdateRequired {
+		value, ok := body[name]
+		nullable := name == "expires_at" || name == "rate_limit"
+		if !ok || (!nullable && bytes.Equal(bytes.TrimSpace(value), []byte("null"))) {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 // RequestedToken is the replacement value, or "" when this edit keeps the
@@ -201,6 +240,31 @@ func NormalizeRateLimit(raw *string) (*string, error) {
 		return nil, ErrString("rate limit must look like 100/m, 1000/h or 50/10s")
 	}
 	return &value, nil
+}
+
+
+// ModelAllowed reports whether model passes an allowlist. An empty list allows
+// everything. Matching is case-insensitive, like channel routing.
+//
+//	["gpt-4o", "claude-*"]: "GPT-4o" yes, "claude-sonnet-5" yes, "o3" no
+func ModelAllowed(allowed []string, model string) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	target := strings.ToLower(strings.TrimSpace(model))
+	for _, entry := range allowed {
+		pattern := strings.ToLower(entry)
+		if prefix, ok := strings.CutSuffix(pattern, "*"); ok {
+			if strings.HasPrefix(target, prefix) {
+				return true
+			}
+			continue
+		}
+		if target == pattern {
+			return true
+		}
+	}
+	return false
 }
 
 // validateTokenMetadata judges the name and description that will be stored, and

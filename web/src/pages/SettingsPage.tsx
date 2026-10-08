@@ -25,6 +25,7 @@ import {
   currentDensity,
   currentTheme,
 } from "../theme";
+import { formatTimestamp } from "../logFormat";
 import type { PromptTemplate, RuntimeSettings, SystemInfo } from "../types";
 
 /** 和 App 的路由共用一个键；改完下次打开控制台就落在这一页。 */
@@ -38,10 +39,34 @@ function readDefaultHome(): string {
   }
 }
 
-/** 数字输入统一走这里：空串当 0，避免 NaN 提交到后端。 */
-function num(raw: string): number {
-  const value = Number(raw);
-  return Number.isFinite(value) ? value : 0;
+/** 每张卡管的字段。保存只提交本卡的，其余取服务端最近一次的值：原先整页
+    提交，另一张卡上没确认的改动跟着落库。 */
+const CARD_FIELDS = {
+  log: ["log_body_keep_count", "log_retention_days", "log_body_max_bytes", "image_storage_max_mb"],
+  routing: [
+    "max_retries",
+    "same_upstream_retry_interval_ms",
+    "auto_weight_failure_penalty",
+    "auto_weight_success_increment",
+    "auto_weight_recovery_increment",
+    "auto_weight_recovery_interval_seconds",
+  ],
+  proxy: ["proxy_enabled", "proxy_url"],
+  timeout: ["default_upstream_timeout_seconds"],
+  dashboard: ["dashboard_multiplier"],
+} satisfies Record<string, (keyof RuntimeSettings)[]>;
+
+type SettingsCard = keyof typeof CARD_FIELDS;
+
+/** base 换上 source 里 keys 的值。 */
+function withFields(
+  base: RuntimeSettings,
+  source: RuntimeSettings,
+  keys: readonly (keyof RuntimeSettings)[],
+): RuntimeSettings {
+  const next: Record<string, unknown> = { ...base };
+  for (const key of keys) next[key] = source[key];
+  return next as unknown as RuntimeSettings;
 }
 
 function formatCount(value: number): string {
@@ -77,19 +102,21 @@ function formatDuration(ms: number | null | undefined): string {
 
 export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
   const [settings, setSettings] = useState<RuntimeSettings | null>(null);
+  /* 服务端最近一次返回的设置。保存以它为底，只换上当前那张卡的字段。 */
+  const [saved, setSaved] = useState<RuntimeSettings | null>(null);
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  /* 哪一张卡正在保存。三张卡各自一个按钮，但后端是整体写入——标出具体那张，
-     免得点了日志策略却看到代理那边转圈。 */
-  const [savingCard, setSavingCard] = useState<string | null>(null);
+  /* 哪一张卡正在保存，标出具体那张，免得点了日志策略却看到代理那边转圈。 */
+  const [savingCard, setSavingCard] = useState<SettingsCard | null>(null);
   const [theme, setTheme] = useState(currentTheme);
   const [density, setDensity] = useState(currentDensity);
   const [editingTemplate, setEditingTemplate] = useState<{ template: PromptTemplate | null } | null>(
     null,
   );
   const [rotatedToken, setRotatedToken] = useState("");
+  const [rotating, setRotating] = useState(false);
   const [defaultHome, setDefaultHome] = useState(readDefaultHome);
   const [refreshingSystem, setRefreshingSystem] = useState(false);
 
@@ -104,6 +131,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
         getSystemInfo(),
       ]);
       setSettings(loaded);
+      setSaved(loaded);
       setTemplates(loadedTemplates);
       setSystem(loadedSystem);
       setError("");
@@ -133,12 +161,23 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     setSettings((current) => (current ? { ...current, [key]: value } : current));
   }
 
-  async function save(card: string) {
-    if (!settings) return;
+  async function save(card: SettingsCard) {
+    if (!settings || !saved) return;
     setSavingCard(card);
     try {
-      /* revision 原样带回去：后端靠它拒掉过期的写入。 */
-      setSettings(await saveSettings(settings));
+      /* revision 取服务端那份原样带回去：后端靠它拒掉过期的写入。 */
+      const result = await saveSettings(withFields(saved, settings, CARD_FIELDS[card]));
+      setSaved(result);
+      // 本卡换成服务端的结果，别的卡上没保存的草稿原样留着。
+      setSettings((current) =>
+        current
+          ? {
+              ...withFields(current, result, CARD_FIELDS[card]),
+              revision: result.revision,
+              updated_at: result.updated_at,
+            }
+          : result,
+      );
       toast("设置已保存。", { tone: "ok" });
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
@@ -160,22 +199,17 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     }
   }
 
-  async function rotate() {
-    const ok = await confirm({
-      title: "轮换管理员令牌？",
-      message: "旧令牌立刻失效，其他已登录的浏览器会被登出。新令牌只显示一次。",
-      confirmLabel: "轮换",
-    });
-    if (!ok) return;
+  async function rotate(token: string) {
+    setRotating(false);
     try {
-      const { token } = await rotateAdminToken();
+      await rotateAdminToken(token);
       // 当前页面接着用新令牌，否则下一个请求就 401。
       setAdminToken(token);
       setRotatedToken(token);
-      toast("管理员令牌已轮换，请立刻保存新值。", { tone: "warn", durationMs: 9000 });
+      toast("管理员令牌已更换，当前控制台已改用新令牌。", { tone: "warn", durationMs: 9000 });
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`轮换失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      else toast(`更换失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
     }
   }
 
@@ -289,6 +323,8 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                   <option value="logs">日志</option>
                   <option value="tokens">令牌</option>
                   <option value="groups">分组</option>
+                  <option value="debug">调试</option>
+                  <option value="images">生图</option>
                   <option value="settings">设置</option>
                 </select>
                 <span className="field-hint">地址栏带着页面锚点时，仍优先进那一页。</span>
@@ -359,10 +395,22 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                       hint="设为 0 时只保留元数据和请求头，不采集正文。"
                       onChange={(v) => patch("log_body_max_bytes", v)}
                     />
+                    {/* 服务端按 MB 存，这里按 GB 填：图片目录的量级是 GB。显示取两位
+                        小数，1229MB 显示成 1.2 而不是 1.2001953125。 */}
+                    <NumberField
+                      className="span-2"
+                      label="生图图片存储上限（GB）"
+                      value={Math.round((settings.image_storage_max_mb / 1024) * 100) / 100}
+                      min={0}
+                      max={1024}
+                      step={0.01}
+                      hint="生图结果另存为文件，日志里只留链接，链接可直接下载。超出上限时从最旧的图删起，约每五分钟检查一次。设为 0 不再保存，并清空已存的图。"
+                      onChange={(v) => patch("image_storage_max_mb", Math.round(v * 1024))}
+                    />
                   </div>
                   <div className="settings-save-row">
                     <p className="settings-inline-status" role="status">
-                      {`上次更新 ${settings.updated_at}`}
+                      {`上次更新 ${formatTimestamp(settings.updated_at)}`}
                     </p>
                     <button
                       type="button"
@@ -625,6 +673,42 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
             ) : null}
           </section>
 
+          <section className="settings-card">
+            <div className="settings-card-head">
+              <div>
+                <h3>看板显示</h3>
+                <p>看板上的请求数和 Tokens 数乘上这个倍率再显示。日志、令牌用量和配额不受影响。</p>
+              </div>
+              <span className="settings-readonly-tag">全局</span>
+            </div>
+            {settings ? (
+              <div className="settings-server-form">
+                <div className="settings-fields-grid">
+                  <NumberField
+                    label="显示倍率"
+                    value={settings.dashboard_multiplier}
+                    min={0.01}
+                    max={1000}
+                    step={0.01}
+                    hint="1 表示按实际显示。可填小数，如 1.5；结果取整。"
+                    onChange={(v) => patch("dashboard_multiplier", v)}
+                  />
+                </div>
+                <div className="settings-save-row">
+                  <p className="settings-inline-status" role="status" />
+                  <button
+                    type="button"
+                    className="primary"
+                    disabled={savingCard !== null}
+                    onClick={() => void save("dashboard")}
+                  >
+                    {savingCard === "dashboard" ? "保存中…" : "保存显示倍率"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
           <section className="settings-card settings-security">
             <div className="settings-card-head">
               <div>
@@ -638,7 +722,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
                 <strong>更换管理员令牌</strong>
                 <p>保存后当前控制台会自动改用新令牌，新值只显示一次。</p>
               </div>
-              <button type="button" className="danger" onClick={() => void rotate()}>
+              <button type="button" className="danger" onClick={() => setRotating(true)}>
                 更换令牌
               </button>
             </div>
@@ -730,6 +814,11 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
         onSubmit={(name, prompt) => void saveTemplate(name, prompt)}
         onClose={() => setEditingTemplate(null)}
       />
+      <RotateDialog
+        open={rotating}
+        onSubmit={(token) => void rotate(token)}
+        onClose={() => setRotating(false)}
+      />
     </section>
   );
 }
@@ -748,6 +837,7 @@ function NumberField({
   value,
   min,
   max,
+  step,
   hint,
   className,
   onChange,
@@ -756,10 +846,16 @@ function NumberField({
   value: number;
   min: number;
   max: number;
+  /** 不给时浏览器按 1 校验，小数会被判非法。 */
+  step?: number;
   hint?: string;
   className?: string;
   onChange: (value: number) => void;
 }) {
+  /* 输入时以敲的原文为准。受控值可能是换算出来的（GB 由 MB 反推），每敲一
+     位就写回的话，1.2 会被改写成 1.2001953125，小数根本输不进去。 */
+  const [draft, setDraft] = useState<string | null>(null);
+
   return (
     <label className={className ? `field ${className}` : "field"}>
       <span className="field-label">{label}</span>
@@ -767,13 +863,120 @@ function NumberField({
         type="number"
         min={min}
         max={max}
+        step={step}
         required
-        inputMode="numeric"
-        value={value}
-        onChange={(event) => onChange(num(event.target.value))}
+        inputMode={step !== undefined && step < 1 ? "decimal" : "numeric"}
+        value={draft ?? value}
+        onFocus={() => setDraft(String(value))}
+        onBlur={() => setDraft(null)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          /* 清空不回写：原先按 0 存，图片上限清空就是删光已存的图，重试次数
+             清空就是不重试。失焦后草稿作废，框里回到原值。 */
+          const raw = event.target.value.trim();
+          const value = Number(raw);
+          if (raw !== "" && Number.isFinite(value)) onChange(value);
+        }}
       />
       {hint ? <span className="field-hint">{hint}</span> : null}
     </label>
+  );
+}
+
+/** 管理员令牌的形状，和后端校验一致：8–256 位可打印 ASCII，不含空格。 */
+const ADMIN_TOKEN_PATTERN = /^[\x21-\x7E]{8,256}$/;
+
+/** 32 位字母数字。丢掉 248 以上的字节，每个字符才等概率。 */
+function randomAdminToken(): string {
+  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let token = "";
+  while (token.length < 32) {
+    for (const byte of crypto.getRandomValues(new Uint8Array(32))) {
+      if (byte < 248 && token.length < 32) token += alphabet[byte % alphabet.length];
+    }
+  }
+  return token;
+}
+
+/**
+ * 更换管理员令牌。新值由管理员填或随机生成，和旧控制台一致：后端不代为
+ * 生成，也不在响应里回令牌。
+ */
+function RotateDialog({
+  open,
+  onSubmit,
+  onClose,
+}: {
+  open: boolean;
+  onSubmit: (token: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useDialog(open, onClose);
+  const [token, setToken] = useState("");
+  const [understood, setUnderstood] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setToken("");
+    setUnderstood(false);
+  }, [open]);
+
+  const valid = ADMIN_TOKEN_PATTERN.test(token.trim());
+
+  return (
+    <dialog className="confirm-dialog" ref={ref} onCancel={onClose} aria-label="更换管理员令牌">
+      <form
+        className="confirm-panel"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (valid && understood) onSubmit(token.trim());
+        }}
+      >
+        <div className="modal-head">
+          <div>
+            <h2>更换管理员令牌</h2>
+            <p>保存后旧令牌立即失效，其他已登录的浏览器会被登出，当前控制台自动改用新令牌。</p>
+          </div>
+        </div>
+
+        <div className="form-grid">
+          <label className="field span-2">
+            <span className="field-label">新令牌</span>
+            <input
+              value={token}
+              onChange={(event) => setToken(event.target.value)}
+              minLength={8}
+              maxLength={256}
+              required
+              spellCheck={false}
+              autoComplete="new-password"
+              placeholder="8–256 位可打印字符，不含空格"
+            />
+            <span className="field-hint">保存前先把它存好，之后只会在本页显示一次。</span>
+          </label>
+          <label className="rotate-confirm-check span-2">
+            <input
+              type="checkbox"
+              checked={understood}
+              onChange={(event) => setUnderstood(event.target.checked)}
+            />
+            <span>我了解保存后旧令牌会立即失效。</span>
+          </label>
+        </div>
+
+        <div className="modal-actions">
+          <button type="button" className="secondary" onClick={() => setToken(randomAdminToken())}>
+            随机生成
+          </button>
+          <button type="button" className="secondary" onClick={onClose}>
+            取消
+          </button>
+          <button type="submit" className="danger" disabled={!valid || !understood}>
+            保存并更换
+          </button>
+        </div>
+      </form>
+    </dialog>
   );
 }
 
