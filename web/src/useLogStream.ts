@@ -83,7 +83,7 @@ export function useLogStream(enabled: boolean, onResync: () => void, filterQuery
   resyncRef.current = onResync;
 
   useEffect(() => {
-    setState({ logs: [], active: [], activeTotal: 0, connected: false, rpm: null, tpm: null });
+    setState({ logs: [], active: [], activeTotal: 0, connected: false, rpm: null, tpm: null, evictedNewestId: 0 });
     if (!enabled) {
       return;
     }

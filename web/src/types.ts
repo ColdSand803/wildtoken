@@ -394,6 +394,4 @@ export interface APIToken {
   quota_period_state: { period: "none" | "daily" | "weekly" | "monthly"; timezone: string; period_key: string; period_start: string | null; period_end: string | null; next_reset_at: string | null };
   quota: QuotaState;
   rate_limit: string | null;
-  /** 空数组表示不限模型。结尾的 * 按前缀匹配。 */
-  allowed_models: string[];
 }

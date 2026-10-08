@@ -70,7 +70,6 @@ export function TokenDialog({
   const [rateLimit, setRateLimit] = useState("");
   const [allowedModels, setAllowedModels] = useState("");
   const [custom, setCustom] = useState("");
-  const [allowedModels, setAllowedModels] = useState("");
   const [quotaPeriod, setQuotaPeriod] = useState("none");
   const [quotaTimezone, setQuotaTimezone] = useState("Asia/Shanghai");
 
