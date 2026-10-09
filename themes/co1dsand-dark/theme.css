@@ -624,7 +624,7 @@ html[data-theme="co1dsand-dark"] .content > .view {
   }
 }
 
-/* ── 移动端：轨道摊平成视口底部的六格 dock，主题与密度改从设置里进 ── */
+/* ── 移动端：轨道摊成底部单行 dock。八个入口各占一列，避免折到第二行。主题与密度改从设置里进 ── */
 @media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
   html[data-theme="co1dsand-dark"] .app-shell {
     display: flex;
@@ -714,7 +714,7 @@ html[data-theme="co1dsand-dark"] .content > .view {
     box-shadow: var(--shadow-md);
     display: grid;
     gap: 3px;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
+    grid-template-columns: repeat(8, minmax(0, 1fr));
     left: 10px;
     padding: 4px;
     position: fixed;
@@ -723,8 +723,7 @@ html[data-theme="co1dsand-dark"] .content > .view {
     z-index: 40;
   }
 
-  /* 六分之一个手机宽放不下并排的图标和标签，图标改到标签上方 —— dock 也因此
-     更好读。 */
+  /* 八分之一屏宽放不下并排的图标和文字，图标放到标签上方。 */
   html[data-theme="co1dsand-dark"] .nav-link {
     flex-direction: column;
     font-size: var(--text-xs);
@@ -736,7 +735,7 @@ html[data-theme="co1dsand-dark"] .content > .view {
     text-align: center;
   }
 
-  /* 六格 dock 里没有沟槽可标，选中态交给底色和图标。 */
+  /* 单行 dock 没有沟槽可标，选中态交给底色和图标。 */
   html[data-theme="co1dsand-dark"] .nav-link.active::after {
     display: none;
   }

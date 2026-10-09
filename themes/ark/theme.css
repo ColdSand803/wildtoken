@@ -982,7 +982,7 @@ html[data-theme="ark"] .live-indicator:not([hidden]) .live-dot {
   50% { box-shadow: 0 0 0 5px rgb(167 216 64 / 3%); }
 }
 
-/* Portrait is re-directed into a header plus a real five-destination dock. */
+/* Portrait is re-directed into a header plus a single-row dock. Eight destinations stay on one line. */
 @media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
   html[data-theme="ark"] .app-shell {
     display: flex;
@@ -1076,7 +1076,7 @@ html[data-theme="ark"] .live-indicator:not([hidden]) .live-dot {
     box-shadow: 0 6px 0 rgb(0 0 0 / 46%);
     display: grid;
     gap: 1px;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(8, minmax(0, 1fr));
     left: 8px;
     padding: 3px;
     position: fixed;
@@ -1088,7 +1088,10 @@ html[data-theme="ark"] .live-indicator:not([hidden]) .live-dot {
   html[data-theme="ark"] .nav-link {
     color: var(--muted);
     min-height: 54px;
-    padding: 4px 1px 14px;
+    min-width: 0;
+    overflow: hidden;
+    padding: 4px 0 14px;
+    white-space: nowrap;
   }
 
   html[data-theme="ark"] .nav-link:hover {
