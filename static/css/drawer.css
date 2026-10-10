@@ -100,11 +100,19 @@
   position: static;
 }
 
-/* 筛选、手动输入和列表共用正文滚动，矮屏也能触及所有控件。 */
-:root .dialog--drawer .model-options {
+/* 模型列表占正文剩余高度，在自己的边框里滚动。
+   overflow: visible 时网格行只占到剩余空间，多出来的行会画出卡片、盖住页脚。 */
+:root .dialog--drawer .model-dialog-panel > .upstream-dialog-body {
+  grid-template-rows: auto auto minmax(140px, 1fr);
+  overflow: auto;
+}
+
+:root .dialog--drawer .model-dialog-panel .model-options {
   align-content: start;
-  max-height: none;
-  overflow: visible;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow: auto;
 }
 
 :root .dialog--drawer .balance-row {
