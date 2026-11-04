@@ -73,7 +73,7 @@ http://127.0.0.1:3100/console
 
 Compose 会把 SQLite 数据保存到 `wildtoken-data` 卷，并发布 `3100` 端口。它还会把宿主机 `./themes` 只读挂载进容器，方便修改主题而不重建镜像。
 
-更新运行中的实例请用 `scripts/deploy.sh`，别直接 `docker compose up -d --build`——后者会切断还在跑的流。脚本先构建，等到没有进行中的请求（最多 600 秒，用 `WAIT=` 调；`FORCE=1` 等不到也换），再替换容器、核对新容器，任一步失败就换回旧镜像。
+更新运行中的实例请用 `scripts/deploy.sh`，别直接 `docker compose up -d --build`。脚本先构建，等进行中的请求跑完，最多 60 秒（用 `WAIT=` 调）；等不到也照换，还在跑的流会被切断（`FORCE=0` 则放弃不换）。换完核对新容器，任一步失败就换回旧镜像。
 
 全新数据库如果监听非本机地址，必须显式设置 `ADMIN_TOKEN`，否则 WildToken 会拒绝启动。该 Token 必须是 24-256 字节、可打印 ASCII、不包含空格，且不能是 `change-me`。
 

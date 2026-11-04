@@ -104,10 +104,10 @@ port `3100`. It also mounts `./themes` read-only into the container so theme
 changes do not require an image rebuild.
 
 To update a running instance, use `scripts/deploy.sh` rather than
-`docker compose up -d --build`, which cuts streams still running. The script
-builds first, waits until no request is in flight (up to 600 seconds, set with
-`WAIT=`; `FORCE=1` swaps anyway), replaces the container, checks the new one
-and rolls back to the previous image if anything fails.
+`docker compose up -d --build`. The script builds first, waits up to 60 seconds
+for in-flight requests to finish (set with `WAIT=`), then replaces the container
+anyway, cutting the streams still running (`FORCE=0` gives up instead). It
+checks the new container and rolls back to the previous image if anything fails.
 
 For a brand-new database listening beyond localhost, WildToken refuses to start
 unless `ADMIN_TOKEN` is explicitly set. The token must be 24-256 bytes, printable
