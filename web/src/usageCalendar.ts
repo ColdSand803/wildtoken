@@ -12,6 +12,8 @@ export interface CalendarCell {
   weekday: number;
   requests: number;
   errors: number;
+  /** 客户端自己断开的请求，不算失败。 */
+  cancelled: number;
   tokens: number;
   /** 0 是没有用量；1–4 由浅到深。 */
   level: number;
@@ -90,6 +92,7 @@ export function buildCalendar(
       weekday: index % 7,
       requests: usage?.requests ?? 0,
       errors: usage?.errors ?? 0,
+      cancelled: usage?.cancelled ?? 0,
       tokens: usage?.total_tokens ?? 0,
       level: 0,
     });

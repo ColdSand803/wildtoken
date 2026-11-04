@@ -10,7 +10,7 @@ function sample() {
   return {
     overview: {
       range: "7d", range_label: "7天", total_requests: 3, previous_total: null, error_requests: 1,
-      status_2xx: 2, status_4xx: 1, status_5xx: 0, status_other: 0, duration_count: 3,
+      status_2xx: 2, status_4xx: 1, status_5xx: 0, status_cancelled: 1, status_other: 0, duration_count: 3,
       avg_duration_ms: 120, min_duration_ms: 50, max_duration_ms: 200,
       p50_duration_ms: 100, p95_duration_ms: 190, p99_duration_ms: 200, bucket_seconds: 60,
       latency_series: [{ bucket_epoch: 1, avg_ms: 120, count: 3 }],

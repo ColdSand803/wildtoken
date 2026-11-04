@@ -48,7 +48,8 @@ function describe(cell: CalendarCell, metric: CalendarMetric) {
     metric === "requests" ? `${exact(cell.requests)} 次请求` : `${exact(cell.tokens)} Tokens`;
   const other =
     metric === "requests" ? `Tokens ${compactCount(cell.tokens)}` : `请求 ${exact(cell.requests)}`;
-  return { value, date, detail: `${other} · 失败 ${exact(cell.errors)}` };
+  const cancelled = cell.cancelled > 0 ? ` · 取消 ${exact(cell.cancelled)}` : "";
+  return { value, date, detail: `${other} · 失败 ${exact(cell.errors)}${cancelled}` };
 }
 
 function rangeText(range: LevelRange | null): string {

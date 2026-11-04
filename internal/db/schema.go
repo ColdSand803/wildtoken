@@ -168,6 +168,9 @@ func Init(ctx context.Context, db *sql.DB) error {
 	if err := ensureUsageHourly(ctx, db); err != nil {
 		return err
 	}
+	if err := splitCancelled(ctx, db); err != nil {
+		return err
+	}
 
 	if err := ensureColumn(ctx, db, "api_tokens", "expires_at", "TEXT"); err != nil {
 		return err

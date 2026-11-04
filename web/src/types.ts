@@ -212,8 +212,10 @@ export interface LogOverview {
   previous_total: number | null;
   error_requests: number;
   status_2xx: number;
+  /** 不含 499：客户端自己断开不算失败，单记在 status_cancelled。 */
   status_4xx: number;
   status_5xx: number;
+  status_cancelled: number;
   status_other: number;
   duration_count: number;
   avg_duration_ms: number;
@@ -278,6 +280,8 @@ export interface DailyUsage {
   day: string;
   requests: number;
   errors: number;
+  /** 客户端自己断开的请求（499），不算失败。 */
+  cancelled: number;
   total_tokens: number;
 }
 

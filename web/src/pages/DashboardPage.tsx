@@ -169,6 +169,8 @@ function StatusBar({ overview }: { overview: LogOverview }) {
     { tone: "ok", label: "2xx", count: overview.status_2xx },
     { tone: "warn", label: "4xx", count: overview.status_4xx },
     { tone: "danger", label: "5xx", count: overview.status_5xx },
+    // 客户端自己断开（499），不算失败，单独一段。
+    { tone: "cancel", label: "取消", count: overview.status_cancelled },
     { tone: "muted", label: "其他", count: overview.status_other },
   ];
 
@@ -300,10 +302,12 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
       setOverview(data.overview);
       setTop(data.top);
       setUsage(data.usage);
-      // 最近失败只取有错或非 2xx 的行。
+      // 最近失败只取有错或非 2xx 的行。客户端自己断开（499）不算失败。
       setRecent(
         (data.recent.items ?? []).filter(
-          (log) => log.error !== null || log.status_code === null || log.status_code >= 400,
+          (log) =>
+            log.status_code !== 499 &&
+            (log.error !== null || log.status_code === null || log.status_code >= 400),
         ),
       );
       setError("");

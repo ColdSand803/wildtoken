@@ -48,7 +48,7 @@ func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours,
 		SELECT upstream_id,
 			((CAST(strftime('%s', created_at) AS INTEGER) + ?) / 3600) * 3600 - ? AS bucket_epoch,
 			COUNT(*),
-			COALESCE(SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN `+failedRows+` THEN 1 ELSE 0 END), 0),
 			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END)
 		FROM request_logs
 		WHERE upstream_id IS NOT NULL AND created_at >= datetime('now', ?)

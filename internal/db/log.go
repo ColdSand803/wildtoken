@@ -36,6 +36,18 @@ const (
 	actualModelExpression = "COALESCE(NULLIF(TRIM(upstream_model), ''), NULLIF(TRIM(model), ''))"
 )
 
+// failedRows is a failed request: no status, or one outside 2xx. 499 is the
+// client hanging up, which is its own doing and not counted as a failure.
+const failedRows = "(status_code IS NULL OR ((status_code < 200 OR status_code >= 300) AND status_code <> 499))"
+
+// cancelledRows is a request the client hung up on.
+const cancelledRows = "status_code = 499"
+
+// failedStatus is failedRows for one status.
+func failedStatus(status *int32) bool {
+	return status == nil || ((*status < 200 || *status >= 300) && *status != 499)
+}
+
 // countedRows keeps the rows that are requests. A retried row is a failed
 // attempt of a request whose outcome another row records: counted, it made one
 // request with a retry look like two, one of them failed.
@@ -546,7 +558,7 @@ func topLogCounts(ctx context.Context, database *sql.DB, window LogTopWindow,
 	outerExtras := ""
 	if spec.withLatency {
 		rowExtras = `, CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END AS dur,
-			CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300 THEN 1 ELSE 0 END AS is_err`
+			CASE WHEN ` + failedRows + ` THEN 1 ELSE 0 END AS is_err`
 		outerExtras = `, AVG(dur) AS avg_dur,
 			CAST(SUM(is_err) AS REAL) / COUNT(*) AS error_rate,
 			SUM(CASE WHEN dur IS NOT NULL THEN 1 ELSE 0 END) AS dur_count`

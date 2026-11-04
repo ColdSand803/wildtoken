@@ -184,6 +184,10 @@ function durationRating(log: RequestLog): { tone: string; basis: string } {
   if (status === null || !Number.isFinite(status)) {
     return { tone: "danger", basis: "请求无响应或状态码缺失" };
   }
+  // 客户端自己断开，快慢都不是这条请求的问题。
+  if (status === 499) {
+    return { tone: "neutral", basis: "客户端断开，不算失败" };
+  }
   if (status < 200 || status >= 300) {
     return { tone: "danger", basis: `HTTP ${status} 错误，优先标红` };
   }
@@ -1001,6 +1005,8 @@ function StatusBadge({ code }: { code: number | null }) {
      CSS 里不存在的名字，那一格就没颜色了。 */
   if (code >= 200 && code < 300) return <span className="badge on status-2xx">{code}</span>;
   if (code >= 300 && code < 400) return <span className="badge neutral status-3xx">{code}</span>;
+  // 499 是客户端自己断开，不是失败，不标红。
+  if (code === 499) return <span className="badge neutral status-4xx">{code}</span>;
   if (code >= 400 && code < 500) return <span className="badge danger status-4xx">{code}</span>;
   if (code >= 500) return <span className="badge danger status-5xx">{code}</span>;
   return <span className="badge neutral status-other">{code}</span>;

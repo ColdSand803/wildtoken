@@ -25,13 +25,16 @@ type LogOverviewOut struct {
 	PreviousStatus *StatusCounts `json:"previous_status"`
 	ErrorRequests  int64         `json:"error_requests"`
 	Status2xx      int64         `json:"status_2xx"`
-	Status4xx      int64         `json:"status_4xx"`
-	Status5xx      int64         `json:"status_5xx"`
-	StatusOther    int64         `json:"status_other"`
-	DurationCount  int64         `json:"duration_count"`
-	AvgDurationMs  float64       `json:"avg_duration_ms"`
-	MinDurationMs  int64         `json:"min_duration_ms"`
-	MaxDurationMs  int64         `json:"max_duration_ms"`
+	// Status4xx leaves out 499, which StatusCancelled counts: the client
+	// hanging up is not the request failing.
+	Status4xx       int64   `json:"status_4xx"`
+	Status5xx       int64   `json:"status_5xx"`
+	StatusCancelled int64   `json:"status_cancelled"`
+	StatusOther     int64   `json:"status_other"`
+	DurationCount   int64   `json:"duration_count"`
+	AvgDurationMs   float64 `json:"avg_duration_ms"`
+	MinDurationMs   int64   `json:"min_duration_ms"`
+	MaxDurationMs   int64   `json:"max_duration_ms"`
 	// P50/P95/P99 是全窗口耗时的最近邻分位数。均值会被一条慢请求拉高，
 	// 分位数区分"普遍变慢"和"偶发超时"。无有效耗时时为 null。
 	P50DurationMs *float64           `json:"p50_duration_ms"`
@@ -67,11 +70,12 @@ type RequestBucketOut struct {
 
 // StatusCounts carries per-class request counts for one window.
 type StatusCounts struct {
-	Total       int64 `json:"total"`
-	Status2xx   int64 `json:"status_2xx"`
-	Status4xx   int64 `json:"status_4xx"`
-	Status5xx   int64 `json:"status_5xx"`
-	StatusOther int64 `json:"status_other"`
+	Total           int64 `json:"total"`
+	Status2xx       int64 `json:"status_2xx"`
+	Status4xx       int64 `json:"status_4xx"`
+	Status5xx       int64 `json:"status_5xx"`
+	StatusCancelled int64 `json:"status_cancelled"`
+	StatusOther     int64 `json:"status_other"`
 }
 
 /*
@@ -168,10 +172,11 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	aggregateQuery := `
 		SELECT
 			COUNT(*),
-			COALESCE(SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ` + failedRows + ` THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 AND status_code <> 499 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ` + cancelledRows + ` THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0),
 			COALESCE(MIN(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END), 0),
@@ -181,12 +186,13 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	var durationSum int64
 	row := database.QueryRowContext(ctx, aggregateQuery, predicateArgs...)
 	if err := row.Scan(&out.TotalRequests, &out.ErrorRequests,
-		&out.Status2xx, &out.Status4xx, &out.Status5xx,
+		&out.Status2xx, &out.Status4xx, &out.Status5xx, &out.StatusCancelled,
 		&out.DurationCount, &durationSum,
 		&out.MinDurationMs, &out.MaxDurationMs); err != nil {
 		return out, err
 	}
-	out.StatusOther = out.TotalRequests - out.Status2xx - out.Status4xx - out.Status5xx
+	out.StatusOther = out.TotalRequests - out.Status2xx - out.Status4xx - out.Status5xx -
+		out.StatusCancelled
 	if out.DurationCount > 0 {
 		out.AvgDurationMs = float64(durationSum) / float64(out.DurationCount)
 	}
@@ -207,7 +213,7 @@ func LogOverview(ctx context.Context, database *sql.DB,
 		SELECT
 			((CAST(strftime('%s', created_at) AS INTEGER) + ?) / ?) * ? - ? AS bucket_epoch,
 			COUNT(*),
-			COALESCE(SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ` + failedRows + ` THEN 1 ELSE 0 END), 0),
 			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END),
 			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0)
 		FROM request_logs
@@ -393,12 +399,15 @@ func previousWindowCounts(ctx context.Context, database *sql.DB,
 		SELECT
 			COUNT(*),
 			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0)
+			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 AND status_code <> 499 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN `+cancelledRows+` THEN 1 ELSE 0 END), 0)
 		FROM request_logs WHERE `+predicate+" AND "+countedRows, args...)
-	if err := row.Scan(&counts.Total, &counts.Status2xx, &counts.Status4xx, &counts.Status5xx); err != nil {
+	if err := row.Scan(&counts.Total, &counts.Status2xx, &counts.Status4xx, &counts.Status5xx,
+		&counts.StatusCancelled); err != nil {
 		return counts, false, err
 	}
-	counts.StatusOther = counts.Total - counts.Status2xx - counts.Status4xx - counts.Status5xx
+	counts.StatusOther = counts.Total - counts.Status2xx - counts.Status4xx - counts.Status5xx -
+		counts.StatusCancelled
 	return counts, true, nil
 }
