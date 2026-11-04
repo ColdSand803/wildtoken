@@ -1023,6 +1023,48 @@ func AdminLogOverview(state *appstate.State) http.HandlerFunc {
 	}
 }
 
+// dailyUsageDays is how far back the calendar reaches: 53 weeks, whatever
+// weekday today is.
+const dailyUsageDays = 53 * 7
+
+type dailyUsageResponse struct {
+	// Today is the console's date, which the calendar ends on.
+	Today string             `json:"today"`
+	Days  []db.DailyUsageOut `json:"days"`
+}
+
+// AdminDailyUsage returns per-day totals for the console's last 53 weeks.
+// They come from usage_hourly, so log retention does not thin them out.
+//
+// Days follow tz_offset as the rest of the dashboard does, applied to the
+// whole span: a zone with daylight saving folds the other half of the year an
+// hour off.
+func AdminDailyUsage(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		zone, err := dashboardZone(r.URL.Query().Get("tz_offset"))
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		now := time.Now().In(zone)
+		_, offset := now.Zone()
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone)
+		since := today.AddDate(0, 0, 1-dailyUsageDays)
+
+		ctx, cancel := analyticsContext(r)
+		defer cancel()
+		days, err := db.DailyUsage(ctx, state.DB, since.Unix(), int64(offset))
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		apperr.WriteJSON(w, http.StatusOK, dailyUsageResponse{
+			Today: today.Format(dashboardDateLayout),
+			Days:  days,
+		})
+	}
+}
+
 // AdminTopLogStats ranks models and channels over a window.
 func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

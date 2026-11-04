@@ -669,3 +669,34 @@ func TestAFullSubscriberIsToldItMissedRows(t *testing.T) {
 		t.Error("the mark survived being taken")
 	}
 }
+
+// The calendar's hourly totals move with the rows they count.
+func TestCommittedLogsAddToTheHourlyUsage(t *testing.T) {
+	database := loggingTestDB(t)
+	ok, bad, tokens := int32(200), int32(502), int32(40)
+
+	for _, batch := range [][]LogEntry{
+		{
+			{Method: "POST", Path: "/v1/responses", StatusCode: &ok, TotalTokens: &tokens},
+			{Method: "POST", Path: "/v1/responses", StatusCode: &bad},
+		},
+		{{Method: "POST", Path: "/v1/responses"}},
+	} {
+		if _, err := insertLogs(context.Background(), database, batch, nil); err != nil {
+			t.Fatalf("insert: %v", err)
+		}
+	}
+
+	var requests, errors, total int64
+	if err := database.QueryRow(
+		"SELECT SUM(requests), SUM(errors), SUM(total_tokens) FROM usage_hourly").
+		Scan(&requests, &errors, &total); err != nil {
+		t.Fatalf("read usage: %v", err)
+	}
+	if requests != 3 || errors != 2 || total != 40 {
+		t.Errorf("usage = %d requests, %d errors, %d tokens; want 3, 2, 40", requests, errors, total)
+	}
+	if logs := countRows(t, database, "SELECT COUNT(*) FROM request_logs"); logs != requests {
+		t.Errorf("%d log rows but %d counted", logs, requests)
+	}
+}

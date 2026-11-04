@@ -129,6 +129,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			logs.Get("/token-usage", handlers.AdminTokenUsageStats(state))
 			logs.Get("/top", handlers.AdminTopLogStats(state))
 			logs.Get("/overview", handlers.AdminLogOverview(state))
+			logs.Get("/daily", handlers.AdminDailyUsage(state))
 			logs.Get("/{id}", handlers.AdminGetLogDetail(state))
 			logs.Get("/{id}/snapshots/{field}", handlers.AdminGetLogSnapshot(state))
 		})

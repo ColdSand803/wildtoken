@@ -565,6 +565,7 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 	}
 
 	records := make([]persistedLogRecord, 0, len(entries))
+	usage := db.UsageTally{}
 	for i, entry := range entries {
 		now := time.Now().UTC()
 		createdAt := now.Format(models.TimestampFormat)
@@ -617,6 +618,7 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 		if err := payloads.Store(ctx, logID, prepared[i], false); err != nil {
 			return nil, err
 		}
+		usage.Add(now, entry.StatusCode, entry.TotalTokens)
 
 		// The quota counter advances with the log row, so a committed request is
 		// always accounted for exactly once. A request that carried no usage, or
@@ -674,6 +676,11 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 				},
 			},
 		})
+	}
+
+	// The calendar's hourly totals commit with the rows they count.
+	if err := db.AddUsage(ctx, tx, usage); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(); err != nil {

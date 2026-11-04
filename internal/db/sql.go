@@ -164,6 +164,30 @@ CREATE TABLE IF NOT EXISTS request_log_bodies (
     record BLOB NOT NULL
 );`
 
+// Request, failure and token totals per UTC hour, kept apart from the logs so
+// retention cannot empty them. hour_start is the hour's first second in unix
+// time: 1762257600 is 2025-11-04 12:00:00 UTC.
+const createUsageHourly = `
+CREATE TABLE usage_hourly (
+    hour_start   INTEGER PRIMARY KEY,
+    requests     INTEGER NOT NULL DEFAULT 0,
+    errors       INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0
+);`
+
+// Fills a new usage_hourly from the logs still on disk. Failure is the test
+// the overview applies: no status, or one outside 2xx.
+const backfillUsageHourly = `
+INSERT INTO usage_hourly (hour_start, requests, errors, total_tokens)
+SELECT CAST(strftime('%s', created_at) AS INTEGER) / 3600 * 3600 AS hour,
+       COUNT(*),
+       SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300
+                THEN 1 ELSE 0 END),
+       COALESCE(SUM(total_tokens), 0)
+FROM request_logs
+WHERE strftime('%s', created_at) IS NOT NULL
+GROUP BY hour`
+
 const createAPITokens = `
 CREATE TABLE IF NOT EXISTS api_tokens (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -6,6 +6,7 @@ import type {
   APIToken,
   BalanceResult,
   ChannelExportDocument,
+  DailyUsagePage,
   Group,
   ImportResult,
   LogOverview,
@@ -343,6 +344,14 @@ export function fetchDashboard(
     recent,
     multiplier: settings.dashboard_multiplier,
   }));
+}
+
+/** 近一年每天的用量，带上看板倍率。日历不跟随看板的时间档，单独取。 */
+export function fetchDailyUsage(): Promise<{ page: DailyUsagePage; multiplier: number }> {
+  return Promise.all([
+    api<DailyUsagePage>(`/api/admin/logs/daily?${tzOffsetParam().slice(1)}`),
+    getSettings(),
+  ]).then(([page, settings]) => ({ page, multiplier: settings.dashboard_multiplier }));
 }
 
 export function listTokens(): Promise<APIToken[]> {

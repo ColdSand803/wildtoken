@@ -269,6 +269,20 @@ export interface TokenUsage {
   range_label?: string;
 }
 
+/** 一天的用量，按控制台时区分日。没有请求的日子不返回。 */
+export interface DailyUsage {
+  day: string;
+  requests: number;
+  errors: number;
+  total_tokens: number;
+}
+
+/** 近 53 周的每日用量。today 是日历最后一天。 */
+export interface DailyUsagePage {
+  today: string;
+  days: DailyUsage[];
+}
+
 /** 运行时设置。revision 是乐观锁，保存时原样带回去。 */
 export interface RuntimeSettings {
   log_body_keep_count: number;
