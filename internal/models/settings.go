@@ -19,6 +19,8 @@ type ModelTestRequest struct {
 	Protocol         string `json:"protocol"`
 	PromptTemplateID int64  `json:"prompt_template_id"`
 	Prompt           string `json:"prompt"`
+	// KeyID tests one key, disabled or not; 0 the first enabled.
+	KeyID int64 `json:"key_id"`
 }
 
 func (r *ModelTestRequest) Validate() error {

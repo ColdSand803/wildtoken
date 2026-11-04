@@ -89,6 +89,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			upstreams.Get("/", handlers.AdminListUpstreams(state))
 			upstreams.Post("/", handlers.AdminCreateUpstream(state))
 			upstreams.Get("/{id}", handlers.AdminGetUpstream(state))
+			upstreams.Get("/{id}/credential", handlers.AdminRevealUpstreamKey(state))
 			upstreams.Put("/{id}", handlers.AdminUpdateUpstream(state))
 			upstreams.Delete("/{id}", handlers.AdminDeleteUpstream(state))
 			upstreams.Patch("/{id}/enabled", handlers.AdminSetUpstreamEnabled(state))

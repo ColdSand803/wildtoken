@@ -423,6 +423,10 @@ type RequestContext struct {
 	Method          string
 	Path            string
 	LogBodyMaxBytes int
+	// UpstreamKeyID and UpstreamKeyName name the key this attempt used; 0 and
+	// "" for a channel signing in through its headers.
+	UpstreamKeyID   int64
+	UpstreamKeyName string
 }
 
 // ProxyRequest forwards a request upstream, streaming SSE bodies as they arrive.
@@ -668,6 +672,8 @@ func baseLogEntry(requestCtx RequestContext, upstream *models.UpstreamRow,
 		ClientType:              &clientType,
 		UpstreamID:              &upstreamID,
 		UpstreamName:            &upstreamName,
+		UpstreamKeyID:           requestCtx.UpstreamKeyID,
+		UpstreamKeyName:         requestCtx.UpstreamKeyName,
 		Model:                   requestCtx.ForwardModel,
 		RequestModel:            requestCtx.RequestModel,
 		UpstreamModel:           requestCtx.ForwardModel,

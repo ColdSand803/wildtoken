@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { UnauthorizedError, fetchUpstreamModels, listPromptTemplates, testUpstreamModel } from "../api";
-import type { ModelTestResult, PromptTemplate, Upstream } from "../types";
+import { UnauthorizedError, fetchUpstreamModels, getUpstream, listPromptTemplates, testUpstreamModel } from "../api";
+import type { ModelTestResult, PromptTemplate, Upstream, UpstreamKey } from "../types";
 import { useToast } from "./feedback";
 import { useDialog } from "../useDialog";
 
@@ -89,6 +89,9 @@ export function ModelTestDialog({
   const [protocol, setProtocol] = useState<string>(PROTOCOLS[0].value);
   const [templateId, setTemplateId] = useState("");
   const [prompt, setPrompt] = useState("");
+  /* 不止一把 key 时才让选，0 是第一把启用的。列表接口不带 key，打开时补拉详情。 */
+  const [keys, setKeys] = useState<UpstreamKey[]>([]);
+  const [keyId, setKeyId] = useState(0);
   const [result, setResult] = useState<ModelTestResult | null>(null);
   const [sending, setSending] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -109,8 +112,19 @@ export function ModelTestDialog({
     setResult(null);
     setSending(false);
     setRefreshing(false);
+    setKeys([]);
+    setKeyId(0);
 
     let cancelled = false;
+    if (upstream.key_count > 1) {
+      getUpstream(upstream.id)
+        .then((full) => {
+          if (!cancelled) setKeys(full.keys ?? []);
+        })
+        .catch(() => {
+          // 拿不到就只用第一把启用的，测试照样能发。
+        });
+    }
     listPromptTemplates()
       .then((list) => {
         if (cancelled) return;
@@ -169,6 +183,7 @@ export function ModelTestDialog({
         protocol,
         prompt_template_id: Number(templateId),
         prompt: prompt.trim(),
+        key_id: keyId,
       });
       if (started !== session.current) return;
       setResult(outcome);
@@ -245,6 +260,21 @@ export function ModelTestDialog({
             </select>
             <span className="field-hint">可使用此渠道配置的模型，或从上游刷新后选择。</span>
           </label>
+
+          {keys.length > 1 ? (
+            <label className="field">
+              <span className="field-label">使用的 Key</span>
+              <select value={keyId} onChange={(event) => setKeyId(Number(event.target.value))}>
+                <option value={0}>第一把启用的（默认）</option>
+                {keys.map((key, index) => (
+                  <option key={key.id} value={key.id}>
+                    {`${key.name || `第 ${index + 1} 把`}${key.enabled ? "" : "（已停用）"}`}
+                  </option>
+                ))}
+              </select>
+              <span className="field-hint">停用的 Key 也能单独测，确认它恢复后再启用。</span>
+            </label>
+          ) : null}
 
           <label className="field">
             <span className="field-label">请求协议</span>

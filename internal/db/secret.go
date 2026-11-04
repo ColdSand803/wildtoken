@@ -33,17 +33,6 @@ func sealSecret(plain string) (string, error) {
 	return c.Seal(plain)
 }
 
-func sealOptionalSecret(plain *string) (*string, error) {
-	if plain == nil {
-		return nil, nil
-	}
-	sealed, err := sealSecret(*plain)
-	if err != nil {
-		return nil, err
-	}
-	return &sealed, nil
-}
-
 // openSecret reads a stored credential. Plaintext stored before sealing
 // existed passes through until startup seals it.
 func openSecret(stored string) (string, error) {
@@ -64,6 +53,7 @@ func openSecret(stored string) (string, error) {
 // secretColumns are the columns holding a credential.
 var secretColumns = []struct{ table, column string }{
 	{"upstreams", "api_key"},
+	{"upstream_keys", "api_key"},
 	{"api_tokens", "token_plain"},
 }
 

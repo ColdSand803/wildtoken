@@ -32,6 +32,25 @@ CREATE TABLE IF NOT EXISTS upstreams (
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );`
 
+// createUpstreamKeys holds each channel's API keys, used in id order. A
+// channel with none signs in through its headers alone.
+//
+// upstreams.api_key stays as a copy of the first enabled key, NULL when there
+// is none: probes read it, and so does a build from before this table, which
+// a rollback may run.
+const createUpstreamKeys = `
+CREATE TABLE IF NOT EXISTS upstream_keys (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    upstream_id INTEGER NOT NULL REFERENCES upstreams(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL DEFAULT '',
+    api_key     TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);`
+
+const createUpstreamKeysIndex = `CREATE INDEX IF NOT EXISTS idx_upstream_keys_upstream ON upstream_keys(upstream_id, id);`
+
 const createModelTestPromptTemplates = `
 CREATE TABLE IF NOT EXISTS model_test_prompt_templates (
     id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, prompt TEXT NOT NULL,

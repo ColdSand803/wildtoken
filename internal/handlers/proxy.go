@@ -284,6 +284,15 @@ func (g *abortLogGuard) setClientType(clientType string) {
 	g.entry.ClientType = &clientType
 }
 
+// setKey names the key an attempt uses; zero for a channel without keys.
+func (g *abortLogGuard) setKey(key models.UpstreamKey) {
+	if g.entry == nil {
+		return
+	}
+	g.entry.UpstreamKeyID = key.ID
+	g.entry.UpstreamKeyName = key.Name
+}
+
 func (g *abortLogGuard) setUpstream(upstreamID int64, upstreamName string, forwardModel *string) {
 	g.active.SetUpstream(upstreamID, upstreamName, forwardModel)
 	if g.entry == nil {
@@ -321,7 +330,8 @@ func (g *abortLogGuard) disarm() { g.entry = nil }
 
 // logAttempt records one failed attempt on a row of its own and stays armed:
 // the request goes on to another channel, which logs how it ended.
-func (g *abortLogGuard) logAttempt(upstream *models.UpstreamRow, statusCode int32, message string) {
+func (g *abortLogGuard) logAttempt(upstream *models.UpstreamRow, key models.UpstreamKey,
+	statusCode int32, message string) {
 	if g.entry == nil {
 		return
 	}
@@ -329,6 +339,7 @@ func (g *abortLogGuard) logAttempt(upstream *models.UpstreamRow, statusCode int3
 	upstreamID, upstreamName := upstream.ID, upstream.Name
 	entry.UpstreamID = &upstreamID
 	entry.UpstreamName = &upstreamName
+	entry.UpstreamKeyID, entry.UpstreamKeyName = key.ID, key.Name
 	entry.StatusCode = &statusCode
 	entry.Error = &message
 	entry.DurationMs = g.elapsed()
@@ -523,46 +534,89 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 	// serves it: then the refusal was theirs, not the request's.
 	var rejected []models.UpstreamRow
 
+	// refused are the keys that turned this request away as unauthorized; none
+	// is tried for it again. cooling are the channels whose remaining keys all
+	// sit out after refusals: they wait until the other channels are spent.
+	// stay keeps the next attempt on the channel just tried, for another key.
+	refused := map[int64]bool{}
+	cooling := map[int64]bool{}
+	lastResort := false
+	var stay *proxy.Selection
+
 	for attempt := 0; ; attempt++ {
 		// Selection repeats until a channel's rate limit admits the request;
 		// admission records the request, refusal excludes the channel. The loop
 		// terminates because every refusal shrinks the candidate set.
 		var selected *proxy.Selection
 		var prepared *proxy.PreparedRequest
+		// upstream is the selected channel signed in with key, the one this
+		// attempt picked of its keys.
+		var upstream models.UpstreamRow
+		var key models.UpstreamKey
+		stayed := false
 		for {
-			selected = config.directSelection
-			if config.selector == nil {
-				var err error
-				selected, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
-					state.AutoWeight, config.policy, nil, config.model, config.auth.GroupID,
-					excluded)
-				if err != nil {
-					config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
-					return nil, err
+			stayed = stay != nil
+			if stayed {
+				selected, stay = stay, nil
+			} else {
+				selected = config.directSelection
+				if config.selector == nil {
+					var err error
+					selected, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
+						state.AutoWeight, config.policy, nil, config.model, config.auth.GroupID,
+						routingExclusions(excluded, cooling, lastResort))
+					if err != nil {
+						config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
+						return nil, err
+					}
+				} else if selected != nil && excluded[selected.Upstream.ID] {
+					// A direct selector has no other candidate behind it.
+					selected = nil
 				}
-			} else if selected != nil && excluded[selected.Upstream.ID] {
-				// A direct selector has no other candidate behind it.
-				selected = nil
+				if selected == nil && !lastResort && len(cooling) > 0 {
+					// Only channels whose keys all sit out are left: use them after all.
+					lastResort = true
+					continue
+				}
 			}
 			if selected == nil {
 				break
 			}
+
+			upstream, key = selected.Upstream, models.UpstreamKey{}
+			if len(selected.Keys) > 0 {
+				picked, benched, ok := state.Keys.Pick(selected.Upstream.ID, selected.Keys, refused)
+				if !ok {
+					// Every one of its keys has turned this request away.
+					excluded[selected.Upstream.ID] = true
+					continue
+				}
+				// A direct selector has nothing else to wait for.
+				if benched && !stayed && !lastResort && config.selector == nil {
+					cooling[selected.Upstream.ID] = true
+					continue
+				}
+				key = picked
+				upstream.APIKey = &key.APIKey
+			}
+
 			// A channel whose stored headers no longer build a request fails
 			// every request it is given, so it is charged, logged and passed
 			// over. Ending the request here refused it with healthy channels
 			// left, and told the caller the channel's name.
 			var err error
-			prepared, err = proxy.PrepareRequest(r.Header, &selected.Upstream, r.Method,
+			prepared, err = proxy.PrepareRequest(r.Header, &upstream, r.Method,
 				config.path, config.query, selected.ForwardModel, config.body, logBodyMaxBytes)
 			if err != nil {
 				state.AutoWeight.RecordFailure(selected.Upstream.ID,
 					selected.Upstream.AutoWeightEnabled == 1, config.policy)
-				config.guard.logAttempt(&selected.Upstream, 502, err.Error())
+				config.guard.logAttempt(&selected.Upstream, key, 502, err.Error())
 				excluded[selected.Upstream.ID] = true
 				anyMisconfigured = true
 				continue
 			}
-			if proxy.UpstreamRateLimitAdmits(state.UpstreamRateLimiter, &selected.Upstream) {
+			// Another key of the channel spends the admission it already gave.
+			if stayed || proxy.UpstreamRateLimitAdmits(state.UpstreamRateLimiter, &selected.Upstream) {
 				break
 			}
 			excluded[selected.Upstream.ID] = true
@@ -597,8 +651,9 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		}
 
 		// Retrying the same channel immediately would usually hit the same
-		// condition, so the configured pause applies first.
-		if attempt > 0 && previousUpstreamID != nil &&
+		// condition, so the configured pause applies first. Another of its keys
+		// is not the same condition, and goes at once.
+		if attempt > 0 && !stayed && previousUpstreamID != nil &&
 			*previousUpstreamID == selected.Upstream.ID &&
 			config.runtimeSettings.SameUpstreamRetryIntervalMs > 0 {
 			select {
@@ -618,10 +673,11 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		lastFailure = nil
 
 		config.guard.setUpstream(selected.Upstream.ID, selected.Upstream.Name, selected.ForwardModel)
+		config.guard.setKey(key)
 		config.guard.setPreparedRequest(prepared)
 
 		response, err := proxy.ProxyRequest(r.Context(), state.ProxyDeps(), config.policy,
-			&selected.Upstream, proxy.RequestContext{
+			&upstream, proxy.RequestContext{
 				DownstreamTokenID:   config.auth.TokenID,
 				DownstreamTokenName: config.auth.TokenName,
 				// The success path builds its own LogEntry from this context, so
@@ -633,16 +689,33 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 				Method:          r.Method,
 				Path:            config.path,
 				LogBodyMaxBytes: logBodyMaxBytes,
+				UpstreamKeyID:   key.ID,
+				UpstreamKeyName: key.Name,
 			}, prepared)
 
 		failed := err != nil || response.Status < 200 || response.Status >= 300
 		if !failed {
+			state.Keys.Clear(key.ID)
 			for _, upstream := range rejected {
 				state.AutoWeight.RecordFailure(upstream.ID, upstream.AutoWeightEnabled == 1,
 					config.policy)
 			}
 			return response, err
 		}
+		// A key the upstream turned away sits out, and the request tries the
+		// channel's next key before another channel, which may be fine. A 429
+		// bars the key while it sits out; a 401 or 403 for the rest of this
+		// request too.
+		if key.ID != 0 && err == nil && proxy.KeyRefused(response.Status) {
+			state.Keys.Bench(key.ID, proxy.RetryAfter(response.Headers))
+			if response.Status != http.StatusTooManyRequests {
+				refused[key.ID] = true
+			}
+			if state.Keys.HasFresh(selected.Keys, refused) {
+				stay = selected
+			}
+		}
+
 		if attempt >= maxRetries {
 			return response, err
 		}
@@ -663,8 +736,9 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			response.Body = bufferFailedBody(response.Body)
 		}
 
-		// Asked again, the channel would refuse the request the same way.
-		if err == nil && !proxy.IsChannelFault(response.Status) {
+		// Asked again, the channel would refuse the request the same way —
+		// unless another of its keys is to be asked.
+		if stay == nil && err == nil && !proxy.IsChannelFault(response.Status) {
 			excluded[selected.Upstream.ID] = true
 			rejected = append(rejected, selected.Upstream)
 		}
@@ -673,6 +747,22 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		previousUpstreamID = &upstreamID
 		lastFailure = &attemptResult{response: response, err: err}
 	}
+}
+
+// routingExclusions are the channels selection passes over: those out for this
+// request and, while others remain, those whose keys all sit out.
+func routingExclusions(excluded, cooling map[int64]bool, lastResort bool) map[int64]bool {
+	if lastResort || len(cooling) == 0 {
+		return excluded
+	}
+	merged := make(map[int64]bool, len(excluded)+len(cooling))
+	for id := range excluded {
+		merged[id] = true
+	}
+	for id := range cooling {
+		merged[id] = true
+	}
+	return merged
 }
 
 // withoutQueryParam drops one parameter from a raw query and leaves the rest

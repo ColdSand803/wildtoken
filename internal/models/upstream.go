@@ -11,9 +11,12 @@ import (
 
 // UpstreamRow mirrors a row of the `upstreams` table.
 type UpstreamRow struct {
-	ID                int64
-	Name              string
-	BaseURL           string
+	ID      int64
+	Name    string
+	BaseURL string
+	// APIKey is the channel's first enabled key, mirrored from upstream_keys,
+	// nil when it has none. Probes, tests and balance checks use it; routing
+	// picks from every enabled key.
 	APIKey            *string
 	ModelNames        string // JSON array string "[]"
 	ModelPrefixes     string // JSON array string "[]"
@@ -36,12 +39,55 @@ type UpstreamRow struct {
 	RateLimit *string
 	CreatedAt string
 	UpdatedAt string
+	// KeyCount and EnabledKeyCount count the channel's keys.
+	KeyCount        int
+	EnabledKeyCount int
+}
+
+// UpstreamKey is one of a channel's API keys, opened.
+type UpstreamKey struct {
+	ID         int64
+	UpstreamID int64
+	Name       string
+	APIKey     string
+	Enabled    bool
+}
+
+// UpstreamKeyIn is one key of a create or update. ID 0 adds a key; an existing
+// ID with an empty APIKey keeps the stored value. Enabled absent means on.
+type UpstreamKeyIn struct {
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	APIKey  string `json:"api_key"`
+	Enabled *bool  `json:"enabled"`
+}
+
+// UpstreamKeyOut describes a key without its value. CoolingSeconds is how
+// long it still sits out after the upstream refused it.
+type UpstreamKeyOut struct {
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	CoolingSeconds int64  `json:"cooling_seconds,omitempty"`
+}
+
+// UpstreamCredentialOut is one key handed out on request: reads never carry
+// a key, so the console asks for one when the operator does.
+type UpstreamCredentialOut struct {
+	BaseURL string `json:"base_url"`
+	APIKey  string `json:"api_key"`
+	KeyID   int64  `json:"key_id"`
+	KeyName string `json:"key_name"`
 }
 
 // UpstreamIn is the create payload for an upstream.
 type UpstreamIn struct {
-	Name          string            `json:"name"`
-	BaseURL       string            `json:"base_url"`
+	Name    string `json:"name"`
+	BaseURL string `json:"base_url"`
+	// Keys replaces the channel's keys; keys not listed are deleted. Absent
+	// leaves them as they are. APIKey is the older single-key field, read only
+	// when Keys is absent: it becomes the first key.
+	Keys          *[]UpstreamKeyIn  `json:"keys"`
 	APIKey        *string           `json:"api_key"`
 	ModelNames    []string          `json:"model_names"`
 	ModelPrefixes []string          `json:"model_prefixes"`
@@ -269,7 +315,7 @@ var upstreamUpdateRequired = []string{
 
 // upstreamUpdateOptional may be left out: a missing key, timeout or archive
 // keeps the stored one, and clear_api_key defaults to false.
-var upstreamUpdateOptional = []string{"api_key", "timeout_seconds", "clear_api_key", "archived"}
+var upstreamUpdateOptional = []string{"keys", "api_key", "timeout_seconds", "clear_api_key", "archived"}
 
 // MissingUpstreamFields names the required fields a replacing update left out
 // or sent as null.
@@ -339,6 +385,8 @@ type UpstreamOut struct {
 	Name              string            `json:"name"`
 	BaseURL           string            `json:"base_url"`
 	APIKeySet         bool              `json:"api_key_set"`
+	KeyCount          int               `json:"key_count"`
+	EnabledKeyCount   int               `json:"enabled_key_count"`
 	ModelNames        []string          `json:"model_names"`
 	ModelPrefixes     []string          `json:"model_prefixes"`
 	ModelMappings     map[string]string `json:"model_mappings"`
@@ -371,23 +419,33 @@ type ExportUpstreamsRequest struct {
 	IncludeAPIKeys bool    `json:"include_api_keys"`
 }
 
+// ChannelExportKey is one key in an export document.
+type ChannelExportKey struct {
+	Name    string `json:"name"`
+	APIKey  string `json:"api_key"`
+	Enabled bool   `json:"enabled"`
+}
+
 // ChannelExportItem is one channel in an export document.
 type ChannelExportItem struct {
-	Name              string            `json:"name"`
-	BaseURL           string            `json:"base_url"`
-	APIKey            *string           `json:"api_key,omitempty"`
-	ModelNames        []string          `json:"model_names"`
-	ModelPrefixes     []string          `json:"model_prefixes"`
-	ModelMappings     map[string]string `json:"model_mappings"`
-	EffortMappings    map[string]string `json:"effort_mappings,omitempty"`
-	Priority          int32             `json:"priority"`
-	Weight            int64             `json:"weight"`
-	AutoWeightEnabled bool              `json:"auto_weight_enabled"`
-	Enabled           bool              `json:"enabled"`
-	ExtraHeaders      map[string]string `json:"extra_headers"`
-	TimeoutSeconds    *float64          `json:"timeout_seconds"`
-	RateLimit         *string           `json:"rate_limit,omitempty"`
-	GroupIDs          []int64           `json:"group_ids"`
+	Name    string `json:"name"`
+	BaseURL string `json:"base_url"`
+	// Keys are carried only when the export asked for them. APIKey is how a
+	// document from before keys carried its one key; an import still reads it.
+	Keys              []ChannelExportKey `json:"keys,omitempty"`
+	APIKey            *string            `json:"api_key,omitempty"`
+	ModelNames        []string           `json:"model_names"`
+	ModelPrefixes     []string           `json:"model_prefixes"`
+	ModelMappings     map[string]string  `json:"model_mappings"`
+	EffortMappings    map[string]string  `json:"effort_mappings,omitempty"`
+	Priority          int32              `json:"priority"`
+	Weight            int64              `json:"weight"`
+	AutoWeightEnabled bool               `json:"auto_weight_enabled"`
+	Enabled           bool               `json:"enabled"`
+	ExtraHeaders      map[string]string  `json:"extra_headers"`
+	TimeoutSeconds    *float64           `json:"timeout_seconds"`
+	RateLimit         *string            `json:"rate_limit,omitempty"`
+	GroupIDs          []int64            `json:"group_ids"`
 	// GroupNames name the same groups. Ids differ between instances, so an
 	// import binds by name when it has one; GroupIDs serve older documents.
 	GroupNames []string `json:"group_names,omitempty"`
@@ -457,16 +515,14 @@ type ImportUpstreamsResponse struct {
 	Items   []ImportResultItem `json:"items"`
 }
 
-// UpstreamDetailOut adds the channel's API key for the single-item endpoint,
-// which the console's edit form needs in order to save the channel back.
-//
-// The key is sealed at rest, but this endpoint hands it out in the clear to
-// anyone holding the admin token.
+// UpstreamDetailOut is the single-item view the console's edit form reads. It
+// lists the channel's keys by name and state but never their values: one is
+// handed out only when asked for, through the credential endpoint.
 type UpstreamDetailOut struct {
 	ID                             int64             `json:"id"`
 	Name                           string            `json:"name"`
 	BaseURL                        string            `json:"base_url"`
-	APIKey                         *string           `json:"api_key"`
+	Keys                           []UpstreamKeyOut  `json:"keys"`
 	APIKeySet                      bool              `json:"api_key_set"`
 	ModelNames                     []string          `json:"model_names"`
 	ModelPrefixes                  []string          `json:"model_prefixes"`

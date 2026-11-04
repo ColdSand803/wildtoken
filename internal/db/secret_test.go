@@ -44,8 +44,9 @@ func assertSealed(t *testing.T, stored, plain string) {
 }
 
 const (
-	storedAPIKey = "SELECT api_key FROM upstreams WHERE id = ?"
-	storedToken  = "SELECT token_plain FROM api_tokens WHERE id = ?"
+	storedAPIKey  = "SELECT api_key FROM upstreams WHERE id = ?"
+	storedKeyList = "SELECT api_key FROM upstream_keys WHERE upstream_id = ?"
+	storedToken   = "SELECT token_plain FROM api_tokens WHERE id = ?"
 )
 
 func TestCredentialsAreSealedAtRestAndReadBackInTheClear(t *testing.T) {
@@ -97,7 +98,8 @@ func TestSealingBringsEveryCredentialUnderTheKey(t *testing.T) {
 	db := memoryDB(t)
 	ctx := context.Background()
 
-	// A database from before sealing: plaintext in both columns.
+	// A database from before sealing: plaintext in every column, the channel's
+	// key both in upstream_keys and in the copy upstreams keeps.
 	legacyKey := "sk-legacy"
 	input := models.DefaultUpstreamIn()
 	input.Name, input.BaseURL, input.APIKey = "legacy", "https://api.example.com", &legacyKey
@@ -123,6 +125,7 @@ func TestSealingBringsEveryCredentialUnderTheKey(t *testing.T) {
 	}
 	sealedMoved, _ := keyFile.Seal(movedKey)
 	db.Exec("UPDATE upstreams SET api_key = ? WHERE id = ?", sealedMoved, moved.ID)
+	db.Exec("UPDATE upstream_keys SET api_key = ? WHERE upstream_id = ?", sealedMoved, moved.ID)
 	if sealed, _ := HasSealedSecrets(ctx, db); !sealed {
 		t.Fatal("a sealed value went unreported")
 	}
@@ -136,21 +139,26 @@ func TestSealingBringsEveryCredentialUnderTheKey(t *testing.T) {
 
 	current := mustCipher(t, "ENCRYPTION_KEY")
 	report, err := SealSecrets(ctx, db, current, keyFile)
-	if err != nil || report != (SealReport{Sealed: 2, Resealed: 1}) {
-		t.Fatalf("report %+v, %v; want 2 sealed, 1 resealed", report, err)
+	if err != nil || report != (SealReport{Sealed: 3, Resealed: 2}) {
+		t.Fatalf("report %+v, %v; want 3 sealed, 2 resealed", report, err)
 	}
 
 	for query, want := range map[string]struct {
 		id    int64
 		plain string
 	}{
-		"legacy key":  {legacy.ID, legacyKey},
-		"moved key":   {moved.ID, movedKey},
-		"token value": {token.ID, token.Token},
+		"legacy key":      {legacy.ID, legacyKey},
+		"moved key":       {moved.ID, movedKey},
+		"legacy key list": {legacy.ID, legacyKey},
+		"moved key list":  {moved.ID, movedKey},
+		"token value":     {token.ID, token.Token},
 	} {
 		column := storedAPIKey
-		if query == "token value" {
+		switch {
+		case query == "token value":
 			column = storedToken
+		case strings.HasSuffix(query, "list"):
+			column = storedKeyList
 		}
 		stored := rawColumn(t, db, column, want.id)
 		if opened, err := current.Open(stored); err != nil || opened != want.plain {

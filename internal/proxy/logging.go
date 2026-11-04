@@ -56,6 +56,8 @@ type LogEntry struct {
 	ClientType                *string
 	UpstreamID                *int64
 	UpstreamName              *string
+	UpstreamKeyID             int64
+	UpstreamKeyName           string
 	Model                     *string
 	RequestModel              *string
 	UpstreamModel             *string
@@ -583,7 +585,8 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 		result, err := tx.ExecContext(ctx, `INSERT INTO request_logs
         (method, path, downstream_token_id, downstream_token_name, client_ip,
          client_type,
-         upstream_id, upstream_name, model, request_model, upstream_model,
+         upstream_id, upstream_name, upstream_key_id, upstream_key_name,
+         model, request_model, upstream_model,
          reasoning_effort, upstream_reasoning_effort, response_reasoning_effort,
          stream, status_code,
          prompt_tokens, completion_tokens, total_tokens,
@@ -591,10 +594,11 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
          duration_ms, first_token_ms, error, created_at)
     VALUES (?, ?, (SELECT id FROM api_tokens WHERE id = ?), ?, ?, ?,
             (SELECT id FROM upstreams WHERE id = ?),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			entry.ClientIP,
-			clientType, entry.UpstreamID, entry.UpstreamName, entry.Model,
+			clientType, entry.UpstreamID, entry.UpstreamName,
+			entry.UpstreamKeyID, entry.UpstreamKeyName, entry.Model,
 			entry.RequestModel, entry.UpstreamModel, entry.ReasoningEffort,
 			entry.UpstreamReasoningEffort,
 			entry.ResponseReasoningEffort, streamInt, entry.StatusCode,

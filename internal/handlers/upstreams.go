@@ -632,14 +632,19 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
+		keys, err := upstreamKeysOut(r.Context(), state, id)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 
 		apperr.WriteJSON(w, http.StatusOK, models.UpstreamDetailOut{
 			GroupIDs:                       groupIDs,
 			ID:                             row.ID,
 			Name:                           row.Name,
 			BaseURL:                        row.BaseURL,
-			APIKey:                         row.APIKey,
-			APIKeySet:                      row.APIKey != nil,
+			Keys:                           keys,
+			APIKeySet:                      row.KeyCount > 0,
 			ModelNames:                     modelNames,
 			ModelPrefixes:                  modelPrefixes,
 			ModelMappings:                  modelMappings,
@@ -982,7 +987,12 @@ func AdminTestUpstream(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-		headers := buildChannelRequestHeaders(nil, row.APIKey, overrides)
+		apiKey, err := probeKey(r.Context(), state.DB, &row, input.KeyID)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		headers := buildChannelRequestHeaders(nil, apiKey, overrides)
 
 		outcome, err := sendAndLogProbe(r.Context(), state, consoleProbe{
 			clientType:   probeChannelTest,
@@ -1073,8 +1083,13 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
+		apiKey, err := probeKey(r.Context(), state.DB, &row, input.KeyID)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 		headers := buildProtocolRequestHeaders(input.Protocol, strings.TrimSpace(input.Model),
-			row.APIKey, overrides)
+			apiKey, overrides)
 		headersPreview := redactHeaderPreview(headers)
 
 		model := strings.TrimSpace(input.Model)
@@ -1305,8 +1320,13 @@ func AdminFetchUpstreamModels(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		apiKey, err := probeKey(r.Context(), state.DB, &row, 0)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 		list, err := fetchModelsForTarget(r.Context(), state, &row.ID, &row.Name,
-			row.BaseURL, row.APIKey, extra, row.TimeoutSeconds)
+			row.BaseURL, apiKey, extra, row.TimeoutSeconds)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -1352,10 +1372,29 @@ func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 			timeout = *input.TimeoutSeconds
 		}
 
+		// A blank key on a saved channel's form means one of its stored keys,
+		// which the form holds only by name.
+		apiKey := input.APIKey
+		if (apiKey == nil || strings.TrimSpace(*apiKey) == "") && input.UpstreamID != 0 {
+			row, found, err := db.GetUpstream(r.Context(), state.DB, input.UpstreamID)
+			if err != nil {
+				apperr.WriteError(w, err)
+				return
+			}
+			if !found {
+				apperr.WriteError(w, apperr.NotFound("upstream not found"))
+				return
+			}
+			if apiKey, err = probeKey(r.Context(), state.DB, &row, input.KeyID); err != nil {
+				apperr.WriteError(w, err)
+				return
+			}
+		}
+
 		// The channel form's preview probes a typed-in base URL, so there is no
 		// channel row to attribute the log row to.
 		list, err := fetchModelsForTarget(r.Context(), state, nil, nil,
-			baseURL, input.APIKey, extra, timeout)
+			baseURL, apiKey, extra, timeout)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -1393,7 +1432,12 @@ func AdminFetchUpstreamBalance(state *appstate.State) http.HandlerFunc {
 		}
 
 		timeout := probeTimeout(state, row.TimeoutSeconds)
-		headers := buildChannelRequestHeaders(nil, row.APIKey, extra)
+		apiKey, err := probeKey(r.Context(), state.DB, &row, 0)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		headers := buildChannelRequestHeaders(nil, apiKey, extra)
 		subscriptionURL := buildProbeURL(row.BaseURL, "dashboard/billing/subscription", "")
 		usageURL := buildProbeURL(row.BaseURL, "dashboard/billing/usage", billingUsageRange())
 
@@ -1516,7 +1560,12 @@ func AdminFetchUpstreamSub2APIBalance(state *appstate.State) http.HandlerFunc {
 		}
 
 		usageURL := buildProbeURL(row.BaseURL, "usage", "")
-		headers := buildChannelRequestHeaders(nil, row.APIKey, extra)
+		apiKey, err := probeKey(r.Context(), state.DB, &row, 0)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		headers := buildChannelRequestHeaders(nil, apiKey, extra)
 
 		outcome, err := sendAndLogProbe(r.Context(), state, consoleProbe{
 			clientType:   probeBalance,
@@ -1722,13 +1771,15 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 			}
 			// Include API key if requested and present
 			if req.IncludeAPIKeys {
-				row, found, err := db.GetUpstream(ctx, state.DB, out.ID)
+				keys, err := db.ListUpstreamKeyValues(ctx, state.DB, out.ID)
 				if err != nil {
 					apperr.WriteError(w, err)
 					return
 				}
-				if found && row.APIKey != nil {
-					item.APIKey = row.APIKey
+				for _, key := range keys {
+					item.Keys = append(item.Keys, models.ChannelExportKey{
+						Name: key.Name, APIKey: key.APIKey, Enabled: key.Enabled,
+					})
 				}
 			} else {
 				// A key moved into a header is still a key.
@@ -1791,6 +1842,21 @@ func keepSensitiveHeaders(stored string, imported map[string]string) map[string]
 	return merged
 }
 
+// importedKeys turns a document's keys into a key list, nil when it carries
+// none: then its older api_key, if any, is the one key, and an overwrite
+// keeps the keys the channel has.
+func importedKeys(keys []models.ChannelExportKey) *[]models.UpstreamKeyIn {
+	if len(keys) == 0 {
+		return nil
+	}
+	listed := make([]models.UpstreamKeyIn, 0, len(keys))
+	for _, key := range keys {
+		enabled := key.Enabled
+		listed = append(listed, models.UpstreamKeyIn{Name: key.Name, APIKey: key.APIKey, Enabled: &enabled})
+	}
+	return &listed
+}
+
 // AdminImportUpstreams imports channels from a JSON document.
 func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1815,6 +1881,7 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 			input := models.UpstreamIn{
 				Name:              item.Name,
 				BaseURL:           item.BaseURL,
+				Keys:              importedKeys(item.Keys),
 				APIKey:            item.APIKey,
 				ModelNames:        item.ModelNames,
 				ModelPrefixes:     item.ModelPrefixes,

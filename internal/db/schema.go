@@ -59,6 +59,8 @@ func Init(ctx context.Context, db *sql.DB) error {
 		"PRAGMA journal_mode=WAL;",
 		"PRAGMA foreign_keys=ON;",
 		createUpstreams,
+		createUpstreamKeys,
+		createUpstreamKeysIndex,
 		createModelTestPromptTemplates,
 		createAdminCredential,
 		"CREATE INDEX IF NOT EXISTS idx_upstreams_enabled_priority ON upstreams(enabled, priority, id);",
@@ -126,6 +128,9 @@ func Init(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	}
+	if err := migrateUpstreamKeys(ctx, db); err != nil {
+		return err
+	}
 
 	for _, column := range []struct{ name, definition string }{
 		{"request_model", "TEXT"},
@@ -140,6 +145,10 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// Client address. NULL on rows written before this column existed, which
 		// the console renders as a dash rather than inventing an address.
 		{"client_ip", "TEXT"},
+		// The key an attempt used: 0 and '' for a channel without keys or a row
+		// from before them. The name is a copy, so it outlives a rename.
+		{"upstream_key_id", "INTEGER NOT NULL DEFAULT 0"},
+		{"upstream_key_name", "TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := ensureColumn(ctx, db, "request_logs", column.name, column.definition); err != nil {
 			return err

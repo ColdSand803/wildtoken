@@ -1,14 +1,31 @@
 /* API 类型。字段名对着 internal/models 里的 json tag 抄，不是猜的——
    改后端时这里的编译错误就是提示。 */
 
+/** 渠道的一把 key，只有名称和状态。值不随读接口出服务端，要看得单独取。 */
+export interface UpstreamKey {
+  id: number;
+  name: string;
+  enabled: boolean;
+  /** 被上游拒绝后还要冷却的秒数，不在冷却时没有这个字段。 */
+  cooling_seconds?: number;
+}
+
+/** 带值的 key：新建或复制渠道时预填的，以及导出文档里的。 */
+export interface DraftKey {
+  name: string;
+  api_key: string;
+  enabled: boolean;
+}
+
 export interface Upstream {
   id: number;
   name: string;
   base_url: string;
   api_key_set: boolean;
-  /* 只有详情接口带回来，列表接口没有。编辑渠道时明文回显到输入框，
-     便于核对当前用的是哪把 Key；探上游也用它。 */
-  api_key?: string | null;
+  key_count: number;
+  enabled_key_count: number;
+  /** 只有详情接口带回来，列表接口没有。 */
+  keys?: UpstreamKey[];
   model_names: string[];
   model_prefixes: string[];
   model_mappings: Record<string, string>;
@@ -68,6 +85,9 @@ export interface RequestLog {
   client_type: string;
   upstream_id: number | null;
   upstream_name: string | null;
+  /** 这次用的渠道 key。0 和 "" 表示渠道没配 key，或是有 key 之前的旧行。 */
+  upstream_key_id: number;
+  upstream_key_name: string;
   model: string | null;
   request_model: string | null;
   upstream_model: string | null;
@@ -125,6 +145,8 @@ export interface RequestLogPage {
 export interface ChannelExportItem {
   name: string;
   base_url: string;
+  /** 只有勾选「含密钥」导出时才有。api_key 是有多 key 之前的旧格式，导入照读。 */
+  keys?: DraftKey[];
   api_key?: string | null;
   model_names: string[];
   model_prefixes: string[];

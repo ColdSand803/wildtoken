@@ -227,6 +227,15 @@ Explicit channel selection bypasses pool selection. Automatic retries re-run
 selection for each attempt; selecting another channel retries immediately, while
 selecting the same channel waits for the configured same-channel retry interval.
 
+A channel may hold several API keys, and requests take its enabled keys in
+turn. A key the upstream answers with 401, 403 or 429 sits out for 10 seconds,
+twice as long with each refusal in a row up to 5 minutes (or as long as a
+`Retry-After` says, within that cap), and the request moves to the channel's
+next key before another channel. A channel whose keys are all disabled leaves
+routing; one with no keys signs in through its extra headers. The console shows
+saved keys masked: the eye button fetches one, and every key handed out is
+logged.
+
 ## 🗺️ Model Mapping
 
 Model mappings let clients use a stable downstream model name while WildToken

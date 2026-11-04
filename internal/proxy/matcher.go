@@ -40,6 +40,9 @@ type parsedUpstream struct {
 	// groupIDs are the groups this channel serves. A token may only reach a
 	// channel that shares its group.
 	groupIDs map[int64]bool
+	// keys are its enabled keys in rotation order; none means it signs in
+	// through its headers.
+	keys []models.UpstreamKey
 }
 
 func newParsedUpstream(row models.UpstreamRow, groupIDs []int64) *parsedUpstream {
@@ -94,7 +97,8 @@ type routingSnapshot struct {
 	byName    map[string]*parsedUpstream
 }
 
-func newRoutingSnapshot(rows []models.UpstreamRow, membership map[int64][]int64) *routingSnapshot {
+func newRoutingSnapshot(rows []models.UpstreamRow, membership map[int64][]int64,
+	keys map[int64][]models.UpstreamKey) *routingSnapshot {
 	snapshot := &routingSnapshot{
 		byID:   make(map[int64]*parsedUpstream, len(rows)),
 		byName: make(map[string]*parsedUpstream, len(rows)),
@@ -104,6 +108,7 @@ func newRoutingSnapshot(rows []models.UpstreamRow, membership map[int64][]int64)
 			continue
 		}
 		upstream := newParsedUpstream(row, membership[row.ID])
+		upstream.keys = keys[row.ID]
 		snapshot.upstreams = append(snapshot.upstreams, upstream)
 		snapshot.byID[row.ID] = upstream
 		snapshot.byName[row.Name] = upstream
@@ -157,7 +162,11 @@ func (c *RoutingCache) getOrLoad(ctx context.Context, database *sql.DB) (*routin
 		if err != nil {
 			return nil, err
 		}
-		loaded := newRoutingSnapshot(rows, membership)
+		keys, err := db.ListEnabledUpstreamKeys(ctx, database)
+		if err != nil {
+			return nil, err
+		}
+		loaded := newRoutingSnapshot(rows, membership, keys)
 
 		c.mu.Lock()
 		if c.value != nil {
@@ -242,16 +251,19 @@ func selectForwardModel(upstream *parsedUpstream, requestedModel *string) *strin
 	return &forwarded
 }
 
-// Selection is the chosen upstream and the model name to forward.
+// Selection is the chosen upstream, the model name to forward, and the keys
+// an attempt picks one of.
 type Selection struct {
 	Upstream     models.UpstreamRow
 	ForwardModel *string
+	Keys         []models.UpstreamKey
 }
 
 func newSelection(upstream *parsedUpstream, model *string) *Selection {
 	return &Selection{
 		Upstream:     upstream.row,
 		ForwardModel: selectForwardModel(upstream, model),
+		Keys:         upstream.keys,
 	}
 }
 

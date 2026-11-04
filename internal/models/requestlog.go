@@ -14,10 +14,14 @@ type RequestLogOut struct {
 	DownstreamTokenID   *int64  `json:"downstream_token_id"`
 	DownstreamTokenName *string `json:"downstream_token_name"`
 	// ClientIP is null on rows written before the column existed.
-	ClientIP                  *string `json:"client_ip"`
-	ClientType                string  `json:"client_type"`
-	UpstreamID                *int64  `json:"upstream_id"`
-	UpstreamName              *string `json:"upstream_name"`
+	ClientIP     *string `json:"client_ip"`
+	ClientType   string  `json:"client_type"`
+	UpstreamID   *int64  `json:"upstream_id"`
+	UpstreamName *string `json:"upstream_name"`
+	// UpstreamKeyID and UpstreamKeyName name the channel key the request used:
+	// 0 and "" for a channel without keys, or a row from before them.
+	UpstreamKeyID             int64   `json:"upstream_key_id"`
+	UpstreamKeyName           string  `json:"upstream_key_name"`
 	Model                     *string `json:"model"`
 	RequestModel              *string `json:"request_model"`
 	UpstreamModel             *string `json:"upstream_model"`
@@ -176,6 +180,8 @@ type RequestLogTopStatsOut struct {
 
 type TestRequest struct {
 	Path string `json:"path"`
+	// KeyID tests one key, disabled or not; 0 the first enabled.
+	KeyID int64 `json:"key_id"`
 }
 
 // Validate keeps the probe path to something that can be appended to a base URL.
@@ -222,4 +228,8 @@ type ModelFetchIn struct {
 	APIKey         *string           `json:"api_key"`
 	ExtraHeaders   map[string]string `json:"extra_headers"`
 	TimeoutSeconds *float64          `json:"timeout_seconds"`
+	// UpstreamID and KeyID name a stored key to sign in with when APIKey is
+	// blank: the edit form shows saved keys only as names.
+	UpstreamID int64 `json:"upstream_id"`
+	KeyID      int64 `json:"key_id"`
 }

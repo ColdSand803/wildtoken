@@ -95,7 +95,12 @@ func AdminDebugUpstream(state *appstate.State) http.HandlerFunc {
 			targetQuery = "beta=true"
 		}
 		targetURL := buildProbeURL(row.BaseURL, debugProtocolPaths[input.Protocol], targetQuery)
-		headers := buildProtocolRequestHeaders(input.Protocol, model, row.APIKey, overrides)
+		apiKey, err := probeKey(r.Context(), state.DB, &row, 0)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		headers := buildProtocolRequestHeaders(input.Protocol, model, apiKey, overrides)
 
 		w.Header().Set("content-type", "text/event-stream")
 		w.Header().Set("cache-control", "no-store")

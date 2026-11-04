@@ -474,6 +474,8 @@ function metaRows(log: RequestLog): Array<{ label: string; value: string }> {
   push("来源 IP", log.client_ip ?? "-");
   push("令牌", log.downstream_token_name ?? "-");
   push("渠道", log.upstream_name ?? "-");
+  // 没配 key 的渠道和有 key 之前的旧日志没有这一项。
+  if (log.upstream_key_id) push("Key", log.upstream_key_name || `#${log.upstream_key_id}`);
   push("模型", modelChain(log));
 
   for (const step of reasoningChain(log)) push(step.label, step.value);

@@ -60,7 +60,7 @@ test("未配置这些项的渠道也要发出后端能接受的值", () => {
 /* 删除后的「撤销」是重建，漏掉的字段就是恢复后悄悄少掉的配置。整份快照
    解构比逐字段列举更难漏：新增字段自动跟着走。 */
 test("删除撤销的重建 payload 覆盖整张渠道配置", () => {
-  const start = source.indexOf("const snapshot = await getUpstream");
+  const start = source.indexOf("snapshot = await getUpstream");
   assert.notEqual(start, -1, "删除前必须先取快照");
   const block = source.slice(start, source.indexOf("} catch (err)", start));
 
@@ -69,7 +69,10 @@ test("删除撤销的重建 payload 覆盖整张渠道配置", () => {
     /const \{ id: _id, api_key_set: _set, \.\.\.rest \} = snapshot/,
     "撤销应整份解构快照，而不是逐字段挑",
   );
-  // 快照来自详情接口，带着 Key，整份交给重建；归档的渠道带上归档前的启用状态。
+  // 快照来自详情接口，整份交给重建；归档的渠道带上归档前的启用状态。
   assert.match(block, /createUpstream\(\{\s*\.\.\.rest,/);
   assert.match(block, /snapshot\.enabled_before_archive/);
+  // 详情不带 key 的值：删之前逐把取回，重建时作为新 key 带上。
+  assert.match(block, /snapshotKeys = await revealAllKeys\(snapshot\)/);
+  assert.match(block, /keys: snapshotKeys\.map\(\(key\) => \(\{ id: 0, \.\.\.key \}\)\)/);
 });
