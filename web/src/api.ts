@@ -13,6 +13,7 @@ import type {
   LogSnapshotField,
   ModelTestResult,
   PromptTemplate,
+  RequestLog,
   RequestLogPage,
   RuntimeSettings,
   SystemInfo,
@@ -383,6 +384,11 @@ export function resetTokenUsage(id: number): Promise<APIToken> {
 }
 
 /** 一份快照。元信息列表行里已经有了，报文按页签逐份拉，没存过的返回 null。 */
+/** 这条日志所属请求的各次尝试，按先后排，不带报文。只尝试了一次时为空。 */
+export function listLogAttempts(id: number): Promise<RequestLog[]> {
+  return api<{ items: RequestLog[] }>(`/api/admin/logs/${id}/attempts`).then((page) => page.items);
+}
+
 export function getLogSnapshot(id: number, field: LogSnapshotField): Promise<unknown> {
   return api<unknown>(`/api/admin/logs/${id}/snapshots/${field}`);
 }

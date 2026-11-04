@@ -29,6 +29,9 @@ type PersistedLogStats struct {
 	TotalTokens          *int64
 	PromptTokens         *int64
 	PromptCachedTokens   *int64
+	// Retried rows are attempts another attempt replaced: their tokens count,
+	// the request does not.
+	Retried bool
 }
 
 // LogStatsSnapshot is what the admin console reads.
@@ -110,17 +113,20 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
 	c.refreshMu.Lock()
 	defer c.refreshMu.Unlock()
 
+	// Requests leave out retried attempts; tokens and the row count do not.
 	var maxLogID sql.NullInt64
+	var logCount int64
 	allTime := logStatsBucket{}
 	err := database.QueryRowContext(ctx, `SELECT
-           COUNT(*) AS request_count,
+           COUNT(*) AS log_count,
+           COALESCE(SUM(CASE WHEN retried = 0 THEN 1 ELSE 0 END), 0) AS request_count,
            MAX(id) AS max_log_id,
-           COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END), 0)
+           COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL AND retried = 0 THEN 1 ELSE 0 END), 0)
                AS token_request_count,
            COALESCE(SUM(total_tokens), 0) AS total_tokens,
            COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
            COALESCE(SUM(prompt_cached_tokens), 0) AS prompt_cached_tokens
-       FROM request_logs`).Scan(&allTime.requestCount, &maxLogID,
+       FROM request_logs`).Scan(&logCount, &allTime.requestCount, &maxLogID,
 		&allTime.tokenRequestCount, &allTime.totalTokens,
 		&allTime.promptTokens, &allTime.promptCachedTokens)
 	if err != nil {
@@ -135,8 +141,8 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
 	rows, err := database.QueryContext(ctx, `SELECT
            CAST((CAST(strftime('%s', created_at) AS INTEGER) / 60) * 60 AS INTEGER)
                AS bucket_start_unix_seconds,
-           COUNT(*) AS request_count,
-           COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END), 0)
+           COALESCE(SUM(CASE WHEN retried = 0 THEN 1 ELSE 0 END), 0) AS request_count,
+           COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL AND retried = 0 THEN 1 ELSE 0 END), 0)
                AS token_request_count,
            COALESCE(SUM(total_tokens), 0) AS total_tokens,
            COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
@@ -151,7 +157,7 @@ func (c *LogStatsCache) RefreshFromDB(ctx context.Context, database *sql.DB) err
 	defer rows.Close()
 
 	refreshed := newLogStatsState()
-	refreshed.totalLogCount = allTime.requestCount
+	refreshed.totalLogCount = logCount
 	refreshed.maxRefreshedLogID = maxLogID.Int64
 	refreshed.allTime = allTime
 	for rows.Next() {
@@ -225,18 +231,9 @@ func (c *LogStatsCache) Snapshot() LogStatsSnapshot {
 }
 
 func (s *logStatsState) applyPersistedEntry(entry PersistedLogStats, now time.Time) {
+	counted := entry.counted()
 	s.totalLogCount++
-	s.allTime.requestCount++
-	if entry.TotalTokens != nil {
-		s.allTime.tokenRequestCount++
-		s.allTime.totalTokens += *entry.TotalTokens
-	}
-	if entry.PromptTokens != nil {
-		s.allTime.promptTokens += *entry.PromptTokens
-	}
-	if entry.PromptCachedTokens != nil {
-		s.allTime.promptCachedTokens += *entry.PromptCachedTokens
-	}
+	s.allTime.add(counted)
 	if entry.CreatedAtUnixSeconds < oldestWindowStart(now) {
 		return
 	}
@@ -247,17 +244,29 @@ func (s *logStatsState) applyPersistedEntry(entry PersistedLogStats, now time.Ti
 		bucket = &logStatsBucket{}
 		s.minuteBuckets[bucketStart] = bucket
 	}
-	bucket.requestCount++
+	bucket.add(counted)
+}
+
+// counted is what one row adds to a bucket: its tokens always, a request only
+// when it is not a retried attempt.
+func (entry PersistedLogStats) counted() logStatsBucket {
+	var counted logStatsBucket
+	if !entry.Retried {
+		counted.requestCount = 1
+		if entry.TotalTokens != nil {
+			counted.tokenRequestCount = 1
+		}
+	}
 	if entry.TotalTokens != nil {
-		bucket.tokenRequestCount++
-		bucket.totalTokens += *entry.TotalTokens
+		counted.totalTokens = *entry.TotalTokens
 	}
 	if entry.PromptTokens != nil {
-		bucket.promptTokens += *entry.PromptTokens
+		counted.promptTokens = *entry.PromptTokens
 	}
 	if entry.PromptCachedTokens != nil {
-		bucket.promptCachedTokens += *entry.PromptCachedTokens
+		counted.promptCachedTokens = *entry.PromptCachedTokens
 	}
+	return counted
 }
 
 const (
@@ -346,8 +355,8 @@ func QueryTokenUsage(ctx context.Context, database *sql.DB, window LogTopWindow,
            COALESCE(SUM(total_tokens), 0),
            COALESCE(SUM(prompt_tokens), 0),
            COALESCE(SUM(prompt_cached_tokens), 0),
-           COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL THEN 1 ELSE 0 END), 0),
-           COUNT(*)
+           COALESCE(SUM(CASE WHEN total_tokens IS NOT NULL AND retried = 0 THEN 1 ELSE 0 END), 0),
+           COALESCE(SUM(CASE WHEN retried = 0 THEN 1 ELSE 0 END), 0)
        FROM request_logs WHERE `)
 	args, err := appendLogTimePredicate(&query, nil, window, startAt, endAt)
 	if err != nil {

@@ -105,6 +105,10 @@ export interface RequestLog {
   duration_ms: number | null;
   first_token_ms: number | null;
   error: string | null;
+  /** 同一次下游请求的各行共用。代理之外写的行、旧行和导入的行是 null。 */
+  request_id: number | null;
+  /** 失败后被另一次尝试取代的行。它不算一个请求，请求的结果记在后面那行。 */
+  retried: boolean;
 }
 
 /** 在途请求。没有游标位置，所以只随最新一页和 SSE 快照来。 */

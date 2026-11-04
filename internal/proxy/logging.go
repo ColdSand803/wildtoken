@@ -75,6 +75,12 @@ type LogEntry struct {
 	FirstTokenMs              *int32
 	DurationMs                *int32
 	Error                     *string
+	// RequestID ties together the rows of one downstream request: its failed
+	// attempts and the row that records how it ended. 0 leaves it unset.
+	RequestID int64
+	// Retried marks a failed attempt that another attempt replaced. Request
+	// counts skip it; the channel it hit still counts it.
+	Retried bool
 	// The captured snapshots. One snapshot may fill several slots, and several
 	// entries: a retried request logs the same request on every attempt.
 	DownstreamRequest  *logbody.Snapshot
@@ -592,10 +598,10 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
          stream, status_code,
          prompt_tokens, completion_tokens, total_tokens,
          prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
-         duration_ms, first_token_ms, error, created_at)
+         duration_ms, first_token_ms, error, request_id, retried, created_at)
     VALUES (?, ?, (SELECT id FROM api_tokens WHERE id = ?), ?, ?, ?,
             (SELECT id FROM upstreams WHERE id = ?),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			entry.ClientIP,
 			clientType, entry.UpstreamID, entry.UpstreamName,
@@ -606,7 +612,7 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 			entry.PromptTokens, entry.CompletionTokens, entry.TotalTokens,
 			entry.PromptCachedTokens, entry.CacheCreationTokens,
 			entry.CompletionReasoningTokens, entry.DurationMs, entry.FirstTokenMs,
-			entry.Error, createdAt)
+			entry.Error, nullableID(entry.RequestID), entry.Retried, createdAt)
 		if err != nil {
 			return nil, apperr.Database(err)
 		}
@@ -618,7 +624,7 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 		if err := payloads.Store(ctx, logID, prepared[i], false); err != nil {
 			return nil, err
 		}
-		usage.Add(now, entry.StatusCode, entry.TotalTokens)
+		usage.Add(now, entry.StatusCode, entry.TotalTokens, entry.Retried)
 
 		// The quota counter advances with the log row, so a committed request is
 		// always accounted for exactly once. A request that carried no usage, or
@@ -643,6 +649,7 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 				TotalTokens:          int32PtrToInt64Ptr(entry.TotalTokens),
 				PromptTokens:         int32PtrToInt64Ptr(entry.PromptTokens),
 				PromptCachedTokens:   int32PtrToInt64Ptr(entry.PromptCachedTokens),
+				Retried:              entry.Retried,
 			},
 			event: LogStreamEvent{
 				Log: models.RequestLogOut{
@@ -673,6 +680,8 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 					DurationMs:                entry.DurationMs,
 					FirstTokenMs:              entry.FirstTokenMs,
 					Error:                     entry.Error,
+					RequestID:                 int64PtrOrNil(entry.RequestID),
+					Retried:                   entry.Retried,
 				},
 			},
 		})
@@ -687,6 +696,21 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 		return nil, apperr.Database(err)
 	}
 	return records, nil
+}
+
+// nullableID stores an unset id as NULL rather than 0.
+func nullableID(id int64) any {
+	if id == 0 {
+		return nil
+	}
+	return id
+}
+
+func int64PtrOrNil(id int64) *int64 {
+	if id == 0 {
+		return nil
+	}
+	return &id
 }
 
 func int32PtrToInt64Ptr(value *int32) *int64 {

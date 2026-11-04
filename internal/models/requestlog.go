@@ -39,11 +39,20 @@ type RequestLogOut struct {
 	DurationMs                *int32  `json:"duration_ms"`
 	FirstTokenMs              *int32  `json:"first_token_ms"`
 	Error                     *string `json:"error"`
+	// RequestID is shared by the rows of one downstream request; null outside
+	// the proxy path and on rows from before it existed.
+	RequestID *int64 `json:"request_id"`
+	// Retried marks a failed attempt that another attempt replaced: it is not
+	// how the request ended.
+	Retried bool `json:"retried"`
 }
 
 // RequestLogDetailOut flattens RequestLogOut and adds the captured payloads.
 type RequestLogDetailOut struct {
 	RequestLogOut
+	// Attempts are the rows of the same request, oldest first, this one among
+	// them; absent when the request took a single attempt.
+	Attempts           []RequestLogOut `json:"attempts,omitempty"`
 	DownstreamRequest  json.RawMessage `json:"downstream_request"`
 	UpstreamRequest    json.RawMessage `json:"upstream_request"`
 	UpstreamResponse   json.RawMessage `json:"upstream_response"`

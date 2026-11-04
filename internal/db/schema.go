@@ -149,10 +149,21 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// from before them. The name is a copy, so it outlives a rename.
 		{"upstream_key_id", "INTEGER NOT NULL DEFAULT 0"},
 		{"upstream_key_name", "TEXT NOT NULL DEFAULT ''"},
+		// A failed attempt is logged on its own row before the next one runs.
+		// request_id ties those rows to the one recording how the request
+		// ended; retried = 1 marks the attempts, which request counts skip.
+		// Older rows carry NULL and 0: each counts as a request, as before.
+		{"request_id", "INTEGER"},
+		{"retried", "INTEGER NOT NULL DEFAULT 0 CHECK (retried IN (0, 1))"},
 	} {
 		if err := ensureColumn(ctx, db, "request_logs", column.name, column.definition); err != nil {
 			return err
 		}
+	}
+	// The detail view lists a request's attempts; only proxied rows have an id.
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_request_logs_request_id
+        ON request_logs(request_id) WHERE request_id IS NOT NULL`); err != nil {
+		return err
 	}
 	if err := ensureUsageHourly(ctx, db); err != nil {
 		return err

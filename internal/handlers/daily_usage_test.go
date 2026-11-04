@@ -16,9 +16,9 @@ func TestDailyUsageCoversTheConsolesLast53Weeks(t *testing.T) {
 	ok, tokens := int32(200), int32(10)
 
 	tally := db.UsageTally{}
-	tally.Add(time.Now(), &ok, &tokens)
+	tally.Add(time.Now(), &ok, &tokens, false)
 	// A day past the calendar's first column.
-	tally.Add(time.Now().AddDate(0, 0, -dailyUsageDays-1), &ok, &tokens)
+	tally.Add(time.Now().AddDate(0, 0, -dailyUsageDays-1), &ok, &tokens, false)
 	if err := db.AddUsage(context.Background(), state.DB, tally); err != nil {
 		t.Fatalf("add usage: %v", err)
 	}

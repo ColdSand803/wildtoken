@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { UnauthorizedError, listLogs, listUpstreams } from "../api";
 import { LogDetailDialog } from "../components/LogDetailDialog";
+import { RetriedMark } from "../components/RetriedMark";
 import {
   exactTokens,
   firstTokenTone,
@@ -916,6 +917,7 @@ function LogRow({
       </td>
       <td data-col="status">
         <StatusBadge code={log.status_code} />
+        {log.retried ? <RetriedMark /> : null}
       </td>
       {/* 色调不能写死成 neutral——CSS 里 ok/warn/danger 各有规则，写死了这一列
           就永远是灰的，扫一眼看不出哪条慢。 */}

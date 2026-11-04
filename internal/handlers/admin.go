@@ -1094,6 +1094,24 @@ func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 	}
 }
 
+// AdminListLogAttempts lists the attempts of the request a log belongs to,
+// without their payloads, so the console can show the chain cheaply.
+func AdminListLogAttempts(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathID(r)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		attempts, err := db.LogAttempts(r.Context(), state.DB, id)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		apperr.WriteJSON(w, http.StatusOK, map[string]any{"items": attempts})
+	}
+}
+
 // AdminGetLogDetail returns one log with its captured payloads.
 func AdminGetLogDetail(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

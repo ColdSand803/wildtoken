@@ -1,7 +1,7 @@
 import { Component, useEffect, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
-import { UnauthorizedError, getLogSnapshot } from "../api";
+import { UnauthorizedError, getLogSnapshot, listLogAttempts } from "../api";
 import {
   normalizeSnapshotBody,
   parseConversationRequest,
@@ -297,6 +297,27 @@ export function LogDetailDialog({
   const snapshots = snapshotsFor(cache, logId);
   const ref = useDialog(open, onClose);
 
+  /* 同一请求的各次尝试。只有代理写的行带 request_id，其余的不用问。
+     结果按日志 id 存，换一条日志时不会先闪出上一条的列表。 */
+  const requestId = log?.request_id ?? null;
+  const [attempts, setAttempts] = useState<{ id: number; items: RequestLog[] } | null>(null);
+  useEffect(() => {
+    if (!open || logId === null || requestId === null) return;
+    let current = true;
+    listLogAttempts(logId)
+      .then((items) => {
+        if (current) setAttempts({ id: logId, items });
+      })
+      .catch(() => {
+        // 拉不到只是少一块链路，元信息照常显示。
+        if (current) setAttempts({ id: logId, items: [] });
+      });
+    return () => {
+      current = false;
+    };
+  }, [open, logId, requestId]);
+  const attemptList = attempts !== null && attempts.id === logId ? attempts.items : [];
+
   // 关窗回到元信息。重开同一条也从头看起，缓存留着，报文不用再拉。
   useEffect(() => {
     if (!open) setSelection({ id: null, tab: "meta" });
@@ -427,7 +448,7 @@ export function LogDetailDialog({
               id="log-detail-panel-meta"
               aria-labelledby="log-detail-tab-meta"
             >
-              {log ? <MetaPanel log={log} /> : null}
+              {log ? <MetaPanel log={log} attempts={attemptList} /> : null}
             </div>
           )}
         </div>
@@ -436,7 +457,7 @@ export function LogDetailDialog({
   );
 }
 
-function MetaPanel({ log }: { log: RequestLog }) {
+function MetaPanel({ log, attempts }: { log: RequestLog; attempts: RequestLog[] }) {
   return (
     <>
       <div className="log-detail-meta">
@@ -450,7 +471,42 @@ function MetaPanel({ log }: { log: RequestLog }) {
           {log.error}
         </p>
       ) : null}
+
+      {attempts.length > 1 ? <AttemptChain current={log.id} attempts={attempts} /> : null}
     </>
+  );
+}
+
+/**
+ * 同一请求的各次尝试，按先后排：前面的失败后换了渠道或 Key，最后一行是结果。
+ * 例：渠道 A 502 → 渠道 B 200。当前打开的那行加粗。
+ */
+function AttemptChain({ current, attempts }: { current: number; attempts: RequestLog[] }) {
+  return (
+    <section className="log-detail-attempts" aria-label="这个请求的各次尝试">
+      <h4>这个请求尝试了 {attempts.length} 次</h4>
+      <ol>
+        {attempts.map((attempt) => (
+          <li
+            key={attempt.id}
+            className="log-detail-attempt"
+            aria-current={attempt.id === current ? "true" : undefined}
+          >
+            <span>{formatTimestamp(attempt.created_at).slice(11)}</span>
+            <span>
+              {attempt.upstream_name ?? "-"}
+              {attempt.upstream_key_name ? ` · ${attempt.upstream_key_name}` : ""}
+            </span>
+            <span>{formatStatus(attempt.status_code)}</span>
+            <span>{formatDuration(attempt.duration_ms)}</span>
+            <span className="log-detail-attempt-note" title={attempt.error ?? undefined}>
+              {attempt.retried ? "已重试" : "结果"}
+              {attempt.error ? ` · ${attempt.error}` : ""}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 

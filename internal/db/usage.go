@@ -19,8 +19,13 @@ type usageHour struct {
 }
 
 // Add counts one log row written at createdAt. Failure is the overview's
-// test: no status, or one outside 2xx.
-func (t UsageTally) Add(createdAt time.Time, status, totalTokens *int32) {
+// test: no status, or one outside 2xx. A retried attempt adds its tokens but
+// not a request: the row that ends the request counts that.
+func (t UsageTally) Add(createdAt time.Time, status, totalTokens *int32, retried bool) {
+	if retried && (totalTokens == nil || *totalTokens == 0) {
+		return
+	}
+
 	hour := createdAt.Unix() / 3600 * 3600
 	sum := t[hour]
 	if sum == nil {
@@ -28,9 +33,11 @@ func (t UsageTally) Add(createdAt time.Time, status, totalTokens *int32) {
 		t[hour] = sum
 	}
 
-	sum.requests++
-	if status == nil || *status < 200 || *status >= 300 {
-		sum.errors++
+	if !retried {
+		sum.requests++
+		if status == nil || *status < 200 || *status >= 300 {
+			sum.errors++
+		}
 	}
 	if totalTokens != nil {
 		sum.tokens += int64(*totalTokens)

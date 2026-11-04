@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 
 import { UnauthorizedError, fetchDashboard } from "../api";
 import { UsageCalendar } from "../components/UsageCalendar";
+import { RetriedMark } from "../components/RetriedMark";
 import { compactCount, scaleDashboard } from "../dashboardScale";
 import { formatTimestamp } from "../logFormat";
 import type { LogOverview, RequestLog, TokenUsage, TopItem, TopStats } from "../types";
@@ -659,6 +660,7 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                           ) : (
                             <span className="badge danger">{log.status_code}</span>
                           )}
+                          {log.retried ? <RetriedMark /> : null}
                         </td>
                         <td>{log.duration_ms === null ? "-" : formatMs(log.duration_ms)}</td>
                       </tr>

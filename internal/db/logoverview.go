@@ -162,6 +162,7 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	if err != nil {
 		return out, err
 	}
+	predicate.WriteString(" AND " + countedRows)
 
 	// 错误口径与前端一致：无状态码，或非 2xx。
 	aggregateQuery := `
@@ -394,7 +395,7 @@ func previousWindowCounts(ctx context.Context, database *sql.DB,
 			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 THEN 1 ELSE 0 END), 0),
 			COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0)
-		FROM request_logs WHERE `+predicate, args...)
+		FROM request_logs WHERE `+predicate+" AND "+countedRows, args...)
 	if err := row.Scan(&counts.Total, &counts.Status2xx, &counts.Status4xx, &counts.Status5xx); err != nil {
 		return counts, false, err
 	}

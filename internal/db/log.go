@@ -36,6 +36,11 @@ const (
 	actualModelExpression = "COALESCE(NULLIF(TRIM(upstream_model), ''), NULLIF(TRIM(model), ''))"
 )
 
+// countedRows keeps the rows that are requests. A retried row is a failed
+// attempt of a request whose outcome another row records: counted, it made one
+// request with a retry look like two, one of them failed.
+const countedRows = "retried = 0"
+
 // logListColumns is the projection backing RequestLogOut.
 const logListColumns = `id, created_at, method, path,
                 downstream_token_id, downstream_token_name,
@@ -47,7 +52,7 @@ const logListColumns = `id, created_at, method, path,
                 prompt_tokens, completion_tokens, total_tokens,
                 prompt_cached_tokens, cache_creation_tokens, completion_reasoning_tokens,
                 duration_ms, first_token_ms,
-                error`
+                error, request_id, retried`
 
 // LogTopWindow is a ranking window accepted by the top-stats endpoint.
 type LogTopWindow int
@@ -248,7 +253,7 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	var reasoningEffort, upstreamReasoningEffort, responseReasoningEffort, logError sql.NullString
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
-	var durationMs, firstTokenMs sql.NullInt64
+	var durationMs, firstTokenMs, requestID sql.NullInt64
 	var clientIP sql.NullString
 
 	err := row.Scan(&entry.ID, &entry.CreatedAt, &entry.Method, &entry.Path,
@@ -259,11 +264,12 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 		&entry.Stream, &statusCode,
 		&promptTokens, &completionTokens, &totalTokens,
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
-		&durationMs, &firstTokenMs, &logError)
+		&durationMs, &firstTokenMs, &logError, &requestID, &entry.Retried)
 	if err != nil {
 		return entry, err
 	}
 
+	entry.RequestID = nullInt64Ptr(requestID)
 	entry.DownstreamTokenID = nullInt64Ptr(downstreamTokenID)
 	entry.UpstreamID = nullInt64Ptr(upstreamID)
 	entry.DownstreamTokenName = nullStringPtr(downstreamTokenName)
@@ -340,69 +346,31 @@ func ListLogs(ctx context.Context, database *sql.DB, limit, offset int32,
 	return entries, nil
 }
 
-// GetLogDetail returns one log with its captured payloads, or ok=false.
+// GetLogDetail returns one log with its captured payloads, or ok=false. A row
+// that belongs to a request with several attempts lists them all.
 func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.RequestLogDetailOut, bool, error) {
-	row := database.QueryRowContext(ctx, `SELECT l.id, l.created_at, l.method, l.path,
-              l.downstream_token_id, l.downstream_token_name,
-              l.client_ip, l.client_type,
-              l.upstream_id, l.upstream_name, l.upstream_key_id, l.upstream_key_name,
-              l.model, l.request_model, l.upstream_model,
-              l.reasoning_effort, l.upstream_reasoning_effort,
-              l.response_reasoning_effort,
-              l.stream, l.status_code,
-              l.prompt_tokens, l.completion_tokens, l.total_tokens,
-              l.prompt_cached_tokens, l.cache_creation_tokens, l.completion_reasoning_tokens,
-              l.duration_ms, l.first_token_ms,
-              l.error
-       FROM request_logs AS l
-       WHERE l.id = ?`, logID)
-
 	var detail models.RequestLogDetailOut
-	var downstreamTokenID, upstreamID sql.NullInt64
-	var downstreamTokenName, upstreamName, model, requestModel, upstreamModel sql.NullString
-	var reasoningEffort, upstreamReasoningEffort, responseReasoningEffort, logError sql.NullString
-	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
-	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
-	var durationMs, firstTokenMs sql.NullInt64
-	var clientIP sql.NullString
-
-	err := row.Scan(&detail.ID, &detail.CreatedAt, &detail.Method, &detail.Path,
-		&downstreamTokenID, &downstreamTokenName, &clientIP, &detail.ClientType,
-		&upstreamID, &upstreamName, &detail.UpstreamKeyID, &detail.UpstreamKeyName,
-		&model, &requestModel, &upstreamModel,
-		&reasoningEffort, &upstreamReasoningEffort, &responseReasoningEffort,
-		&detail.Stream, &statusCode,
-		&promptTokens, &completionTokens, &totalTokens,
-		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
-		&durationMs, &firstTokenMs, &logError)
+	row := database.QueryRowContext(ctx,
+		"SELECT "+logListColumns+" FROM request_logs WHERE id = ?", logID)
+	entry, err := scanLogListRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return detail, false, nil
 	}
 	if err != nil {
 		return detail, false, apperr.Database(err)
 	}
+	detail.RequestLogOut = entry
 
-	detail.DownstreamTokenID = nullInt64Ptr(downstreamTokenID)
-	detail.UpstreamID = nullInt64Ptr(upstreamID)
-	detail.DownstreamTokenName = nullStringPtr(downstreamTokenName)
-	detail.ClientIP = nullStringPtr(clientIP)
-	detail.UpstreamName = nullStringPtr(upstreamName)
-	detail.Model = nullStringPtr(model)
-	detail.RequestModel = nullStringPtr(requestModel)
-	detail.UpstreamModel = nullStringPtr(upstreamModel)
-	detail.ReasoningEffort = nullStringPtr(reasoningEffort)
-	detail.UpstreamReasoningEffort = nullStringPtr(upstreamReasoningEffort)
-	detail.ResponseReasoningEffort = nullStringPtr(responseReasoningEffort)
-	detail.Error = nullStringPtr(logError)
-	detail.StatusCode = nullInt32Ptr(statusCode)
-	detail.PromptTokens = nullInt32Ptr(promptTokens)
-	detail.CompletionTokens = nullInt32Ptr(completionTokens)
-	detail.TotalTokens = nullInt32Ptr(totalTokens)
-	detail.PromptCachedTokens = nullInt32Ptr(promptCachedTokens)
-	detail.CacheCreationTokens = nullInt32Ptr(cacheCreationTokens)
-	detail.CompletionReasoningTokens = nullInt32Ptr(completionReasoningTokens)
-	detail.DurationMs = nullInt32Ptr(durationMs)
-	detail.FirstTokenMs = nullInt32Ptr(firstTokenMs)
+	if entry.RequestID != nil {
+		attempts, err := requestAttempts(ctx, database, *entry.RequestID)
+		if err != nil {
+			return detail, false, err
+		}
+		// One row is the whole request; there is no chain to show.
+		if len(attempts) > 1 {
+			detail.Attempts = attempts
+		}
+	}
 
 	snapshots, found, err := loadLogSnapshots(ctx, database, logID,
 		logbody.SlotDownstreamRequest, logbody.SlotUpstreamRequest,
@@ -518,6 +486,7 @@ func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 			groupExpression:  actualModelExpression,
 			sourceFilter:     modelSourceFilter,
 			metricExpression: "1",
+			metricFilter:     countedRows,
 			withLatency:      true,
 		},
 		{
@@ -827,6 +796,51 @@ func deleteOldLogsBatch(ctx context.Context, database *sql.DB,
 		return 0, apperr.Database(err)
 	}
 	return affected, nil
+}
+
+// LogAttempts lists the rows of the request logID belongs to, oldest first,
+// itself included. A request that took one attempt, and a row from outside the
+// proxy path, have nothing to list.
+func LogAttempts(ctx context.Context, database *sql.DB, logID int64) ([]models.RequestLogOut, error) {
+	var requestID sql.NullInt64
+	err := database.QueryRowContext(ctx,
+		"SELECT request_id FROM request_logs WHERE id = ?", logID).Scan(&requestID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !requestID.Valid) {
+		return []models.RequestLogOut{}, nil
+	}
+	if err != nil {
+		return nil, apperr.Database(err)
+	}
+
+	attempts, err := requestAttempts(ctx, database, requestID.Int64)
+	if err != nil || len(attempts) > 1 {
+		return attempts, err
+	}
+	return []models.RequestLogOut{}, nil
+}
+
+// requestAttempts lists the rows of one request in the order they were written:
+// its failed attempts, then the row that records how it ended.
+func requestAttempts(ctx context.Context, database *sql.DB, requestID int64) ([]models.RequestLogOut, error) {
+	rows, err := database.QueryContext(ctx, "SELECT "+logListColumns+
+		" FROM request_logs WHERE request_id = ? ORDER BY id LIMIT 50", requestID)
+	if err != nil {
+		return nil, apperr.Database(err)
+	}
+	defer rows.Close()
+
+	attempts := []models.RequestLogOut{}
+	for rows.Next() {
+		attempt, err := scanLogListRow(rows)
+		if err != nil {
+			return nil, apperr.Database(err)
+		}
+		attempts = append(attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Database(err)
+	}
+	return attempts, nil
 }
 
 func nullStringPtr(value sql.NullString) *string {

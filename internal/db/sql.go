@@ -176,12 +176,13 @@ CREATE TABLE usage_hourly (
 );`
 
 // Fills a new usage_hourly from the logs still on disk. Failure is the test
-// the overview applies: no status, or one outside 2xx.
+// the overview applies: no status, or one outside 2xx. Retried attempts add
+// tokens, not requests.
 const backfillUsageHourly = `
 INSERT INTO usage_hourly (hour_start, requests, errors, total_tokens)
 SELECT CAST(strftime('%s', created_at) AS INTEGER) / 3600 * 3600 AS hour,
-       COUNT(*),
-       SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300
+       SUM(CASE WHEN retried = 0 THEN 1 ELSE 0 END),
+       SUM(CASE WHEN retried = 0 AND (status_code IS NULL OR status_code < 200 OR status_code >= 300)
                 THEN 1 ELSE 0 END),
        COALESCE(SUM(total_tokens), 0)
 FROM request_logs
