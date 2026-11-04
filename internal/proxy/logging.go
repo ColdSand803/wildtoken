@@ -165,7 +165,6 @@ type LogMetricsRecorder interface {
 }
 
 type persistedLogRecord struct {
-	stats db.PersistedLogStats
 	event LogStreamEvent
 }
 
@@ -201,7 +200,7 @@ type LogWriter struct {
 // which is also what drains the queue: ctx bounds each write rather than
 // abandoning the rows still waiting to be made.
 func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecorder,
-	logStats *db.LogStatsCache, queueCapacity int, quotas *quota.Tracker) *LogWriter {
+	queueCapacity int, quotas *quota.Tracker) *LogWriter {
 	writer := &LogWriter{
 		entries: make(chan LogEntry, max(queueCapacity, 1)),
 		metrics: metrics,
@@ -209,7 +208,7 @@ func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecor
 		quotas:  quotas,
 		done:    make(chan struct{}),
 	}
-	go writer.run(ctx, database, logStats)
+	go writer.run(ctx, database)
 	return writer
 }
 
@@ -348,7 +347,7 @@ func (w *LogWriter) CloseWithin(limit time.Duration) bool {
 	}
 }
 
-func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogStatsCache) {
+func (w *LogWriter) run(ctx context.Context, database *sql.DB) {
 	defer close(w.done)
 
 	// Carried usage normally rides with the next batch; the tick applies it
@@ -363,11 +362,11 @@ func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogS
 		select {
 		case entry, ok = <-w.entries:
 		case <-carriedRetry.C:
-			w.flush(ctx, database, logStats, nil)
+			w.flush(ctx, database, nil)
 			continue
 		}
 		if !ok {
-			w.flush(ctx, database, logStats, nil)
+			w.flush(ctx, database, nil)
 			return
 		}
 		batch = append(batch, entry)
@@ -395,7 +394,7 @@ func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogS
 
 		entries := batch
 		batch = make([]LogEntry, 0, logWriteBatchSize)
-		w.flush(ctx, database, logStats, entries)
+		w.flush(ctx, database, entries)
 
 		if channelClosed {
 			return
@@ -403,8 +402,7 @@ func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogS
 	}
 }
 
-func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.LogStatsCache,
-	entries []LogEntry) {
+func (w *LogWriter) flush(ctx context.Context, database *sql.DB, entries []LogEntry) {
 	entryCount := uint64(len(entries))
 	w.metrics.RecordLogDequeue(entryCount)
 	// Out of the queue, these bodies no longer count against its budget.
@@ -452,29 +450,22 @@ func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.Lo
 			w.quotas.Settle(tokenID, used)
 		}
 		w.metrics.RecordLogWritten(entryCount)
-		w.publish(writeCtx, database, logStats, records)
+		w.publish(writeCtx, database, records)
 	}
 	if time.Since(startedAt) >= slowDBOperationThreshold {
 		w.metrics.RecordSlowDBOperation()
 	}
 }
 
-// publish folds committed rows into the stats cache and notifies subscribers.
+// publish notifies subscribers of committed rows.
 //
 // insertLogBatchWithRetry only returns after its SQLite transaction commits.
 // Never publish from Schedule, or a dropped or rolled-back row could appear in
 // the live console.
-func (w *LogWriter) publish(ctx context.Context, database *sql.DB, logStats *db.LogStatsCache,
-	records []persistedLogRecord) {
+func (w *LogWriter) publish(ctx context.Context, database *sql.DB, records []persistedLogRecord) {
 	if len(records) == 0 {
 		return
 	}
-
-	stats := make([]db.PersistedLogStats, 0, len(records))
-	for _, record := range records {
-		stats = append(stats, record.stats)
-	}
-	logStats.RecordPersistedEntries(stats)
 
 	var recentRate *db.RecentLogRate
 	if rate, err := db.RecentOneMinuteLogRate(ctx, database); err == nil {
@@ -572,6 +563,8 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 
 	records := make([]persistedLogRecord, 0, len(entries))
 	usage := db.UsageTally{}
+	// The batch's ids, consecutive inside this transaction, for stats_hourly.
+	var firstID, lastID int64
 	for i, entry := range entries {
 		now := time.Now().UTC()
 		createdAt := now.Format(models.TimestampFormat)
@@ -620,6 +613,10 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 		if err != nil {
 			return nil, apperr.Database(err)
 		}
+		if firstID == 0 {
+			firstID = logID
+		}
+		lastID = logID
 
 		if err := payloads.Store(ctx, logID, prepared[i], false); err != nil {
 			return nil, err
@@ -643,14 +640,6 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 		}
 
 		records = append(records, persistedLogRecord{
-			stats: db.PersistedLogStats{
-				ID:                   logID,
-				CreatedAtUnixSeconds: now.Unix(),
-				TotalTokens:          int32PtrToInt64Ptr(entry.TotalTokens),
-				PromptTokens:         int32PtrToInt64Ptr(entry.PromptTokens),
-				PromptCachedTokens:   int32PtrToInt64Ptr(entry.PromptCachedTokens),
-				Retried:              entry.Retried,
-			},
 			event: LogStreamEvent{
 				Log: models.RequestLogOut{
 					ID:                        logID,
@@ -687,9 +676,15 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 		})
 	}
 
-	// The calendar's hourly totals commit with the rows they count.
+	// The calendar's and the dashboard's hourly totals commit with the rows
+	// they count.
 	if err := db.AddUsage(ctx, tx, usage); err != nil {
 		return nil, err
+	}
+	if firstID != 0 {
+		if err := db.AddStats(ctx, tx, firstID, lastID); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -711,14 +706,6 @@ func int64PtrOrNil(id int64) *int64 {
 		return nil
 	}
 	return &id
-}
-
-func int32PtrToInt64Ptr(value *int32) *int64 {
-	if value == nil {
-		return nil
-	}
-	converted := int64(*value)
-	return &converted
 }
 
 // eventBroker fans committed log rows out to the console's SSE subscribers.
@@ -864,12 +851,12 @@ func redactHeaders(headers map[string]string) map[string]string {
 
 // RunCleanupLoop keeps full bodies near the configured row limit, collects the
 // chunks dropped bodies leave behind every ten minutes, and performs the
-// heavier retention and statistics work hourly.
+// heavier retention work hourly.
 //
 // The runtime policy is read through a getter rather than a shared lock, so the
 // loop always sees the latest console edit without owning the settings.
 func RunCleanupLoop(ctx context.Context, database *sql.DB, settings func() models.RuntimeSettings,
-	metrics LogMetricsRecorder, logStats *db.LogStatsCache) {
+	metrics LogMetricsRecorder) {
 	select {
 	case <-ctx.Done():
 		return
@@ -900,7 +887,7 @@ func RunCleanupLoop(ctx context.Context, database *sql.DB, settings func() model
 		}
 
 		current := settings()
-		RunCleanupPass(ctx, database, &current, metrics, logStats, steps)
+		RunCleanupPass(ctx, database, &current, metrics, steps)
 	}
 }
 
@@ -916,7 +903,7 @@ type CleanupSteps struct {
 
 // RunCleanupPass performs one cleanup cycle.
 func RunCleanupPass(ctx context.Context, database *sql.DB, settings *models.RuntimeSettings,
-	metrics LogMetricsRecorder, logStats *db.LogStatsCache, steps CleanupSteps) {
+	metrics LogMetricsRecorder, steps CleanupSteps) {
 	cleanupStartedAt := time.Now()
 	cleanupSucceeded := true
 	metrics.BeginCleanup()
@@ -955,15 +942,6 @@ func RunCleanupPass(ctx context.Context, database *sql.DB, settings *models.Runt
 			slog.Error("collecting log metadata failed", "error", err)
 		}
 		if time.Since(deleteStartedAt) >= slowDBOperationThreshold {
-			metrics.RecordSlowDBOperation()
-		}
-
-		statsRefreshStartedAt := time.Now()
-		if err := logStats.RefreshFromDB(ctx, database); err != nil {
-			cleanupSucceeded = false
-			slog.Warn("request log statistics refresh after cleanup failed", "error", err)
-		}
-		if time.Since(statsRefreshStartedAt) >= slowDBOperationThreshold {
 			metrics.RecordSlowDBOperation()
 		}
 	}

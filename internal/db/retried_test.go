@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"testing"
-	"time"
 )
 
 // One request that failed over: its retried attempt, then the row that ended
@@ -32,6 +31,7 @@ func TestRetriedAttemptsAreNotRequests(t *testing.T) {
 	database := seedRetriedRequest(t)
 	ctx := context.Background()
 
+	rebuildStats(t, database)
 	overview, err := LogOverview(ctx, database, LogTopWindowOneDay, "", "", 0)
 	if err != nil {
 		t.Fatalf("overview: %v", err)
@@ -70,28 +70,23 @@ func TestRetriedAttemptsAreNotRequests(t *testing.T) {
 	}
 }
 
-func TestTheStatsCacheCountsRequestsAndEveryRow(t *testing.T) {
+func TestRowCountsKeepRetriedAttemptsAndRequestCountsDoNot(t *testing.T) {
 	database := seedRetriedRequest(t)
+	ctx := context.Background()
+	rebuildStats(t, database)
 
-	cache, err := LoadLogStatsCache(context.Background(), database)
+	total, _, err := LogCounts(ctx, database)
 	if err != nil {
-		t.Fatalf("load: %v", err)
+		t.Fatalf("counts: %v", err)
 	}
-	snapshot := cache.Snapshot()
-	if snapshot.TotalLogCount != 3 || snapshot.TokenUsage.AllTime.AllRequestCount != 2 {
-		t.Errorf("refreshed: %d rows, %d requests; want 3 and 2",
-			snapshot.TotalLogCount, snapshot.TokenUsage.AllTime.AllRequestCount)
+	usage, err := TokenUsageWindows(ctx, database, "")
+	if err != nil {
+		t.Fatalf("windows: %v", err)
 	}
-
-	tokens := int64(9)
-	cache.RecordPersistedEntries([]PersistedLogStats{
-		{ID: 10, CreatedAtUnixSeconds: time.Now().Unix(), TotalTokens: &tokens, Retried: true},
-	})
-	snapshot = cache.Snapshot()
-	allTime := snapshot.TokenUsage.AllTime
-	if snapshot.TotalLogCount != 4 || allTime.AllRequestCount != 2 || allTime.TotalTokens != 44 {
-		t.Errorf("after a retried row: %d rows, %d requests, %d tokens; want 4, 2, 44",
-			snapshot.TotalLogCount, allTime.AllRequestCount, allTime.TotalTokens)
+	allTime := usage.AllTime
+	if total != 3 || allTime.AllRequestCount != 2 || allTime.TotalTokens != 35 {
+		t.Errorf("%d rows, %d requests, %d tokens; want 3, 2, 35",
+			total, allTime.AllRequestCount, allTime.TotalTokens)
 	}
 }
 

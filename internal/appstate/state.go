@@ -110,7 +110,6 @@ type State struct {
 	Throttle    *authstate.Throttle
 	Metrics     *metrics.Runtime
 	LogWriter   *proxy.LogWriter
-	LogStats    *db.LogStatsCache
 	ModelsCache *ModelsListCache
 	Routing     *proxy.RoutingCache
 	// ActiveRequests holds what is being proxied right now, which no log row

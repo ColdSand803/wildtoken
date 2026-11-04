@@ -126,8 +126,9 @@ func overviewSpanSeconds(ctx context.Context, database *sql.DB,
 			return 0, err
 		}
 	case LogTopWindowAll:
+		// stats_hourly outlives the logs, so it is where "all" starts.
 		row := database.QueryRowContext(ctx,
-			"SELECT CAST(strftime('%s', MIN(created_at)) AS INTEGER), CAST(strftime('%s', 'now') AS INTEGER) FROM request_logs")
+			"SELECT MIN(hour_start), CAST(strftime('%s', 'now') AS INTEGER) FROM stats_hourly")
 		if err := row.Scan(&start, &end); err != nil {
 			return 0, err
 		}
@@ -161,6 +162,10 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	window LogTopWindow, startAt, endAt string, offsetSeconds int64) (LogOverviewOut, error) {
 	var out LogOverviewOut
 
+	statsWindow, err := resolveStatsSpan(window, startAt, endAt, time.Now())
+	if err != nil {
+		return out, err
+	}
 	var predicate strings.Builder
 	predicateArgs, err := appendLogTimePredicate(&predicate, nil, window, startAt, endAt)
 	if err != nil {
@@ -168,33 +173,23 @@ func LogOverview(ctx context.Context, database *sql.DB,
 	}
 	predicate.WriteString(" AND " + countedRows)
 
-	// 错误口径与前端一致：无状态码，或非 2xx。
-	aggregateQuery := `
-		SELECT
-			COUNT(*),
-			COALESCE(SUM(CASE WHEN ` + failedRows + ` THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 AND status_code <> 499 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN ` + cancelledRows + ` THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms ELSE 0 END), 0),
-			COALESCE(MIN(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END), 0),
-			COALESCE(MAX(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END), 0)
-		FROM request_logs
-		WHERE ` + predicate.String()
-	var durationSum int64
-	row := database.QueryRowContext(ctx, aggregateQuery, predicateArgs...)
-	if err := row.Scan(&out.TotalRequests, &out.ErrorRequests,
-		&out.Status2xx, &out.Status4xx, &out.Status5xx, &out.StatusCancelled,
-		&out.DurationCount, &durationSum,
-		&out.MinDurationMs, &out.MaxDurationMs); err != nil {
+	// The totals read stats_hourly for the window's whole hours and the logs
+	// for the part hours at its edges. 错误口径与前端一致（failedRows）。
+	totals, err := queryStatsTotals(ctx, database, statsWindow)
+	if err != nil {
 		return out, err
 	}
+	out.TotalRequests = totals.requests
+	out.ErrorRequests = totals.errors
+	out.Status2xx, out.Status4xx, out.Status5xx = totals.status2xx, totals.status4xx, totals.status5xx
+	out.StatusCancelled = totals.cancelled
 	out.StatusOther = out.TotalRequests - out.Status2xx - out.Status4xx - out.Status5xx -
 		out.StatusCancelled
+	out.DurationCount = totals.durationCount
 	if out.DurationCount > 0 {
-		out.AvgDurationMs = float64(durationSum) / float64(out.DurationCount)
+		out.AvgDurationMs = float64(totals.durationSum) / float64(out.DurationCount)
+		out.MinDurationMs = totals.durationMin.Int64
+		out.MaxDurationMs = totals.durationMax.Int64
 	}
 
 	span, err := overviewSpanSeconds(ctx, database, window, startAt, endAt)
@@ -222,6 +217,19 @@ func LogOverview(ctx context.Context, database *sql.DB,
 		ORDER BY bucket_epoch ASC`
 	seriesArgs := append([]any{offsetSeconds, out.BucketSeconds, out.BucketSeconds, offsetSeconds},
 		predicateArgs...)
+	// Whole-hour buckets in a whole-hour zone line up with stats_hourly's
+	// hours, so they read it; a 30-minute bucket, or a +05:30 zone, reads the
+	// logs. A bucket of only retried attempts has no request, so none is shown.
+	if offsetSeconds%3600 == 0 && out.BucketSeconds%3600 == 0 {
+		source, sourceArgs := statsFacts(statsWindow)
+		seriesQuery = `SELECT ((at + ?) / ?) * ? - ? AS bucket_epoch,
+                SUM(requests), SUM(errors),
+                SUM(duration_sum) * 1.0 / NULLIF(SUM(duration_count), 0), SUM(duration_count)
+            FROM ` + source + `
+            GROUP BY bucket_epoch HAVING SUM(requests) > 0 ORDER BY bucket_epoch`
+		seriesArgs = append([]any{offsetSeconds, out.BucketSeconds, out.BucketSeconds, offsetSeconds},
+			sourceArgs...)
+	}
 	rows, err := database.QueryContext(ctx, seriesQuery, seriesArgs...)
 	if err != nil {
 		return out, err
@@ -353,59 +361,48 @@ previousWindowCounts 统计"上一个同长周期"的请求总数与分类计数
 func previousWindowCounts(ctx context.Context, database *sql.DB,
 	window LogTopWindow, startAt, endAt string) (StatusCounts, bool, error) {
 	var counts StatusCounts
-	var predicate string
-	var args []any
+	now := time.Now().Unix()
+	day := int64(24 * 3600)
+
+	var previous statsSpan
 	switch window {
-	case LogTopWindowAll:
-		return counts, false, nil
 	case LogTopWindowCustom:
-		start, err := time.Parse("2006-01-02 15:04:05", startAt)
+		current, err := resolveStatsSpan(window, startAt, endAt, time.Now())
 		if err != nil {
 			return counts, false, err
 		}
-		end, err := time.Parse("2006-01-02 15:04:05", endAt)
-		if err != nil {
-			return counts, false, err
-		}
-		span := end.Sub(start)
-		predicate = "created_at >= ? AND created_at < ?"
-		args = append(args, start.Add(-span).Format("2006-01-02 15:04:05"), startAt)
+		previous = statsSpan{start: 2*current.start - current.end, end: current.start}
 	case LogTopWindowToday:
-		predicate = "created_at >= datetime('now', 'localtime', 'start of day', 'utc', '-1 day')" +
-			" AND created_at < datetime('now', '-1 day')"
 		// Yesterday up to this time of day, from the operator's midnight when
 		// the caller resolved one.
-		if startAt != "" {
-			start, err := time.Parse("2006-01-02 15:04:05", startAt)
-			if err != nil {
-				return counts, false, err
-			}
-			predicate = "created_at >= ? AND created_at < datetime('now', '-1 day')"
-			args = append(args, start.Add(-24*time.Hour).Format("2006-01-02 15:04:05"))
+		current, err := resolveStatsSpan(window, startAt, endAt, time.Now())
+		if err != nil {
+			return counts, false, err
 		}
+		previous = statsSpan{start: current.start - day, end: now - day}
 	case LogTopWindowOneDay:
-		predicate = "created_at >= datetime('now', '-2 days') AND created_at < datetime('now', '-1 day')"
+		previous = statsSpan{start: now - 2*day, end: now - day}
 	case LogTopWindowThreeDays:
-		predicate = "created_at >= datetime('now', '-6 days') AND created_at < datetime('now', '-3 days')"
+		previous = statsSpan{start: now - 6*day, end: now - 3*day}
 	case LogTopWindowSevenDays:
-		predicate = "created_at >= datetime('now', '-14 days') AND created_at < datetime('now', '-7 days')"
+		previous = statsSpan{start: now - 14*day, end: now - 7*day}
 	case LogTopWindowThirtyDays:
-		predicate = "created_at >= datetime('now', '-60 days') AND created_at < datetime('now', '-30 days')"
+		previous = statsSpan{start: now - 60*day, end: now - 30*day}
 	default:
+		// "All" has nothing before it.
 		return counts, false, nil
 	}
 
-	row := database.QueryRowContext(ctx, `
-		SELECT
-			COUNT(*),
-			COALESCE(SUM(CASE WHEN status_code >= 200 AND status_code < 300 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 400 AND status_code < 500 AND status_code <> 499 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN status_code >= 500 THEN 1 ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN `+cancelledRows+` THEN 1 ELSE 0 END), 0)
-		FROM request_logs WHERE `+predicate+" AND "+countedRows, args...)
-	if err := row.Scan(&counts.Total, &counts.Status2xx, &counts.Status4xx, &counts.Status5xx,
-		&counts.StatusCancelled); err != nil {
+	totals, err := queryStatsTotals(ctx, database, previous)
+	if err != nil {
 		return counts, false, err
+	}
+	counts = StatusCounts{
+		Total:           totals.requests,
+		Status2xx:       totals.status2xx,
+		Status4xx:       totals.status4xx,
+		Status5xx:       totals.status5xx,
+		StatusCancelled: totals.cancelled,
 	}
 	counts.StatusOther = counts.Total - counts.Status2xx - counts.Status4xx - counts.Status5xx -
 		counts.StatusCancelled

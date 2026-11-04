@@ -30,7 +30,7 @@ func proxyRateLimitState(t *testing.T) *appstate.State {
 	state.UpstreamRateLimiter = ratelimit.NewLimiter()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 64, state.Quotas)
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, 64, state.Quotas)
 	t.Cleanup(func() {
 		state.LogWriter.Close()
 		state.TokenRateLimiter.Close()

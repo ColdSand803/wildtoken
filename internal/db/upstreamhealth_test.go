@@ -20,6 +20,7 @@ func TestHealthHoursFollowTheOperatorsOffset(t *testing.T) {
 	}
 
 	const offset = 5*3600 + 1800
+	rebuildStats(t, database)
 	health, err := UpstreamHealthHistory(context.Background(), database, 24, offset)
 	if err != nil {
 		t.Fatal(err)

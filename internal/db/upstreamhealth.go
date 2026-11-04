@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/apperr"
 )
@@ -44,16 +45,33 @@ func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours,
 	hours = min(max(hours, 1), 24*7)
 	cutoff := fmt.Sprintf("-%d hours", hours)
 
-	rows, err := database.QueryContext(ctx, `
+	// In a whole-hour zone the buckets are stats_hourly's own hours, so it
+	// answers them, the logs only the part hour at the start. A +05:30 zone's
+	// hours straddle two of them and are counted from the logs.
+	query := `
 		SELECT upstream_id,
 			((CAST(strftime('%s', created_at) AS INTEGER) + ?) / 3600) * 3600 - ? AS bucket_epoch,
 			COUNT(*),
-			COALESCE(SUM(CASE WHEN `+failedRows+` THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ` + failedRows + ` THEN 1 ELSE 0 END), 0),
 			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END)
 		FROM request_logs
 		WHERE upstream_id IS NOT NULL AND created_at >= datetime('now', ?)
 		GROUP BY upstream_id, bucket_epoch
-		ORDER BY bucket_epoch ASC`, offsetSeconds, offsetSeconds, cutoff)
+		ORDER BY bucket_epoch ASC`
+	args := []any{offsetSeconds, offsetSeconds, cutoff}
+	if offsetSeconds%3600 == 0 {
+		source, sourceArgs := statsFacts(statsSpan{start: time.Now().Unix() - hours*3600})
+		query = `SELECT upstream_id, ((at + ?) / 3600) * 3600 - ? AS bucket_epoch,
+                SUM(attempts), SUM(attempt_errors),
+                SUM(attempt_duration_sum) * 1.0 / NULLIF(SUM(attempt_duration_count), 0)
+            FROM ` + source + `
+            WHERE upstream_id <> 0
+            GROUP BY upstream_id, bucket_epoch HAVING SUM(attempts) > 0
+            ORDER BY bucket_epoch ASC`
+		args = append([]any{offsetSeconds, offsetSeconds}, sourceArgs...)
+	}
+
+	rows, err := database.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, apperr.Database(err)
 	}

@@ -103,15 +103,10 @@ func New(ctx context.Context) (*Server, error) {
 	}
 
 	runtimeMetrics := metrics.New()
-	logStats, err := db.LoadLogStatsCache(ctx, database)
-	if err != nil {
-		database.Close()
-		return nil, fmt.Errorf("load log statistics: %w", err)
-	}
 
 	jobsCtx, cancelJobs := context.WithCancel(context.Background())
 	quotas := quota.NewTracker()
-	logWriter := proxy.NewLogWriter(jobsCtx, database, runtimeMetrics, logStats,
+	logWriter := proxy.NewLogWriter(jobsCtx, database, runtimeMetrics,
 		settings.Logging.LogQueueCapacity, quotas)
 
 	stopping := make(chan struct{})
@@ -124,7 +119,6 @@ func New(ctx context.Context) (*Server, error) {
 		Throttle:            throttle,
 		Metrics:             runtimeMetrics,
 		LogWriter:           logWriter,
-		LogStats:            logStats,
 		ModelsCache:         appstate.NewModelsListCache(),
 		Routing:             proxy.NewRoutingCache(),
 		ActiveRequests:      proxy.NewActiveRegistry(),
@@ -142,8 +136,7 @@ func New(ctx context.Context) (*Server, error) {
 		return state.Runtime.Get().ImageStorageMaxMB > 0
 	})
 
-	go db.RunLogStatsRefreshLoop(jobsCtx, database, logStats, runtimeMetrics)
-	go proxy.RunCleanupLoop(jobsCtx, database, state.Runtime.Get, runtimeMetrics, logStats)
+	go proxy.RunCleanupLoop(jobsCtx, database, state.Runtime.Get, runtimeMetrics)
 	go imagestore.RunCleanupLoop(jobsCtx, state.Images, func() int64 {
 		return state.Runtime.Get().ImageStorageMaxMB << 20
 	})

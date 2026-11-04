@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/liguangsheng/wildtoken/internal/db"
 )
 
 // bulkStatsResponse mirrors the wire shape the card view consumes.
@@ -53,6 +56,10 @@ func TestBulkChannelStatsGroupsPerChannel(t *testing.T) {
 	`)
 	if err != nil {
 		t.Fatalf("seed logs: %v", err)
+	}
+	// Inserted by hand, so filed into stats_hourly as the log writer would.
+	if err := db.AddStats(context.Background(), state.DB, 1, 4); err != nil {
+		t.Fatalf("add stats: %v", err)
 	}
 
 	// Mount the routes the way the real router does, so the static /stats

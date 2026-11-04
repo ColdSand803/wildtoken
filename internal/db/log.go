@@ -444,29 +444,30 @@ func GetLogSnapshot(ctx context.Context, database *sql.DB, logID int64, field Lo
 	return snapshots[slot], true, nil
 }
 
-// topLogCountSpec describes one ranking query.
-type topLogCountSpec struct {
-	nameExpression   string
-	groupExpression  string
-	sourceFilter     string
-	metricExpression string
-	metricFilter     string
-	// exposeGroupID surfaces the numeric group key as `id` (channel rankings).
-	exposeGroupID bool
-	// withLatency attaches per-group average duration and error rate to the
-	// ranking rows (request-count rankings of models/channels).
-	withLatency bool
+// topRanking is one ranking of a window's facts: grouped by key, ordered by
+// metric. Channels group by upstream_id so renamed or same-named channels stay
+// apart; models by the name that went upstream.
+type topRanking struct {
+	// key is the facts column ranked by; empty values are left out.
+	key, keyEmpty string
+	// name is the label shown; metric what the ranking counts.
+	name, metric string
+	// latency adds average duration and error rate (the request ranking of
+	// models). exposeID surfaces upstream_id as id (channel rankings).
+	latency, exposeID bool
 }
 
-// channelNameExpression prefers a non-empty upstream_name snapshot, else "#<id>".
-const channelNameExpression = `CASE
-              WHEN upstream_name IS NOT NULL AND TRIM(upstream_name) <> '' THEN TRIM(upstream_name)
-              ELSE '#' || upstream_id
-           END`
+// channelNameAggregate prefers a channel's stored name, else "#<id>".
+const channelNameAggregate = "MAX(CASE WHEN upstream_name <> '' THEN upstream_name ELSE '#' || upstream_id END)"
 
-const modelSourceFilter = "COALESCE(NULLIF(TRIM(upstream_model), ''), NULLIF(TRIM(model), '')) IS NOT NULL"
-
-const tokenMetricFilter = "total_tokens IS NOT NULL AND total_tokens > 0"
+// topRankings: models count requests, channels every attempt they took, and
+// token rankings every token spent.
+var topRankings = [4]topRanking{
+	{key: "model", keyEmpty: "''", name: "MAX(model)", metric: "SUM(requests)", latency: true},
+	{key: "upstream_id", keyEmpty: "0", name: channelNameAggregate, metric: "SUM(attempts)", exposeID: true},
+	{key: "model", keyEmpty: "''", name: "MAX(model)", metric: "SUM(total_tokens)"},
+	{key: "upstream_id", keyEmpty: "0", name: channelNameAggregate, metric: "SUM(total_tokens)", exposeID: true},
+}
 
 // TopLogStats ranks models and channels by request count and token usage.
 func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, limit int64) (models.RequestLogTopStatsOut, error) {
@@ -486,48 +487,19 @@ func TopLogStatsCustom(ctx context.Context, database *sql.DB, startAt, endAt str
 	return topLogStats(ctx, database, LogTopWindowCustom, startAt, endAt, limit)
 }
 
+// topLogStats reads stats_hourly for the window's whole hours and the logs for
+// the part hours at its edges.
 func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 	startAt, endAt string, limit int64) (models.RequestLogTopStatsOut, error) {
 	limit = min(max(limit, 1), 20)
-
-	// Channels aggregate by upstream_id so renamed or same-name channels stay
-	// distinct.
-	specs := [4]topLogCountSpec{
-		{
-			nameExpression:   actualModelExpression,
-			groupExpression:  actualModelExpression,
-			sourceFilter:     modelSourceFilter,
-			metricExpression: "1",
-			metricFilter:     countedRows,
-			withLatency:      true,
-		},
-		{
-			nameExpression:   channelNameExpression,
-			groupExpression:  "upstream_id",
-			sourceFilter:     "upstream_id IS NOT NULL",
-			metricExpression: "1",
-			exposeGroupID:    true,
-		},
-		{
-			nameExpression:   actualModelExpression,
-			groupExpression:  actualModelExpression,
-			sourceFilter:     modelSourceFilter,
-			metricExpression: "COALESCE(total_tokens, 0)",
-			metricFilter:     tokenMetricFilter,
-		},
-		{
-			nameExpression:   channelNameExpression,
-			groupExpression:  "upstream_id",
-			sourceFilter:     "upstream_id IS NOT NULL",
-			metricExpression: "COALESCE(total_tokens, 0)",
-			metricFilter:     tokenMetricFilter,
-			exposeGroupID:    true,
-		},
+	span, err := resolveStatsSpan(window, startAt, endAt, time.Now())
+	if err != nil {
+		return models.RequestLogTopStatsOut{}, err
 	}
 
 	var rankings [4][]models.RequestLogTopItemOut
-	for i, spec := range specs {
-		items, err := topLogCounts(ctx, database, window, startAt, endAt, spec, limit)
+	for i, ranking := range topRankings {
+		items, err := topItems(ctx, database, span, ranking, limit)
 		if err != nil {
 			return models.RequestLogTopStatsOut{}, err
 		}
@@ -543,44 +515,25 @@ func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 	}, nil
 }
 
-func topLogCounts(ctx context.Context, database *sql.DB, window LogTopWindow,
-	startAt, endAt string, spec topLogCountSpec, limit int64) ([]models.RequestLogTopItemOut, error) {
-	// Rows group by groupExpression (e.g. upstream_id) but surface a display
-	// name. When several names share one group key, MAX(name) picks a stable
-	// non-null label.
-	idSelect := "CAST(NULL AS INTEGER) AS id"
-	if spec.exposeGroupID {
-		idSelect = "CAST(group_key AS INTEGER) AS id"
+func topItems(ctx context.Context, database *sql.DB, span statsSpan, ranking topRanking,
+	limit int64) ([]models.RequestLogTopItemOut, error) {
+	id := "NULL"
+	if ranking.exposeID {
+		id = "upstream_id"
 	}
-	// Latency context rides along as extra per-row columns so one pass feeds
-	// both the ranking metric and the duration/error aggregates.
-	rowExtras := ""
-	outerExtras := ""
-	if spec.withLatency {
-		rowExtras = `, CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END AS dur,
-			CASE WHEN ` + failedRows + ` THEN 1 ELSE 0 END AS is_err`
-		outerExtras = `, AVG(dur) AS avg_dur,
-			CAST(SUM(is_err) AS REAL) / COUNT(*) AS error_rate,
-			SUM(CASE WHEN dur IS NOT NULL THEN 1 ELSE 0 END) AS dur_count`
+	latency := ""
+	if ranking.latency {
+		latency = `, SUM(duration_sum) * 1.0 / NULLIF(SUM(duration_count), 0),
+            SUM(errors) * 1.0 / NULLIF(SUM(requests), 0)`
 	}
+	source, args := statsFacts(span)
+	query := fmt.Sprintf(`SELECT %s AS name, %s AS count, %s%s
+        FROM %s WHERE %s <> %s
+        GROUP BY %s HAVING count > 0
+        ORDER BY count DESC, name COLLATE NOCASE ASC LIMIT ?`,
+		ranking.name, ranking.metric, id, latency, source, ranking.key, ranking.keyEmpty, ranking.key)
 
-	var query strings.Builder
-	fmt.Fprintf(&query, "SELECT MAX(name) AS name, SUM(value) AS count, %s%s FROM (SELECT %s AS group_key, %s AS name, %s AS value%s FROM request_logs WHERE ",
-		idSelect, outerExtras, spec.groupExpression, spec.nameExpression, spec.metricExpression, rowExtras)
-	args, err := appendLogTimePredicate(&query, nil, window, startAt, endAt)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Fprintf(&query, " AND (%s)", spec.sourceFilter)
-	if spec.metricFilter != "" {
-		fmt.Fprintf(&query, " AND (%s)", spec.metricFilter)
-	}
-	query.WriteString(`) WHERE group_key IS NOT NULL AND name IS NOT NULL AND name <> '' ` +
-		`GROUP BY group_key HAVING count > 0 ` +
-		`ORDER BY count DESC, name COLLATE NOCASE ASC LIMIT ?`)
-	args = append(args, limit)
-
-	rows, err := database.QueryContext(ctx, query.String(), args...)
+	rows, err := database.QueryContext(ctx, query, append(args, limit)...)
 	if err != nil {
 		return nil, apperr.Database(err)
 	}
@@ -589,29 +542,26 @@ func topLogCounts(ctx context.Context, database *sql.DB, window LogTopWindow,
 	items := []models.RequestLogTopItemOut{}
 	for rows.Next() {
 		var item models.RequestLogTopItemOut
-		var id sql.NullInt64
-		var avgDur, errorRate sql.NullFloat64
-		var durCount sql.NullInt64
-		var scanDest []any
-		if spec.withLatency {
-			scanDest = []any{&item.Name, &item.Count, &id, &avgDur, &errorRate, &durCount}
-		} else {
-			scanDest = []any{&item.Name, &item.Count, &id}
+		var upstreamID sql.NullInt64
+		var avgDuration, errorRate sql.NullFloat64
+		destination := []any{&item.Name, &item.Count, &upstreamID}
+		if ranking.latency {
+			destination = append(destination, &avgDuration, &errorRate)
 		}
-		if err := rows.Scan(scanDest...); err != nil {
+		if err := rows.Scan(destination...); err != nil {
 			return nil, apperr.Database(err)
 		}
-		if spec.exposeGroupID && id.Valid {
-			value := id.Int64
+		if upstreamID.Valid {
+			value := upstreamID.Int64
 			item.ID = &value
 		}
-		if durCount.Valid && durCount.Int64 > 0 && avgDur.Valid {
-			avg := avgDur.Float64
-			item.AvgDurationMs = &avg
+		if avgDuration.Valid {
+			value := avgDuration.Float64
+			item.AvgDurationMs = &value
 		}
 		if errorRate.Valid {
-			rate := errorRate.Float64
-			item.ErrorRate = &rate
+			value := errorRate.Float64
+			item.ErrorRate = &value
 		}
 		items = append(items, item)
 	}

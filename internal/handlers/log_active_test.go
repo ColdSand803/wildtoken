@@ -159,7 +159,7 @@ func TestWriteActiveRequestsEmitsAnEmptyArray(t *testing.T) {
 func TestTheLiveLogStreamEndsWhenShutdownBegins(t *testing.T) {
 	state := activeLogTestState(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 8,
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, 8,
 		state.Quotas)
 	t.Cleanup(func() {
 		state.LogWriter.Close()
@@ -233,7 +233,7 @@ func (c *stalledConsole) String() string {
 func TestALaggingLogStreamIsToldToResync(t *testing.T) {
 	state := activeLogTestState(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 4096,
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, 4096,
 		state.Quotas)
 	t.Cleanup(func() {
 		state.LogWriter.Close()
@@ -306,7 +306,7 @@ func TestTheLiveLogStreamRefreshesItsRates(t *testing.T) {
 
 	state := activeLogTestState(t)
 	ctx, cancel := context.WithCancel(context.Background())
-	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, db.NewLogStatsCache(), 8,
+	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics, 8,
 		state.Quotas)
 	t.Cleanup(func() {
 		state.LogWriter.Close()

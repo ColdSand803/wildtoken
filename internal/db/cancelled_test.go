@@ -20,6 +20,7 @@ func TestAClientHangingUpIsNotAFailure(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
+	rebuildStats(t, database)
 	overview, err := LogOverview(ctx, database, LogTopWindowOneDay, "", "", 0)
 	if err != nil {
 		t.Fatalf("overview: %v", err)
