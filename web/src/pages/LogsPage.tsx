@@ -77,6 +77,7 @@ const CLIENT_TYPES = [
   "opencode",
   "claude",
   "pi",
+  "dsh",
   "unknown",
   "model-test",
   "channel-test",
