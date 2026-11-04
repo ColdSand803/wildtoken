@@ -376,6 +376,38 @@ no body lists any more are then collected. Up to 100,000 logs can keep their
 bodies, at up to 128 MiB per body. SQLite incremental vacuum returns the freed
 pages to the filesystem.
 
+## 💾 Backup and Restore
+
+WildToken backs the database up every day at 05:00 local time and keeps the
+newest 10 (`backup.at`, `backup.keep`, or `APP__BACKUP__AT`,
+`APP__BACKUP__KEEP`). A backup is one SQLite file holding everything but log
+bodies, which are a rolling diagnostic window; restored logs show their bodies
+as cleared. A start with no backup from the last day takes one a minute in.
+
+- Docker Compose writes them to `./.backup` on the host (`BACKUP_DIR` moves
+  it), so they outlive the data volume. Create the directory as your user
+  before the first start — `scripts/deploy.sh` does — or Docker creates it as
+  root and the backups are root's.
+- Run from source or as the Windows app, they go to `backups/` under the
+  working directory (`WILDTOKEN_BACKUP_DIR` moves it).
+- `wildtoken backup` takes one now, beside a running server:
+  `docker compose exec wildtoken wildtoken backup`.
+
+Credentials in a backup are sealed with the key in use when it was taken. Keep
+that key (`ENCRYPTION_KEY`, or `wildtoken.key` in the data volume) somewhere
+the backups are not.
+
+To restore under Docker Compose:
+
+```bash
+scripts/restore.sh .backup/wildtoken-20261104-050000.db
+```
+
+It stops the container, keeps the database it replaces in the data volume as
+`wildtoken.db.before-restore-<time>`, starts the container and reports whether
+the stored credentials opened. Elsewhere, stop the service and copy the backup
+over `wildtoken.db`.
+
 ## 🎨 Themes
 
 Built-in light and dark themes live under `static/css/`. Optional theme packs

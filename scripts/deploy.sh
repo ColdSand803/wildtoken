@@ -22,6 +22,9 @@ for tool in docker curl; do
 	command -v "$tool" >/dev/null || { log "缺少 $tool"; exit 1; }
 done
 
+# 备份目录由宿主用户建，备份才归宿主用户（见 docker-compose.yml）。
+mkdir -p "${BACKUP_DIR:-.backup}"
+
 image=$(docker compose config --images "$SERVICE")
 build_log=$(mktemp -t wildtoken-deploy.XXXXXX)
 trap 'rm -f "$build_log"' EXIT

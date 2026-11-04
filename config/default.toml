@@ -33,3 +33,9 @@ dir = "themes"
 # setting (console → 设置).
 [images]
 dir = "images"
+
+# Daily database backup, without log bodies. Blank dir turns it off.
+[backup]
+dir = "backups"
+at = "05:00"
+keep = 10

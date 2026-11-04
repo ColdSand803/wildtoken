@@ -22,6 +22,17 @@ type Settings struct {
 	Admin    AdminSettings    `toml:"admin"`
 	Themes   ThemeSettings    `toml:"themes"`
 	Images   ImageSettings    `toml:"images"`
+	Backup   BackupSettings   `toml:"backup"`
+}
+
+// BackupSettings schedules the daily database backup.
+type BackupSettings struct {
+	// Dir holds the backups; blank turns them off.
+	Dir string `toml:"dir"`
+	// At is the local time of day one is taken, as HH:MM.
+	At string `toml:"at"`
+	// Keep is how many are kept, newest first.
+	Keep int `toml:"keep"`
 }
 
 type ServerSettings struct {
@@ -86,6 +97,7 @@ func Default() Settings {
 		Admin:    AdminSettings{Token: "change-me"},
 		Themes:   ThemeSettings{Dir: "themes"},
 		Images:   ImageSettings{Dir: "images"},
+		Backup:   BackupSettings{Dir: "backups", At: "05:00", Keep: 10},
 	}
 }
 
@@ -128,6 +140,9 @@ func Load() (Settings, error) {
 	}
 	if dir := os.Getenv("WILDTOKEN_IMAGE_DIR"); dir != "" {
 		settings.Images.Dir = dir
+	}
+	if dir := os.Getenv("WILDTOKEN_BACKUP_DIR"); dir != "" {
+		settings.Backup.Dir = dir
 	}
 
 	return settings, nil
@@ -196,6 +211,11 @@ func applyEnvOverrides(settings *Settings) error {
 		{"APP__ADMIN__CLIENT_IP_HEADER", func(s *Settings, v string) error { s.Admin.ClientIPHeader = v; return nil }},
 		{"APP__THEMES__DIR", func(s *Settings, v string) error { s.Themes.Dir = v; return nil }},
 		{"APP__IMAGES__DIR", func(s *Settings, v string) error { s.Images.Dir = v; return nil }},
+		{"APP__BACKUP__DIR", func(s *Settings, v string) error { s.Backup.Dir = v; return nil }},
+		{"APP__BACKUP__AT", func(s *Settings, v string) error { s.Backup.At = v; return nil }},
+		{"APP__BACKUP__KEEP", func(s *Settings, v string) error {
+			return parseInt(v, func(n int64) { s.Backup.Keep = int(n) })
+		}},
 	}
 
 	for _, override := range overrides {

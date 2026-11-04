@@ -146,6 +146,7 @@ func New(ctx context.Context) (*Server, error) {
 	go imagestore.RunCleanupLoop(jobsCtx, state.Images, func() int64 {
 		return state.Runtime.Get().ImageStorageMaxMB << 20
 	})
+	go runBackupLoop(jobsCtx, database, settings.Backup)
 
 	bindAddr := net.JoinHostPort(settings.Server.Host,
 		fmt.Sprintf("%d", settings.Server.Port))

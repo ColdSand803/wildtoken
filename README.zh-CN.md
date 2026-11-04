@@ -290,6 +290,24 @@ WILDTOKEN_LOG=info
 
 日志元数据和正文快照分开存储。正文按内容切块、每块只存一份：编码工具每轮重发整段对话，相邻请求几乎完全相同，所以每条日志只为新增的那一轮付出空间；请求头等快照元数据同样只存一份。超出保留条数的日志会清掉正文，保留状态码、渠道、模型、Token 用量、延迟和 Header，不再被任何正文引用的块随后回收。保留条数最多 100,000 条，单份正文最多 128 MiB。SQLite 使用增量 vacuum，把回收释放的页还给文件系统。
 
+## 💾 备份与恢复
+
+WildToken 每天本地时间 05:00 备份数据库，保留最新 10 份（`backup.at`、`backup.keep`，或 `APP__BACKUP__AT`、`APP__BACKUP__KEEP`）。每份是一个 SQLite 文件，除日志正文外什么都有——正文只是滚动的排障窗口，恢复后的旧日志显示为正文已清。启动时如果最近一天没有备份，一分钟后先补一份。
+
+- Docker Compose 写到宿主机的 `./.backup`（`BACKUP_DIR` 可改），删了数据卷备份还在。首次启动前请以自己的用户建好这个目录（`scripts/deploy.sh` 会建），否则 Docker 以 root 建，备份也归 root。
+- 源码运行或 Windows 桌面版写到工作目录下的 `backups/`（`WILDTOKEN_BACKUP_DIR` 可改）。
+- `wildtoken backup` 立即备份一份，服务照常运行：`docker compose exec wildtoken wildtoken backup`。
+
+备份里的凭证用备份时的密钥加密。这把密钥（`ENCRYPTION_KEY`，或数据卷里的 `wildtoken.key`）别和备份放在一起。
+
+Docker Compose 下恢复：
+
+```bash
+scripts/restore.sh .backup/wildtoken-20261104-050000.db
+```
+
+脚本会停容器，把被替换的库留在数据卷里，名为 `wildtoken.db.before-restore-<时间>`，再起容器并报告存储的凭证能否解开。其他部署方式：停掉服务，用备份覆盖 `wildtoken.db`。
+
 ## 🎨 主题
 
 内置浅色/深色主题位于 `static/css/`。可选主题包位于 [`themes/`](themes/)，详见 [`themes/README.md`](themes/README.md)。

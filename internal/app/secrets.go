@@ -105,9 +105,8 @@ func newSecretKey(ctx context.Context, database *sql.DB, keyPath string) (string
 	return source, key, err
 }
 
-// secretKeyPath names the key file beside the database: "/data/wildtoken.db"
-// keeps it in "/data/wildtoken.key". An in-memory database has none.
-func secretKeyPath(settings config.DatabaseSettings) (string, error) {
+// databaseFile is the database's path on disk, or "" for an in-memory one.
+func databaseFile(settings config.DatabaseSettings) (string, error) {
 	dsn, err := sqliteDSN(settings)
 	if err != nil {
 		return "", err
@@ -117,6 +116,16 @@ func secretKeyPath(settings config.DatabaseSettings) (string, error) {
 	path = strings.TrimPrefix(strings.TrimPrefix(path, "file:"), "//")
 	if path == "" || strings.HasPrefix(path, ":memory:") {
 		return "", nil
+	}
+	return path, nil
+}
+
+// secretKeyPath names the key file beside the database: "/data/wildtoken.db"
+// keeps it in "/data/wildtoken.key". An in-memory database has none.
+func secretKeyPath(settings config.DatabaseSettings) (string, error) {
+	path, err := databaseFile(settings)
+	if err != nil || path == "" {
+		return "", err
 	}
 
 	keyPath := strings.TrimSuffix(path, filepath.Ext(path)) + ".key"
