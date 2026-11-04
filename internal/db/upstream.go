@@ -60,7 +60,11 @@ func scanUpstreamRow(row interface{ Scan(...any) error }) (models.UpstreamRow, e
 		return upstream, err
 	}
 	if apiKey.Valid {
-		upstream.APIKey = &apiKey.String
+		plain, err := openSecret(apiKey.String)
+		if err != nil {
+			return upstream, err
+		}
+		upstream.APIKey = &plain
 	}
 	if rateLimit.Valid && rateLimit.String != "" {
 		upstream.RateLimit = &rateLimit.String
@@ -315,6 +319,10 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn) (
 	if err != nil {
 		return models.UpstreamOut{}, apperr.BadRequest(err.Error())
 	}
+	apiKey, err := sealOptionalSecret(input.APIKey)
+	if err != nil {
+		return models.UpstreamOut{}, apperr.Internal("could not seal the API key")
+	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
@@ -327,7 +335,7 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn) (
          effort_mappings, priority, weight, auto_weight_enabled, enabled,
          extra_headers, timeout_seconds, rate_limit, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		input.Name, input.BaseURL, input.APIKey, encoded.Names, encoded.Prefixes,
+		input.Name, input.BaseURL, apiKey, encoded.Names, encoded.Prefixes,
 		encoded.ModelMappings, encoded.EffortMappings, input.Priority, input.Weight,
 		boolToInt64(input.AutoWeightEnabled), boolToInt64(input.Enabled),
 		encoded.Headers, timeout, rateLimit)
@@ -413,6 +421,10 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 	case input.APIKey != nil:
 		apiKey = input.APIKey
 	}
+	sealedKey, err := sealOptionalSecret(apiKey)
+	if err != nil {
+		return models.UpstreamOut{}, apperr.Internal("could not seal the API key")
+	}
 
 	timeout := existing.TimeoutSeconds
 	if input.TimeoutSeconds != nil {
@@ -436,7 +448,7 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
             enabled = CASE WHEN archived = 1 THEN 0 ELSE ? END, extra_headers = ?,
             timeout_seconds = ?, rate_limit = ?, updated_at = datetime('now')
         WHERE id = ?`,
-		input.Name, input.BaseURL, apiKey, encoded.Names, encoded.Prefixes,
+		input.Name, input.BaseURL, sealedKey, encoded.Names, encoded.Prefixes,
 		encoded.ModelMappings, encoded.EffortMappings, input.Priority, input.Weight,
 		boolToInt64(input.AutoWeightEnabled), boolToInt64(input.Enabled),
 		encoded.Headers, timeout, rateLimit, id)

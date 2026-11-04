@@ -257,7 +257,7 @@ dir = "themes"
 1. `config/default.toml`
 2. 可选的 `config/<RUN_ENV>.toml`
 3. 带 `APP__` 前缀的环境变量，例如 `APP__SERVER__PORT=3100`
-4. `.env` 里的兼容变量：`ADMIN_TOKEN`、`DATABASE_URL`、`WILDTOKEN_THEME_DIR`
+4. `.env` 里的兼容变量：`ADMIN_TOKEN`、`DATABASE_URL`、`ENCRYPTION_KEY`、`WILDTOKEN_THEME_DIR`
 
 常用环境变量：
 
@@ -298,8 +298,12 @@ WILDTOKEN_LOG=info
 - 在可信机器或内网之外暴露 WildToken 前，请放到 TLS 和常规网络访问控制之后。
 - 非 localhost 监听必须使用强 `ADMIN_TOKEN`；暴露前请轮换遗留的 `change-me` 凭证。
 - 不要把 `.env`、SQLite 数据、日志或带真实配置的发布压缩包提交到公开仓库。
-- 下游 API Token 以明文形式存储在数据库中，以便在控制台随时复制；认证走 SHA-256 摘要，明文不参与请求链路。
-  这意味着 SQLite 文件和管理端口的访问控制等同于所有下游令牌的访问控制，请照此对待两者。
+- 渠道 API Key 和控制台可复制的令牌在 SQLite 里用 AES-256-GCM 加密存储；认证走 SHA-256 摘要。
+  密钥取 `ENCRYPTION_KEY`（可用 `openssl rand -hex 32` 生成）；没设时，首次启动在数据库旁生成
+  `wildtoken.key`（权限 0600）。密钥别和数据库备份放在一起——Docker 部署请在 `.env` 里设
+  `ENCRYPTION_KEY`，否则密钥就在数据卷里。之后再设也行，下次启动会自动换成新密钥。密钥丢了只能重填
+  所有渠道 Key，请单独备份。持有管理令牌的人在控制台上照样能看到明文 Key 和令牌。
+- 升级后首次启动会加密已有的明文，并做一次 `VACUUM` 清掉空闲页里的旧副本，需要约等于数据库大小的空闲磁盘。
 - 提供商 API Key 只应由服务端注入上游请求，不应分发给下游客户端。
 - 管理 API 同源访问并要求 `x-admin-token`；兼容性 `/v1/*` API 会为下游客户端开启 CORS。
 - 管理端认证带准入控制：单个来源连续失败 5 次后按指数退避（1 秒起，最长 60 秒），

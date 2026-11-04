@@ -36,6 +36,9 @@ type DatabaseSettings struct {
 	SQLiteStatementCacheCapacity int    `toml:"sqlite_statement_cache_capacity"`
 	SQLiteMmapSizeBytes          int64  `toml:"sqlite_mmap_size_bytes"`
 	IdleTimeoutSeconds           int64  `toml:"idle_timeout_seconds"`
+	// EncryptionKey seals channel API keys and token plaintext at rest. Blank
+	// uses a key file beside the database, made on first start.
+	EncryptionKey string `toml:"encryption_key"`
 }
 
 type LoggingSettings struct {
@@ -116,6 +119,10 @@ func Load() (Settings, error) {
 	if url := os.Getenv("DATABASE_URL"); url != "" {
 		settings.Database.URL = url
 	}
+	// faketoken's name for it, so one value can serve both.
+	if key := os.Getenv("ENCRYPTION_KEY"); key != "" {
+		settings.Database.EncryptionKey = key
+	}
 	if dir := os.Getenv("WILDTOKEN_THEME_DIR"); dir != "" {
 		settings.Themes.Dir = dir
 	}
@@ -173,6 +180,7 @@ func applyEnvOverrides(settings *Settings) error {
 		{"APP__DATABASE__IDLE_TIMEOUT_SECONDS", func(s *Settings, v string) error {
 			return parseInt(v, func(n int64) { s.Database.IdleTimeoutSeconds = n })
 		}},
+		{"APP__DATABASE__ENCRYPTION_KEY", func(s *Settings, v string) error { s.Database.EncryptionKey = v; return nil }},
 		{"APP__LOGGING__LOG_QUEUE_CAPACITY", func(s *Settings, v string) error {
 			return parseInt(v, func(n int64) { s.Logging.LogQueueCapacity = int(n) })
 		}},

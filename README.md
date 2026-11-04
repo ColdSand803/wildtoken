@@ -326,8 +326,8 @@ Configuration sources are loaded in this order:
 2. optional `config/<RUN_ENV>.toml`
 3. environment variables with the `APP__` prefix, for example
    `APP__SERVER__PORT=3100`
-4. compatibility variables from `.env`: `ADMIN_TOKEN`, `DATABASE_URL`, and
-   `WILDTOKEN_THEME_DIR`
+4. compatibility variables from `.env`: `ADMIN_TOKEN`, `DATABASE_URL`,
+   `ENCRYPTION_KEY`, and `WILDTOKEN_THEME_DIR`
 
 Common environment variables:
 
@@ -387,10 +387,18 @@ theme packs.
   `change-me` credential before exposure.
 - Keep `.env`, SQLite data, logs, and release archives with live configuration
   out of public repositories.
-- Downstream API tokens are stored in plaintext so the console can copy them at
-  any time; authentication resolves a SHA-256 digest and the plaintext never
-  enters the request path. Treat access to the SQLite file and to the admin port
-  as access to every downstream token.
+- Provider API keys and the token copies the console shows are sealed in SQLite
+  with AES-256-GCM; authentication resolves a SHA-256 digest. The key is
+  `ENCRYPTION_KEY` (generate one with `openssl rand -hex 32`); without it,
+  WildToken creates `wildtoken.key` (mode 0600) beside the database on first
+  start. Keep the key out of database backups — under Docker, set
+  `ENCRYPTION_KEY` in `.env`, or the key sits in the data volume. Setting it
+  later moves existing values over on the next start. Losing the key means
+  re-entering every channel key, so back it up separately. The console still
+  shows keys and tokens in the clear to whoever holds the admin token.
+- The first start after upgrading seals existing plaintext and runs one
+  `VACUUM` to clear old copies from free space; it needs free disk space about
+  the size of the database.
 - Provider API keys are injected into upstream requests server-side and should
   never be distributed to downstream clients.
 - Admin APIs are same-origin and require `x-admin-token`; compatibility `/v1/*`

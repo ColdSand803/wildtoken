@@ -9,6 +9,9 @@ sqlite_cache_size_kib = 2048
 sqlite_statement_cache_capacity = 32
 sqlite_mmap_size_bytes = 0
 idle_timeout_seconds = 60
+# Seals channel API keys and token copies at rest. Prefer ENCRYPTION_KEY in the
+# environment; blank uses wildtoken.key beside the database, made on first start.
+# encryption_key = ""
 
 [logging]
 log_queue_capacity = 512
