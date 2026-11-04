@@ -183,122 +183,146 @@ func rewriteEffort(raw json.RawMessage, mappings map[string]string) (json.RawMes
 	return encoded, true
 }
 
-// applyEffortMappings rewrites every place a request states its reasoning
-// effort, reporting whether it changed anything.
+// effortEdits rewrites every place a request states its reasoning effort.
 //
 // All three locations are rewritten rather than only the first one found. Which
 // of them an upstream reads is its own business, so leaving one still holding
 // the downstream value would let the original effort through — and a request
 // that states two different efforts is one no upstream promises to resolve the
 // way the gateway happened to guess.
-func applyEffortMappings(request map[string]json.RawMessage, mappings map[string]string) bool {
+func effortEdits(body []byte, members []member, mappings map[string]string) []jsonEdit {
 	if len(mappings) == 0 {
-		return false
-	}
-	changed := false
-
-	if raw, present := request["reasoning_effort"]; present {
-		if replacement, ok := rewriteEffort(raw, mappings); ok {
-			request["reasoning_effort"] = replacement
-			changed = true
-		}
+		return nil
 	}
 
-	for _, parent := range []string{"reasoning", "output_config"} {
-		raw, present := request[parent]
-		if !present {
-			continue
+	var edits []jsonEdit
+	for _, m := range members {
+		switch m.name {
+		case "reasoning_effort":
+			if replacement, ok := rewriteEffort(body[m.start:m.end], mappings); ok {
+				edits = append(edits, jsonEdit{start: m.start, end: m.end, text: replacement})
+			}
+		case "reasoning", "output_config":
+			// A non-object here is left alone: rewriting it would mean inventing
+			// a shape the caller did not send.
+			nested, _, ok := objectMembers(body[m.start:m.end])
+			if !ok {
+				continue
+			}
+			for _, n := range nested {
+				if n.name != "effort" {
+					continue
+				}
+				start, end := m.start+n.start, m.start+n.end
+				if replacement, ok := rewriteEffort(body[start:end], mappings); ok {
+					edits = append(edits, jsonEdit{start: start, end: end, text: replacement})
+				}
+			}
 		}
-		// A non-object here is left alone: rewriting it would mean inventing a
-		// shape the caller did not send. Decoding into raw messages keeps the
-		// siblings of the effort — thinking, verbosity, summary — byte for byte.
-		var nested map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &nested); err != nil {
-			continue
-		}
-		effort, present := nested["effort"]
-		if !present {
-			continue
-		}
-		replacement, ok := rewriteEffort(effort, mappings)
-		if !ok {
-			continue
-		}
-		nested["effort"] = replacement
-		reencoded, err := json.Marshal(nested)
-		if err != nil {
-			continue
-		}
-		request[parent] = reencoded
-		changed = true
 	}
-
-	return changed
+	return edits
 }
 
-// PrepareUpstreamBody rewrites a JSON request body for its selected upstream.
-//
-// Streaming Chat Completions responses omit usage by default on many
-// OpenAI-compatible upstreams. It is requested explicitly so the gateway can
-// consistently record prompt, completion, and total token counts.
+// modelEdits points every "model" at the forwarded name. Every one, not only
+// the last that routing read: an upstream reading the first of two duplicates
+// must not get a model the gateway never checked.
+func modelEdits(body []byte, members []member, forwardModel string) []jsonEdit {
+	encoded, err := json.Marshal(forwardModel)
+	if err != nil {
+		return nil
+	}
+
+	var edits []jsonEdit
+	for _, m := range members {
+		if m.name != "model" {
+			continue
+		}
+		var current string
+		if json.Unmarshal(body[m.start:m.end], &current) != nil || current == forwardModel {
+			continue
+		}
+		edits = append(edits, jsonEdit{start: m.start, end: m.end, text: encoded})
+	}
+	return edits
+}
+
+// usageEdits sets stream_options.include_usage on a streaming chat completion:
+// many OpenAI-compatible upstreams leave usage out of the stream unless asked,
+// and the gateway records it.
+func usageEdits(body []byte, members []member, closing int) []jsonEdit {
+	const options = `{"include_usage":true}`
+
+	var edits []jsonEdit
+	found := false
+	for _, m := range members {
+		if m.name != "stream_options" {
+			continue
+		}
+		found = true
+
+		value := body[m.start:m.end]
+		nested, nestedClosing, ok := objectMembers(value)
+		if !ok {
+			// A non-object, null included, is replaced rather than merged.
+			edits = append(edits, jsonEdit{start: m.start, end: m.end, text: []byte(options)})
+			continue
+		}
+
+		asked := false
+		for _, n := range nested {
+			if n.name != "include_usage" {
+				continue
+			}
+			asked = true
+			if string(value[n.start:n.end]) != "true" {
+				edits = append(edits, jsonEdit{start: m.start + n.start, end: m.start + n.end,
+					text: []byte("true")})
+			}
+		}
+		if !asked {
+			edits = append(edits, insertMember(m.start, nested, nestedClosing, `"include_usage":true`))
+		}
+	}
+	if !found {
+		edits = append(edits, insertMember(0, members, closing, `"stream_options":`+options))
+	}
+	return edits
+}
+
+// PrepareUpstreamBody rewrites a JSON request body for its selected upstream:
+// the forwarded model, the channel's effort mapping, and the usage option a
+// streaming chat completion needs. Every other byte reaches the upstream as
+// the caller sent it.
 //
 // effortMappings replaces the reasoning effort the caller asked for with the one
 // the channel's upstream understands, so a downstream naming an effort its
 // provider does not have is translated rather than refused.
 func PrepareUpstreamBody(body []byte, forwardModel *string, path string,
 	effortMappings map[string]string) []byte {
-	var request map[string]json.RawMessage
-	if err := json.Unmarshal(body, &request); err != nil {
+	members, closing, ok := objectMembers(body)
+	if !ok {
 		return body
 	}
 
-	changed := applyEffortMappings(request, effortMappings)
-
+	edits := effortEdits(body, members, effortMappings)
 	if forwardModel != nil {
-		var currentModel string
-		if err := json.Unmarshal(request["model"], &currentModel); err == nil &&
-			currentModel != *forwardModel {
-			encoded, err := json.Marshal(*forwardModel)
-			if err == nil {
-				request["model"] = encoded
-				changed = true
-			}
-		}
+		edits = append(edits, modelEdits(body, members, *forwardModel)...)
 	}
-
-	if strings.Trim(path, "/") == "chat/completions" && requestsStreaming(request) {
-		streamOptions := map[string]json.RawMessage{}
-		if raw, present := request["stream_options"]; present {
-			// A non-object stream_options is replaced rather than merged. null
-			// decodes without error into a nil map, which panicked on the write
-			// below and dropped the connection.
-			if err := json.Unmarshal(raw, &streamOptions); err != nil || streamOptions == nil {
-				streamOptions = map[string]json.RawMessage{}
-				changed = true
-			}
-		}
-		if !bytes.Equal(streamOptions["include_usage"], []byte("true")) {
-			streamOptions["include_usage"] = json.RawMessage("true")
-			changed = true
-		}
-		if encoded, err := json.Marshal(streamOptions); err == nil {
-			request["stream_options"] = encoded
-		}
+	if strings.Trim(path, "/") == "chat/completions" && requestsStreaming(body, members) {
+		edits = append(edits, usageEdits(body, members, closing)...)
 	}
-
-	if !changed {
-		return body
-	}
-	encoded, err := json.Marshal(request)
-	if err != nil {
-		return body
-	}
-	return encoded
+	return applyEdits(body, edits)
 }
 
-func requestsStreaming(request map[string]json.RawMessage) bool {
-	var stream bool
-	return json.Unmarshal(request["stream"], &stream) == nil && stream
+// requestsStreaming reads "stream" as json.Unmarshal would: the last one wins.
+func requestsStreaming(body []byte, members []member) bool {
+	stream := false
+	for _, m := range members {
+		if m.name == "stream" {
+			stream = string(body[m.start:m.end]) == "true"
+		}
+	}
+	return stream
 }
 
 // PreparedRequest is everything derived from one attempt's request: the URL,
