@@ -450,10 +450,32 @@ func (c RequestContext) logFailure(deps Deps, entry LogEntry) {
 // written now and marked retried, so it is not counted as how the request
 // ended.
 func (r *Response) Retry() {
-	if stream, ok := r.Body.(*bufferedStream); ok {
+	switch stream := r.Body.(type) {
+	case *sseStream:
+		stream.abandon()
+	case *bufferedStream:
 		stream.markRetried()
+		r.Body.Close()
+	default:
+		r.Body.Close()
 	}
-	r.Body.Close()
+}
+
+// Streaming reports whether the body is an upstream event stream.
+func (r *Response) Streaming() bool {
+	_, ok := r.Body.(*sseStream)
+	return ok
+}
+
+// Prime holds a streamed response back until it carries content, so a
+// failure before that can go to another channel unseen. onHold runs each time
+// something is held back. It reports false when the stream failed before any
+// content. Any other response is ready as it is.
+func (r *Response) Prime(onHold func()) bool {
+	if stream, ok := r.Body.(*sseStream); ok {
+		return stream.prime(onHold)
+	}
+	return true
 }
 
 // ProxyRequest forwards a request upstream, streaming SSE bodies as they arrive.

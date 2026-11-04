@@ -415,6 +415,8 @@ var channelFaultStreamErrors = map[string]bool{
 	"rate_limit_error":    true,
 	"server_error":        true,
 	"rate_limit_exceeded": true,
+	// A relay's own concurrency cap, seen held open ~45 s before it reports.
+	"gateway_concurrency_limit": true,
 }
 
 // streamErrorFromValue reads the failure an `error` or `response.failed` event

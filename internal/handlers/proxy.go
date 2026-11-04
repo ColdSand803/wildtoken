@@ -467,8 +467,10 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			}
 		}
 
-		response, err := runProxyAttempts(w, r, state, proxyAttemptConfig{
+		client := &downstream{w: w}
+		response, err := runProxyAttempts(r, state, proxyAttemptConfig{
 			guard:           guard,
+			downstream:      client,
 			auth:            auth,
 			groupName:       resolveGroupName(r.Context(), state, auth.GroupID),
 			path:            path,
@@ -496,13 +498,16 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 		}
 		guard.disarm()
 
-		writeProxiedResponse(w, response)
+		client.deliver(response)
 	}
 }
 
 type proxyAttemptConfig struct {
 	guard *abortLogGuard
-	auth  middleware.DownstreamAuth
+	// downstream is the client's side; a stream's headers go out through it
+	// before the attempt is known to succeed.
+	downstream *downstream
+	auth       middleware.DownstreamAuth
 	// groupName is resolved once for the error message, so the retry loop does
 	// not query it per attempt.
 	groupName       string
@@ -520,8 +525,9 @@ type proxyAttemptConfig struct {
 // configured limit. A nil response with a nil error means routing produced no
 // attempt and the refusal has already been written and logged: a 429 when every
 // candidate was rate limited, a 503 when there was no route at all.
-func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.State,
+func runProxyAttempts(r *http.Request, state *appstate.State,
 	config proxyAttemptConfig) (*proxy.Response, error) {
+	w := config.downstream.w
 	maxRetries := int(config.runtimeSettings.MaxRetries)
 	logBodyMaxBytes := int(config.runtimeSettings.LogBodyMaxBytes)
 
@@ -530,11 +536,25 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 	// it. A way out that does not return it ends on a row the guard writes,
 	// so the held one was only an attempt.
 	var lastFailure *attemptResult
+	// streamFailure is the last stream that failed before content. Its headers
+	// are out, so when nothing else answers it is what the client receives:
+	// the stream as the channel sent it, error event and all.
+	var streamFailure *attemptResult
 	defer func() {
-		if lastFailure != nil {
-			lastFailure.retried(state.LogWriter)
+		for _, held := range []*attemptResult{lastFailure, streamFailure} {
+			if held != nil {
+				held.retried(state.LogWriter)
+			}
 		}
 	}()
+	// replay ends the request on streamFailure.
+	replay := func() (*proxy.Response, error) {
+		failure := streamFailure
+		streamFailure = nil
+		failure.concluded(state.LogWriter)
+		config.guard.disarm()
+		return failure.response, nil
+	}
 
 	// excluded collects the channels that stay out of routing for the rest of
 	// this request, so re-selection falls over to the remaining candidates
@@ -583,6 +603,9 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 						state.AutoWeight, config.policy, nil, config.model, config.auth.GroupID,
 						routingExclusions(excluded, cooling, lastResort))
 					if err != nil {
+						if streamFailure != nil {
+							return replay()
+						}
 						config.guard.logAndDisarm(500, "upstream selection failed: "+err.Error())
 						return nil, err
 					}
@@ -641,7 +664,11 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		}
 
 		if selected == nil {
-			// Nothing else to try. A buffered failure is the caller's answer.
+			// Nothing else to try. A stream whose headers are out is the answer;
+			// otherwise the last buffered failure is.
+			if streamFailure != nil {
+				return replay()
+			}
 			if failure := lastFailure; failure != nil {
 				lastFailure = nil
 				failure.concluded(state.LogWriter)
@@ -678,6 +705,9 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			config.runtimeSettings.SameUpstreamRetryIntervalMs > 0 {
 			select {
 			case <-r.Context().Done():
+				if streamFailure != nil {
+					return replay()
+				}
 				// Logged here because no attempt was made to log it: this is
 				// the one error path out of this function that ProxyRequest
 				// never saw.
@@ -690,10 +720,10 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 
 		// Once a new attempt has a route, the previous failure was only an
 		// attempt, and its row is written as one.
-		if lastFailure != nil {
+		if lastFailure != nil && lastFailure != streamFailure {
 			lastFailure.retried(state.LogWriter)
-			lastFailure = nil
 		}
+		lastFailure = nil
 
 		config.guard.setUpstream(selected.Upstream.ID, selected.Upstream.Name, selected.ForwardModel)
 		config.guard.setKey(key)
@@ -722,6 +752,19 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			}, prepared)
 
 		failed := err != nil || response.Status < 200 || response.Status >= 300
+
+		// A stream is held back until it shows content, so an error before
+		// that is only a failed attempt and another channel can still answer.
+		// Its headers go out now, as they always did. The last attempt has
+		// nothing to fall back on and is not held.
+		streamFailed := false
+		if !failed && response.Streaming() && holdsStream(config.path) &&
+			attempt < maxRetries {
+			config.downstream.sendHeader(response)
+			if !response.Prime(config.downstream.ping) {
+				failed, streamFailed = true, true
+			}
+		}
 		if !failed {
 			state.Keys.Clear(key.ID)
 			for _, upstream := range rejected {
@@ -746,22 +789,32 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			}
 		}
 
-		if attempt >= maxRetries {
-			current.concluded(state.LogWriter)
-			return response, err
-		}
 		// A client that has gone is not owed another attempt. Retrying spent
 		// another channel's rate-limit allowance and wrote another log row for
 		// a request nobody was waiting for, so one disconnect could leave a
 		// handful of 499s behind it.
-		if r.Context().Err() != nil {
+		if attempt >= maxRetries || r.Context().Err() != nil {
+			if streamFailure != nil && !streamFailed {
+				// The client holds a stream's headers; this answer cannot follow.
+				current.retried(state.LogWriter)
+				return replay()
+			}
 			current.concluded(state.LogWriter)
 			return response, err
 		}
 
-		// Asked again, the channel would refuse the request the same way —
-		// unless another of its keys is to be asked.
-		if stay == nil && err == nil && !proxy.IsChannelFault(response.Status) {
+		switch {
+		case streamFailed:
+			// Out for the rest of this request. The stream's failure was
+			// charged where it showed, if it was the channel's.
+			excluded[selected.Upstream.ID] = true
+			if streamFailure != nil {
+				streamFailure.retried(state.LogWriter)
+			}
+			streamFailure = current
+		case stay == nil && err == nil && !proxy.IsChannelFault(response.Status):
+			// Asked again, the channel would refuse the request the same way —
+			// unless another of its keys is to be asked.
 			excluded[selected.Upstream.ID] = true
 			rejected = append(rejected, selected.Upstream)
 		}
@@ -817,10 +870,16 @@ type attemptResult struct {
 	// held is the row of an attempt that got no answer. One that did answer
 	// carries its row in response, written when the body closes.
 	held *proxy.LogEntry
+	// settled makes the first verdict the only one.
+	settled bool
 }
 
 // retried writes the attempt as one another attempt replaced.
 func (a *attemptResult) retried(writer *proxy.LogWriter) {
+	if a.settled {
+		return
+	}
+	a.settled = true
 	if a.held != nil {
 		a.held.Retried = true
 		writer.Schedule(*a.held)
@@ -833,41 +892,93 @@ func (a *attemptResult) retried(writer *proxy.LogWriter) {
 // concluded writes the attempt as how the request ended. A response's row is
 // written by whoever delivers and closes it.
 func (a *attemptResult) concluded(writer *proxy.LogWriter) {
+	if a.settled {
+		return
+	}
+	a.settled = true
 	if a.held != nil {
 		writer.Schedule(*a.held)
 	}
 }
 
-// writeProxiedResponse copies an upstream response downstream, streaming it as
-// it arrives so an SSE body is not buffered.
-func writeProxiedResponse(w http.ResponseWriter, response *proxy.Response) {
-	defer response.Body.Close()
+// downstream is the client's side of a proxied answer.
+//
+// A stream's headers go out when it arrives, as before, though its body is held
+// back until it shows content: an attempt that fails before then is retried on
+// another channel. The headers can be sent only once, so a later attempt
+// continues the stream they opened.
+type downstream struct {
+	w          http.ResponseWriter
+	headerSent bool
+	lastPing   time.Time
+}
 
-	header := w.Header()
+// sendHeader writes a response's status and headers, the first time only.
+func (d *downstream) sendHeader(response *proxy.Response) {
+	if d.headerSent {
+		return
+	}
+	d.headerSent = true
+
+	header := d.w.Header()
 	for name, value := range response.Headers {
 		if containsFold(hopByHopResponseHeaders, name) {
 			continue
 		}
 		header.Set(name, value)
 	}
-	w.WriteHeader(response.Status)
+	d.w.WriteHeader(response.Status)
+	d.flush()
+}
 
-	flusher, canFlush := w.(http.Flusher)
+// ping keeps a held-back stream's connection busy, at most once a second. An
+// SSE comment line is skipped by every client's parser: ": waiting\n\n".
+func (d *downstream) ping() {
+	if time.Since(d.lastPing) < time.Second {
+		return
+	}
+	d.lastPing = time.Now()
+	if _, err := io.WriteString(d.w, ": waiting for the upstream\n\n"); err == nil {
+		d.flush()
+	}
+}
+
+func (d *downstream) flush() {
+	if flusher, ok := d.w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// deliver copies an upstream response downstream, streaming it as it arrives
+// so an SSE body is not buffered.
+func (d *downstream) deliver(response *proxy.Response) {
+	defer response.Body.Close()
+	d.sendHeader(response)
+
 	buffer := make([]byte, 32*1024)
 	for {
 		read, err := response.Body.Read(buffer)
 		if read > 0 {
-			if _, writeErr := w.Write(buffer[:read]); writeErr != nil {
+			if _, writeErr := d.w.Write(buffer[:read]); writeErr != nil {
 				return
 			}
-			if canFlush {
-				flusher.Flush()
-			}
+			d.flush()
 		}
 		if err != nil {
 			return
 		}
 	}
+}
+
+// holdsStream reports whether a stream on this path waits for content before
+// reaching the client. Text generation does; an image stream is mostly image
+// data, which holding back would only delay.
+func holdsStream(path string) bool {
+	switch path {
+	case "chat/completions", "completions", "responses", "messages":
+		return true
+	}
+	return false
 }
 
 // AggregateModelIDs collects unique model ids from enabled upstream configs,

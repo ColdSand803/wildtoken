@@ -4,10 +4,12 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -219,4 +221,98 @@ func TestMisconfiguredChannelsAreAttempts(t *testing.T) {
 			oneRequest(t, logged)
 		})
 	}
+}
+
+// sseChannel streams parts, flushing after each.
+func sseChannel(t *testing.T, parts ...string) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("content-type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		for _, part := range parts {
+			w.Write([]byte(part))
+			w.(http.Flusher).Flush()
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+const (
+	streamStart  = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":5}}}\n\n"
+	streamText   = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"answer\"}}\n\n"
+	streamStop   = "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+	streamFailed = "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"gateway_concurrency_limit\",\"message\":\"Concurrency limit exceeded\"}}\n\n"
+)
+
+const streamRequest = `{"model":"test-model","stream":true,"messages":[{"role":"user","content":"hi"}]}`
+
+// streamThroughServer sends a stream request over a real connection, so the
+// held-back headers, pings and flushes go through net/http as in production.
+func streamThroughServer(t *testing.T, router http.Handler) (int, string) {
+	t.Helper()
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/v1/messages",
+		strings.NewReader(streamRequest))
+	request.Header.Set("authorization", "Bearer caller-token")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	defer response.Body.Close()
+	body, _ := io.ReadAll(response.Body)
+	return response.StatusCode, string(body)
+}
+
+// A stream that fails before any content goes to the next channel, and the
+// client receives only that channel's answer.
+func TestAStreamFailingBeforeContentMovesToTheNextChannel(t *testing.T) {
+	state := proxyRateLimitState(t)
+	insertCallerToken(t, state.DB, "caller-token")
+	createChannel(t, state, "busy", sseChannel(t, streamStart, streamFailed).URL, 999, nil)
+	createChannel(t, state, "free", sseChannel(t, streamStart, streamText, streamStop).URL, 100, nil)
+
+	code, body := streamThroughServer(t, proxyRateLimitRouter(state))
+	if code != http.StatusOK || !strings.HasSuffix(body, streamStart+streamText+streamStop) {
+		t.Fatalf("status %d body %q, want the free channel's stream", code, body)
+	}
+	if strings.Contains(body, "Concurrency") {
+		t.Errorf("the client saw the busy channel's error: %q", body)
+	}
+
+	logged := loggedAttempts(t, state)
+	want := []string{"busy:Bad Gateway:retried", "free:OK:final"}
+	if got := shape(logged); !slices.Equal(got, want) {
+		t.Fatalf("logged %v, want %v", got, want)
+	}
+	oneRequest(t, logged)
+	if requests, errors := usageRequests(t, state); requests != 1 || errors != 0 {
+		t.Errorf("usage counted %d requests, %d errors; want 1 and 0", requests, errors)
+	}
+}
+
+// The client already holds the first stream's headers. When the next channel
+// answers with something else, the client gets the first stream as it was sent.
+func TestAFailedStreamIsReplayedWhenNothingElseCanFollowIt(t *testing.T) {
+	state := proxyRateLimitState(t)
+	insertCallerToken(t, state.DB, "caller-token")
+	limited, _ := statusUpstream(t, http.StatusTooManyRequests)
+	createChannel(t, state, "busy", sseChannel(t, streamStart, streamFailed).URL, 999, nil)
+	createChannel(t, state, "limited", limited.URL, 100, nil)
+
+	code, body := streamThroughServer(t, proxyRateLimitRouter(state))
+	if code != http.StatusOK || !strings.HasSuffix(body, streamStart+streamFailed) {
+		t.Fatalf("status %d body %q, want the busy channel's stream as sent", code, body)
+	}
+
+	// The replayed stream is logged once delivered, after the attempt that
+	// came later.
+	logged := loggedAttempts(t, state)
+	want := []string{"limited:Too Many Requests:retried", "busy:Bad Gateway:final"}
+	if got := shape(logged); !slices.Equal(got, want) {
+		t.Fatalf("logged %v, want %v", got, want)
+	}
+	oneRequest(t, logged)
 }
