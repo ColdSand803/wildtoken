@@ -289,8 +289,8 @@ func TestExactModelNameAndMappingTieBeforePriority(t *testing.T) {
 		if err != nil || !ok {
 			t.Fatalf("load %s: %v (ok=%v)", name, err, ok)
 		}
-		if score := modelMatchScore(newParsedUpstream(row, []int64{models.DefaultGroupID}), ptr("gpt-test")); score != 4 {
-			t.Errorf("%s scored %d, want 4", name, score)
+		if score := modelMatchScore(newParsedUpstream(row, []int64{models.DefaultGroupID}), ptr("gpt-test")); score != 2 {
+			t.Errorf("%s scored %d, want 2", name, score)
 		}
 	}
 
@@ -418,12 +418,30 @@ func TestExactModelNameWinsOverALongerCandidateListedFirst(t *testing.T) {
 	if forwarded == nil || *forwarded != "gpt-4o" {
 		t.Fatalf("forwarded model = %v, want the exact match gpt-4o", forwarded)
 	}
+}
 
-	// A request with no exact match still falls back to the prefix candidate.
-	partial := "gpt-4"
-	forwarded = selectForwardModel(parsed, &partial)
-	if forwarded == nil || *forwarded != "gpt-4o-mini" {
-		t.Fatalf("forwarded model = %v, want the first prefix candidate", forwarded)
+// A listed name that only starts or ends with the request is no match, so a
+// failover away from the channel that lists the model finds no route rather
+// than a smaller model under a nearby name.
+func TestANearbyModelNameIsNoMatch(t *testing.T) {
+	database := testDB(t)
+	insertUpstream(t, database, "exact", []string{"gpt-4o"}, 100, 100, true)
+	insertUpstream(t, database, "nearby", []string{"gpt-4o-mini", "openai/gpt-4o"}, 100, 100, true)
+
+	selection, err := SelectUpstream(context.Background(), database, NewRoutingCache(),
+		NewAutoWeightManager(), testPolicy(), nil, ptr("gpt-4o"), models.DefaultGroupID,
+		map[int64]bool{1: true})
+	if err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	if selection != nil {
+		t.Fatalf("with the exact channel excluded, %q served gpt-4o as %v",
+			selection.Upstream.Name, *selection.ForwardModel)
+	}
+
+	if selection := selectWithFreshCache(t, database, NewAutoWeightManager(),
+		ptr("nearby"), ptr("gpt-4o")); selection != nil {
+		t.Errorf("direct selection served gpt-4o as %v", *selection.ForwardModel)
 	}
 }
 

@@ -204,8 +204,10 @@ WildToken chooses an upstream in this order:
 1. `X-WildToken-Upstream` header or `?upstream=` query parameter selects a
    channel by name or ID.
 2. Request JSON `model` exact-matches a channel model-mapping key or model name.
-3. The same `model` is matched against configured model prefixes, upstream-name
-   prefixes, and upstream-name suffixes.
+3. Failing that, the same `model` is matched against the channel's model
+   prefixes. A listed model name that merely starts or ends with the request is
+   no match: `gpt-4o` does not reach a channel listing only `gpt-4o-mini`. Point
+   an alias at another name with a model mapping.
 4. Among enabled candidates, the highest `priority` layer wins.
 5. Within that priority layer, WildToken performs weighted random selection.
    When automatic weight is enabled, effective weight is

@@ -547,12 +547,6 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 			if selected == nil {
 				break
 			}
-			// The allowlist admitted the name asked for, not whichever name a
-			// channel's list happens to start or end with it.
-			if !forwardModelAllowed(config.auth.AllowedModels, config.model, selected) {
-				excluded[selected.Upstream.ID] = true
-				continue
-			}
 			// A channel whose stored headers no longer build a request fails
 			// every request it is given, so it is charged, logged and passed
 			// over. Ending the request here refused it with healthy channels
@@ -679,20 +673,6 @@ func runProxyAttempts(w http.ResponseWriter, r *http.Request, state *appstate.St
 		previousUpstreamID = &upstreamID
 		lastFailure = &attemptResult{response: response, err: err}
 	}
-}
-
-// forwardModelAllowed reports whether a selection forwards a model the token
-// may use. An operator's explicit mapping is honored as written; a fuzzy name
-// match must pass the allowlist itself, or a token limited to "gpt-4" could be
-// forwarded as "gpt-4.5-preview".
-func forwardModelAllowed(allowed []string, requested *string, selected *proxy.Selection) bool {
-	if len(allowed) == 0 || selected.Mapped || selected.ForwardModel == nil {
-		return true
-	}
-	if requested != nil && *selected.ForwardModel == *requested {
-		return true
-	}
-	return models.ModelAllowed(allowed, *selected.ForwardModel)
 }
 
 // withoutQueryParam drops one parameter from a raw query and leaves the rest
