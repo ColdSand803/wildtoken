@@ -14,7 +14,7 @@ test("Gojo manifest exposes the Limitless palette", () => {
     label: "五条悟",
     css: "theme.css",
     swatch: ["#070910", "#63dcff"],
-    version: "1.0.0",
+    version: "1.1.0",
     description: "Satoru Gojo character theme with a blindfold rail, Six Eyes focus states, and blue-red-violet Limitless fields.",
   });
 });
@@ -31,7 +31,8 @@ test("Gojo defines a scoped Six Eyes theme without external assets", () => {
   ]) {
     assert.ok(css.includes(token), `missing ${token}`);
   }
-  assert.match(css, /\.brand-mark::before[\s\S]*radial-gradient/);
+  // The rail opens with the name; the pack draws no product mark.
+  assert.match(css, /\.brand-mark \{\s*display: none;\s*\}/);
   assert.match(css, /body::before[\s\S]*repeating-radial-gradient/);
   assert.doesNotMatch(css, /url\(["']?https?:/);
 });
