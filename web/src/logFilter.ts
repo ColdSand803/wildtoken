@@ -6,7 +6,20 @@
  * internal/db/log.go 的 appendFilters，两边改一处要同步另一处。
  */
 
-import type { RequestLog } from "./types";
+import type { ActiveRequest, RequestLog } from "./types";
+
+type LogFilterRow = Pick<
+  RequestLog,
+  | "upstream_id"
+  | "client_type"
+  | "model"
+  | "request_model"
+  | "upstream_model"
+  | "upstream_name"
+  | "downstream_token_name"
+  | "status_code"
+  | "error"
+> & { id: number | null };
 
 export interface LogFilters {
   /** 渠道 id 的字符串形式，空串 = 不筛。 */
@@ -29,7 +42,7 @@ function matchesStatus(code: number | null, status: string): boolean {
 }
 
 /** 大小写不敏感的子串匹配，字段同服务端 LIKE 的那八个。 */
-function matchesSearch(row: RequestLog, search: string): boolean {
+function matchesSearch(row: LogFilterRow, search: string): boolean {
   const needle = search.trim().toLowerCase();
   if (!needle) return true;
 
@@ -45,9 +58,14 @@ function matchesSearch(row: RequestLog, search: string): boolean {
   ].some((value) => value !== null && value !== undefined && String(value).toLowerCase().includes(needle));
 }
 
-export function logMatchesFilters(row: RequestLog, filters: LogFilters): boolean {
+export function logMatchesFilters(row: LogFilterRow, filters: LogFilters): boolean {
   if (filters.upstreamId && String(row.upstream_id ?? "") !== filters.upstreamId) return false;
   if (filters.clientType && row.client_type !== filters.clientType) return false;
   if (!matchesStatus(row.status_code, filters.status)) return false;
   return matchesSearch(row, filters.search);
+}
+
+export function activeMatchesFilters(row: ActiveRequest, filters: LogFilters): boolean {
+  // 在途 ID 不是日志 ID；最终状态码、错误尚未落定。
+  return logMatchesFilters({ ...row, id: null, status_code: null, error: null }, filters);
 }

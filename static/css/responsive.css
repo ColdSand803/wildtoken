@@ -217,7 +217,9 @@
   }
 
   .log-filter select,
-  .log-filter input {
+  .log-filter input,
+  /* 渠道 ID 框在 base.css 里单独收窄过，特异性高一级，这里要重新点名盖回去。 */
+  .log-filter-channel input {
     min-width: 0;
     width: 100%;
   }

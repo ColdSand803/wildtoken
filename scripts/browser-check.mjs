@@ -39,6 +39,8 @@ const FAKE_MODELS = ["gpt-4o", "gpt-4o-mini", "claude-sonnet-5", "grok-4.5"];
 const FAKE_REPLY = "假上游的回复。";
 /** 请求体里出现这个词，假上游就拖 3 秒再答，留出观测在途行的窗口。 */
 const SLOW_MARKER = "__slow__";
+const FILTER_HOLD_MARKER = "__filter_hold__";
+const heldFilterResponses = new Set();
 
 // ── CDP ──────────────────────────────────────────────────────────────────────
 
@@ -390,11 +392,21 @@ function startFakeUpstream() {
       raw += chunk;
     });
     request.on("end", () => {
-      const delay = raw.includes(SLOW_MARKER) ? 3000 : 0;
-      setTimeout(() => {
+      const respond = () => {
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify(body));
-      }, delay);
+      };
+      if (raw.includes(FILTER_HOLD_MARKER)) {
+        // 筛选检查主动释放响应，不靠延时猜测在途窗口。
+        const release = () => {
+          heldFilterResponses.delete(release);
+          respond();
+        };
+        heldFilterResponses.add(release);
+        response.once("close", () => heldFilterResponses.delete(release));
+        return;
+      }
+      setTimeout(respond, raw.includes(SLOW_MARKER) ? 3000 : 0);
     });
   });
   return new Promise((resolve, reject) => {
@@ -1003,6 +1015,112 @@ async function main() {
       const items = await page.count("[role=menu] [role=menuitem]");
       assert(items > 0, "菜单项数量为 0");
       await page.press("Escape");
+    });
+
+    await check("复制菜单只复制最新地址和全部 Key，归档和无 Key 也可用", async () => {
+      const cleanupPaths = [];
+      const refresh = () => page.evaluate(() => {
+        const button = [...document.querySelectorAll(".upstream-toolbar button")]
+          .find((node) => node.textContent.trim() === "刷新");
+        if (!button) throw new Error("找不到渠道刷新按钮");
+        button.click();
+      });
+      try {
+        const multi = await adminPost("/api/admin/upstreams/", upstreamPayload({
+          name: "copy-check-multi", base_url: "https://old.example.test/v1", api_key: null,
+          enabled: false,
+          keys: [
+            { name: "primary", api_key: "sk-copy-primary", enabled: true },
+            { name: "disabled", api_key: "sk-copy-disabled", enabled: false },
+          ],
+        }));
+        cleanupPaths.push(`/api/admin/upstreams/${multi.id}`);
+        const empty = await adminPost("/api/admin/upstreams/", upstreamPayload({
+          name: "copy-check-empty", base_url: "https://empty.example.test", api_key: null,
+          enabled: false, keys: [],
+        }));
+        cleanupPaths.push(`/api/admin/upstreams/${empty.id}`);
+        await refresh();
+        await page.waitFor(() => [...document.querySelectorAll("table.upstream-table tbody tr")]
+          .some((row) => row.textContent.includes("copy-check-multi")
+            && row.textContent.includes("https://old.example.test/v1")), { label: "复制检查渠道" });
+
+        // 列表仍是旧地址；复制要读服务器上的新地址。
+        const updated = await fetch(`${ORIGIN}/api/admin/upstreams/${multi.id}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json", "x-admin-token": ADMIN_TOKEN },
+          body: JSON.stringify(upstreamPayload({
+            name: multi.name, base_url: "https://new.example.test/v1", api_key: null, enabled: false,
+          })),
+        });
+        assertEqual(updated.status, 200, "更新复制检查地址");
+
+        await page.evaluate(() => {
+          const descriptor = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+          const originalFetch = window.fetch;
+          window.__channelCopies = [];
+          window.__channelCopyFailure = 0;
+          window.__channelCredentialCalls = 0;
+          Object.defineProperty(navigator, "clipboard", {
+            configurable: true,
+            value: { writeText: async (text) => { window.__channelCopies.push(text); } },
+          });
+          window.fetch = (input, init) => {
+            const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+            if (window.__channelCopyFailure
+              && url.includes(`/upstreams/${window.__channelCopyFailure}/credential`)
+              && ++window.__channelCredentialCalls === 2) {
+              return Promise.reject(new Error("取 Key 检查失败"));
+            }
+            return originalFetch.call(window, input, init);
+          };
+          window.__restoreChannelCopy = () => {
+            window.fetch = originalFetch;
+            if (descriptor) Object.defineProperty(navigator, "clipboard", descriptor);
+            else delete navigator.clipboard;
+            delete window.__channelCopies;
+            delete window.__channelCopyFailure;
+            delete window.__channelCredentialCalls;
+            delete window.__restoreChannelCopy;
+          };
+        });
+
+        const fixtures = [
+          { name: "auto-weight", text: `Base URL: http://127.0.0.1:${fakeUpstreamPort}\nAPI Key: sk-check` },
+          { name: multi.name, text: "Base URL: https://new.example.test/v1\nAPI Key: sk-copy-primary\nAPI Key: sk-copy-disabled" },
+          { name: empty.name, text: "Base URL: https://empty.example.test" },
+          { name: "archived-channel", archived: true, text: "Base URL: https://api.example.com\nAPI Key: sk-check" },
+        ];
+        for (const [index, fixture] of fixtures.entries()) {
+          if (fixture.archived) await page.click(".archived-toggle");
+          await openRowMenu(page, fixture.name);
+          await clickMenuItem(page, "复制地址和 API Key");
+          await page.waitFor((count) => window.__channelCopies.length === count,
+            { label: `${fixture.name} 写入剪贴板` }, index + 1);
+          assertEqual(await page.evaluate(() => window.__channelCopies.at(-1)), fixture.text, "复制内容");
+          if (fixture.archived) await page.click(".archived-toggle");
+        }
+
+        await page.evaluate((id) => { window.__channelCopyFailure = id; }, multi.id);
+        await openRowMenu(page, multi.name);
+        await clickMenuItem(page, "复制地址和 API Key");
+        await page.waitFor(() => [...document.querySelectorAll(".toast-message")]
+          .some((node) => node.textContent.includes("复制失败：取 Key 检查失败")), { label: "取 Key 失败提示" });
+        assertEqual(await page.evaluate(() => window.__channelCopies.length), fixtures.length,
+          "取一把 Key 失败不复制半份内容");
+      } finally {
+        await page.evaluate(() => { window.__restoreChannelCopy?.(); });
+        await page.press("Escape");
+        if (await page.evaluate(() => !document.querySelector(".archived-body")?.hasAttribute("hidden"))) {
+          await page.click(".archived-toggle");
+        }
+        for (const path of cleanupPaths.reverse()) {
+          await fetch(`${ORIGIN}${path}`, { method: "DELETE", headers: { "x-admin-token": ADMIN_TOKEN } });
+        }
+        await refresh();
+        await page.waitFor(() => ![...document.querySelectorAll("table.upstream-table tbody tr")]
+          .some((row) => row.textContent.includes("copy-check-")), { label: "复制检查渠道清理" });
+      }
     });
 
     /* 克隆是「拿完整配置开一个新建表单」。id 0 的草稿一旦被当成编辑，
@@ -2335,12 +2453,32 @@ async function main() {
       await sleepInPage(page, 900);
     });
 
-    await check("渠道筛选列出全量渠道", async () => {
-      const names = await page.evaluate(() => {
-        const select = document.querySelector(".log-filter-channel select");
-        return [...select.options].map((option) => option.textContent);
+    /* 渠道不再给下拉：ID 就写在每行的渠道格里，输入框只要把数字送进
+       upstream_id。先从行上读一个真 ID，再把它打进去。 */
+    await check("渠道 ID 输入框按 ID 筛并带上 upstream_id 参数", async () => {
+      const channelID = await page.evaluate(() => {
+        const strong = document.querySelector("table.log-table tbody tr .channel-stack strong");
+        return (strong?.textContent ?? "").replace(/^#/, "").trim();
       });
-      assert(names.includes("archived-channel"), `渠道不全：${names}`);
+      assert(/^\d+$/.test(channelID), `渠道格里没读到 ID：「${channelID}」`);
+
+      const seen = [];
+      const collect = (event) => seen.push(event.request.url);
+      cdp.on("Network.requestWillBeSent", collect);
+      try {
+        await page.fill(".log-filter-channel input", channelID);
+        await sleepInPage(page, 900);
+        const hits = seen.filter(
+          (url) => url.includes("/api/admin/logs/") && url.includes(`upstream_id=${channelID}`),
+        );
+        assert(hits.length > 0, `没发出带 upstream_id=${channelID} 的请求`);
+      } finally {
+        cdp.off("Network.requestWillBeSent", collect);
+      }
+
+      // 清空，后面的检查要靠完整列表。
+      await page.fill(".log-filter-channel input", "");
+      await sleepInPage(page, 900);
     });
 
 
@@ -2635,6 +2773,111 @@ async function main() {
       /* 请求可能已经结束（行没了），那也算数——说明它确实走完了一轮。
          只有「行还在且数字一模一样」才是计时死了。 */
       assert(second === null || second !== first, `已用时冻住在 ${first}`);
+    });
+
+    await check("在途请求遵守渠道、客户端、状态和搜索筛选", async () => {
+      const cleanupPaths = [];
+      const pending = [];
+      const channelIDs = async (expected) => page.waitFor((ids) => {
+        const shown = [...document.querySelectorAll("tr.log-row--active .channel-stack strong")]
+          .map((node) => Number(node.textContent.replace(/^#/, ""))).sort((a, b) => a - b);
+        return JSON.stringify(shown) === JSON.stringify(ids);
+      }, { label: `在途渠道 ${expected}`, timeout: 5000 }, [...expected].sort((a, b) => a - b));
+      const selectFilter = async (label, value) => page.evaluate((name, next) => {
+        const select = document.querySelector(`.log-toolbar select[aria-label="${name}"]`);
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(select, next);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }, label, value);
+      const elapsed = async () => page.evaluate(() =>
+        parseFloat(document.querySelector("tr.log-row--active .duration-time")?.textContent ?? ""));
+
+      try {
+        const group = await adminPost("/api/admin/groups", { name: "active-filter-check" });
+        cleanupPaths.push(`/api/admin/groups/${group.id}`);
+        const fixtures = [];
+        for (const [suffix, client] of [["alpha", "codex"], ["beta", "claude"]]) {
+          const name = `active-filter-${suffix}`;
+          const model = `filter-model-${suffix}`;
+          const channel = await adminPost("/api/admin/upstreams/", upstreamPayload({
+            name, base_url: `http://127.0.0.1:${fakeUpstreamPort}`,
+            model_names: [model], group_ids: [group.id],
+          }));
+          cleanupPaths.push(`/api/admin/upstreams/${channel.id}`);
+          const token = await adminPost("/api/admin/tokens", {
+            name: `filter-token-${suffix}`, enabled: true, group_id: group.id,
+          });
+          cleanupPaths.push(`/api/admin/tokens/${token.id}`);
+          const send = (prompt) => fetch(`${ORIGIN}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "content-type": "application/json", authorization: `Bearer ${token.token}`, "user-agent": client },
+            body: JSON.stringify({ model, messages: [{ role: "user", content: prompt }] }),
+          });
+          // 先落一条同客户端日志，让下拉有真实选项。
+          assertEqual((await send("筛选准备")).status, 200, "准备请求");
+          fixtures.push({ id: channel.id, name, model, tokenName: token.name, client, send });
+        }
+        for (const fixture of fixtures) pending.push(fixture.send(FILTER_HOLD_MARKER));
+        const [first, second] = fixtures;
+        const all = fixtures.map((fixture) => fixture.id);
+        await channelIDs(all);
+
+        await page.fill(".log-filter-channel input", String(first.id));
+        await channelIDs([first.id]);
+        const before = await elapsed();
+        await sleepInPage(page, 800);
+        await page.fill(".log-filter-channel input", String(second.id));
+        await channelIDs([second.id]);
+        await page.fill(".log-filter-channel input", String(first.id));
+        await channelIDs([first.id]);
+        assert((await elapsed()) > before + 0.5, "切筛选把在途计时退回了快照");
+        const concurrency = await page.evaluate(() => {
+          const pill = [...document.querySelectorAll(".log-rate-pill")]
+            .find((node) => node.querySelector(".log-rate-pill-label")?.textContent === "并发");
+          return Number(pill?.querySelector(".log-rate-value")?.textContent.replaceAll(",", ""));
+        });
+        assert(concurrency >= 2, "并发数不该缩成筛选后的行数");
+        await page.fill(".log-filter-channel input", "");
+        await channelIDs(all);
+
+        for (const search of [first.name, first.model, first.tokenName]) {
+          await page.fill("#log-search", search);
+          await channelIDs([first.id]);
+        }
+        await page.fill("#log-search", "not-a-filter-match");
+        await channelIDs([]);
+        await page.fill("#log-search", "");
+        await channelIDs(all);
+
+        await selectFilter("按客户端筛选日志", first.client);
+        await channelIDs([first.id]);
+        await selectFilter("按客户端筛选日志", second.client);
+        await channelIDs([second.id]);
+        await selectFilter("按客户端筛选日志", "");
+        await channelIDs(all);
+        for (const status of ["2xx", "4xx", "5xx"]) {
+          await selectFilter("按状态码筛选日志", status);
+          await channelIDs([]);
+        }
+        await selectFilter("按状态码筛选日志", "none");
+        await channelIDs(all);
+        await page.fill(".log-filter-channel input", String(first.id));
+        await selectFilter("按客户端筛选日志", first.client);
+        await page.fill("#log-search", first.model);
+        await channelIDs([first.id]);
+        await page.fill("#log-search", second.model);
+        await channelIDs([]);
+      } finally {
+        for (const release of heldFilterResponses) release();
+        await Promise.all(pending);
+        await page.fill(".log-filter-channel input", "");
+        await page.fill("#log-search", "");
+        await selectFilter("按客户端筛选日志", "");
+        await selectFilter("按状态码筛选日志", "");
+        await channelIDs([]);
+        for (const path of cleanupPaths.reverse()) {
+          await fetch(`${ORIGIN}${path}`, { method: "DELETE", headers: { "x-admin-token": ADMIN_TOKEN } });
+        }
+      }
     });
 
     /* IP 列放在日志段最后：它要新打一条请求，而这条会顶到列表第一行。

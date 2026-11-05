@@ -1129,9 +1129,10 @@ html[data-theme="light"] .nav-link:hover {
   min-width: 180px;
 }
 
-.log-filter-channel select {
-  min-width: 220px;
-  width: clamp(220px, 22vw, 300px);
+/* 渠道 ID 输入框只容四五位数字，不跟下拉一样铺开。 */
+.log-filter-channel input {
+  min-width: 120px;
+  width: clamp(120px, 12vw, 160px);
 }
 
 .view-toolbar {
