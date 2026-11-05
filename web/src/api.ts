@@ -6,7 +6,7 @@ import type { LogFilters } from "./logFilters";
 
 import type {
   APIToken,
-  BalanceResult,
+  BalanceResponse,
   ChannelExportDocument,
   DailyUsagePage,
   Group,
@@ -15,6 +15,7 @@ import type {
   LogSnapshotField,
   ModelTestResult,
   PromptTemplate,
+  RequestLog,
   RequestLogPage,
   RuntimeSettings,
   SystemInfo,
@@ -202,11 +203,11 @@ export function testUpstreamModel(
 export function fetchUpstreamBalance(
   id: number,
   provider: "new-api" | "sub2api",
-): Promise<BalanceResult> {
+): Promise<BalanceResponse> {
   const path = provider === "sub2api"
     ? `/api/admin/upstreams/${id}/balance/sub2api`
     : `/api/admin/upstreams/${id}/balance`;
-  return api<BalanceResult>(path, { method: "POST" });
+  return api<BalanceResponse>(path, { method: "POST" });
 }
 
 export function listGroups(): Promise<Array<{ id: number; name: string }>> {
@@ -365,6 +366,11 @@ export function fetchDailyUsage(): Promise<{ page: DailyUsagePage; multiplier: n
   ]).then(([page, settings]) => ({ page, multiplier: settings.dashboard_multiplier }));
 }
 
+/** 日志里出现过的客户端类型，按名称排序。日志页的客户端下拉用。 */
+export function listLogClientTypes(): Promise<string[]> {
+  return api<{ client_types: string[] }>("/api/admin/logs/clients").then((body) => body.client_types);
+}
+
 export function listTokens(): Promise<APIToken[]> {
   return api<APIToken[]>("/api/admin/tokens/");
 }
@@ -394,6 +400,11 @@ export function resetTokenUsage(id: number): Promise<APIToken> {
 }
 
 /** 一份快照。元信息列表行里已经有了，报文按页签逐份拉，没存过的返回 null。 */
+/** 这条日志所属请求的各次尝试，按先后排，不带报文。只尝试了一次时为空。 */
+export function listLogAttempts(id: number): Promise<RequestLog[]> {
+  return api<{ items: RequestLog[] }>(`/api/admin/logs/${id}/attempts`).then((page) => page.items);
+}
+
 export function getLogSnapshot(id: number, field: LogSnapshotField): Promise<unknown> {
   return api<unknown>(`/api/admin/logs/${id}/snapshots/${field}`);
 }

@@ -5,7 +5,8 @@ import test from "node:test";
 import { scaleDailyUsage } from "../web/src/dashboardScale.ts";
 import { CALENDAR_WEEKS, buildCalendar } from "../web/src/usageCalendar.ts";
 
-const usage = (day, requests, total_tokens = 0, errors = 0) => ({ day, requests, errors, total_tokens });
+const usage = (day, requests, total_tokens = 0, errors = 0, cancelled = 0) =>
+  ({ day, requests, errors, cancelled, total_tokens });
 
 test("今天在最后一列，第一列从 52 周前的周一开始", () => {
   // 2026-11-04 是周三。
@@ -87,8 +88,8 @@ test("月份标签在 1 号那一列；第一列的残月离下一个标签够�
 });
 
 test("日历计数乘看板倍率取整，非法倍率原样返回", () => {
-  const days = [usage("2026-11-04", 3, 7, 1)];
-  assert.deepEqual(scaleDailyUsage(days, 1.5), [usage("2026-11-04", 5, 11, 2)]);
+  const days = [usage("2026-11-04", 3, 7, 1, 1)];
+  assert.deepEqual(scaleDailyUsage(days, 1.5), [usage("2026-11-04", 5, 11, 2, 2)]);
   assert.equal(scaleDailyUsage(days, 0), days);
   assert.equal(scaleDailyUsage(days, Number.NaN), days);
 });

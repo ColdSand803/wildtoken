@@ -95,12 +95,12 @@ func AdminDebugUpstream(state *appstate.State) http.HandlerFunc {
 			targetQuery = "beta=true"
 		}
 		targetURL := buildProbeURL(row.BaseURL, debugProtocolPaths[input.Protocol], targetQuery)
-		apiKey, err := probeKey(r.Context(), state.DB, &row, 0)
+		credential, err := probeKey(r.Context(), state.DB, &row, 0)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
 		}
-		headers := buildProtocolRequestHeaders(input.Protocol, model, apiKey, overrides)
+		headers := buildProtocolRequestHeaders(input.Protocol, model, credential.apiKey, overrides)
 
 		w.Header().Set("content-type", "text/event-stream")
 		w.Header().Set("cache-control", "no-store")
@@ -133,6 +133,8 @@ func AdminDebugUpstream(state *appstate.State) http.HandlerFunc {
 			body:         input.Body,
 			upstreamID:   &row.ID,
 			upstreamName: &row.Name,
+			keyID:        credential.keyID,
+			keyName:      credential.keyName,
 			model:        logModel,
 			onResponse: func(status int, headers map[string]string) {
 				send("response", map[string]any{

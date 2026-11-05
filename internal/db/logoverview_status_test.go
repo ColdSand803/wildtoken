@@ -16,7 +16,7 @@ func TestLogOverviewErrorDefinitionMatchesStatusFilter(t *testing.T) {
 	ctx := context.Background()
 
 	// One row per status class the classification has to place: 2xx, a 3xx that
-	// is non-2xx but not a failure, a 4xx, a client cancel, a 5xx, and a row
+	// is non-2xx, a 4xx, a client cancel, a 5xx, and a row
 	// that never got a status.
 	if _, err := database.Exec(`INSERT INTO request_logs
         (id, created_at, method, path, client_type, stream, status_code, duration_ms)
@@ -30,6 +30,7 @@ func TestLogOverviewErrorDefinitionMatchesStatusFilter(t *testing.T) {
 		t.Fatalf("seed logs: %v", err)
 	}
 
+	rebuildStats(t, database)
 	overview, err := LogOverview(ctx, database, LogTopWindowOneDay, "", "", 0)
 	if err != nil {
 		t.Fatalf("overview: %v", err)
@@ -41,14 +42,14 @@ func TestLogOverviewErrorDefinitionMatchesStatusFilter(t *testing.T) {
 		t.Fatalf("list error rows: %v", err)
 	}
 
-	// 302, 404, 499, 502 and the missing status are all errors; only the 200 is
-	// not.
+	// 302, 404, 502 and the missing status are errors; 200 is successful
+	// and 499 is a client cancellation, not a failure.
 	if int64(len(errorRows)) != overview.ErrorRequests {
 		t.Errorf("status=error returned %d rows, overview reported %d errors",
 			len(errorRows), overview.ErrorRequests)
 	}
-	if overview.ErrorRequests != 5 {
-		t.Errorf("error requests = %d, want 5", overview.ErrorRequests)
+	if overview.ErrorRequests != 4 {
+		t.Errorf("error requests = %d, want 4", overview.ErrorRequests)
 	}
 
 	var seriesErrors int64
@@ -62,14 +63,14 @@ func TestLogOverviewErrorDefinitionMatchesStatusFilter(t *testing.T) {
 
 	// The classes partition the window exactly once each: `other` is 1xx/3xx
 	// only, `none` is the missing status only, and nothing is double counted.
-	if overview.Status2xx != 1 || overview.Status4xx != 2 ||
+	if overview.Status2xx != 1 || overview.Status4xx != 1 || overview.StatusCancelled != 1 ||
 		overview.Status5xx != 1 || overview.StatusOther != 1 || overview.StatusNone != 1 {
-		t.Errorf("status classes = 2xx:%d 4xx:%d 5xx:%d other:%d none:%d, want 1/2/1/1/1",
-			overview.Status2xx, overview.Status4xx, overview.Status5xx,
+		t.Errorf("status classes = 2xx:%d 4xx:%d 5xx:%d cancelled:%d other:%d none:%d, want 1/1/1/1/1/1",
+			overview.Status2xx, overview.Status4xx, overview.Status5xx, overview.StatusCancelled,
 			overview.StatusOther, overview.StatusNone)
 	}
 	classSum := overview.Status2xx + overview.Status4xx + overview.Status5xx +
-		overview.StatusOther + overview.StatusNone
+		overview.StatusCancelled + overview.StatusOther + overview.StatusNone
 	if classSum != overview.TotalRequests {
 		t.Errorf("status classes sum to %d, total is %d", classSum, overview.TotalRequests)
 	}

@@ -3,8 +3,10 @@ import type { LogFilters } from "../logFilters";
 import { LogTiming } from "../components/LogTiming";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { UnauthorizedError, listLogs, listUpstreams } from "../api";
+import { UnauthorizedError, listLogClientTypes, listLogs, listUpstreams } from "../api";
+import { clientTypeOptions } from "../clientTypes";
 import { LogDetailDialog } from "../components/LogDetailDialog";
+import { RetriedMark } from "../components/RetriedMark";
 import {
   exactTokens,
   firstTokenTone,
@@ -71,22 +73,6 @@ function ReasoningCell({ log }: { log: ReasoningSource }) {
   );
 }
 
-/** 客户端筛选的固定档位。后三个是控制台探测，不是真实客户端。 */
-const CLIENT_TYPES = [
-  "codex-desktop",
-  "codex-tui",
-  "codex",
-  "opencode",
-  "claude",
-  "pi",
-  "dsh",
-  "unknown",
-  "model-test",
-  "channel-test",
-  "model-list",
-  "balance",
-];
-
 function readColumns(): Record<ColumnKey, boolean> {
   const fallback = Object.fromEntries(COLUMNS.map((c) => [c.key, true])) as Record<ColumnKey, boolean>;
   try {
@@ -119,13 +105,17 @@ function Masked() {
  *
  * 写成一行的话，同名不同 ID 的渠道在日志里分不出来；而过滤器按 ID 筛，
  * 没有 ID 就对不上号。
+ *
+ * keyName 只有在途行传：跑长流时要看出是哪把 Key 在跑。
  */
 function ChannelStack({
   log,
   sensitiveHidden,
+  keyName,
 }: {
   log: { upstream_id: number | null; upstream_name: string | null };
   sensitiveHidden: boolean;
+  keyName?: string;
 }) {
   const name = (log.upstream_name ?? "").trim();
   const hidden = sensitiveHidden && Boolean(name);
@@ -146,24 +136,44 @@ function ChannelStack({
       <strong title={name ? `#${log.upstream_id} · ${shown}` : `#${log.upstream_id}`}>
         {`#${log.upstream_id}`}
       </strong>
-      <ChannelStackName name={name} hidden={hidden} />
+      <ChannelStackName name={name} hidden={hidden} keyName={keyName} />
     </div>
   );
 }
 
-/** 下行：有名字就显（该遮就遮），没名字说清楚是没名而不是空着。 */
-function ChannelStackName({ name, hidden }: { name: string; hidden: boolean }) {
-  if (!name) return <span className="muted">无名称</span>;
+/**
+ * 下行：有名字就显（该遮就遮），没名字说清楚是没名而不是空着。
+ * 带 Key 时接在后面，例："主力 · key-2"。Key 名随渠道名一起遮。
+ */
+function ChannelStackName({
+  name,
+  hidden,
+  keyName,
+}: {
+  name: string;
+  hidden: boolean;
+  keyName?: string;
+}) {
+  const key = keyName ? (
+    <>
+      {" · "}
+      {hidden ? <Masked /> : keyName}
+    </>
+  ) : null;
+
+  if (!name) return <span className="muted">无名称{key}</span>;
   if (hidden) {
     return (
       <span className="muted">
         <Masked />
+        {key}
       </span>
     );
   }
   return (
-    <span className="muted" title={name}>
+    <span className="muted" title={keyName ? `${name} · ${keyName}` : name}>
       {name}
+      {key}
     </span>
   );
 }
@@ -184,6 +194,10 @@ function durationRating(log: RequestLog): { tone: string; basis: string } {
   const status = log.status_code;
   if (status === null || !Number.isFinite(status)) {
     return { tone: "danger", basis: "请求无响应或状态码缺失" };
+  }
+  // 客户端自己断开，快慢都不是这条请求的问题。
+  if (status === 499) {
+    return { tone: "neutral", basis: "客户端断开，不算失败" };
   }
   if (status < 200 || status >= 300) {
     return { tone: "danger", basis: `HTTP ${status} 错误，优先标红` };
@@ -311,6 +325,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   const [statusFilter, setStatusFilter] = useState(initial.status ?? "");
   const [upstreamFilter, setUpstreamFilter] = useState(initial.upstreamId ?? "");
   const [upstreams, setUpstreams] = useState<Array<{ id: number; name: string }>>([]);
+  const [clientTypes, setClientTypes] = useState<string[]>([]);
   /* 输入框的实时值和真正拿去查的值分开。每敲一下键都发一次查询的话，
      输一个模型名会打出十几次全库扫描。 */
   const [searchInput, setSearchInput] = useState(initial.search ?? "");
@@ -427,6 +442,13 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
       .catch(() => setUpstreams([]));
   }, []);
 
+  // 客户端下拉同理，取库里出现过的全部类型。
+  useEffect(() => {
+    listLogClientTypes()
+      .then(setClientTypes)
+      .catch(() => setClientTypes([]));
+  }, []);
+
   const onResync = useCallback(() => {
     if (onLatestPage) void load();
     else setMissedNew(true);
@@ -474,6 +496,16 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
        的比流里攒着的还新，直接拼在前面顺序就乱了。 */
     return merged.sort((a, b) => b.id - a.id).slice(0, pageSize);
   }, [stream.logs, page?.items, onLatestPage, filters, pageSize]);
+
+  const clientOptions = useMemo(
+    () =>
+      clientTypeOptions(
+        clientTypes,
+        [...stream.logs, ...(page?.items ?? [])].map((log) => log.client_type),
+        clientFilter,
+      ),
+    [clientTypes, stream.logs, page?.items, clientFilter],
+  );
 
   /* 在途集合：只在最新页显示。流连着就以它为准，断了退回快照里的那份。 */
   const activeFromPage = page?.active ?? [];
@@ -577,13 +609,20 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
               onChange={(event) => applyFilter(setClientFilter, event.target.value)}
             >
               <option value="">全部客户端</option>
-              {/* 固定清单，和旧版一致。从当前页数据里凑的话，没出现在这几十行
-                  里的客户端就根本选不到。 */}
-              {CLIENT_TYPES.map((type) => (
+              {clientOptions.clients.map((type) => (
                 <option key={type} value={type}>
                   {type}
                 </option>
               ))}
+              {clientOptions.probes.length > 0 ? (
+                <optgroup label="控制台探测">
+                  {clientOptions.probes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
             </select>
           </label>
           <label className="log-filter">
@@ -797,6 +836,12 @@ function RatePill({ label, value }: { label: string; value: number | null }) {
   );
 }
 
+/** 没配 Key 的渠道是 0；有 id 没名字时退回 #id。 */
+function activeKeyName(request: ActiveRequest): string | undefined {
+  if (!request.upstream_key_id) return undefined;
+  return request.upstream_key_name || `#${request.upstream_key_id}`;
+}
+
 function ActiveRows({
   active,
   sensitiveHidden,
@@ -834,7 +879,11 @@ function ActiveRows({
             {request.upstream_id === null || request.upstream_id === undefined ? (
               <span className="muted">路由中…</span>
             ) : (
-              <ChannelStack log={request} sensitiveHidden={sensitiveHidden} />
+              <ChannelStack
+                log={request}
+                sensitiveHidden={sensitiveHidden}
+                keyName={activeKeyName(request)}
+              />
             )}
           </td>
           <td className="token-cell" data-col="token">
@@ -978,6 +1027,7 @@ function LogRow({
       </td>
       <td data-col="status">
         <StatusBadge code={log.status_code} />
+        {log.retried ? <RetriedMark /> : null}
       </td>
       {/* 色调不能写死成 neutral——CSS 里 ok/warn/danger 各有规则，写死了这一列
           就永远是灰的，扫一眼看不出哪条慢。 */}
@@ -1056,6 +1106,8 @@ function StatusBadge({ code }: { code: number | null }) {
      CSS 里不存在的名字，那一格就没颜色了。 */
   if (code >= 200 && code < 300) return <span className="badge on status-2xx">{code}</span>;
   if (code >= 300 && code < 400) return <span className="badge neutral status-3xx">{code}</span>;
+  // 499 是客户端自己断开，不是失败，不标红。
+  if (code === 499) return <span className="badge neutral status-4xx">{code}</span>;
   if (code >= 400 && code < 500) return <span className="badge danger status-4xx">{code}</span>;
   if (code >= 500) return <span className="badge danger status-5xx">{code}</span>;
   return <span className="badge neutral status-other">{code}</span>;

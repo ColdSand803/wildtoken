@@ -239,7 +239,7 @@ func TestQueuedBodiesPastTheBudgetKeepOnlyTheirLength(t *testing.T) {
 	database := loggingTestDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := NewLogWriter(ctx, database, metrics.New(), db.NewLogStatsCache(), 16, quota.NewTracker(), nil)
+	writer := NewLogWriter(ctx, database, metrics.New(), 16, quota.NewTracker(), nil)
 
 	writer.queuedBodyBytes.Store(logQueueBodyBudget)
 	request := textSnapshot(`{"method":"POST"}`, "a body that does not fit")
@@ -264,11 +264,10 @@ func TestQueuedBodiesPastTheBudgetKeepOnlyTheirLength(t *testing.T) {
 func TestLogWriterBatchesQueuedEntriesAndUpdatesMetrics(t *testing.T) {
 	database := loggingTestDB(t)
 	runtimeMetrics := metrics.New()
-	logStats := db.NewLogStatsCache()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := NewLogWriter(ctx, database, runtimeMetrics, logStats, 16, quota.NewTracker(), nil)
+	writer := NewLogWriter(ctx, database, runtimeMetrics, 16, quota.NewTracker(), nil)
 	subscription := writer.Subscribe()
 	defer subscription.Close()
 	events := subscription.Events()
@@ -309,10 +308,9 @@ func TestLogWriterBatchesQueuedEntriesAndUpdatesMetrics(t *testing.T) {
 			snapshot.LogDroppedTotal, snapshot.LogWriteFailuresTotal)
 	}
 
-	statsSnapshot := logStats.Snapshot()
-	if statsSnapshot.TotalLogCount != 2 || statsSnapshot.LogCount24h != 2 {
-		t.Errorf("stats = %d total / %d in 24h, want 2/2",
-			statsSnapshot.TotalLogCount, statsSnapshot.LogCount24h)
+	// The batch's rows reach the dashboard's hourly totals in the same commit.
+	if requests := countRows(t, database, "SELECT SUM(requests) FROM stats_hourly"); requests != 2 {
+		t.Errorf("stats_hourly counted %d requests, want 2", requests)
 	}
 
 	received := make([]LogStreamEvent, 0, 2)
@@ -345,7 +343,7 @@ func TestLogWriterDropsEntriesRatherThanBlockingWhenTheQueueIsFull(t *testing.T)
 	// A zero capacity is raised to one, so exactly one entry can be queued while
 	// the writer is busy.
 	ctx, cancel := context.WithCancel(context.Background())
-	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 1, quota.NewTracker(), nil)
+	writer := NewLogWriter(ctx, database, runtimeMetrics, 1, quota.NewTracker(), nil)
 
 	// Stop the writer before scheduling, so nothing drains the queue.
 	cancel()
@@ -376,7 +374,7 @@ func TestCleanupPassClearsBodiesBeyondTheKeepCount(t *testing.T) {
 	settings := models.DefaultRuntimeSettings()
 	settings.LogBodyKeepCount = 2
 	runtimeMetrics := metrics.New()
-	RunCleanupPass(ctx, database, &settings, runtimeMetrics, db.NewLogStatsCache(), CleanupSteps{Chunks: true})
+	RunCleanupPass(ctx, database, &settings, runtimeMetrics, CleanupSteps{Chunks: true})
 
 	if cleared := countRows(t, database,
 		"SELECT COUNT(*) FROM request_log_snapshots WHERE bodies_cleared = 1"); cleared != 3 {
@@ -554,7 +552,7 @@ func TestADroppedEntryStillReachesTheQuota(t *testing.T) {
 		t.Fatalf("held %d, want both requests weighed until committed", held)
 	}
 
-	writer.flush(ctx, database, db.NewLogStatsCache(), []LogEntry{<-writer.entries})
+	writer.flush(ctx, database, []LogEntry{<-writer.entries})
 
 	reloaded, _, err := db.GetToken(ctx, database, created.ID)
 	if err != nil {
@@ -589,13 +587,13 @@ func TestUsageOfAFailedBatchIsAppliedLater(t *testing.T) {
 	used := int32(300)
 	entry := LogEntry{Method: "POST", Path: "responses", DownstreamTokenID: &created.ID, TotalTokens: &used}
 	quotas.Meter(created.ID, "", 300)
-	writer.flush(ctx, broken, db.NewLogStatsCache(), []LogEntry{entry})
+	writer.flush(ctx, broken, []LogEntry{entry})
 
 	if held := quotas.Outstanding(created.ID, ""); held != 300 {
 		t.Fatalf("held %d after the failed write, want the usage still held", held)
 	}
 
-	writer.flush(ctx, database, db.NewLogStatsCache(), nil)
+	writer.flush(ctx, database, nil)
 	reloaded, _, err := db.GetToken(ctx, database, created.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -614,7 +612,7 @@ func TestSchedulingAfterCloseDropsTheEntryRatherThanPanicking(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 8, quota.NewTracker(), nil)
+	writer := NewLogWriter(ctx, database, runtimeMetrics, 8, quota.NewTracker(), nil)
 	writer.Close()
 
 	// A stream still running when the server stopped waiting for it schedules
@@ -632,7 +630,7 @@ func TestSchedulingConcurrentlyWithCloseNeverPanics(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	writer := NewLogWriter(ctx, database, metrics.New(), db.NewLogStatsCache(), 8, quota.NewTracker(), nil)
+	writer := NewLogWriter(ctx, database, metrics.New(), 8, quota.NewTracker(), nil)
 
 	// Close races the schedulers rather than following them, which is the order
 	// a shutdown that timed out on its in-flight requests produces.

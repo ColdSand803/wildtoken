@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
-# 重建并替换 wildtoken 容器，不切断正在跑的请求。
+# 重建并替换 wildtoken 容器。
 #
-# 先构建，旧容器照常服务；等进行中的请求清零再换容器；换完核对健康检查、
-# 运行的镜像和控制台 CSP，任一步失败就换回旧镜像。
+# 先构建，旧容器照常服务；等进行中的请求清零再换容器，等不到也换；换完核对
+# 健康检查、运行的镜像和控制台 CSP，任一步失败就换回旧镜像。
 #
-#   scripts/deploy.sh             最多等 600 秒
-#   WAIT=60 scripts/deploy.sh     最多等 60 秒，仍有请求就放弃，不换
-#   FORCE=1 scripts/deploy.sh     等满仍有请求也换，它们会被切断
+# 默认只等 60 秒：长流从不间断时永远等不到清零，而切断几个流可以接受。
+#
+#   scripts/deploy.sh             最多等 60 秒，仍有请求也换，它们会被切断
+#   WAIT=600 scripts/deploy.sh    最多等 600 秒
+#   FORCE=0 scripts/deploy.sh     等满仍有请求就放弃，不换，退出码 2
 #
 # 剩下的风险在换容器那一两秒：清零后刚到的请求最多再跑 15 秒
 # （requestDrainTimeout），到达时旧容器已停的请求连接失败，由客户端重试。
@@ -14,8 +16,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 SERVICE=wildtoken
-WAIT=${WAIT:-600}
-FORCE=${FORCE:-0}
+WAIT=${WAIT:-60}
+FORCE=${FORCE:-1}
 log() { printf '[deploy] %s %s\n' "$(date +%H:%M:%S)" "$*"; }
 
 for tool in docker curl; do
@@ -129,7 +131,7 @@ while :; do
 			log "等了 ${WAIT} 秒仍有 $n 个，FORCE=1，照换"
 			break
 		fi
-		log "等了 ${WAIT} 秒仍有 $n 个，放弃，没换；FORCE=1 可强制"
+		log "等了 ${WAIT} 秒仍有 $n 个，FORCE=0，放弃，没换"
 		exit 2
 	fi
 	sleep 1

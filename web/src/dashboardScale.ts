@@ -44,6 +44,7 @@ export function scaleDashboard(
       status_2xx: n(overview.status_2xx),
       status_4xx: n(overview.status_4xx),
       status_5xx: n(overview.status_5xx),
+      status_cancelled: n(overview.status_cancelled),
       status_other: n(overview.status_other),
       duration_count: n(overview.duration_count),
       latency_series: overview.latency_series.map((b) => ({ ...b, count: n(b.count) })),
@@ -75,6 +76,7 @@ export function scaleDailyUsage(days: DailyUsage[], multiplier: number): DailyUs
     ...day,
     requests: Math.round(day.requests * m),
     errors: Math.round(day.errors * m),
+    cancelled: Math.round(day.cancelled * m),
     total_tokens: Math.round(day.total_tokens * m),
   }));
 }

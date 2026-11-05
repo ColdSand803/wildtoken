@@ -505,6 +505,62 @@
   overflow-wrap: anywhere;
 }
 
+/* 失败后被重试取代的尝试：状态码下一行小字，不抢状态码的颜色。 */
+.log-retried {
+  color: var(--muted);
+  display: block;
+  font-size: var(--text-xs);
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
+/* 同一请求的尝试链。一次一行：时间、渠道、状态、耗时，说明另起一行。 */
+.log-detail-attempts {
+  margin-top: 14px;
+}
+
+.log-detail-attempts h4 {
+  color: var(--muted-strong);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.log-detail-attempts ol {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  list-style: none;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.log-detail-attempt {
+  align-items: baseline;
+  display: grid;
+  font-size: var(--text-sm);
+  gap: 4px 12px;
+  grid-template-columns: max-content minmax(0, 1fr) max-content max-content;
+  padding: 8px 12px;
+}
+
+.log-detail-attempt + .log-detail-attempt {
+  border-top: 1px solid var(--line);
+}
+
+/* 当前打开的那次。 */
+.log-detail-attempt[aria-current="true"] {
+  background: var(--accent-soft);
+  font-weight: 600;
+}
+
+.log-detail-attempt-note {
+  color: var(--muted);
+  font-weight: 400;
+  grid-column: 1 / -1;
+  overflow-wrap: anywhere;
+}
+
 .log-detail-state {
   align-items: center;
   color: var(--muted);

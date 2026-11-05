@@ -97,6 +97,17 @@ func GetUpstreamKey(ctx context.Context, db Queryer, upstreamID, keyID int64) (m
 	return keys[0], true, nil
 }
 
+// FirstEnabledUpstreamKey returns a channel's first enabled key, opened: the
+// one upstreams.api_key mirrors, which a probe naming no key signs in with.
+func FirstEnabledUpstreamKey(ctx context.Context, db Queryer, upstreamID int64) (models.UpstreamKey, bool, error) {
+	keys, err := queryUpstreamKeys(ctx, db, `SELECT id, upstream_id, name, api_key, enabled
+        FROM upstream_keys WHERE upstream_id = ? AND enabled = 1 ORDER BY id LIMIT 1`, upstreamID)
+	if err != nil || len(keys) == 0 {
+		return models.UpstreamKey{}, false, err
+	}
+	return keys[0], true, nil
+}
+
 func queryUpstreamKeys(ctx context.Context, db Queryer, query string, args ...any) ([]models.UpstreamKey, error) {
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {

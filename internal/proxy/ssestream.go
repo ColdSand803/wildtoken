@@ -53,7 +53,16 @@ type sseStream struct {
 	// requestBody is what was sent upstream, for estimating the prompt of a
 	// stream abandoned before its usage arrived.
 	requestBody []byte
+
+	// held is what prime read ahead, handed to the caller before anything
+	// else; heldErr is how that read ended, returned once held is drained.
+	held    []byte
+	heldErr error
 }
+
+// primeHoldBytes caps what a stream holds back while it waits for content.
+// Past it the stream is delivered: something that large is no preamble.
+const primeHoldBytes = 1 << 20
 
 func newSSEStream(requestCtx context.Context, upstream io.ReadCloser, attempt *attemptTimeout,
 	start time.Time, status int,
@@ -98,6 +107,22 @@ func (s *sseStream) Read(buffer []byte) (int, error) {
 		}
 		return read, nil
 	}
+	// What prime read ahead was observed then; it is only handed over now.
+	if len(s.held) > 0 {
+		read := copy(buffer, s.held)
+		s.held = s.held[read:]
+		if len(s.held) == 0 {
+			s.held = nil
+			if s.observation.terminalEventSeen {
+				s.finishComplete()
+			}
+		}
+		return read, nil
+	}
+	if s.heldErr != nil {
+		s.finishRead(s.heldErr)
+		return 0, s.heldErr
+	}
 
 	// The clock runs only while waiting on the upstream, so a long answer is
 	// never cut off for being long, nor a slow reader for being slow.
@@ -112,14 +137,92 @@ func (s *sseStream) Read(buffer []byte) (int, error) {
 			s.finishComplete()
 		}
 	}
+	s.finishRead(err)
+	return read, err
+}
 
+// finishRead logs the stream when a read ended it.
+func (s *sseStream) finishRead(err error) {
 	switch {
 	case err == io.EOF:
 		s.finishComplete()
 	case err != nil:
 		s.finishInterrupted(err)
 	}
-	return read, err
+}
+
+// prime reads ahead until the stream shows its first visible token, keeping
+// what it read for Read. Until then nothing has reached the client, so a
+// failure can still go to another channel. onHold runs after each chunk held
+// back, for the caller to keep the client's connection alive.
+//
+// It reports false for a stream that failed before any content: an error
+// event, the channel's timeout, the upstream gone. A stream that ends cleanly
+// without content, or outgrows primeHoldBytes, is delivered as it is.
+func (s *sseStream) prime(onHold func()) bool {
+	// The first-event gate may already have observed a complete answer.
+	if s.observation.firstTokenMs != nil || s.observation.terminalEventSeen {
+		return s.observation.streamError == nil
+	}
+	buffer := make([]byte, 32<<10)
+	for {
+		s.attempt.extend()
+		read, err := s.upstream.Read(buffer)
+		s.attempt.pause()
+		if read > 0 {
+			chunk := buffer[:read]
+			s.capture.push(chunk)
+			s.observation.observeChunk(chunk, s.measure)
+			s.held = append(s.held, chunk...)
+		}
+		if err != nil {
+			s.heldErr = err
+			// A terminal event without its closing blank line still ended
+			// the stream.
+			s.observation.finish(s.measure)
+		}
+
+		switch {
+		case s.observation.firstTokenMs != nil:
+			return true
+		case s.observation.streamError != nil:
+			return false
+		case s.observation.terminalEventSeen:
+			return true
+		case err != nil:
+			return false
+		case len(s.held) > primeHoldBytes:
+			return true
+		}
+		if read > 0 && onHold != nil {
+			onHold()
+		}
+	}
+}
+
+// abandon logs a stream that failed before any content as an attempt another
+// one replaces, and releases it.
+func (s *sseStream) abandon() {
+	s.mu.Lock()
+	if s.entry != nil {
+		s.entry.Retried = true
+	}
+	s.mu.Unlock()
+
+	switch {
+	case s.observation.streamError != nil:
+		// Logged as the error it reported, charged if it blames the channel.
+		s.finishComplete()
+	case s.heldErr != nil && s.heldErr != io.EOF:
+		// 504 for the channel's timeout, 502 for a dropped connection.
+		s.finishInterrupted(s.heldErr)
+	default:
+		if s.finishLog(502, ptrTo("upstream ended the stream before any content"), s.failureStage()) {
+			s.deps.AutoWeight.RecordFailure(s.upstreamID, s.autoWeightEnabled, s.policy)
+			s.deps.Metrics.RecordSSEUpstreamError()
+		}
+	}
+	s.Close()
 }
 
 // Close finalizes a stream the client abandoned before it completed.

@@ -3,8 +3,9 @@ import type { DraftKey, Upstream } from "./types";
 /**
  * 表单里的一行 key。
  *
- * id 为 0 是新加的。已保存的 key 不回显，value 留空表示不改；点眼睛取回的
- * 明文记在 revealed 里，提交时没改过就照样发空，明文不必再回传一趟。
+ * id 为 0 是新加的。已保存的 key 不回显，value 留空表示不改，框里显示星号；
+ * 点眼睛取回的明文记在 revealed 里，再点遮回星号，再亮不用重取。提交时没改过
+ * 就照样发空，明文不必再回传一趟。
  */
 export interface KeyRow {
   /** 只在表单里区分行，给 React 当 key 用。 */
@@ -14,6 +15,8 @@ export interface KeyRow {
   value: string;
   enabled: boolean;
   revealed: string | null;
+  /** 已保存的 key 是否亮着明文。新加的行不遮，用不到。 */
+  shown: boolean;
   coolingSeconds: number;
 }
 
@@ -35,6 +38,7 @@ export function newKeyRow(draft?: DraftKey): KeyRow {
     value: draft?.api_key ?? "",
     enabled: draft?.enabled ?? true,
     revealed: null,
+    shown: false,
     coolingSeconds: 0,
   };
 }
@@ -55,8 +59,24 @@ export function keyRowsFrom(upstream: Upstream | null, drafts?: DraftKey[]): Key
     value: "",
     enabled: key.enabled,
     revealed: null,
+    shown: false,
     coolingSeconds: key.cooling_seconds ?? 0,
   }));
+}
+
+/**
+ * 亮出明文。框里空着就填回取过的明文；框里已有字（新填的）就亮这些字。
+ * 两样都没有时得先取，由调用方取到后写进 revealed 再调。
+ */
+export function showKey(row: KeyRow): KeyRow {
+  const value = row.value === "" && row.revealed !== null ? row.revealed : row.value;
+  return { ...row, value, shown: true };
+}
+
+/** 遮回去。没改过的明文清空，框里回到星号；改过的留着，只是遮住。 */
+export function hideKey(row: KeyRow): KeyRow {
+  const value = row.revealed !== null && row.value === row.revealed ? "" : row.value;
+  return { ...row, value, shown: false };
 }
 
 /** 提交用的 keys。没填值的新行丢掉；取回来没改的发空，表示不改。 */

@@ -68,11 +68,20 @@ type RequestLogOut struct {
 	// with AttemptIndex and RequestUID for that.
 	FailureRetryable *bool   `json:"failure_retryable"`
 	Error            *string `json:"error"`
+	// RequestID is shared by the rows of one downstream request; null outside
+	// the proxy path and on rows from before it existed.
+	RequestID *int64 `json:"request_id"`
+	// Retried marks a failed attempt that another attempt replaced: it is not
+	// how the request ended.
+	Retried bool `json:"retried"`
 }
 
 // RequestLogDetailOut flattens RequestLogOut and adds the captured payloads.
 type RequestLogDetailOut struct {
 	RequestLogOut
+	// Attempts are the rows of the same request, oldest first, this one among
+	// them; absent when the request took a single attempt.
+	Attempts           []RequestLogOut `json:"attempts,omitempty"`
 	DownstreamRequest  json.RawMessage `json:"downstream_request"`
 	UpstreamRequest    json.RawMessage `json:"upstream_request"`
 	UpstreamResponse   json.RawMessage `json:"upstream_response"`
@@ -133,9 +142,13 @@ type ActiveRequestOut struct {
 	ClientType          string  `json:"client_type"`
 	UpstreamID          *int64  `json:"upstream_id"`
 	UpstreamName        *string `json:"upstream_name"`
-	Model               *string `json:"model"`
-	RequestModel        *string `json:"request_model"`
-	UpstreamModel       *string `json:"upstream_model"`
+	// UpstreamKeyID and UpstreamKeyName name the key the current attempt uses,
+	// as on RequestLogOut.
+	UpstreamKeyID   int64   `json:"upstream_key_id"`
+	UpstreamKeyName string  `json:"upstream_key_name"`
+	Model           *string `json:"model"`
+	RequestModel    *string `json:"request_model"`
+	UpstreamModel   *string `json:"upstream_model"`
 	// ReasoningEffort is what the caller asked for; UpstreamReasoningEffort is
 	// what the channel's effort mapping rewrote it into. Both are known once the
 	// upstream request has been prepared.

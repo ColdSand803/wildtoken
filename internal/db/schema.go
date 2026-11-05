@@ -90,6 +90,11 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// took the write lock for as long as that scan, with every proxied
 		// request's log write queued behind it.
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_downstream_token_created_at ON request_logs(downstream_token_id, created_at);",
+		// The log page's client filter, and the list of clients it offers.
+		// created_at is in it because the page sorts by it: on client_type
+		// alone, a page of pi (120k of 232k rows) sorted all of them, 33 ms
+		// against 0.2 ms.
+		"CREATE INDEX IF NOT EXISTS idx_request_logs_client_created_at ON request_logs(client_type, created_at);",
 		createAPITokens,
 		createGroups,
 		seedDefaultGroup,
@@ -175,12 +180,29 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// from before them. The name is a copy, so it outlives a rename.
 		{"upstream_key_id", "INTEGER NOT NULL DEFAULT 0"},
 		{"upstream_key_name", "TEXT NOT NULL DEFAULT ''"},
+		// A failed attempt is logged on its own row before the next one runs.
+		// request_id ties those rows to the one recording how the request
+		// ended; retried = 1 marks the attempts, which request counts skip.
+		// Older rows carry NULL and 0: each counts as a request, as before.
+		{"request_id", "INTEGER"},
+		{"retried", "INTEGER NOT NULL DEFAULT 0 CHECK (retried IN (0, 1))"},
 	} {
 		if err := ensureColumn(ctx, db, "request_logs", column.name, column.definition); err != nil {
 			return err
 		}
 	}
+	// The detail view lists a request's attempts; only proxied rows have an id.
+	if _, err := db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_request_logs_request_id
+        ON request_logs(request_id) WHERE request_id IS NOT NULL`); err != nil {
+		return err
+	}
 	if err := ensureUsageHourly(ctx, db); err != nil {
+		return err
+	}
+	if err := splitCancelled(ctx, db); err != nil {
+		return err
+	}
+	if err := ensureStatsHourly(ctx, db); err != nil {
 		return err
 	}
 

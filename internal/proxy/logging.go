@@ -94,6 +94,12 @@ type LogEntry struct {
 	// next one's budget.
 	QuotaPeriodStamp string
 	Error            *string
+	// RequestID ties together the rows of one downstream request: its failed
+	// attempts and the row that records how it ended. 0 leaves it unset.
+	RequestID int64
+	// Retried marks a failed attempt that another attempt replaced. Request
+	// counts skip it; the channel it hit still counts it.
+	Retried bool
 	// The captured snapshots. One snapshot may fill several slots, and several
 	// entries: a retried request logs the same request on every attempt.
 	DownstreamRequest  *logbody.Snapshot
@@ -205,7 +211,6 @@ type ScrapeRecorder interface {
 }
 
 type persistedLogRecord struct {
-	stats db.PersistedLogStats
 	event LogStreamEvent
 }
 
@@ -250,17 +255,18 @@ type carriedKey struct {
 // which is also what drains the queue: ctx bounds each write rather than
 // abandoning the rows still waiting to be made.
 func NewLogWriter(ctx context.Context, database *sql.DB, metrics LogMetricsRecorder,
-	logStats *db.LogStatsCache, queueCapacity int, quotas *quota.Tracker,
-	scrape ScrapeRecorder) *LogWriter {
+	queueCapacity int, quotas *quota.Tracker, scrape ...ScrapeRecorder) *LogWriter {
 	writer := &LogWriter{
 		entries: make(chan LogEntry, max(queueCapacity, 1)),
 		metrics: metrics,
 		events:  newEventBroker(),
 		quotas:  quotas,
-		scrape:  scrape,
 		done:    make(chan struct{}),
 	}
-	go writer.run(ctx, database, logStats)
+	if len(scrape) > 0 {
+		writer.scrape = scrape[0]
+	}
+	go writer.run(ctx, database)
 	return writer
 }
 
@@ -483,7 +489,7 @@ func (w *LogWriter) CloseWithin(limit time.Duration) bool {
 	}
 }
 
-func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogStatsCache) {
+func (w *LogWriter) run(ctx context.Context, database *sql.DB) {
 	defer close(w.done)
 
 	// Carried usage normally rides with the next batch; the tick applies it
@@ -498,11 +504,11 @@ func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogS
 		select {
 		case entry, ok = <-w.entries:
 		case <-carriedRetry.C:
-			w.flush(ctx, database, logStats, nil)
+			w.flush(ctx, database, nil)
 			continue
 		}
 		if !ok {
-			w.flush(ctx, database, logStats, nil)
+			w.flush(ctx, database, nil)
 			return
 		}
 		batch = append(batch, entry)
@@ -530,7 +536,7 @@ func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogS
 
 		entries := batch
 		batch = make([]LogEntry, 0, logWriteBatchSize)
-		w.flush(ctx, database, logStats, entries)
+		w.flush(ctx, database, entries)
 
 		if channelClosed {
 			return
@@ -538,8 +544,7 @@ func (w *LogWriter) run(ctx context.Context, database *sql.DB, logStats *db.LogS
 	}
 }
 
-func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.LogStatsCache,
-	entries []LogEntry) {
+func (w *LogWriter) flush(ctx context.Context, database *sql.DB, entries []LogEntry) {
 	entryCount := uint64(len(entries))
 	w.metrics.RecordLogDequeue(entryCount)
 	// Out of the queue, these bodies no longer count against its budget.
@@ -587,29 +592,22 @@ func (w *LogWriter) flush(ctx context.Context, database *sql.DB, logStats *db.Lo
 			w.quotas.Settle(key.tokenID, key.period, used)
 		}
 		w.metrics.RecordLogWritten(entryCount)
-		w.publish(writeCtx, database, logStats, records)
+		w.publish(writeCtx, database, records)
 	}
 	if time.Since(startedAt) >= slowDBOperationThreshold {
 		w.metrics.RecordSlowDBOperation()
 	}
 }
 
-// publish folds committed rows into the stats cache and notifies subscribers.
+// publish notifies subscribers of committed rows.
 //
 // insertLogBatchWithRetry only returns after its SQLite transaction commits.
 // Never publish from Schedule, or a dropped or rolled-back row could appear in
 // the live console.
-func (w *LogWriter) publish(ctx context.Context, database *sql.DB, logStats *db.LogStatsCache,
-	records []persistedLogRecord) {
+func (w *LogWriter) publish(ctx context.Context, database *sql.DB, records []persistedLogRecord) {
 	if len(records) == 0 {
 		return
 	}
-
-	stats := make([]db.PersistedLogStats, 0, len(records))
-	for _, record := range records {
-		stats = append(stats, record.stats)
-	}
-	logStats.RecordPersistedEntries(stats)
 
 	var recentRate *db.RecentLogRate
 	if rate, err := db.RecentOneMinuteLogRate(ctx, database); err == nil {
@@ -707,6 +705,8 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 
 	records := make([]persistedLogRecord, 0, len(entries))
 	usage := db.UsageTally{}
+	// The batch's ids, consecutive inside this transaction, for stats_hourly.
+	var firstID, lastID int64
 	for i, entry := range entries {
 		now := time.Now().UTC()
 		createdAt := now.Format(models.TimestampFormat)
@@ -736,11 +736,11 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
          duration_ms, first_token_ms,
          request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
          failure_stage, failure_retryable,
-         error, created_at)
+         error, request_id, retried, created_at)
     VALUES (?, ?, (SELECT id FROM api_tokens WHERE id = ?), ?, ?, ?,
             (SELECT id FROM upstreams WHERE id = ?),
             ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?)`,
+            ?, ?, ?, ?, ?, ?, ?, ?)`,
 			entry.Method, entry.Path, entry.DownstreamTokenID, entry.DownstreamTokenName,
 			entry.ClientIP,
 			clientType, entry.UpstreamID, entry.UpstreamName,
@@ -753,7 +753,7 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 			entry.CompletionReasoningTokens, entry.DurationMs, entry.FirstTokenMs,
 			entry.RequestUID, entry.AttemptIndex, entry.PreUpstreamMs,
 			entry.UpstreamHeadersMs, entry.FailureStage, entry.FailureRetryable,
-			entry.Error, createdAt)
+			entry.Error, nullableID(entry.RequestID), entry.Retried, createdAt)
 		if err != nil {
 			return nil, apperr.Database(err)
 		}
@@ -761,11 +761,15 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 		if err != nil {
 			return nil, apperr.Database(err)
 		}
+		if firstID == 0 {
+			firstID = logID
+		}
+		lastID = logID
 
 		if err := payloads.Store(ctx, logID, prepared[i], false); err != nil {
 			return nil, err
 		}
-		usage.Add(now, entry.StatusCode, entry.TotalTokens)
+		usage.Add(now, entry.StatusCode, entry.TotalTokens, entry.Retried)
 
 		// The quota counter advances with the log row, so a committed request is
 		// always accounted for exactly once. A request that carried no usage, or
@@ -787,13 +791,6 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 		}
 
 		records = append(records, persistedLogRecord{
-			stats: db.PersistedLogStats{
-				ID:                   logID,
-				CreatedAtUnixSeconds: now.Unix(),
-				TotalTokens:          int32PtrToInt64Ptr(entry.TotalTokens),
-				PromptTokens:         int32PtrToInt64Ptr(entry.PromptTokens),
-				PromptCachedTokens:   int32PtrToInt64Ptr(entry.PromptCachedTokens),
-			},
 			event: LogStreamEvent{
 				Log: models.RequestLogOut{
 					ID:                        logID,
@@ -829,14 +826,22 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 					FailureStage:              entry.FailureStage,
 					FailureRetryable:          entry.FailureRetryable,
 					Error:                     entry.Error,
+					RequestID:                 int64PtrOrNil(entry.RequestID),
+					Retried:                   entry.Retried,
 				},
 			},
 		})
 	}
 
-	// The calendar's hourly totals commit with the rows they count.
+	// The calendar's and the dashboard's hourly totals commit with the rows
+	// they count.
 	if err := db.AddUsage(ctx, tx, usage); err != nil {
 		return nil, err
+	}
+	if firstID != 0 {
+		if err := db.AddStats(ctx, tx, firstID, lastID); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -845,12 +850,19 @@ func insertLogBatch(ctx context.Context, database *sql.DB, entries []LogEntry,
 	return records, nil
 }
 
-func int32PtrToInt64Ptr(value *int32) *int64 {
-	if value == nil {
+// nullableID stores an unset id as NULL rather than 0.
+func nullableID(id int64) any {
+	if id == 0 {
 		return nil
 	}
-	converted := int64(*value)
-	return &converted
+	return id
+}
+
+func int64PtrOrNil(id int64) *int64 {
+	if id == 0 {
+		return nil
+	}
+	return &id
 }
 
 // eventBroker fans committed log rows out to the console's SSE subscribers.
@@ -996,12 +1008,12 @@ func redactHeaders(headers map[string]string) map[string]string {
 
 // RunCleanupLoop keeps full bodies near the configured row limit, collects the
 // chunks dropped bodies leave behind every ten minutes, and performs the
-// heavier retention and statistics work hourly.
+// heavier retention work hourly.
 //
 // The runtime policy is read through a getter rather than a shared lock, so the
 // loop always sees the latest console edit without owning the settings.
 func RunCleanupLoop(ctx context.Context, database *sql.DB, settings func() models.RuntimeSettings,
-	metrics LogMetricsRecorder, logStats *db.LogStatsCache) {
+	metrics LogMetricsRecorder) {
 	select {
 	case <-ctx.Done():
 		return
@@ -1032,7 +1044,7 @@ func RunCleanupLoop(ctx context.Context, database *sql.DB, settings func() model
 		}
 
 		current := settings()
-		RunCleanupPass(ctx, database, &current, metrics, logStats, steps)
+		RunCleanupPass(ctx, database, &current, metrics, steps)
 	}
 }
 
@@ -1048,7 +1060,7 @@ type CleanupSteps struct {
 
 // RunCleanupPass performs one cleanup cycle.
 func RunCleanupPass(ctx context.Context, database *sql.DB, settings *models.RuntimeSettings,
-	metrics LogMetricsRecorder, logStats *db.LogStatsCache, steps CleanupSteps) {
+	metrics LogMetricsRecorder, steps CleanupSteps) {
 	cleanupStartedAt := time.Now()
 	cleanupSucceeded := true
 	metrics.BeginCleanup()
@@ -1087,15 +1099,6 @@ func RunCleanupPass(ctx context.Context, database *sql.DB, settings *models.Runt
 			slog.Error("collecting log metadata failed", "error", err)
 		}
 		if time.Since(deleteStartedAt) >= slowDBOperationThreshold {
-			metrics.RecordSlowDBOperation()
-		}
-
-		statsRefreshStartedAt := time.Now()
-		if err := logStats.RefreshFromDB(ctx, database); err != nil {
-			cleanupSucceeded = false
-			slog.Warn("request log statistics refresh after cleanup failed", "error", err)
-		}
-		if time.Since(statsRefreshStartedAt) >= slowDBOperationThreshold {
 			metrics.RecordSlowDBOperation()
 		}
 	}

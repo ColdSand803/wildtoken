@@ -37,6 +37,23 @@ const (
 	actualModelExpression = "COALESCE(NULLIF(TRIM(upstream_model), ''), NULLIF(TRIM(model), ''))"
 )
 
+// failedRows is a failed request: no status, or one outside 2xx. 499 is the
+// client hanging up, which is its own doing and not counted as a failure.
+const failedRows = "(status_code IS NULL OR ((status_code < 200 OR status_code >= 300) AND status_code <> 499))"
+
+// cancelledRows is a request the client hung up on.
+const cancelledRows = "status_code = 499"
+
+// failedStatus is failedRows for one status.
+func failedStatus(status *int32) bool {
+	return status == nil || ((*status < 200 || *status >= 300) && *status != 499)
+}
+
+// countedRows keeps the rows that are requests. A retried row is a failed
+// attempt of a request whose outcome another row records: counted, it made one
+// request with a retry look like two, one of them failed.
+const countedRows = "retried = 0"
+
 // logListColumns is the projection backing RequestLogOut.
 const logListColumns = `id, created_at, method, path,
                 downstream_token_id, downstream_token_name,
@@ -50,7 +67,7 @@ const logListColumns = `id, created_at, method, path,
                 duration_ms, first_token_ms,
                 request_uid, attempt_index, pre_upstream_ms, upstream_headers_ms,
                 failure_stage, failure_retryable,
-                error`
+                error, request_id, retried`
 
 // LogTopWindow is a ranking window accepted by the top-stats endpoint.
 type LogTopWindow int
@@ -289,7 +306,7 @@ func StatusMatches(status string, code *int32) bool {
 	case LogStatusNone:
 		return false
 	case LogStatusError:
-		return value < 200 || value >= 300
+		return failedStatus(code)
 	default:
 		return true
 	}
@@ -409,7 +426,7 @@ func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
 		case LogStatusNone:
 			query.WriteString(" AND status_code IS NULL")
 		case LogStatusError:
-			query.WriteString(" AND (status_code IS NULL OR status_code < 200 OR status_code >= 300)")
+			query.WriteString(" AND " + failedRows)
 		}
 	}
 	if f.ClientType != nil {
@@ -433,6 +450,38 @@ func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
 	return args
 }
 
+// logClientTypesQuery reads one index entry per client type: each step seeks
+// the first type after the last one found, instead of reading every row.
+const logClientTypesQuery = `WITH RECURSIVE seen(client_type) AS (
+        SELECT MIN(client_type) FROM request_logs
+        UNION ALL
+        SELECT (SELECT MIN(client_type) FROM request_logs WHERE client_type > seen.client_type)
+        FROM seen WHERE seen.client_type IS NOT NULL)
+    SELECT client_type FROM seen WHERE client_type IS NOT NULL`
+
+// LogClientTypes lists the client types the logs hold, in name order: what the
+// log page's client filter offers, e.g. ["axonhub", "claude", "pi"].
+func LogClientTypes(ctx context.Context, database *sql.DB) ([]string, error) {
+	rows, err := database.QueryContext(ctx, logClientTypesQuery)
+	if err != nil {
+		return nil, apperr.Database(err)
+	}
+	defer rows.Close()
+
+	types := []string{}
+	for rows.Next() {
+		var clientType string
+		if err := rows.Scan(&clientType); err != nil {
+			return nil, apperr.Database(err)
+		}
+		types = append(types, clientType)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Database(err)
+	}
+	return types, nil
+}
+
 // LogCursor is the keyset position a page continues from.
 type LogCursor struct {
 	CreatedAt string
@@ -446,7 +495,7 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 	var reasoningEffort, upstreamReasoningEffort, responseReasoningEffort, logError sql.NullString
 	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
 	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
-	var durationMs, firstTokenMs sql.NullInt64
+	var durationMs, firstTokenMs, requestID sql.NullInt64
 	var requestUID, failureStage sql.NullString
 	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
 	var failureRetryable sql.NullBool
@@ -462,11 +511,12 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
 		&durationMs, &firstTokenMs, &requestUID, &attemptIndex,
 		&preUpstreamMs, &upstreamHeadersMs,
-		&failureStage, &failureRetryable, &logError)
+		&failureStage, &failureRetryable, &logError, &requestID, &entry.Retried)
 	if err != nil {
 		return entry, err
 	}
 
+	entry.RequestID = nullInt64Ptr(requestID)
 	entry.DownstreamTokenID = nullInt64Ptr(downstreamTokenID)
 	entry.UpstreamID = nullInt64Ptr(upstreamID)
 	entry.DownstreamTokenName = nullStringPtr(downstreamTokenName)
@@ -510,8 +560,8 @@ func nullBoolPtr(value sql.NullBool) *bool {
 
 // LogQueryTimeout bounds how long one log listing may run.
 //
-// None of the filters can use an index: client_type and status_code have none,
-// and the search is a leading-wildcard LIKE, which nothing can. LIMIT bounds the
+// The status and search filters cannot use an index: status_code has none, and
+// the search is a leading-wildcard LIKE, which nothing can. LIMIT bounds the
 // rows returned, not the rows examined, so a filter matching little or nothing
 // reads the whole table — holding one of the few pooled connections while the
 // proxy path waits for one. The deadline turns that into an error the operator
@@ -560,83 +610,31 @@ func ListLogs(ctx context.Context, database *sql.DB, limit, offset int32,
 	return entries, nil
 }
 
-// GetLogDetail returns one log with its captured payloads, or ok=false.
+// GetLogDetail returns one log with its captured payloads, or ok=false. A row
+// that belongs to a request with several attempts lists them all.
 func GetLogDetail(ctx context.Context, database *sql.DB, logID int64) (models.RequestLogDetailOut, bool, error) {
-	row := database.QueryRowContext(ctx, `SELECT l.id, l.created_at, l.method, l.path,
-              l.downstream_token_id, l.downstream_token_name,
-              l.client_ip, l.client_type,
-              l.upstream_id, l.upstream_name, l.upstream_key_id, l.upstream_key_name,
-              l.model, l.request_model, l.upstream_model,
-              l.reasoning_effort, l.upstream_reasoning_effort,
-              l.response_reasoning_effort,
-              l.stream, l.status_code,
-              l.prompt_tokens, l.completion_tokens, l.total_tokens,
-              l.prompt_cached_tokens, l.cache_creation_tokens, l.completion_reasoning_tokens,
-              l.duration_ms, l.first_token_ms,
-              l.request_uid, l.attempt_index,
-              l.pre_upstream_ms, l.upstream_headers_ms,
-              l.failure_stage, l.failure_retryable,
-              l.error
-       FROM request_logs AS l
-       WHERE l.id = ?`, logID)
-
 	var detail models.RequestLogDetailOut
-	var downstreamTokenID, upstreamID sql.NullInt64
-	var downstreamTokenName, upstreamName, model, requestModel, upstreamModel sql.NullString
-	var reasoningEffort, upstreamReasoningEffort, responseReasoningEffort, logError sql.NullString
-	var statusCode, promptTokens, completionTokens, totalTokens sql.NullInt64
-	var promptCachedTokens, cacheCreationTokens, completionReasoningTokens sql.NullInt64
-	var durationMs, firstTokenMs sql.NullInt64
-	var detailRequestUID, detailFailureStage sql.NullString
-	var attemptIndex, preUpstreamMs, upstreamHeadersMs sql.NullInt64
-	var detailFailureRetryable sql.NullBool
-	var clientIP sql.NullString
-
-	err := row.Scan(&detail.ID, &detail.CreatedAt, &detail.Method, &detail.Path,
-		&downstreamTokenID, &downstreamTokenName, &clientIP, &detail.ClientType,
-		&upstreamID, &upstreamName, &detail.UpstreamKeyID, &detail.UpstreamKeyName,
-		&model, &requestModel, &upstreamModel,
-		&reasoningEffort, &upstreamReasoningEffort, &responseReasoningEffort,
-		&detail.Stream, &statusCode,
-		&promptTokens, &completionTokens, &totalTokens,
-		&promptCachedTokens, &cacheCreationTokens, &completionReasoningTokens,
-		&durationMs, &firstTokenMs,
-		&detailRequestUID, &attemptIndex, &preUpstreamMs, &upstreamHeadersMs,
-		&detailFailureStage, &detailFailureRetryable, &logError)
+	row := database.QueryRowContext(ctx,
+		"SELECT "+logListColumns+" FROM request_logs WHERE id = ?", logID)
+	entry, err := scanLogListRow(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return detail, false, nil
 	}
 	if err != nil {
 		return detail, false, apperr.Database(err)
 	}
+	detail.RequestLogOut = entry
 
-	detail.DownstreamTokenID = nullInt64Ptr(downstreamTokenID)
-	detail.UpstreamID = nullInt64Ptr(upstreamID)
-	detail.DownstreamTokenName = nullStringPtr(downstreamTokenName)
-	detail.ClientIP = nullStringPtr(clientIP)
-	detail.UpstreamName = nullStringPtr(upstreamName)
-	detail.Model = nullStringPtr(model)
-	detail.RequestModel = nullStringPtr(requestModel)
-	detail.UpstreamModel = nullStringPtr(upstreamModel)
-	detail.ReasoningEffort = nullStringPtr(reasoningEffort)
-	detail.UpstreamReasoningEffort = nullStringPtr(upstreamReasoningEffort)
-	detail.ResponseReasoningEffort = nullStringPtr(responseReasoningEffort)
-	detail.Error = nullStringPtr(logError)
-	detail.StatusCode = nullInt32Ptr(statusCode)
-	detail.PromptTokens = nullInt32Ptr(promptTokens)
-	detail.CompletionTokens = nullInt32Ptr(completionTokens)
-	detail.TotalTokens = nullInt32Ptr(totalTokens)
-	detail.PromptCachedTokens = nullInt32Ptr(promptCachedTokens)
-	detail.CacheCreationTokens = nullInt32Ptr(cacheCreationTokens)
-	detail.CompletionReasoningTokens = nullInt32Ptr(completionReasoningTokens)
-	detail.DurationMs = nullInt32Ptr(durationMs)
-	detail.FirstTokenMs = nullInt32Ptr(firstTokenMs)
-	detail.RequestUID = nullStringPtr(detailRequestUID)
-	detail.AttemptIndex = nullInt32Ptr(attemptIndex)
-	detail.PreUpstreamMs = nullInt32Ptr(preUpstreamMs)
-	detail.UpstreamHeadersMs = nullInt32Ptr(upstreamHeadersMs)
-	detail.FailureStage = nullStringPtr(detailFailureStage)
-	detail.FailureRetryable = nullBoolPtr(detailFailureRetryable)
+	if entry.RequestID != nil {
+		attempts, err := requestAttempts(ctx, database, *entry.RequestID)
+		if err != nil {
+			return detail, false, err
+		}
+		// One row is the whole request; there is no chain to show.
+		if len(attempts) > 1 {
+			detail.Attempts = attempts
+		}
+	}
 
 	snapshots, found, err := loadLogSnapshots(ctx, database, logID,
 		logbody.SlotDownstreamRequest, logbody.SlotUpstreamRequest,
@@ -698,25 +696,21 @@ func GetLogSnapshot(ctx context.Context, database *sql.DB, logID int64, field Lo
 	return snapshots[slot], true, nil
 }
 
-// topLogCountSpec describes one ranking query.
-type topLogCountSpec struct {
-	nameExpression   string
-	groupExpression  string
-	sourceFilter     string
-	metricExpression string
-	metricFilter     string
-	// exposeGroupID surfaces the numeric group key as `id` (channel rankings).
-	exposeGroupID bool
-	// withLatency attaches per-group average duration and error rate to the
-	// ranking rows (request-count rankings of models/channels).
-	withLatency bool
+// topRanking is one ranking of a window's facts: grouped by key, ordered by
+// metric. Channels group by upstream_id so renamed or same-named channels stay
+// apart; models by the name that went upstream.
+type topRanking struct {
+	// key is the facts column ranked by; empty values are left out.
+	key, keyEmpty string
+	// name is the label shown; metric what the ranking counts.
+	name, metric string
+	// latency adds average duration and error rate (the request ranking of
+	// models). exposeID surfaces upstream_id as id (channel rankings).
+	latency, exposeID bool
 }
 
-// channelNameExpression prefers a non-empty upstream_name snapshot, else "#<id>".
-const channelNameExpression = `CASE
-              WHEN upstream_name IS NOT NULL AND TRIM(upstream_name) <> '' THEN TRIM(upstream_name)
-              ELSE '#' || upstream_id
-           END`
+// channelNameAggregate prefers a channel's stored name, else "#<id>".
+const channelNameAggregate = "MAX(CASE WHEN upstream_name <> '' THEN upstream_name ELSE '#' || upstream_id END)"
 
 // tokenNameExpression prefers a non-empty downstream_token_name snapshot, else "#<id>".
 const tokenNameExpression = `CASE
@@ -727,6 +721,15 @@ const tokenNameExpression = `CASE
 const modelSourceFilter = "COALESCE(NULLIF(TRIM(upstream_model), ''), NULLIF(TRIM(model), '')) IS NOT NULL"
 
 const tokenMetricFilter = "total_tokens IS NOT NULL AND total_tokens > 0"
+
+// topRankings: models count requests, channels every attempt they took, and
+// token rankings every token spent.
+var topRankings = [4]topRanking{
+	{key: "model", keyEmpty: "''", name: "MAX(model)", metric: "SUM(requests)", latency: true},
+	{key: "upstream_id", keyEmpty: "0", name: channelNameAggregate, metric: "SUM(attempts)", exposeID: true},
+	{key: "model", keyEmpty: "''", name: "MAX(model)", metric: "SUM(total_tokens)"},
+	{key: "upstream_id", keyEmpty: "0", name: channelNameAggregate, metric: "SUM(total_tokens)", exposeID: true},
+}
 
 // TopLogStats ranks models and channels by request count and token usage.
 func TopLogStats(ctx context.Context, database *sql.DB, window LogTopWindow, limit int64) (models.RequestLogTopStatsOut, error) {
@@ -746,67 +749,31 @@ func TopLogStatsCustom(ctx context.Context, database *sql.DB, startAt, endAt str
 	return topLogStats(ctx, database, LogTopWindowCustom, startAt, endAt, limit)
 }
 
+// topLogStats reads stats_hourly for the window's whole hours and the logs for
+// the part hours at its edges.
 func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 	startAt, endAt string, limit int64) (models.RequestLogTopStatsOut, error) {
 	limit = min(max(limit, 1), 20)
-
-	// Channels aggregate by upstream_id and Tokens by downstream_token_id so
-	// renamed or same-name items stay distinct.
-	specs := [6]topLogCountSpec{
-		{
-			nameExpression:   actualModelExpression,
-			groupExpression:  actualModelExpression,
-			sourceFilter:     modelSourceFilter,
-			metricExpression: "1",
-			withLatency:      true,
-		},
-		{
-			nameExpression:   channelNameExpression,
-			groupExpression:  "upstream_id",
-			sourceFilter:     "upstream_id IS NOT NULL",
-			metricExpression: "1",
-			exposeGroupID:    true,
-		},
-		{
-			nameExpression:   actualModelExpression,
-			groupExpression:  actualModelExpression,
-			sourceFilter:     modelSourceFilter,
-			metricExpression: "COALESCE(total_tokens, 0)",
-			metricFilter:     tokenMetricFilter,
-		},
-		{
-			nameExpression:   channelNameExpression,
-			groupExpression:  "upstream_id",
-			sourceFilter:     "upstream_id IS NOT NULL",
-			metricExpression: "COALESCE(total_tokens, 0)",
-			metricFilter:     tokenMetricFilter,
-			exposeGroupID:    true,
-		},
-		{
-			nameExpression:   tokenNameExpression,
-			groupExpression:  "downstream_token_id",
-			sourceFilter:     "downstream_token_id IS NOT NULL",
-			metricExpression: "1",
-			withLatency:      true,
-			exposeGroupID:    true,
-		},
-		{
-			nameExpression:   tokenNameExpression,
-			groupExpression:  "downstream_token_id",
-			sourceFilter:     "downstream_token_id IS NOT NULL",
-			metricExpression: "COALESCE(total_tokens, 0)",
-			metricFilter:     tokenMetricFilter,
-			exposeGroupID:    true,
-		},
+	span, err := resolveStatsSpan(window, startAt, endAt, time.Now())
+	if err != nil {
+		return models.RequestLogTopStatsOut{}, err
 	}
 
 	var rankings [6][]models.RequestLogTopItemOut
-	for i, spec := range specs {
-		items, err := topLogCounts(ctx, database, window, startAt, endAt, spec, limit)
+	for i, ranking := range topRankings {
+		items, err := topItems(ctx, database, span, ranking, limit)
 		if err != nil {
 			return models.RequestLogTopStatsOut{}, err
 		}
 		rankings[i] = items
+	}
+
+	for i, byTokens := range []bool{false, true} {
+		items, err := topTokenItems(ctx, database, window, startAt, endAt, byTokens, limit)
+		if err != nil {
+			return models.RequestLogTopStatsOut{}, err
+		}
+		rankings[4+i] = items
 	}
 
 	return models.RequestLogTopStatsOut{
@@ -820,44 +787,82 @@ func topLogStats(ctx context.Context, database *sql.DB, window LogTopWindow,
 	}, nil
 }
 
-func topLogCounts(ctx context.Context, database *sql.DB, window LogTopWindow,
-	startAt, endAt string, spec topLogCountSpec, limit int64) ([]models.RequestLogTopItemOut, error) {
-	// Rows group by groupExpression (e.g. upstream_id) but surface a display
-	// name. When several names share one group key, MAX(name) picks a stable
-	// non-null label.
-	idSelect := "CAST(NULL AS INTEGER) AS id"
-	if spec.exposeGroupID {
-		idSelect = "CAST(group_key AS INTEGER) AS id"
-	}
-	// Latency context rides along as extra per-row columns so one pass feeds
-	// both the ranking metric and the duration/error aggregates.
-	rowExtras := ""
-	outerExtras := ""
-	if spec.withLatency {
-		rowExtras = `, CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END AS dur,
-			CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300 THEN 1 ELSE 0 END AS is_err`
-		outerExtras = `, AVG(dur) AS avg_dur,
-			CAST(SUM(is_err) AS REAL) / COUNT(*) AS error_rate,
-			SUM(CASE WHEN dur IS NOT NULL THEN 1 ELSE 0 END) AS dur_count`
-	}
-
-	var query strings.Builder
-	fmt.Fprintf(&query, "SELECT MAX(name) AS name, SUM(value) AS count, %s%s FROM (SELECT %s AS group_key, %s AS name, %s AS value%s FROM request_logs WHERE ",
-		idSelect, outerExtras, spec.groupExpression, spec.nameExpression, spec.metricExpression, rowExtras)
-	args, err := appendLogTimePredicate(&query, nil, window, startAt, endAt)
+// topTokenItems ranks token identities, which the channel/model hourly facts
+// do not carry. Request rankings skip retried attempts; token usage includes them.
+func topTokenItems(ctx context.Context, database *sql.DB, window LogTopWindow,
+	startAt, endAt string, byTokens bool, limit int64) ([]models.RequestLogTopItemOut, error) {
+	var predicate strings.Builder
+	args, err := appendLogTimePredicate(&predicate, nil, window, startAt, endAt)
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(&query, " AND (%s)", spec.sourceFilter)
-	if spec.metricFilter != "" {
-		fmt.Fprintf(&query, " AND (%s)", spec.metricFilter)
+	predicate.WriteString(" AND downstream_token_id IS NOT NULL")
+	metric, latency := "COUNT(*)", ""
+	if byTokens {
+		metric = "SUM(total_tokens)"
+		predicate.WriteString(" AND " + tokenMetricFilter)
+	} else {
+		predicate.WriteString(" AND " + countedRows)
+		latency = ", AVG(CASE WHEN duration_ms >= 0 THEN duration_ms END), AVG(CASE WHEN " +
+			failedRows + " THEN 1.0 ELSE 0.0 END)"
 	}
-	query.WriteString(`) WHERE group_key IS NOT NULL AND name IS NOT NULL AND name <> '' ` +
-		`GROUP BY group_key HAVING count > 0 ` +
-		`ORDER BY count DESC, name COLLATE NOCASE ASC LIMIT ?`)
-	args = append(args, limit)
+	query := "SELECT MAX(" + tokenNameExpression + ") AS name, " + metric +
+		" AS count, downstream_token_id" + latency + " FROM request_logs WHERE " +
+		predicate.String() + " GROUP BY downstream_token_id HAVING count > 0" +
+		" ORDER BY count DESC, name COLLATE NOCASE ASC LIMIT ?"
+	rows, err := database.QueryContext(ctx, query, append(args, limit)...)
+	if err != nil {
+		return nil, apperr.Database(err)
+	}
+	defer rows.Close()
+	items := []models.RequestLogTopItemOut{}
+	for rows.Next() {
+		var item models.RequestLogTopItemOut
+		var id int64
+		var avgDuration, errorRate sql.NullFloat64
+		dest := []any{&item.Name, &item.Count, &id}
+		if !byTokens {
+			dest = append(dest, &avgDuration, &errorRate)
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, apperr.Database(err)
+		}
+		item.ID = &id
+		if avgDuration.Valid {
+			value := avgDuration.Float64
+			item.AvgDurationMs = &value
+		}
+		if errorRate.Valid {
+			value := errorRate.Float64
+			item.ErrorRate = &value
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Database(err)
+	}
+	return items, nil
+}
 
-	rows, err := database.QueryContext(ctx, query.String(), args...)
+func topItems(ctx context.Context, database *sql.DB, span statsSpan, ranking topRanking,
+	limit int64) ([]models.RequestLogTopItemOut, error) {
+	id := "NULL"
+	if ranking.exposeID {
+		id = "upstream_id"
+	}
+	latency := ""
+	if ranking.latency {
+		latency = `, SUM(duration_sum) * 1.0 / NULLIF(SUM(duration_count), 0),
+            SUM(errors) * 1.0 / NULLIF(SUM(requests), 0)`
+	}
+	source, args := statsFacts(span)
+	query := fmt.Sprintf(`SELECT %s AS name, %s AS count, %s%s
+        FROM %s WHERE %s <> %s
+        GROUP BY %s HAVING count > 0
+        ORDER BY count DESC, name COLLATE NOCASE ASC LIMIT ?`,
+		ranking.name, ranking.metric, id, latency, source, ranking.key, ranking.keyEmpty, ranking.key)
+
+	rows, err := database.QueryContext(ctx, query, append(args, limit)...)
 	if err != nil {
 		return nil, apperr.Database(err)
 	}
@@ -866,29 +871,26 @@ func topLogCounts(ctx context.Context, database *sql.DB, window LogTopWindow,
 	items := []models.RequestLogTopItemOut{}
 	for rows.Next() {
 		var item models.RequestLogTopItemOut
-		var id sql.NullInt64
-		var avgDur, errorRate sql.NullFloat64
-		var durCount sql.NullInt64
-		var scanDest []any
-		if spec.withLatency {
-			scanDest = []any{&item.Name, &item.Count, &id, &avgDur, &errorRate, &durCount}
-		} else {
-			scanDest = []any{&item.Name, &item.Count, &id}
+		var upstreamID sql.NullInt64
+		var avgDuration, errorRate sql.NullFloat64
+		destination := []any{&item.Name, &item.Count, &upstreamID}
+		if ranking.latency {
+			destination = append(destination, &avgDuration, &errorRate)
 		}
-		if err := rows.Scan(scanDest...); err != nil {
+		if err := rows.Scan(destination...); err != nil {
 			return nil, apperr.Database(err)
 		}
-		if spec.exposeGroupID && id.Valid {
-			value := id.Int64
+		if upstreamID.Valid {
+			value := upstreamID.Int64
 			item.ID = &value
 		}
-		if durCount.Valid && durCount.Int64 > 0 && avgDur.Valid {
-			avg := avgDur.Float64
-			item.AvgDurationMs = &avg
+		if avgDuration.Valid {
+			value := avgDuration.Float64
+			item.AvgDurationMs = &value
 		}
 		if errorRate.Valid {
-			rate := errorRate.Float64
-			item.ErrorRate = &rate
+			value := errorRate.Float64
+			item.ErrorRate = &value
 		}
 		items = append(items, item)
 	}
@@ -1085,6 +1087,51 @@ func deleteOldLogsBatch(ctx context.Context, database *sql.DB,
 		return 0, apperr.Database(err)
 	}
 	return affected, nil
+}
+
+// LogAttempts lists the rows of the request logID belongs to, oldest first,
+// itself included. A request that took one attempt, and a row from outside the
+// proxy path, have nothing to list.
+func LogAttempts(ctx context.Context, database *sql.DB, logID int64) ([]models.RequestLogOut, error) {
+	var requestID sql.NullInt64
+	err := database.QueryRowContext(ctx,
+		"SELECT request_id FROM request_logs WHERE id = ?", logID).Scan(&requestID)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !requestID.Valid) {
+		return []models.RequestLogOut{}, nil
+	}
+	if err != nil {
+		return nil, apperr.Database(err)
+	}
+
+	attempts, err := requestAttempts(ctx, database, requestID.Int64)
+	if err != nil || len(attempts) > 1 {
+		return attempts, err
+	}
+	return []models.RequestLogOut{}, nil
+}
+
+// requestAttempts lists the rows of one request in the order they were written:
+// its failed attempts, then the row that records how it ended.
+func requestAttempts(ctx context.Context, database *sql.DB, requestID int64) ([]models.RequestLogOut, error) {
+	rows, err := database.QueryContext(ctx, "SELECT "+logListColumns+
+		" FROM request_logs WHERE request_id = ? ORDER BY id LIMIT 50", requestID)
+	if err != nil {
+		return nil, apperr.Database(err)
+	}
+	defer rows.Close()
+
+	attempts := []models.RequestLogOut{}
+	for rows.Next() {
+		attempt, err := scanLogListRow(rows)
+		if err != nil {
+			return nil, apperr.Database(err)
+		}
+		attempts = append(attempts, attempt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Database(err)
+	}
+	return attempts, nil
 }
 
 func nullStringPtr(value sql.NullString) *string {

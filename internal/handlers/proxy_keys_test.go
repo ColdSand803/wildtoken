@@ -229,3 +229,35 @@ func TestKeysStayOnTheServerUntilAsked(t *testing.T) {
 		t.Errorf("another channel's key: status %d, want 404", code)
 	}
 }
+
+// While a request is out, the in-flight view names the key it went with.
+func TestAnInFlightRequestNamesItsKey(t *testing.T) {
+	state, router := keyState(t)
+	state.ActiveRequests = proxy.NewActiveRegistry()
+
+	arrived, release := make(chan struct{}), make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(arrived)
+		<-release
+		w.Header().Set("content-type", "application/json")
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(server.Close)
+	channel := keyedChannel(t, state, "multi", server.URL, 100,
+		models.UpstreamKeyIn{Name: "main", APIKey: "sk-main"})
+	keys, _ := db.ListUpstreamKeys(context.Background(), state.DB, channel)
+
+	done := make(chan int)
+	go func() { done <- sendProxyRequest(router, "caller-token").Code }()
+	<-arrived
+
+	requests := state.ActiveRequests.Snapshot().Requests
+	close(release)
+	if len(requests) != 1 || requests[0].UpstreamKeyID != keys[0].ID ||
+		requests[0].UpstreamKeyName != "main" {
+		t.Errorf("in flight = %+v, want key %d main", requests, keys[0].ID)
+	}
+	if code := <-done; code != http.StatusOK {
+		t.Errorf("status %d", code)
+	}
+}

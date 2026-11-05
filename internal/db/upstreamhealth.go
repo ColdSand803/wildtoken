@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/apperr"
 )
@@ -67,18 +68,32 @@ func UpstreamHealthHistory(ctx context.Context, database *sql.DB, hours, offsetS
 		exclusion.WriteString(")")
 	}
 
-	rows, err := database.QueryContext(ctx, `
+	query := `
 		SELECT upstream_id,
 			((CAST(strftime('%s', created_at) AS INTEGER) + ?) / 3600) * 3600 - ? AS bucket_epoch,
 			COUNT(*),
-			COALESCE(SUM(CASE WHEN (status_code IS NULL OR status_code < 200 OR status_code >= 300) AND (status_code IS NULL OR status_code <> 499) THEN 1 ELSE 0 END), 0),
+			COALESCE(SUM(CASE WHEN ` + failedRows + ` THEN 1 ELSE 0 END), 0),
 			AVG(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN duration_ms END),
 			COALESCE(SUM(CASE WHEN duration_ms IS NOT NULL AND duration_ms >= 0 THEN 1 ELSE 0 END), 0)
 		FROM request_logs
-		WHERE upstream_id IS NOT NULL AND created_at >= datetime('now', ?)`+
-		exclusion.String()+`
+		WHERE upstream_id IS NOT NULL AND created_at >= datetime('now', ?)` +
+		exclusion.String() + `
 		GROUP BY upstream_id, bucket_epoch
-		ORDER BY bucket_epoch ASC`, args...)
+		ORDER BY bucket_epoch ASC`
+	if offsetSeconds%3600 == 0 && len(excludeClientTypes) == 0 {
+		source, sourceArgs := statsFacts(statsSpan{start: time.Now().Unix() - hours*3600})
+		query = `SELECT upstream_id, ((at + ?) / 3600) * 3600 - ? AS bucket_epoch,
+                SUM(attempts), SUM(attempt_errors),
+                SUM(attempt_duration_sum) * 1.0 / NULLIF(SUM(attempt_duration_count), 0),
+                SUM(attempt_duration_count)
+            FROM ` + source + `
+            WHERE upstream_id <> 0
+            GROUP BY upstream_id, bucket_epoch HAVING SUM(attempts) > 0
+            ORDER BY bucket_epoch ASC`
+		args = append([]any{offsetSeconds, offsetSeconds}, sourceArgs...)
+	}
+
+	rows, err := database.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, apperr.Database(err)
 	}

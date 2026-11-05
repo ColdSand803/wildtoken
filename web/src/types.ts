@@ -111,6 +111,10 @@ export interface RequestLog {
   failure_stage: string | null;
   failure_retryable: boolean | null;
   error: string | null;
+  /** 同一次下游请求的各行共用。代理之外写的行、旧行和导入的行是 null。 */
+  request_id: number | null;
+  /** 失败后被另一次尝试取代的行。它不算一个请求，请求的结果记在后面那行。 */
+  retried: boolean;
 }
 
 /** 在途请求。没有游标位置，所以只随最新一页和 SSE 快照来。 */
@@ -127,6 +131,9 @@ export interface ActiveRequest {
   client_type: string;
   upstream_id: number | null;
   upstream_name: string | null;
+  /** 当前这次尝试用的 Key。没配 Key 的渠道是 0 和 ""。 */
+  upstream_key_id: number;
+  upstream_key_name: string;
   model: string | null;
   request_model: string | null;
   upstream_model: string | null;
@@ -216,8 +223,10 @@ export interface LogOverview {
   previous_total: number | null;
   error_requests: number;
   status_2xx: number;
+  /** 不含 499：客户端自己断开不算失败，单记在 status_cancelled。 */
   status_4xx: number;
   status_5xx: number;
+  status_cancelled: number;
   status_other: number;
   status_none: number;
   duration_count: number;
@@ -283,6 +292,8 @@ export interface DailyUsage {
   day: string;
   requests: number;
   errors: number;
+  /** 客户端自己断开的请求（499），不算失败。 */
+  cancelled: number;
   total_tokens: number;
 }
 
@@ -361,12 +372,15 @@ export interface SystemInfo {
 }
 
 /**
- * 余额查询结果。
+ * 一把 Key 的余额。
  *
  * 和模型测试一样，接口总是 200，成败看 ok。三个金额字段都可能为 null：
  * 有些渠道只报剩余，有些只报总额。
  */
 export interface BalanceResult {
+  /** 没配 Key 的渠道只有一项，key_id 是 0。迁移来的 Key 名字是空串。 */
+  key_id: number;
+  key_name: string;
   ok: boolean;
   provider?: string;
   total_usd?: number | null;
@@ -378,6 +392,11 @@ export interface BalanceResult {
   is_valid?: boolean;
   mode?: string | null;
   message?: string;
+}
+
+/** 查余额的回应：启用的 Key 逐把一项，按 Key 的顺序。 */
+export interface BalanceResponse {
+  keys: BalanceResult[];
 }
 
 /**

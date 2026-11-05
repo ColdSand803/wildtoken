@@ -216,17 +216,19 @@ CREATE TABLE usage_hourly (
     hour_start   INTEGER PRIMARY KEY,
     requests     INTEGER NOT NULL DEFAULT 0,
     errors       INTEGER NOT NULL DEFAULT 0,
-    total_tokens INTEGER NOT NULL DEFAULT 0
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    cancelled    INTEGER NOT NULL DEFAULT 0
 );`
 
 // Fills a new usage_hourly from the logs still on disk. Failure is the test
-// the overview applies: no status, or one outside 2xx.
+// the overview applies; 499 counts apart as cancelled. Retried attempts add
+// tokens, not requests.
 const backfillUsageHourly = `
-INSERT INTO usage_hourly (hour_start, requests, errors, total_tokens)
+INSERT INTO usage_hourly (hour_start, requests, errors, cancelled, total_tokens)
 SELECT CAST(strftime('%s', created_at) AS INTEGER) / 3600 * 3600 AS hour,
-       COUNT(*),
-       SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300
-                THEN 1 ELSE 0 END),
+       SUM(CASE WHEN retried = 0 THEN 1 ELSE 0 END),
+       SUM(CASE WHEN retried = 0 AND ` + failedRows + ` THEN 1 ELSE 0 END),
+       SUM(CASE WHEN retried = 0 AND ` + cancelledRows + ` THEN 1 ELSE 0 END),
        COALESCE(SUM(total_tokens), 0)
 FROM request_logs
 WHERE strftime('%s', created_at) IS NOT NULL

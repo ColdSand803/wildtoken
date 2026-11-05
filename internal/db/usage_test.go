@@ -44,15 +44,15 @@ func TestUsageTalliesAddUpPerHourAcrossBatches(t *testing.T) {
 	ctx := context.Background()
 
 	first := UsageTally{}
-	first.Add(utc("2026-11-04 10:05"), int32p(200), int32p(100))
-	first.Add(utc("2026-11-04 10:59"), int32p(500), nil)
-	first.Add(utc("2026-11-04 11:00"), nil, int32p(50))
+	first.Add(utc("2026-11-04 10:05"), int32p(200), int32p(100), false)
+	first.Add(utc("2026-11-04 10:59"), int32p(500), nil, false)
+	first.Add(utc("2026-11-04 11:00"), nil, int32p(50), false)
 	if err := AddUsage(ctx, database, first); err != nil {
 		t.Fatalf("add first: %v", err)
 	}
 
 	second := UsageTally{}
-	second.Add(utc("2026-11-04 10:30"), int32p(201), int32p(7))
+	second.Add(utc("2026-11-04 10:30"), int32p(201), int32p(7), false)
 	if err := AddUsage(ctx, database, second); err != nil {
 		t.Fatalf("add second: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestDailyUsageFoldsHoursIntoTheReadersDays(t *testing.T) {
 		"2026-11-04 03:00", // 22:00 in -05
 		"2026-11-04 05:00", // 00:00 in -05
 	} {
-		tally.Add(utc(at), int32p(200), int32p(int32(1)<<i))
+		tally.Add(utc(at), int32p(200), int32p(int32(1)<<i), false)
 	}
 	if err := AddUsage(ctx, database, tally); err != nil {
 		t.Fatalf("add: %v", err)

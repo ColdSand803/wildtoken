@@ -456,6 +456,55 @@ type RequestContext struct {
 	// "" for a channel signing in through its headers.
 	UpstreamKeyID   int64
 	UpstreamKeyName string
+	// RequestID is written on this attempt's row, tying it to the other rows
+	// of the same downstream request. 0 leaves it unset.
+	RequestID int64
+	// HoldFailure, when set, receives the row of an attempt that got no answer
+	// instead of the log writer: the caller writes it once it knows whether
+	// another attempt replaces this one. nil writes it at once.
+	HoldFailure func(LogEntry)
+}
+
+// logFailure writes the row of an attempt that got no answer, or hands it to
+// the caller holding it.
+func (c RequestContext) logFailure(deps Deps, entry LogEntry) {
+	if c.HoldFailure != nil {
+		c.HoldFailure(entry)
+		return
+	}
+	deps.LogWriter.Schedule(entry)
+}
+
+// Retry releases a failed attempt that another attempt replaces. Its row is
+// written now and marked retried, so it is not counted as how the request
+// ended.
+func (r *Response) Retry() {
+	switch stream := r.Body.(type) {
+	case *sseStream:
+		stream.abandon()
+	case *bufferedStream:
+		stream.markRetried()
+		r.Body.Close()
+	default:
+		r.Body.Close()
+	}
+}
+
+// Streaming reports whether the body is an upstream event stream.
+func (r *Response) Streaming() bool {
+	_, ok := r.Body.(*sseStream)
+	return ok
+}
+
+// Prime holds a streamed response back until it carries content, so a
+// failure before that can go to another channel unseen. onHold runs each time
+// something is held back. It reports false when the stream failed before any
+// content. Any other response is ready as it is.
+func (r *Response) Prime(onHold func()) bool {
+	if stream, ok := r.Body.(*sseStream); ok {
+		return stream.prime(onHold)
+	}
+	return true
 }
 
 // ProxyRequest forwards a request upstream, streaming SSE bodies as they arrive.
@@ -491,7 +540,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
 		entry.SetFailure(FailureStageRequestBuild, statusCode)
-		deps.LogWriter.Schedule(entry)
+		requestCtx.logFailure(deps, entry)
 
 		return nil, apperr.Upstream("the channel's base URL is invalid")
 	}
@@ -531,7 +580,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
 		entry.SetFailure(stage, statusCode)
-		deps.LogWriter.Schedule(entry)
+		requestCtx.logFailure(deps, entry)
 
 		return nil, attemptFailure(statusCode)
 	}
@@ -613,7 +662,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		entry.UpstreamHeadersMs = headersMs
 		entry.DurationMs = elapsedMs(start)
 		entry.Error = &message
-		deps.LogWriter.Schedule(entry)
+		requestCtx.logFailure(deps, entry)
 		return nil, attemptFailure(statusCode)
 	}
 
@@ -803,6 +852,7 @@ func baseLogEntry(requestCtx RequestContext, upstream *models.UpstreamRow,
 		UpstreamName:            &upstreamName,
 		UpstreamKeyID:           requestCtx.UpstreamKeyID,
 		UpstreamKeyName:         requestCtx.UpstreamKeyName,
+		RequestID:               requestCtx.RequestID,
 		Model:                   requestCtx.ForwardModel,
 		RequestModel:            requestCtx.RequestModel,
 		UpstreamModel:           requestCtx.ForwardModel,

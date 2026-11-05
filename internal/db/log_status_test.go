@@ -47,7 +47,7 @@ func TestLogFilterStatusCategories(t *testing.T) {
 		{LogStatus5xx, []int64{5}},
 		{LogStatusOther, []int64{2}},
 		{LogStatusNone, []int64{6}},
-		{LogStatusError, []int64{2, 3, 4, 5, 6}},
+		{LogStatusError, []int64{2, 3, 5, 6}},
 	}
 
 	for _, tc := range testCases {
