@@ -71,9 +71,18 @@ func TestActiveRegistryCountsRetriedChannels(t *testing.T) {
 
 	request := registry.Begin("POST", "chat/completions")
 	request.SetUpstream(1, "first", nil)
-	request.SetUpstream(2, "second", nil)
+	request.SetKey(5, "key-a")
 
 	requests := registry.Snapshot().Requests
+	if requests[0].UpstreamKeyID != 5 || requests[0].UpstreamKeyName != "key-a" {
+		t.Fatalf("key was not recorded: %d %q", requests[0].UpstreamKeyID, requests[0].UpstreamKeyName)
+	}
+
+	// The second channel has no keys: the first one's must not stay on show.
+	request.SetUpstream(2, "second", nil)
+	request.SetKey(0, "")
+
+	requests = registry.Snapshot().Requests
 	if len(requests) != 1 {
 		t.Fatalf("a retried request must stay one entry, got %d", len(requests))
 	}
@@ -82,6 +91,9 @@ func TestActiveRegistryCountsRetriedChannels(t *testing.T) {
 	}
 	if requests[0].UpstreamName == nil || *requests[0].UpstreamName != "second" {
 		t.Fatalf("expected the current channel, got %+v", requests[0].UpstreamName)
+	}
+	if requests[0].UpstreamKeyID != 0 || requests[0].UpstreamKeyName != "" {
+		t.Fatalf("the previous key stayed: %d %q", requests[0].UpstreamKeyID, requests[0].UpstreamKeyName)
 	}
 }
 

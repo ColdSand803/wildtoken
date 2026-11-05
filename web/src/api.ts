@@ -4,7 +4,7 @@
 
 import type {
   APIToken,
-  BalanceResult,
+  BalanceResponse,
   ChannelExportDocument,
   DailyUsagePage,
   Group,
@@ -197,11 +197,11 @@ export function testUpstreamModel(
 export function fetchUpstreamBalance(
   id: number,
   provider: "new-api" | "sub2api",
-): Promise<BalanceResult> {
+): Promise<BalanceResponse> {
   const path = provider === "sub2api"
     ? `/api/admin/upstreams/${id}/balance/sub2api`
     : `/api/admin/upstreams/${id}/balance`;
-  return api<BalanceResult>(path, { method: "POST" });
+  return api<BalanceResponse>(path, { method: "POST" });
 }
 
 export function listGroups(): Promise<Array<{ id: number; name: string }>> {

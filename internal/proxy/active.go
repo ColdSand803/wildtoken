@@ -51,6 +51,8 @@ type ActiveRequest struct {
 	clientType              string
 	upstreamID              *int64
 	upstreamName            *string
+	upstreamKeyID           int64
+	upstreamKeyName         string
 	model                   *string
 	requestModel            *string
 	upstreamModel           *string
@@ -162,6 +164,8 @@ func (a *ActiveRequest) snapshotLocked(now time.Time) models.ActiveRequestOut {
 		ClientType:              a.clientType,
 		UpstreamID:              a.upstreamID,
 		UpstreamName:            a.upstreamName,
+		UpstreamKeyID:           a.upstreamKeyID,
+		UpstreamKeyName:         a.upstreamKeyName,
 		Model:                   a.model,
 		RequestModel:            a.requestModel,
 		UpstreamModel:           a.upstreamModel,
@@ -224,15 +228,28 @@ func (a *ActiveRequest) SetModel(model *string) {
 // The count is what makes a retry visible while it is happening: a request that
 // has moved to its third channel looks the same as a slow first attempt without
 // it.
+//
+// The previous attempt's key goes with its channel; SetKey names the new one.
 func (a *ActiveRequest) SetUpstream(upstreamID int64, upstreamName string, forwardModel *string) {
 	a.update(func() {
 		a.upstreamID = &upstreamID
 		a.upstreamName = &upstreamName
+		a.upstreamKeyID = 0
+		a.upstreamKeyName = ""
 		a.upstreamModel = forwardModel
 		if forwardModel != nil {
 			a.model = forwardModel
 		}
 		a.attempt++
+	})
+}
+
+// SetKey records the channel key this attempt uses: 0 and "" for a channel
+// without keys.
+func (a *ActiveRequest) SetKey(keyID int64, keyName string) {
+	a.update(func() {
+		a.upstreamKeyID = keyID
+		a.upstreamKeyName = keyName
 	})
 }
 

@@ -234,7 +234,8 @@ twice as long with each refusal in a row up to 5 minutes (or as long as a
 next key before another channel. A channel whose keys are all disabled leaves
 routing; one with no keys signs in through its extra headers. The console shows
 saved keys masked: the eye button fetches one, and every key handed out is
-logged.
+logged. A balance query reads each enabled key and lists it on its own, and
+the log page shows which key an in-flight request is using.
 
 ## 🗺️ Model Mapping
 

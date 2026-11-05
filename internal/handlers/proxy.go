@@ -293,6 +293,7 @@ func (g *abortLogGuard) setClientType(clientType string) {
 
 // setKey names the key an attempt uses; zero for a channel without keys.
 func (g *abortLogGuard) setKey(key models.UpstreamKey) {
+	g.active.SetKey(key.ID, key.Name)
 	if g.entry == nil {
 		return
 	}

@@ -118,13 +118,17 @@ function Masked() {
  *
  * 写成一行的话，同名不同 ID 的渠道在日志里分不出来；而过滤器按 ID 筛，
  * 没有 ID 就对不上号。
+ *
+ * keyName 只有在途行传：跑长流时要看出是哪把 Key 在跑。
  */
 function ChannelStack({
   log,
   sensitiveHidden,
+  keyName,
 }: {
   log: { upstream_id: number | null; upstream_name: string | null };
   sensitiveHidden: boolean;
+  keyName?: string;
 }) {
   const name = (log.upstream_name ?? "").trim();
   const hidden = sensitiveHidden && Boolean(name);
@@ -145,24 +149,44 @@ function ChannelStack({
       <strong title={name ? `#${log.upstream_id} · ${shown}` : `#${log.upstream_id}`}>
         {`#${log.upstream_id}`}
       </strong>
-      <ChannelStackName name={name} hidden={hidden} />
+      <ChannelStackName name={name} hidden={hidden} keyName={keyName} />
     </div>
   );
 }
 
-/** 下行：有名字就显（该遮就遮），没名字说清楚是没名而不是空着。 */
-function ChannelStackName({ name, hidden }: { name: string; hidden: boolean }) {
-  if (!name) return <span className="muted">无名称</span>;
+/**
+ * 下行：有名字就显（该遮就遮），没名字说清楚是没名而不是空着。
+ * 带 Key 时接在后面，例："主力 · key-2"。Key 名随渠道名一起遮。
+ */
+function ChannelStackName({
+  name,
+  hidden,
+  keyName,
+}: {
+  name: string;
+  hidden: boolean;
+  keyName?: string;
+}) {
+  const key = keyName ? (
+    <>
+      {" · "}
+      {hidden ? <Masked /> : keyName}
+    </>
+  ) : null;
+
+  if (!name) return <span className="muted">无名称{key}</span>;
   if (hidden) {
     return (
       <span className="muted">
         <Masked />
+        {key}
       </span>
     );
   }
   return (
-    <span className="muted" title={name}>
+    <span className="muted" title={keyName ? `${name} · ${keyName}` : name}>
       {name}
+      {key}
     </span>
   );
 }
@@ -735,6 +759,12 @@ function RatePill({ label, value }: { label: string; value: number | null }) {
   );
 }
 
+/** 没配 Key 的渠道是 0；有 id 没名字时退回 #id。 */
+function activeKeyName(request: ActiveRequest): string | undefined {
+  if (!request.upstream_key_id) return undefined;
+  return request.upstream_key_name || `#${request.upstream_key_id}`;
+}
+
 function ActiveRows({
   active,
   sensitiveHidden,
@@ -772,7 +802,11 @@ function ActiveRows({
             {request.upstream_id === null || request.upstream_id === undefined ? (
               <span className="muted">路由中…</span>
             ) : (
-              <ChannelStack log={request} sensitiveHidden={sensitiveHidden} />
+              <ChannelStack
+                log={request}
+                sensitiveHidden={sensitiveHidden}
+                keyName={activeKeyName(request)}
+              />
             )}
           </td>
           <td className="token-cell" data-col="token">

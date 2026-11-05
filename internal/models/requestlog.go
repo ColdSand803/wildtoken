@@ -113,9 +113,13 @@ type ActiveRequestOut struct {
 	ClientType          string  `json:"client_type"`
 	UpstreamID          *int64  `json:"upstream_id"`
 	UpstreamName        *string `json:"upstream_name"`
-	Model               *string `json:"model"`
-	RequestModel        *string `json:"request_model"`
-	UpstreamModel       *string `json:"upstream_model"`
+	// UpstreamKeyID and UpstreamKeyName name the key the current attempt uses,
+	// as on RequestLogOut.
+	UpstreamKeyID   int64   `json:"upstream_key_id"`
+	UpstreamKeyName string  `json:"upstream_key_name"`
+	Model           *string `json:"model"`
+	RequestModel    *string `json:"request_model"`
+	UpstreamModel   *string `json:"upstream_model"`
 	// ReasoningEffort is what the caller asked for; UpstreamReasoningEffort is
 	// what the channel's effort mapping rewrote it into. Both are known once the
 	// upstream request has been prepared.
