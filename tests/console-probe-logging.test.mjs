@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { clientTypeOptions } from "../web/src/clientTypes.ts";
+
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 
 const UPSTREAMS_SOURCE = "internal/handlers/upstreams.go";
@@ -16,25 +18,13 @@ function probeClientTypes() {
   return values;
 }
 
-/**
- * The values offered by the log page's client filter.
- *
- * The list is a constant rather than something derived from the loaded page,
- * so it is read from the source instead of from rendered markup.
- */
-function clientFilterOptions() {
-  const source = read("web/src/pages/LogsPage.tsx");
-  const declared = /const CLIENT_TYPES(?::[^=]+)? = \[([^\]]+)\]/.exec(source);
-  assert.notEqual(declared, null, "the client filter list must exist");
-  return [...declared[1].matchAll(/"([a-z0-9-]+)"/gi)].map((match) => match[1]);
-}
-
-test("every console probe client type is offered by the log page filter", () => {
-  // The filter is a hardcoded list, so a new probe type added in Go would
-  // otherwise be written to the log and then be unfilterable in the console.
-  const options = clientFilterOptions();
+test("every console probe client type sits in the log page filter's probe group", () => {
+  // The filter offers whatever the logs hold, so every type is selectable. The
+  // probe group is a list of its own: a probe type added in Go without it
+  // would be filed among the real clients.
   for (const value of probeClientTypes()) {
-    assert.ok(options.includes(value), `${value} must be selectable in the client filter`);
+    assert.deepEqual(clientTypeOptions([value], [], "").probes, [value],
+      `${value} must be grouped as a console probe`);
   }
 });
 

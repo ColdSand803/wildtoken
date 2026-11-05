@@ -6,6 +6,8 @@ import type { LogFilters } from "../logFilters";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchDashboard } from "../api";
+import { UsageCalendar } from "../components/UsageCalendar";
+import { RetriedMark } from "../components/RetriedMark";
 import { compactCount, scaleDashboard } from "../dashboardScale";
 import { formatTimestamp } from "../logFormat";
 import type { LogOverview, RequestLog, TokenUsage, TopItem, TopStats } from "../types";
@@ -247,6 +249,8 @@ function StatusBar({ overview }: { overview: LogOverview }) {
     { tone: "ok", label: "2xx", count: overview.status_2xx },
     { tone: "warn", label: "4xx", count: overview.status_4xx },
     { tone: "danger", label: "5xx", count: overview.status_5xx },
+    // 客户端自己断开（499），不算失败，单独一段。
+    { tone: "cancel", label: "取消", count: overview.status_cancelled },
     { tone: "muted", label: "其他", count: overview.status_other },
     { tone: "danger", label: "无响应", count: overview.status_none },
   ];
@@ -347,6 +351,8 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [recent, setRecent] = useState<RequestLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // 日历不跟时间档，只在点「刷新」时重取。
+  const [calendarRefresh, setCalendarRefresh] = useState(0);
 
   /* 选了自定义但日期还没填齐时不发请求。点一下那个档位就能打出三个
      start_date= 空值的 400，而界面上只会变成一片破折号。 */
@@ -370,10 +376,12 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
       setOverview(data.overview);
       setTop(data.top);
       setUsage(data.usage);
-      // 最近失败只取有错或非 2xx 的行。
+      // 最近失败只取有错或非 2xx 的行。客户端自己断开（499）不算失败。
       setRecent(
         (data.recent.items ?? []).filter(
-          (log) => log.error !== null || log.status_code === null || log.status_code >= 400,
+          (log) =>
+            log.status_code !== 499 &&
+            (log.error !== null || log.status_code === null || log.status_code >= 400),
         ),
       );
       setError("");
@@ -697,7 +705,14 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                     {maskChannels ? <path className="log-sensitive-slash" d="m4 4 16 16" /> : null}
                   </svg>
                 </button>
-                <button type="button" className="secondary" onClick={() => void load()}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    void load();
+                    setCalendarRefresh((value) => value + 1);
+                  }}
+                >
                   刷新
                 </button>
               </div>
@@ -735,6 +750,8 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
               />
             </div>
           </section>
+
+          <UsageCalendar refreshKey={calendarRefresh} onUnauthorized={onUnauthorized} />
 
           <article className="dashboard-card dashboard-card-wide wt-card">
             <div className="panel-head dashboard-card-head wt-card-head">
@@ -782,6 +799,7 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                           ) : (
                             <span className="badge danger">{log.status_code}</span>
                           )}
+                          {log.retried ? <RetriedMark /> : null}
                         </td>
                         <td>{log.duration_ms === null ? "-" : formatMs(log.duration_ms)}</td>
                       </tr>

@@ -103,6 +103,12 @@ The Compose file stores SQLite data in the `wildtoken-data` volume and publishes
 port `3100`. It also mounts `./themes` read-only into the container so theme
 changes do not require an image rebuild.
 
+To update a running instance, use `scripts/deploy.sh` rather than
+`docker compose up -d --build`. The script builds first, waits up to 60 seconds
+for in-flight requests to finish (set with `WAIT=`), then replaces the container
+anyway, cutting the streams still running (`FORCE=0` gives up instead). It
+checks the new container and rolls back to the previous image if anything fails.
+
 For a brand-new database listening beyond localhost, WildToken refuses to start
 unless `ADMIN_TOKEN` is explicitly set. The token must be 24-256 bytes, printable
 ASCII, contain no spaces, and not be `change-me`.
@@ -204,8 +210,10 @@ WildToken chooses an upstream in this order:
 1. `X-WildToken-Upstream` header or `?upstream=` query parameter selects a
    channel by name or ID.
 2. Request JSON `model` exact-matches a channel model-mapping key or model name.
-3. The same `model` is matched against configured model prefixes, upstream-name
-   prefixes, and upstream-name suffixes.
+3. Failing that, the same `model` is matched against the channel's model
+   prefixes. A listed model name that merely starts or ends with the request is
+   no match: `gpt-4o` does not reach a channel listing only `gpt-4o-mini`. Point
+   an alias at another name with a model mapping.
 4. Among enabled candidates, the highest `priority` layer wins.
 5. Within that priority layer, WildToken performs weighted random selection.
    When automatic weight is enabled, effective weight is
@@ -218,6 +226,16 @@ zero, the higher-priority layer can take traffic again.
 Explicit channel selection bypasses pool selection. Automatic retries re-run
 selection for each attempt; selecting another channel retries immediately, while
 selecting the same channel waits for the configured same-channel retry interval.
+
+A channel may hold several API keys, and requests take its enabled keys in
+turn. A key the upstream answers with 401, 403 or 429 sits out for 10 seconds,
+twice as long with each refusal in a row up to 5 minutes (or as long as a
+`Retry-After` says, within that cap), and the request moves to the channel's
+next key before another channel. A channel whose keys are all disabled leaves
+routing; one with no keys signs in through its extra headers. The console shows
+saved keys masked: the eye button fetches one, and every key handed out is
+logged. A balance query reads each enabled key and lists it on its own, and
+the log page shows which key an in-flight request is using.
 
 ## 🗺️ Model Mapping
 
@@ -326,8 +344,8 @@ Configuration sources are loaded in this order:
 2. optional `config/<RUN_ENV>.toml`
 3. environment variables with the `APP__` prefix, for example
    `APP__SERVER__PORT=3100`
-4. compatibility variables from `.env`: `ADMIN_TOKEN`, `DATABASE_URL`, and
-   `WILDTOKEN_THEME_DIR`
+4. compatibility variables from `.env`: `ADMIN_TOKEN`, `DATABASE_URL`,
+   `ENCRYPTION_KEY`, and `WILDTOKEN_THEME_DIR`
 
 Common environment variables:
 
@@ -358,10 +376,47 @@ The admin console includes:
   reasoning-token fields when providers report them
 - server-side log body retention, full-log retention, and snapshot byte limits
 
-Log metadata and body snapshots are stored separately. WildToken can prune old
-snapshot bodies while keeping status code, channel, model, token usage, latency,
-and headers. SQLite incremental vacuum keeps reclaimed pages from accumulating
-indefinitely.
+Log metadata and body snapshots are stored separately. Bodies are cut into
+content-defined chunks and each chunk is stored once: a coding agent resends its
+whole conversation every turn, so consecutive requests are nearly identical and
+each log only pays for its new turn. Snapshot metadata such as headers is
+stored once per distinct value too. Logs past the keep count lose their bodies
+but keep status code, channel, model, token usage, latency, and headers; chunks
+no body lists any more are then collected. Up to 100,000 logs can keep their
+bodies, at up to 128 MiB per body. SQLite incremental vacuum returns the freed
+pages to the filesystem.
+
+## 💾 Backup and Restore
+
+WildToken backs the database up every day at 05:00 local time and keeps the
+newest 10 (`backup.at`, `backup.keep`, or `APP__BACKUP__AT`,
+`APP__BACKUP__KEEP`). A backup is one SQLite file holding everything but log
+bodies, which are a rolling diagnostic window; restored logs show their bodies
+as cleared. A start with no backup from the last day takes one a minute in.
+
+- Docker Compose writes them to `./.backup` on the host (`BACKUP_DIR` moves
+  it), so they outlive the data volume. Create the directory as your user
+  before the first start — `scripts/deploy.sh` does — or Docker creates it as
+  root and the backups are root's.
+- Run from source or as the Windows app, they go to `backups/` under the
+  working directory (`WILDTOKEN_BACKUP_DIR` moves it).
+- `wildtoken backup` takes one now, beside a running server:
+  `docker compose exec wildtoken wildtoken backup`.
+
+Credentials in a backup are sealed with the key in use when it was taken. Keep
+that key (`ENCRYPTION_KEY`, or `wildtoken.key` in the data volume) somewhere
+the backups are not.
+
+To restore under Docker Compose:
+
+```bash
+scripts/restore.sh .backup/wildtoken-20261104-050000.db
+```
+
+It stops the container, keeps the database it replaces in the data volume as
+`wildtoken.db.before-restore-<time>`, starts the container and reports whether
+the stored credentials opened. Elsewhere, stop the service and copy the backup
+over `wildtoken.db`.
 
 ## 🎨 Themes
 
@@ -382,10 +437,18 @@ theme packs.
   `change-me` credential before exposure.
 - Keep `.env`, SQLite data, logs, and release archives with live configuration
   out of public repositories.
-- Downstream API tokens are stored in plaintext so the console can copy them at
-  any time; authentication resolves a SHA-256 digest and the plaintext never
-  enters the request path. Treat access to the SQLite file and to the admin port
-  as access to every downstream token.
+- Provider API keys and the token copies the console shows are sealed in SQLite
+  with AES-256-GCM; authentication resolves a SHA-256 digest. The key is
+  `ENCRYPTION_KEY` (generate one with `openssl rand -hex 32`); without it,
+  WildToken creates `wildtoken.key` (mode 0600) beside the database on first
+  start. Keep the key out of database backups — under Docker, set
+  `ENCRYPTION_KEY` in `.env`, or the key sits in the data volume. Setting it
+  later moves existing values over on the next start. Losing the key means
+  re-entering every channel key, so back it up separately. The console still
+  shows keys and tokens in the clear to whoever holds the admin token.
+- The first start after upgrading seals existing plaintext and runs one
+  `VACUUM` to clear old copies from free space; it needs free disk space about
+  the size of the database.
 - Provider API keys are injected into upstream requests server-side and should
   never be distributed to downstream clients.
 - Admin APIs are same-origin and require `x-admin-token`; compatibility `/v1/*`

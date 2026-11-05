@@ -180,9 +180,9 @@ func TestTheRoutingHintIsNotForwarded(t *testing.T) {
 	}
 }
 
-// The allowlist admits the name asked for. Fuzzy matching must not turn it into
-// another model the token may not use; an operator's explicit mapping may.
-func TestAnAllowlistAlsoBindsTheForwardedModel(t *testing.T) {
+// A token allowed gpt-4 reaches only what serves gpt-4: not a channel listing
+// gpt-4.5-preview, but an operator's mapping of gpt-4 onto it.
+func TestAnAllowlistedModelReachesOnlyChannelsServingIt(t *testing.T) {
 	state := proxyRateLimitState(t)
 	ctx := context.Background()
 	server, hits := countingUpstream(t)
@@ -193,21 +193,21 @@ func TestAnAllowlistAlsoBindsTheForwardedModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fuzzy := models.DefaultUpstreamIn()
-	fuzzy.Name = "fuzzy"
-	fuzzy.BaseURL = server.URL
-	fuzzy.ModelNames = []string{"gpt-4.5-preview"}
-	if _, err := db.CreateUpstream(ctx, state.DB, &fuzzy); err != nil {
+	nearby := models.DefaultUpstreamIn()
+	nearby.Name = "nearby"
+	nearby.BaseURL = server.URL
+	nearby.ModelNames = []string{"gpt-4.5-preview"}
+	if _, err := db.CreateUpstream(ctx, state.DB, &nearby); err != nil {
 		t.Fatal(err)
 	}
 	router := proxyRateLimitRouter(state)
 
 	if code := sendBody(router, "/v1/chat/completions", created.Token,
 		`{"model":"gpt-4"}`).Code; code != http.StatusServiceUnavailable {
-		t.Errorf("fuzzy match to another model returned %d, want 503", code)
+		t.Errorf("a nearby model name returned %d, want 503", code)
 	}
 	if hits.Load() != 0 {
-		t.Error("the request reached a channel forwarding a model outside the allowlist")
+		t.Error("the request reached a channel that does not serve gpt-4")
 	}
 
 	mapped := models.DefaultUpstreamIn()

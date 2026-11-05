@@ -30,7 +30,7 @@ export function matchesLogFilters(log: RequestLog, filters: LogFilters): boolean
   if (filters.clientType && log.client_type !== filters.clientType) return false;
   const status = log.status_code;
   if (filters.status === "none" && status != null) return false;
-  if (filters.status === "error" && status != null && status >= 200 && status < 300) return false;
+  if (filters.status === "error" && (status === 499 || (status != null && status >= 200 && status < 300))) return false;
   if (filters.status === "other" && !(status != null && ((status >= 100 && status < 200) || (status >= 300 && status < 400)))) return false;
   if (/^[245]xx$/.test(filters.status ?? "")) {
     const base = Number(filters.status![0]) * 100;

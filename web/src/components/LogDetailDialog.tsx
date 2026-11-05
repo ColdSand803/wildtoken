@@ -3,7 +3,7 @@ import { formatFailureStage } from "../logTiming";
 import { Component, useEffect, useState } from "react";
 import type { KeyboardEvent, ReactNode } from "react";
 
-import { UnauthorizedError, getLogSnapshot } from "../api";
+import { UnauthorizedError, getLogSnapshot, listLogAttempts } from "../api";
 import {
   normalizeSnapshotBody,
   parseConversationRequest,
@@ -307,6 +307,27 @@ export function LogDetailDialog({
   const snapshots = snapshotsFor(cache, logId);
   const ref = useDialog(open, onClose);
 
+  /* 同一请求的各次尝试。只有代理写的行带 request_id，其余的不用问。
+     结果按日志 id 存，换一条日志时不会先闪出上一条的列表。 */
+  const requestId = log?.request_id ?? null;
+  const [attempts, setAttempts] = useState<{ id: number; items: RequestLog[] } | null>(null);
+  useEffect(() => {
+    if (!open || logId === null || requestId === null) return;
+    let current = true;
+    listLogAttempts(logId)
+      .then((items) => {
+        if (current) setAttempts({ id: logId, items });
+      })
+      .catch(() => {
+        // 拉不到只是少一块链路，元信息照常显示。
+        if (current) setAttempts({ id: logId, items: [] });
+      });
+    return () => {
+      current = false;
+    };
+  }, [open, logId, requestId]);
+  const attemptList = attempts !== null && attempts.id === logId ? attempts.items : [];
+
   // 关窗回到元信息。重开同一条也从头看起，缓存留着，报文不用再拉。
   useEffect(() => {
     if (!open) setSelection({ id: null, tab: "meta" });
@@ -437,7 +458,7 @@ export function LogDetailDialog({
               id="log-detail-panel-meta"
               aria-labelledby="log-detail-tab-meta"
             >
-              {log ? <><MetaPanel log={log} sensitiveHidden={sensitiveHidden} /><LogTiming log={log} /><RetryChain log={log} logs={logs} onSelect={onSelect} /></> : null}
+              {log ? <><MetaPanel log={log} attempts={attemptList} sensitiveHidden={sensitiveHidden} /><LogTiming log={log} /><RetryChain log={log} logs={attemptList.length > 1 ? attemptList : logs} onSelect={onSelect} /></> : null}
             </div>
           )}
         </div>
@@ -446,7 +467,7 @@ export function LogDetailDialog({
   );
 }
 
-function MetaPanel({ log, sensitiveHidden }: { log: RequestLog; sensitiveHidden?: boolean }) {
+function MetaPanel({ log, attempts, sensitiveHidden }: { log: RequestLog; attempts: RequestLog[]; sensitiveHidden?: boolean }) {
   return (
     <>
       <div className="log-detail-meta">
@@ -460,7 +481,42 @@ function MetaPanel({ log, sensitiveHidden }: { log: RequestLog; sensitiveHidden?
           {log.error}
         </p>
       ) : null}
+
+      {attempts.length > 1 && !log.request_uid ? <AttemptChain current={log.id} attempts={attempts} sensitiveHidden={sensitiveHidden} /> : null}
     </>
+  );
+}
+
+/**
+ * 同一请求的各次尝试，按先后排：前面的失败后换了渠道或 Key，最后一行是结果。
+ * 例：渠道 A 502 → 渠道 B 200。当前打开的那行加粗。
+ */
+function AttemptChain({ current, attempts, sensitiveHidden }: { current: number; attempts: RequestLog[]; sensitiveHidden?: boolean }) {
+  return (
+    <section className="log-detail-attempts" aria-label="这个请求的各次尝试">
+      <h4>这个请求尝试了 {attempts.length} 次</h4>
+      <ol>
+        {attempts.map((attempt) => (
+          <li
+            key={attempt.id}
+            className="log-detail-attempt"
+            aria-current={attempt.id === current ? "true" : undefined}
+          >
+            <span>{formatTimestamp(attempt.created_at).slice(11)}</span>
+            <span>
+              {sensitiveHidden && attempt.upstream_name ? SENSITIVE_MASK : attempt.upstream_name ?? "-"}
+              {attempt.upstream_key_name ? ` · ${sensitiveHidden ? SENSITIVE_MASK : attempt.upstream_key_name}` : ""}
+            </span>
+            <span>{formatStatus(attempt.status_code)}</span>
+            <span>{formatDuration(attempt.duration_ms)}</span>
+            <span className="log-detail-attempt-note" title={attempt.error ?? undefined}>
+              {attempt.retried ? "已重试" : "结果"}
+              {attempt.error ? ` · ${attempt.error}` : ""}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
@@ -484,6 +540,11 @@ function metaRows(log: RequestLog, sensitiveHidden = false): Array<{ label: stri
   push("来源 IP", sensitiveHidden && log.client_ip ? SENSITIVE_MASK : log.client_ip ?? "-");
   push("令牌", sensitiveHidden && log.downstream_token_name ? SENSITIVE_MASK : log.downstream_token_name ?? "-");
   push("渠道", sensitiveHidden && log.upstream_name ? SENSITIVE_MASK : log.upstream_name ?? "-");
+  // 没配 key 的渠道和有 key 之前的旧日志没有这一项。名称和渠道一样，隐藏敏感信息时打码。
+  if (log.upstream_key_id) {
+    const keyLabel = log.upstream_key_name || `#${log.upstream_key_id}`;
+    push("Key", sensitiveHidden && log.upstream_key_name ? SENSITIVE_MASK : keyLabel);
+  }
   push("模型", modelChain(log));
 
   for (const step of reasoningChain(log)) push(step.label, step.value);

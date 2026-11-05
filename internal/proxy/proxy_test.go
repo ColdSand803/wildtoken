@@ -39,7 +39,7 @@ func newProxyHarness(t *testing.T) *proxyHarness {
 
 	runtimeMetrics := metrics.New()
 	ctx, cancel := context.WithCancel(context.Background())
-	writer := NewLogWriter(ctx, database, runtimeMetrics, db.NewLogStatsCache(), 64, quota.NewTracker(), nil)
+	writer := NewLogWriter(ctx, database, runtimeMetrics, 64, quota.NewTracker(), nil)
 	t.Cleanup(func() {
 		writer.Close()
 		cancel()

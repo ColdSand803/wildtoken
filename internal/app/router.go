@@ -25,29 +25,34 @@ const noStoreCacheControl = "no-store, no-cache, must-revalidate, max-age=0"
 func NewRouter(state *appstate.State) http.Handler {
 	router := chi.NewRouter()
 
-	router.Get("/health", handlers.HealthCheck(state))
-	router.Get("/", func(w http.ResponseWriter, r *http.Request) {
+	// Everything but the relay below, whose responses are the upstream's and
+	// pass through as they came.
+	console := router.With(securityHeaders)
+
+	console.Get("/health", handlers.HealthCheck(state))
+	console.Get("/health/active", handlers.ActiveCount(state))
+	console.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console", http.StatusSeeOther)
 	})
-	router.Get("/console", serveConsoleHTML)
-	router.Mount("/console/assets", noStore(http.StripPrefix("/console/assets",
+	console.Get("/console", serveConsoleHTML)
+	console.Mount("/console/assets", noStore(http.StripPrefix("/console/assets",
 		http.FileServer(http.Dir(filepath.Join("web", "dist", "assets"))))))
-	router.Get("/api/themes", handlers.ListPublicThemePacks(state))
+	console.Get("/api/themes", handlers.ListPublicThemePacks(state))
 
 	// Outside the admin group: Prometheus authenticates with its own bearer token,
 	// not the console's x-admin-token. Disabled by default, and 404 when disabled so
 	// the endpoint's existence is not confirmed to a scanner.
 	router.Get("/metrics", handlers.PrometheusMetrics(state))
 
-	router.Mount("/static", noStore(http.StripPrefix("/static",
+	console.Mount("/static", noStore(http.StripPrefix("/static",
 		noDirectoryListing(http.FileServer(http.Dir("static"))))))
-	router.Mount("/theme-packs", noStore(http.StripPrefix("/theme-packs",
+	console.Mount("/theme-packs", noStore(http.StripPrefix("/theme-packs",
 		serveThemePackCSS(state.Settings.Themes.Dir))))
 	// Saved generated images. Public on purpose: <img> and a pasted link cannot
 	// send the admin header, and the 128-bit random name is the access check.
-	router.Mount("/images", state.Images.Handler())
+	console.Mount("/images", state.Images.Handler())
 
-	router.Group(func(admin chi.Router) {
+	console.Group(func(admin chi.Router) {
 		admin.Use(middleware.RequireAdmin(state.Credentials, state.Settings.Admin.ClientIPHeader))
 		mountAdminRoutes(admin, state)
 	})
@@ -114,6 +119,7 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			upstreams.Get("/", handlers.AdminListUpstreams(state))
 			upstreams.Post("/", handlers.AdminCreateUpstream(state))
 			upstreams.Get("/{id}", handlers.AdminGetUpstream(state))
+			upstreams.Get("/{id}/credential", handlers.AdminRevealUpstreamKey(state))
 			upstreams.Put("/{id}", handlers.AdminUpdateUpstream(state))
 			upstreams.Delete("/{id}", handlers.AdminDeleteUpstream(state))
 			upstreams.Patch("/{id}/enabled", handlers.AdminSetUpstreamEnabled(state))
@@ -154,7 +160,10 @@ func mountAdminRoutes(router chi.Router, state *appstate.State) {
 			logs.Get("/token-usage", handlers.AdminTokenUsageStats(state))
 			logs.Get("/top", handlers.AdminTopLogStats(state))
 			logs.Get("/overview", handlers.AdminLogOverview(state))
+			logs.Get("/daily", handlers.AdminDailyUsage(state))
+			logs.Get("/clients", handlers.AdminListLogClientTypes(state))
 			logs.Get("/{id}", handlers.AdminGetLogDetail(state))
+			logs.Get("/{id}/attempts", handlers.AdminListLogAttempts(state))
 			logs.Get("/{id}/snapshots/{field}", handlers.AdminGetLogSnapshot(state))
 		})
 	})
@@ -247,6 +256,7 @@ func serveConsoleHTML(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("content-type", "text/html; charset=utf-8")
 	w.Header().Set("cache-control", noStoreCacheControl)
+	w.Header().Set("content-security-policy", consolePolicy(html))
 	w.Write(html)
 }
 

@@ -3,18 +3,14 @@ package db
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/models"
 )
 
 func itoa(value int) string { return strconv.Itoa(value) }
-
-func nowUnix() int64 { return time.Now().UTC().Unix() }
 
 func nullString(value string) sql.NullString {
 	return sql.NullString{String: value, Valid: true}
@@ -126,13 +122,12 @@ func TestGetLogDetailResolvesOverridesAgainstCanonicalSnapshots(t *testing.T) {
 		t.Fatalf("insert log: %v", err)
 	}
 	// The upstream request matched the downstream one; the downstream response
-	// was explicitly absent.
-	if _, err := database.Exec(`INSERT INTO request_log_payloads
+	// was explicitly absent. Stored the way releases before chunked storage
+	// kept snapshots, and migrated.
+	seedLegacyPayloads(t, database, `INSERT INTO request_log_payloads
         (request_log_id, request_snapshot, upstream_request_override, upstream_request_is_override,
          response_snapshot, downstream_response_override, downstream_response_is_override)
-        VALUES (1, '{"body":{"text":"req"}}', NULL, 0, '{"body":{"text":"res"}}', NULL, 1)`); err != nil {
-		t.Fatalf("insert payload: %v", err)
-	}
+        VALUES (1, '{"body":{"text":"req"}}', NULL, 0, '{"body":{"text":"res"}}', NULL, 1)`)
 
 	detail, ok, err := GetLogDetail(ctx, database, 1)
 	if err != nil || !ok {
@@ -168,16 +163,16 @@ func TestGetLogSnapshotResolvesEachFieldLikeTheDetail(t *testing.T) {
             VALUES (1, 'POST', '/v1/responses', 'codex', 0)`,
 		`INSERT INTO request_logs (id, method, path, client_type, stream)
             VALUES (2, 'POST', '/v1/responses', 'codex', 0)`,
-		`INSERT INTO request_log_payloads
-            (request_log_id, request_snapshot, upstream_request_override, upstream_request_is_override,
-             response_snapshot, downstream_response_override, downstream_response_is_override)
-            VALUES (1, '{"body":{"text":"req"}}', '{"body":{"text":"up"}}', 1,
-                    '{"body":{"text":"res"}}', NULL, 1)`,
 	} {
 		if _, err := database.Exec(stmt); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
+	seedLegacyPayloads(t, database, `INSERT INTO request_log_payloads
+            (request_log_id, request_snapshot, upstream_request_override, upstream_request_is_override,
+             response_snapshot, downstream_response_override, downstream_response_is_override)
+            VALUES (1, '{"body":{"text":"req"}}', '{"body":{"text":"up"}}', 1,
+                    '{"body":{"text":"res"}}', NULL, 1)`)
 
 	want := map[LogSnapshotField]string{
 		LogSnapshotDownstreamRequest:  `{"body":{"text":"req"}}`,
@@ -254,6 +249,7 @@ func TestTopLogStatsRanksModelsAndChannels(t *testing.T) {
 		}
 	}
 
+	rebuildStats(t, database)
 	stats, err := TopLogStats(ctx, database, LogTopWindowSevenDays, 10)
 	if err != nil {
 		t.Fatalf("top stats: %v", err)
@@ -345,6 +341,7 @@ func TestTopLogStatsAllTimeIncludesOldRows(t *testing.T) {
 	if !ok {
 		t.Fatal("all-time window was rejected")
 	}
+	rebuildStats(t, database)
 	stats, err := TopLogStats(ctx, database, window, 10)
 	if err != nil {
 		t.Fatalf("top stats: %v", err)
@@ -378,6 +375,7 @@ func TestCustomLogRangesUseAnInclusiveEndDate(t *testing.T) {
 		}
 	}
 
+	rebuildStats(t, database)
 	usage, err := QueryTokenUsage(ctx, database, LogTopWindowCustom,
 		"2026-08-01 00:00:00", "2026-08-04 00:00:00")
 	if err != nil {
@@ -401,79 +399,21 @@ func TestDeleteOldLogsRemovesPayloadsWithTheirLogs(t *testing.T) {
 	database := memoryDB(t)
 	ctx := context.Background()
 
-	for i, age := range []string{"-40 days", "-1 days"} {
-		id := i + 1
-		if _, err := database.Exec(`INSERT INTO request_logs
-            (id, created_at, method, path, client_type, stream)
-            VALUES (?, datetime('now', ?), 'POST', '/v1/responses', 'codex', 0)`,
-			id, age); err != nil {
-			t.Fatalf("insert log: %v", err)
-		}
-		if _, err := database.Exec(`INSERT INTO request_log_payloads
-            (request_log_id, request_snapshot) VALUES (?, '{"body":{"text":"x"}}')`,
-			id); err != nil {
-			t.Fatalf("insert payload: %v", err)
-		}
-	}
+	storeTestLog(t, database, "-40 days", textSnapshot(`{}`, "x"))
+	storeTestLog(t, database, "-1 days", textSnapshot(`{}`, "x"))
 
 	if err := DeleteOldLogs(ctx, database, 30); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
-	var logCount, payloadCount int64
-	if err := database.QueryRow("SELECT COUNT(*) FROM request_logs").Scan(&logCount); err != nil {
-		t.Fatalf("count logs: %v", err)
-	}
-	if err := database.QueryRow("SELECT COUNT(*) FROM request_log_payloads").
-		Scan(&payloadCount); err != nil {
-		t.Fatalf("count payloads: %v", err)
-	}
-	if logCount != 1 || payloadCount != 1 {
-		t.Errorf("after retention: %d logs, %d payloads, want 1 and 1", logCount, payloadCount)
+	logCount := countRows(t, database, "SELECT COUNT(*) FROM request_logs")
+	snapshotCount := countRows(t, database, "SELECT COUNT(*) FROM request_log_snapshots")
+	if logCount != 1 || snapshotCount != 1 {
+		t.Errorf("after retention: %d logs, %d snapshot rows, want 1 and 1", logCount, snapshotCount)
 	}
 }
 
-func TestClearSnapshotBodyKeepsMetadataAndSurvivesCorruptJSON(t *testing.T) {
-	stored := nullString(`{"method":"POST","body":{"text":"secret"}}`)
-	cleared, ok := clearSnapshotBody(stored, true).(string)
-	if !ok {
-		t.Fatalf("clearSnapshotBody returned %T, want a string", clearSnapshotBody(stored, true))
-	}
-	var decoded map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(cleared), &decoded); err != nil {
-		t.Fatalf("decode cleared: %v", err)
-	}
-	if string(decoded["method"]) != `"POST"` {
-		t.Errorf("metadata was lost: %s", cleared)
-	}
-	if string(decoded["body"]) != `{"cleared":true}` {
-		t.Errorf("body = %s, want it cleared", decoded["body"])
-	}
-
-	// A snapshot that no longer parses is replaced wholesale rather than kept.
-	corrupt := clearSnapshotBody(nullString("not json"), true)
-	if corrupt != clearedBodySnapshot {
-		t.Errorf("corrupt snapshot = %v, want the cleared placeholder", corrupt)
-	}
-
-	// Nothing is rewritten when the row is not due for clearing.
-	untouched := clearSnapshotBody(stored, false)
-	if untouched != stored.String {
-		t.Errorf("snapshot = %v, want it untouched", untouched)
-	}
-
-	if clearSnapshotBody(nullStringInvalid(), true) != nil {
-		t.Error("an absent snapshot produced a value")
-	}
-
-	// A JSON null decodes into a nil map; writing into it panicked the cleanup
-	// goroutine, which has no recover.
-	if clearSnapshotBody(nullString("null"), true) != clearedBodySnapshot {
-		t.Error("a null snapshot was not replaced by the cleared placeholder")
-	}
-}
-
-func TestRefreshGroupsLogsIntoUsageWindows(t *testing.T) {
+func TestUsageWindowsGroupTheLogs(t *testing.T) {
 	database := memoryDB(t)
 	ctx := context.Background()
 
@@ -488,66 +428,36 @@ func TestRefreshGroupsLogsIntoUsageWindows(t *testing.T) {
 		t.Fatalf("insert logs: %v", err)
 	}
 
-	cache, err := LoadLogStatsCache(ctx, database)
+	rebuildStats(t, database)
+	total, lastDay, err := LogCounts(ctx, database)
 	if err != nil {
-		t.Fatalf("load: %v", err)
+		t.Fatalf("counts: %v", err)
 	}
-	snapshot := cache.Snapshot()
+	if total != 5 || lastDay != 2 {
+		t.Errorf("rows = %d total, %d in 24h; want 5 and 2", total, lastDay)
+	}
+	usage, err := TokenUsageWindows(ctx, database, "")
+	if err != nil {
+		t.Fatalf("windows: %v", err)
+	}
 
-	if snapshot.TotalLogCount != 5 {
-		t.Errorf("total = %d, want 5", snapshot.TotalLogCount)
-	}
-	if snapshot.LogCount24h != 2 {
-		t.Errorf("24h = %d, want 2", snapshot.LogCount24h)
-	}
 	// The 8-day-old row is outside seven days but inside thirty, and the
 	// 31-day-old row falls out of the window entirely.
-	sevenDays := snapshot.TokenUsage.SevenDays
+	sevenDays := usage.SevenDays
 	if sevenDays.TotalTokens != 300 || sevenDays.PromptTokens != 200 ||
 		sevenDays.PromptCachedTokens != 50 || sevenDays.RequestCount != 2 ||
 		sevenDays.AllRequestCount != 3 {
 		t.Errorf("seven-day window = %+v", sevenDays)
 	}
-	thirtyDays := snapshot.TokenUsage.ThirtyDays
+	thirtyDays := usage.ThirtyDays
 	if thirtyDays.TotalTokens != 300 || thirtyDays.AllRequestCount != 4 {
 		t.Errorf("thirty-day window = %+v", thirtyDays)
 	}
-	allTime := snapshot.TokenUsage.AllTime
+	allTime := usage.AllTime
 	if allTime.TotalTokens != 700 || allTime.PromptTokens != 400 ||
 		allTime.PromptCachedTokens != 100 || allTime.RequestCount != 3 ||
 		allTime.AllRequestCount != 5 {
 		t.Errorf("all-time window = %+v", allTime)
-	}
-}
-
-func TestRecordPersistedEntriesUpdatesCacheWithoutRefresh(t *testing.T) {
-	cache := NewLogStatsCache()
-	now := nowUnix()
-	total, prompt, cached := int64(12), int64(9), int64(3)
-
-	cache.RecordPersistedEntries([]PersistedLogStats{
-		{ID: 1, CreatedAtUnixSeconds: now, TotalTokens: &total,
-			PromptTokens: &prompt, PromptCachedTokens: &cached},
-		{ID: 2, CreatedAtUnixSeconds: now},
-	})
-
-	snapshot := cache.Snapshot()
-	if snapshot.TotalLogCount != 2 || snapshot.LogCount24h != 2 {
-		t.Errorf("counts = %d total / %d in 24h, want 2/2",
-			snapshot.TotalLogCount, snapshot.LogCount24h)
-	}
-	window := snapshot.TokenUsage.ThirtyDays
-	if window.TotalTokens != 12 || window.PromptTokens != 9 ||
-		window.PromptCachedTokens != 3 || window.RequestCount != 1 ||
-		window.AllRequestCount != 2 {
-		t.Errorf("window = %+v", window)
-	}
-
-	// A replayed entry must not be counted twice.
-	cache.RecordPersistedEntries([]PersistedLogStats{{ID: 1, CreatedAtUnixSeconds: now,
-		TotalTokens: &total, PromptTokens: &prompt, PromptCachedTokens: &cached}})
-	if replayed := cache.Snapshot(); replayed.TotalLogCount != 2 {
-		t.Errorf("total after replay = %d, want 2", replayed.TotalLogCount)
 	}
 }
 
@@ -580,100 +490,6 @@ func TestRecentOneMinuteRateCountsOnlySuccessfulRequests(t *testing.T) {
 	}
 	if rate.RequestCount != 2 || rate.TotalTokens != 30 {
 		t.Errorf("rate = %+v, want 2 requests and 30 tokens", rate)
-	}
-}
-
-func TestRefreshPreservesPendingEntriesNewerThanTheWatermark(t *testing.T) {
-	database := memoryDB(t)
-	ctx := context.Background()
-
-	if _, err := database.Exec(`INSERT INTO request_logs
-        (id, created_at, method, path, client_type, stream, total_tokens)
-        VALUES (1, datetime('now'), 'POST', '/v1/r', 'codex', 0, 10)`); err != nil {
-		t.Fatalf("insert: %v", err)
-	}
-
-	cache := NewLogStatsCache()
-	total, prompt, cached := int64(5), int64(4), int64(1)
-	cache.RecordPersistedEntries([]PersistedLogStats{{
-		ID: 2, CreatedAtUnixSeconds: nowUnix(),
-		TotalTokens: &total, PromptTokens: &prompt, PromptCachedTokens: &cached,
-	}})
-	if err := cache.RefreshFromDB(ctx, database); err != nil {
-		t.Fatalf("refresh: %v", err)
-	}
-
-	// Row 2 committed after the refresh read the table, so its counts are carried
-	// over rather than lost.
-	snapshot := cache.Snapshot()
-	if snapshot.TotalLogCount != 2 {
-		t.Errorf("total = %d, want 2", snapshot.TotalLogCount)
-	}
-	window := snapshot.TokenUsage.ThirtyDays
-	if window.TotalTokens != 15 || window.PromptTokens != 4 ||
-		window.PromptCachedTokens != 1 || window.RequestCount != 2 {
-		t.Errorf("window = %+v, want the pending entry merged in", window)
-	}
-}
-
-func TestPendingEntriesAreBoundedWhenRefreshesStopHappening(t *testing.T) {
-	cache := NewLogStatsCache()
-	now := nowUnix()
-
-	// Every committed row is held until the next successful rebuild carries it
-	// across. Nothing trimmed the map, so a database that stopped answering
-	// turned steady traffic into unbounded memory.
-	surplus := 1000
-	entries := make([]PersistedLogStats, 0, maxPendingEntries+surplus)
-	for id := range int64(maxPendingEntries + surplus) {
-		entries = append(entries, PersistedLogStats{ID: id + 1, CreatedAtUnixSeconds: now})
-	}
-	cache.RecordPersistedEntries(entries)
-
-	// Snapshot prunes, which is where the cap applies.
-	snapshot := cache.Snapshot()
-
-	cache.mu.Lock()
-	held := len(cache.state.pendingEntries)
-	cache.mu.Unlock()
-
-	if held > maxPendingEntries {
-		t.Errorf("held %d pending entries, want at most %d", held, maxPendingEntries)
-	}
-	// Trimming leaves headroom rather than stopping at the cap, so the next
-	// batch does not put the map straight back over it and pay for another
-	// full sort of every key.
-	if held > pendingLowWater {
-		t.Errorf("trimmed to %d, want the low-water mark %d so the sort amortizes",
-			held, pendingLowWater)
-	}
-	// The counts the dropped entries contributed stay in the buckets; only the
-	// ability to replay them across a rebuild is given up.
-	if snapshot.TotalLogCount != int64(maxPendingEntries+surplus) {
-		t.Errorf("total = %d, want every entry counted once", snapshot.TotalLogCount)
-	}
-}
-
-func TestPruneDoesNotSortWhileTheMapIsWithinItsCap(t *testing.T) {
-	cache := NewLogStatsCache()
-	now := nowUnix()
-
-	// The ordinary case is a map holding one refresh interval of rows. Prune
-	// runs on every batch and every console poll, so it must not touch the
-	// entries at all until the cap is actually reached.
-	entries := make([]PersistedLogStats, 0, 128)
-	for id := range int64(128) {
-		entries = append(entries, PersistedLogStats{ID: id + 1, CreatedAtUnixSeconds: now})
-	}
-	cache.RecordPersistedEntries(entries)
-	cache.Snapshot()
-
-	cache.mu.Lock()
-	held := len(cache.state.pendingEntries)
-	cache.mu.Unlock()
-
-	if held != 128 {
-		t.Errorf("held %d entries, want all 128 kept below the cap", held)
 	}
 }
 
@@ -716,35 +532,18 @@ func TestRetentionTakesThePayloadRowsWithIt(t *testing.T) {
 	database := memoryDB(t)
 	ctx := context.Background()
 
-	result, err := database.Exec(`INSERT INTO request_logs
-       (created_at, method, path, client_type, stream)
-       VALUES (datetime('now', '-40 days'), 'POST', '/v1/responses', 'codex', 0)`)
-	if err != nil {
-		t.Fatalf("insert log: %v", err)
-	}
-	logID, err := result.LastInsertId()
-	if err != nil {
-		t.Fatalf("last insert id: %v", err)
-	}
-	if _, err := database.Exec(`INSERT INTO request_log_payloads
-       (request_log_id, request_snapshot, response_snapshot)
-       VALUES (?, '{"body":"x"}', '{"body":"y"}')`, logID); err != nil {
-		t.Fatalf("insert payload: %v", err)
-	}
+	storeTestLog(t, database, "-40 days", textSnapshot(`{}`, "x"), nil, textSnapshot(`{}`, "y"))
 
 	if err := DeleteOldLogs(ctx, database, 30); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
-	// The payload goes with its parent through ON DELETE CASCADE, which is why
-	// the delete no longer names it separately.
-	var payloads int64
-	if err := database.QueryRow(
-		"SELECT COUNT(*) FROM request_log_payloads").Scan(&payloads); err != nil {
-		t.Fatalf("count payloads: %v", err)
-	}
-	if payloads != 0 {
-		t.Errorf("%d payload rows survived their log row", payloads)
+	// The snapshot and body rows go with their parent through ON DELETE
+	// CASCADE, which is why the delete does not name them separately.
+	for _, table := range []string{"request_log_snapshots", "request_log_bodies"} {
+		if rows := countRows(t, database, "SELECT COUNT(*) FROM "+table); rows != 0 {
+			t.Errorf("%d %s rows survived their log row", rows, table)
+		}
 	}
 }
 

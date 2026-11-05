@@ -55,11 +55,29 @@ function Result({ result, provider }: { result: BalanceResult; provider: Balance
   );
 }
 
+/** 一项结果：成功显金额，失败显原因。 */
+function Outcome({ result, provider }: { result: BalanceResult; provider: BalanceProvider }) {
+  if (result.ok) return <Result result={result} provider={provider} />;
+  return <p className="muted">{result.message || "未知错误"}</p>;
+}
+
+/** 例："3 把 Key，1 把失败"。全成或全败时只说结果。 */
+function summarize(results: BalanceResult[]): string {
+  const failed = results.filter((result) => !result.ok).length;
+  if (failed === 0) return "查询成功";
+  if (failed === results.length) return "查询失败";
+  return `${results.length} 把 Key，${failed} 把失败`;
+}
+
 /**
  * 余额查询。
  *
  * 旧版是个带刷新按钮的窗口而不是一条 toast：余额要对着看、要反复刷，
  * 看完就消失的提示不顶用。
+ *
+ * 启用的 Key 逐把查：几把 Key 可能是几个账号，各有各的余额。只有一项时
+ * 照旧平铺；多把时每把一节，空名的 Key 用 #id 称呼。不算合计——同一账号
+ * 的几把 Key 报的可能是同一笔余额，加起来就重复了。
  */
 export function BalanceDialog({
   open,
@@ -72,7 +90,7 @@ export function BalanceDialog({
   provider: BalanceProvider;
   onClose: () => void;
 }) {
-  const [result, setResult] = useState<BalanceResult | null>(null);
+  const [results, setResults] = useState<BalanceResult[] | null>(null);
   const [failure, setFailure] = useState("");
   const [busy, setBusy] = useState(false);
   const dialogRef = useDialog(open, onClose);
@@ -84,13 +102,13 @@ export function BalanceDialog({
     if (!upstream) return;
     const token = ++queryRef.current;
     setBusy(true);
-    setResult(null);
+    setResults(null);
     setFailure("");
     try {
       const outcome = await fetchUpstreamBalance(upstream.id, provider);
       if (token !== queryRef.current) return;
-      if (outcome.ok) setResult(outcome);
-      else setFailure(outcome.message || "未知错误");
+      if (outcome.keys?.length) setResults(outcome.keys);
+      else setFailure("没有可查的 Key");
     } catch (err) {
       if (token !== queryRef.current) return;
       if (err instanceof UnauthorizedError) return;
@@ -109,7 +127,7 @@ export function BalanceDialog({
     void query();
   }, [open, query]);
 
-  const summary = busy ? "正在查询..." : result ? "查询成功" : failure ? "查询失败" : "";
+  const summary = busy ? "正在查询..." : results ? summarize(results) : failure ? "查询失败" : "";
 
   return (
     <dialog className="balance-dialog dialog--drawer" ref={dialogRef} onCancel={onClose}>
@@ -148,7 +166,15 @@ export function BalanceDialog({
         </div>
 
         <div className="balance-body upstream-dialog-body">
-          {result ? <Result result={result} provider={provider} /> : null}
+          {results?.length === 1 ? <Outcome result={results[0]} provider={provider} /> : null}
+          {results && results.length > 1
+            ? results.map((result) => (
+                <section className="balance-key" key={result.key_id}>
+                  <h3>{`Key ${result.key_name || `#${result.key_id}`}`}</h3>
+                  <Outcome result={result} provider={provider} />
+                </section>
+              ))
+            : null}
           {failure ? <p className="muted">{failure}</p> : null}
         </div>
       </div>

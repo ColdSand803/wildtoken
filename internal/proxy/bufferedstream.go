@@ -43,6 +43,15 @@ func newBufferedStream(requestCtx context.Context, body []byte, entry LogEntry,
 	}
 }
 
+// markRetried records that another attempt replaced this response.
+func (s *bufferedStream) markRetried() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.entry != nil {
+		s.entry.Retried = true
+	}
+}
+
 func (s *bufferedStream) Read(buffer []byte) (int, error) {
 	return s.body.Read(buffer)
 }
@@ -59,7 +68,9 @@ func (s *bufferedStream) Close() error {
 		return nil
 	}
 
-	if s.requestCtx.Err() != nil {
+	// A retried attempt keeps the upstream's answer: the client may have left
+	// since, but this row records what the channel did, not the delivery.
+	if !entry.Retried && s.requestCtx.Err() != nil {
 		clientGone := int32(499)
 		entry.StatusCode = &clientGone
 		entry.Error = ptrTo("client disconnected before the response was delivered")

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/liguangsheng/wildtoken/internal/appstate"
-	"github.com/liguangsheng/wildtoken/internal/db"
 	"github.com/liguangsheng/wildtoken/internal/proxy"
 )
 
@@ -23,7 +22,7 @@ func probeAllState(t *testing.T) *appstate.State {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics,
-		db.NewLogStatsCache(), 64, state.Quotas, nil)
+		64, state.Quotas, nil)
 	t.Cleanup(func() {
 		state.LogWriter.Close()
 		cancel()

@@ -38,7 +38,7 @@ func proxyRateLimitState(t *testing.T) *appstate.State {
 	// same scrape counters production traffic does.
 	state.Prometheus = metrics.NewPrometheus()
 	state.LogWriter = proxy.NewLogWriter(ctx, state.DB, state.Metrics,
-		db.NewLogStatsCache(), 64, state.Quotas, state.Prometheus)
+		64, state.Quotas, state.Prometheus)
 	t.Cleanup(func() {
 		state.LogWriter.Close()
 		state.TokenRateLimiter.Close()

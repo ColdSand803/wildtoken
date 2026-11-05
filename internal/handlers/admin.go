@@ -32,7 +32,7 @@ import (
 //
 // The release workflow parses this line to check that a tag matches, so its
 // shape must stay `const Version = "..."`.
-const Version = "0.2.2"
+const Version = "0.2.3"
 
 // maxLogListOffset caps how deep the offset-paged log list may reach.
 const maxLogListOffset int32 = 100_000
@@ -346,7 +346,11 @@ func AdminSystemInfo(state *appstate.State) http.HandlerFunc {
 			}
 		}
 
-		logStats := state.LogStats.Snapshot()
+		// Unknown counts read as zero, as the rate below does.
+		totalLogCount, logCount24h, err := db.LogCounts(r.Context(), state.DB)
+		if err != nil {
+			totalLogCount, logCount24h = 0, 0
+		}
 		recentOneMinuteLogCount, err := db.RecentOneMinuteLogCount(r.Context(), state.DB)
 		if err != nil {
 			recentOneMinuteLogCount = 0
@@ -372,8 +376,8 @@ func AdminSystemInfo(state *appstate.State) http.HandlerFunc {
 			CurrentServerTime:             time.Now().Format(time.RFC3339),
 			DatabaseOK:                    databaseOK,
 			DatabaseAllocatedBytes:        databaseAllocatedBytes,
-			TotalLogCount:                 logStats.TotalLogCount,
-			LogCount24h:                   logStats.LogCount24h,
+			TotalLogCount:                 totalLogCount,
+			LogCount24h:                   logCount24h,
 			EnabledUpstreamCount:          enabledUpstreamCount,
 			TotalUpstreamCount:            totalUpstreamCount,
 			RecentOneMinuteLogCount:       recentOneMinuteLogCount,
@@ -1038,46 +1042,28 @@ func AdminTokenUsageStats(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		stats := state.LogStats.Snapshot().TokenUsage
+		// Five windows from stats_hourly, a few milliseconds each. "today"
+		// starts at the operator's midnight.
+		ctx, cancel := analyticsContext(r)
+		defer cancel()
+		now := time.Now().In(zone)
+		midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone)
+		stats, err := db.TokenUsageWindows(ctx, state.DB, midnight.UTC().Format(models.TimestampFormat))
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 		if selection.Value == "default" {
 			apperr.WriteJSON(w, http.StatusOK, stats)
 			return
 		}
 
-		// The cache's "today" starts at the server's midnight; an operator in
-		// another zone gets theirs from the database.
-		_, serverOffset := time.Now().Zone()
-		var usage models.TokenUsageWindowOut
-		switch selection.Window {
-		case db.LogTopWindowToday:
-			usage = stats.Today
-			if selection.OffsetSeconds != int64(serverOffset) {
-				ctx, cancel := analyticsContext(r)
-				defer cancel()
-				usage, err = db.QueryTokenUsage(ctx, state.DB, selection.Window,
-					selection.StartAt, selection.EndAt)
-				if err != nil {
-					apperr.WriteError(w, err)
-					return
-				}
-			}
-		case db.LogTopWindowOneDay:
-			usage = stats.OneDay
-		case db.LogTopWindowSevenDays:
-			usage = stats.SevenDays
-		case db.LogTopWindowThirtyDays:
-			usage = stats.ThirtyDays
-		case db.LogTopWindowAll:
-			usage = stats.AllTime
-		default:
-			ctx, cancel := analyticsContext(r)
-			defer cancel()
-			usage, err = db.QueryTokenUsage(ctx, state.DB, selection.Window,
-				selection.StartAt, selection.EndAt)
-			if err != nil {
-				apperr.WriteError(w, err)
-				return
-			}
+		// A chosen range goes in today; the console reads it there.
+		usage, err := db.QueryTokenUsage(ctx, state.DB, selection.Window,
+			selection.StartAt, selection.EndAt)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
 		}
 
 		stats.Today = usage
@@ -1121,6 +1107,66 @@ func AdminLogOverview(state *appstate.State) http.HandlerFunc {
 	}
 }
 
+// dailyUsageDays is how far back the calendar reaches: 53 weeks, whatever
+// weekday today is.
+const dailyUsageDays = 53 * 7
+
+type dailyUsageResponse struct {
+	// Today is the console's date, which the calendar ends on.
+	Today string             `json:"today"`
+	Days  []db.DailyUsageOut `json:"days"`
+}
+
+// AdminDailyUsage returns per-day totals for the console's last 53 weeks.
+// They come from usage_hourly, so log retention does not thin them out.
+//
+// Days follow tz_offset as the rest of the dashboard does, applied to the
+// whole span: a zone with daylight saving folds the other half of the year an
+// hour off.
+func AdminDailyUsage(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		zone, err := dashboardZone(r.URL.Query().Get("tz_offset"))
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		now := time.Now().In(zone)
+		_, offset := now.Zone()
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, zone)
+		since := today.AddDate(0, 0, 1-dailyUsageDays)
+
+		ctx, cancel := analyticsContext(r)
+		defer cancel()
+		days, err := db.DailyUsage(ctx, state.DB, since.Unix(), int64(offset))
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		apperr.WriteJSON(w, http.StatusOK, dailyUsageResponse{
+			Today: today.Format(dashboardDateLayout),
+			Days:  days,
+		})
+	}
+}
+
+type logClientTypesResponse struct {
+	ClientTypes []string `json:"client_types"`
+}
+
+// AdminListLogClientTypes lists the client types the logs hold, for the log
+// page's client filter. Imported history carries types this build does not
+// detect, such as axonhub; a fixed list could not offer them.
+func AdminListLogClientTypes(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		types, err := db.LogClientTypes(r.Context(), state.DB)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		apperr.WriteJSON(w, http.StatusOK, logClientTypesResponse{ClientTypes: types})
+	}
+}
+
 // AdminTopLogStats ranks models and channels over a window.
 func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -1147,6 +1193,24 @@ func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 			return
 		}
 		apperr.WriteJSON(w, http.StatusOK, stats)
+	}
+}
+
+// AdminListLogAttempts lists the attempts of the request a log belongs to,
+// without their payloads, so the console can show the chain cheaply.
+func AdminListLogAttempts(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id, err := pathID(r)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		attempts, err := db.LogAttempts(r.Context(), state.DB, id)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		apperr.WriteJSON(w, http.StatusOK, map[string]any{"items": attempts})
 	}
 }
 
@@ -1529,40 +1593,20 @@ func AdminGetUpstreamsStats(state *appstate.State) http.HandlerFunc {
 		// Lifetime totals per channel: request count, cache hit rate over
 		// prompt tokens, and average tokens per thousand requests (the
 		// cost proxy — no pricing data is stored anywhere in this project).
-		totals, err := state.DB.QueryContext(r.Context(), `
-			SELECT
-				upstream_id,
-				COUNT(*),
-				COALESCE(SUM(prompt_cached_tokens), 0),
-				COALESCE(SUM(prompt_tokens), 0),
-				COALESCE(SUM(total_tokens), 0)
-			FROM request_logs
-			WHERE upstream_id IS NOT NULL
-			GROUP BY upstream_id
-		`)
+		totals, err := db.ChannelTotals(r.Context(), state.DB)
 		if err != nil {
 			apperr.WriteError(w, apperr.Internal("failed to fetch channel totals"))
 			return
 		}
-		defer totals.Close()
-		for totals.Next() {
-			var upstreamID, requests, cachedTokens, promptTokens, totalTokens int64
-			if err := totals.Scan(&upstreamID, &requests, &cachedTokens, &promptTokens, &totalTokens); err != nil {
-				apperr.WriteError(w, apperr.Internal("failed to scan channel totals"))
-				return
+		for _, total := range totals {
+			entry := channel(total.UpstreamID)
+			entry.TotalRequests = total.Attempts
+			if total.PromptTokens > 0 {
+				entry.CacheHitRate = float64(total.PromptCachedTokens) / float64(total.PromptTokens) * 100
 			}
-			entry := channel(upstreamID)
-			entry.TotalRequests = requests
-			if promptTokens > 0 {
-				entry.CacheHitRate = float64(cachedTokens) / float64(promptTokens) * 100
+			if total.Attempts > 0 {
+				entry.AvgTokensPer1M = float64(total.TotalTokens) / float64(total.Attempts) * 1000
 			}
-			if requests > 0 {
-				entry.AvgTokensPer1M = float64(totalTokens) / float64(requests) * 1000
-			}
-		}
-		if err := totals.Err(); err != nil {
-			apperr.WriteError(w, apperr.Internal("failed to read channel totals"))
-			return
 		}
 
 		apperr.WriteJSON(w, http.StatusOK, map[string]any{"stats": stats})

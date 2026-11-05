@@ -1,14 +1,31 @@
 /* API 类型。字段名对着 internal/models 里的 json tag 抄，不是猜的——
    改后端时这里的编译错误就是提示。 */
 
+/** 渠道的一把 key，只有名称和状态。值不随读接口出服务端，要看得单独取。 */
+export interface UpstreamKey {
+  id: number;
+  name: string;
+  enabled: boolean;
+  /** 被上游拒绝后还要冷却的秒数，不在冷却时没有这个字段。 */
+  cooling_seconds?: number;
+}
+
+/** 带值的 key：新建或复制渠道时预填的，以及导出文档里的。 */
+export interface DraftKey {
+  name: string;
+  api_key: string;
+  enabled: boolean;
+}
+
 export interface Upstream {
   id: number;
   name: string;
   base_url: string;
   api_key_set: boolean;
-  /* 只有详情接口带回来，列表接口没有。编辑渠道时明文回显到输入框，
-     便于核对当前用的是哪把 Key；探上游也用它。 */
-  api_key?: string | null;
+  key_count: number;
+  enabled_key_count: number;
+  /** 只有详情接口带回来，列表接口没有。 */
+  keys?: UpstreamKey[];
   model_names: string[];
   model_prefixes: string[];
   model_mappings: Record<string, string>;
@@ -68,6 +85,9 @@ export interface RequestLog {
   client_type: string;
   upstream_id: number | null;
   upstream_name: string | null;
+  /** 这次用的渠道 key。0 和 "" 表示渠道没配 key，或是有 key 之前的旧行。 */
+  upstream_key_id: number;
+  upstream_key_name: string;
   model: string | null;
   request_model: string | null;
   upstream_model: string | null;
@@ -91,6 +111,10 @@ export interface RequestLog {
   failure_stage: string | null;
   failure_retryable: boolean | null;
   error: string | null;
+  /** 同一次下游请求的各行共用。代理之外写的行、旧行和导入的行是 null。 */
+  request_id: number | null;
+  /** 失败后被另一次尝试取代的行。它不算一个请求，请求的结果记在后面那行。 */
+  retried: boolean;
 }
 
 /** 在途请求。没有游标位置，所以只随最新一页和 SSE 快照来。 */
@@ -107,6 +131,9 @@ export interface ActiveRequest {
   client_type: string;
   upstream_id: number | null;
   upstream_name: string | null;
+  /** 当前这次尝试用的 Key。没配 Key 的渠道是 0 和 ""。 */
+  upstream_key_id: number;
+  upstream_key_name: string;
   model: string | null;
   request_model: string | null;
   upstream_model: string | null;
@@ -131,6 +158,8 @@ export interface RequestLogPage {
 export interface ChannelExportItem {
   name: string;
   base_url: string;
+  /** 只有勾选「含密钥」导出时才有。api_key 是有多 key 之前的旧格式，导入照读。 */
+  keys?: DraftKey[];
   api_key?: string | null;
   model_names: string[];
   model_prefixes: string[];
@@ -194,8 +223,10 @@ export interface LogOverview {
   previous_total: number | null;
   error_requests: number;
   status_2xx: number;
+  /** 不含 499：客户端自己断开不算失败，单记在 status_cancelled。 */
   status_4xx: number;
   status_5xx: number;
+  status_cancelled: number;
   status_other: number;
   status_none: number;
   duration_count: number;
@@ -254,6 +285,22 @@ export interface TokenUsage {
   all_time: TokenUsageWindow;
   range?: string;
   range_label?: string;
+}
+
+/** 一天的用量，按控制台时区分日。没有请求的日子不返回。 */
+export interface DailyUsage {
+  day: string;
+  requests: number;
+  errors: number;
+  /** 客户端自己断开的请求（499），不算失败。 */
+  cancelled: number;
+  total_tokens: number;
+}
+
+/** 近 53 周的每日用量。today 是日历最后一天。 */
+export interface DailyUsagePage {
+  today: string;
+  days: DailyUsage[];
 }
 
 /** 运行时设置。revision 是乐观锁，保存时原样带回去。 */
@@ -325,12 +372,15 @@ export interface SystemInfo {
 }
 
 /**
- * 余额查询结果。
+ * 一把 Key 的余额。
  *
  * 和模型测试一样，接口总是 200，成败看 ok。三个金额字段都可能为 null：
  * 有些渠道只报剩余，有些只报总额。
  */
 export interface BalanceResult {
+  /** 没配 Key 的渠道只有一项，key_id 是 0。迁移来的 Key 名字是空串。 */
+  key_id: number;
+  key_name: string;
   ok: boolean;
   provider?: string;
   total_usd?: number | null;
@@ -342,6 +392,11 @@ export interface BalanceResult {
   is_valid?: boolean;
   mode?: string | null;
   message?: string;
+}
+
+/** 查余额的回应：启用的 Key 逐把一项，按 Key 的顺序。 */
+export interface BalanceResponse {
+  keys: BalanceResult[];
 }
 
 /**

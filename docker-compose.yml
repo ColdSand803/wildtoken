@@ -16,6 +16,8 @@ services:
       WILDTOKEN_THEME_DIR: /app/themes
       # 生图结果存成文件，和数据库同一个卷，重建容器不丢。
       WILDTOKEN_IMAGE_DIR: /data/images
+      # 每日备份写到宿主机目录：删了数据卷，备份还在。
+      WILDTOKEN_BACKUP_DIR: /backups
     ports:
       - "3100:3100"
     # 容器默认继承宿主机的解析器。部分上游域名的权威 NS 会拒绝一部分解析器的
@@ -39,6 +41,9 @@ services:
       - wildtoken-data:/data
       # 镜像已自带 themes/；此挂载会覆盖它，便于本地改主题免重建镜像。
       - ./themes:/app/themes:ro
+      # 目录要先由宿主用户建好（scripts/deploy.sh 会建）：交给 Docker 建就归
+      # root，备份随目录属主，也就成了 root 的。
+      - ${BACKUP_DIR:-./.backup}:/backups
     healthcheck:
       test:
         [

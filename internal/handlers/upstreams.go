@@ -301,6 +301,10 @@ type consoleProbe struct {
 	// which probes a typed-in base URL with no channel row behind it.
 	upstreamID   *int64
 	upstreamName *string
+	// keyID and keyName name the channel key the probe signs in with, for the
+	// log row: 0 and "" when there is none to name.
+	keyID   int64
+	keyName string
 	// model is carried only by the model test.
 	model *string
 	// onResponse and onChunk, when set, see the response as it arrives: the
@@ -352,6 +356,8 @@ func sendAndLogProbe(ctx context.Context, state *appstate.State, probe consolePr
 			ClientType:        &probe.clientType,
 			UpstreamID:        probe.upstreamID,
 			UpstreamName:      probe.upstreamName,
+			UpstreamKeyID:     probe.keyID,
+			UpstreamKeyName:   probe.keyName,
 			Model:             probe.model,
 			RequestModel:      probe.model,
 			UpstreamModel:     probe.model,
@@ -663,14 +669,19 @@ func AdminGetUpstream(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
+		keys, err := upstreamKeysOut(r.Context(), state, id)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 
 		apperr.WriteJSON(w, http.StatusOK, models.UpstreamDetailOut{
 			GroupIDs:                       groupIDs,
 			ID:                             row.ID,
 			Name:                           row.Name,
 			BaseURL:                        row.BaseURL,
-			APIKey:                         row.APIKey,
-			APIKeySet:                      row.APIKey != nil,
+			Keys:                           keys,
+			APIKeySet:                      row.KeyCount > 0,
 			ModelNames:                     modelNames,
 			ModelPrefixes:                  modelPrefixes,
 			ModelMappings:                  modelMappings,
@@ -1030,7 +1041,12 @@ func AdminTestUpstream(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-		headers := buildChannelRequestHeaders(nil, row.APIKey, overrides)
+		credential, err := probeKey(r.Context(), state.DB, &row, input.KeyID)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		headers := buildChannelRequestHeaders(nil, credential.apiKey, overrides)
 
 		outcome, err := sendAndLogProbe(r.Context(), state, consoleProbe{
 			clientType:   probeChannelTest,
@@ -1039,6 +1055,8 @@ func AdminTestUpstream(state *appstate.State) http.HandlerFunc {
 			headers:      headers,
 			upstreamID:   &row.ID,
 			upstreamName: &row.Name,
+			keyID:        credential.keyID,
+			keyName:      credential.keyName,
 		}, probeTimeout(state, row.TimeoutSeconds))
 		if err != nil {
 			apperr.WriteJSON(w, http.StatusOK, map[string]any{
@@ -1319,8 +1337,13 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
+		credential, err := probeKey(r.Context(), state.DB, &row, input.KeyID)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 		headers := buildProtocolRequestHeaders(input.Protocol, strings.TrimSpace(input.Model),
-			row.APIKey, overrides)
+			credential.apiKey, overrides)
 		headersPreview := redactHeaderPreview(headers)
 
 		model := strings.TrimSpace(input.Model)
@@ -1332,6 +1355,8 @@ func AdminTestUpstreamModel(state *appstate.State) http.HandlerFunc {
 			body:         payload,
 			upstreamID:   &row.ID,
 			upstreamName: &row.Name,
+			keyID:        credential.keyID,
+			keyName:      credential.keyName,
 			model:        &model,
 		}, probeTimeout(state, row.TimeoutSeconds))
 		if err != nil {
@@ -1491,14 +1516,14 @@ func extractModelTestReply(body []byte) any {
 
 // fetchModelsForTarget lists the models a base URL advertises.
 func fetchModelsForTarget(ctx context.Context, state *appstate.State, upstreamID *int64,
-	upstreamName *string, baseURL string, apiKey *string, extraHeaders map[string]string,
+	upstreamName *string, baseURL string, credential probeCredential, extraHeaders map[string]string,
 	timeoutSeconds float64) (models.ModelListOut, error) {
 	if err := validateOverrides(extraHeaders); err != nil {
 		return models.ModelListOut{}, err
 	}
 
 	targetURL := buildProbeURL(baseURL, "models", "")
-	headers := buildChannelRequestHeaders(nil, apiKey, extraHeaders)
+	headers := buildChannelRequestHeaders(nil, credential.apiKey, extraHeaders)
 
 	outcome, err := sendAndLogProbe(ctx, state, consoleProbe{
 		clientType:   probeModelList,
@@ -1507,6 +1532,8 @@ func fetchModelsForTarget(ctx context.Context, state *appstate.State, upstreamID
 		headers:      headers,
 		upstreamID:   upstreamID,
 		upstreamName: upstreamName,
+		keyID:        credential.keyID,
+		keyName:      credential.keyName,
 	}, probeTimeout(state, timeoutSeconds))
 	if err != nil {
 		return models.ModelListOut{}, apperr.Upstream("upstream request failed: " + err.Error())
@@ -1551,8 +1578,13 @@ func AdminFetchUpstreamModels(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
+		credential, err := probeKey(r.Context(), state.DB, &row, 0)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
 		list, err := fetchModelsForTarget(r.Context(), state, &row.ID, &row.Name,
-			row.BaseURL, row.APIKey, extra, row.TimeoutSeconds)
+			row.BaseURL, credential, extra, row.TimeoutSeconds)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -1598,10 +1630,31 @@ func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 			timeout = *input.TimeoutSeconds
 		}
 
+		// A blank key on a saved channel's form means one of its stored keys,
+		// which the form holds only by name.
+		apiKey := input.APIKey
+		if (apiKey == nil || strings.TrimSpace(*apiKey) == "") && input.UpstreamID != 0 {
+			row, found, err := db.GetUpstream(r.Context(), state.DB, input.UpstreamID)
+			if err != nil {
+				apperr.WriteError(w, err)
+				return
+			}
+			if !found {
+				apperr.WriteError(w, apperr.NotFound("upstream not found"))
+				return
+			}
+			credential, err := probeKey(r.Context(), state.DB, &row, input.KeyID)
+			if err != nil {
+				apperr.WriteError(w, err)
+				return
+			}
+			apiKey = credential.apiKey
+		}
+
 		// The channel form's preview probes a typed-in base URL, so there is no
-		// channel row to attribute the log row to.
+		// channel row to attribute the log row to, nor a key.
 		list, err := fetchModelsForTarget(r.Context(), state, nil, nil,
-			baseURL, input.APIKey, extra, timeout)
+			baseURL, probeCredential{apiKey: apiKey}, extra, timeout)
 		if err != nil {
 			apperr.WriteError(w, err)
 			return
@@ -1610,8 +1663,24 @@ func AdminFetchModelsPreview(state *appstate.State) http.HandlerFunc {
 	}
 }
 
-// AdminFetchUpstreamBalance reads a new-api style billing endpoint.
-func AdminFetchUpstreamBalance(state *appstate.State) http.HandlerFunc {
+// balanceProbeLimit bounds how many of a channel's keys a balance check reads
+// at once.
+const balanceProbeLimit = 4
+
+// balanceReader reads one key's balance into the shape the console renders:
+// "ok", then the amounts or a "message". probe arrives signed and attributed;
+// the reader picks its URLs.
+type balanceReader func(ctx context.Context, state *appstate.State, baseURL string,
+	probe consoleProbe, timeout time.Duration) map[string]any
+
+// serveBalances reads a channel's balance once per enabled key, in key order.
+// A key that fails leaves the others' results standing, e.g.
+//
+//	{"keys": [{"key_id": 3, "key_name": "a", "ok": true, "remaining_usd": 4.2},
+//	          {"key_id": 5, "key_name": "", "ok": false, "message": "渠道返回 HTTP 401"}]}
+//
+// A channel without keys gives one result, key_id 0.
+func serveBalances(state *appstate.State, read balanceReader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id, err := pathID(r)
 		if err != nil {
@@ -1637,177 +1706,155 @@ func AdminFetchUpstreamBalance(state *appstate.State) http.HandlerFunc {
 			apperr.WriteError(w, err)
 			return
 		}
-
-		timeout := probeTimeout(state, row.TimeoutSeconds)
-		headers := buildChannelRequestHeaders(nil, row.APIKey, extra)
-		subscriptionURL := buildProbeURL(row.BaseURL, "dashboard/billing/subscription", "")
-		usageURL := buildProbeURL(row.BaseURL, "dashboard/billing/usage", billingUsageRange())
-
-		subscription, err := sendAndLogProbe(r.Context(), state, consoleProbe{
-			clientType:   probeBalance,
-			method:       http.MethodGet,
-			url:          subscriptionURL,
-			headers:      headers,
-			upstreamID:   &row.ID,
-			upstreamName: &row.Name,
-		}, timeout)
+		credentials, err := balanceCredentials(r.Context(), state.DB, &row)
 		if err != nil {
-			apperr.WriteJSON(w, http.StatusOK, map[string]any{
-				"ok": false, "message": "请求失败: " + err.Error(),
-			})
-			return
-		}
-		if subscription.status != http.StatusOK {
-			apperr.WriteJSON(w, http.StatusOK, map[string]any{
-				"ok":      false,
-				"message": fmt.Sprintf("渠道返回 HTTP %d", subscription.status),
-			})
+			apperr.WriteError(w, err)
 			return
 		}
 
-		var subscriptionPayload map[string]any
-		if err := json.Unmarshal([]byte(subscription.body), &subscriptionPayload); err != nil {
-			apperr.WriteJSON(w, http.StatusOK, map[string]any{
-				"ok": false, "message": "渠道未返回 JSON",
-			})
-			return
-		}
+		// Side by side, a few at a time: one after another, a channel of slow
+		// keys would hold the dialog for the sum of their timeouts.
+		timeout := probeTimeout(state, row.TimeoutSeconds)
+		results := make([]map[string]any, len(credentials))
+		slots := make(chan struct{}, balanceProbeLimit)
+		var group sync.WaitGroup
+		for i, credential := range credentials {
+			group.Go(func() {
+				slots <- struct{}{}
+				defer func() { <-slots }()
 
-		// The usage endpoint is best-effort: a channel that only reports a
-		// remaining balance is still useful.
-		var usedUSD *float64
-		usage, err := sendAndLogProbe(r.Context(), state, consoleProbe{
-			clientType:   probeBalance,
-			method:       http.MethodGet,
-			url:          usageURL,
-			headers:      headers,
-			upstreamID:   &row.ID,
-			upstreamName: &row.Name,
-		}, timeout)
-		if err == nil && usage.status == http.StatusOK {
-			var usagePayload map[string]any
-			if json.Unmarshal([]byte(usage.body), &usagePayload) == nil {
-				if total, ok := usagePayload["total_usage"].(float64); ok {
-					// new-api reports usage in cents.
-					converted := total / 100.0
-					usedUSD = &converted
-				}
+				result := read(r.Context(), state, row.BaseURL, consoleProbe{
+					clientType:   probeBalance,
+					method:       http.MethodGet,
+					headers:      buildChannelRequestHeaders(nil, credential.apiKey, extra),
+					upstreamID:   &row.ID,
+					upstreamName: &row.Name,
+					keyID:        credential.keyID,
+					keyName:      credential.keyName,
+				}, timeout)
+				result["key_id"] = credential.keyID
+				result["key_name"] = credential.keyName
+				results[i] = result
+			})
+		}
+		group.Wait()
+
+		apperr.WriteJSON(w, http.StatusOK, map[string]any{"keys": results})
+	}
+}
+
+// AdminFetchUpstreamBalance reads a new-api style billing endpoint.
+func AdminFetchUpstreamBalance(state *appstate.State) http.HandlerFunc {
+	return serveBalances(state, readNewAPIBalance)
+}
+
+// readNewAPIBalance reads one key's new-api billing: the subscription for the
+// limit, the usage for what is spent.
+func readNewAPIBalance(ctx context.Context, state *appstate.State, baseURL string,
+	probe consoleProbe, timeout time.Duration) map[string]any {
+	probe.url = buildProbeURL(baseURL, "dashboard/billing/subscription", "")
+	subscription, err := sendAndLogProbe(ctx, state, probe, timeout)
+	if err != nil {
+		return map[string]any{"ok": false, "message": "请求失败: " + err.Error()}
+	}
+	if subscription.status != http.StatusOK {
+		return map[string]any{
+			"ok":      false,
+			"message": fmt.Sprintf("渠道返回 HTTP %d", subscription.status),
+		}
+	}
+
+	var subscriptionPayload map[string]any
+	if err := json.Unmarshal([]byte(subscription.body), &subscriptionPayload); err != nil {
+		return map[string]any{"ok": false, "message": "渠道未返回 JSON"}
+	}
+
+	// The usage endpoint is best-effort: a channel that only reports a
+	// remaining balance is still useful.
+	var usedUSD *float64
+	probe.url = buildProbeURL(baseURL, "dashboard/billing/usage", billingUsageRange())
+	usage, err := sendAndLogProbe(ctx, state, probe, timeout)
+	if err == nil && usage.status == http.StatusOK {
+		var usagePayload map[string]any
+		if json.Unmarshal([]byte(usage.body), &usagePayload) == nil {
+			if total, ok := usagePayload["total_usage"].(float64); ok {
+				// new-api reports usage in cents.
+				converted := total / 100.0
+				usedUSD = &converted
 			}
 		}
+	}
 
-		var totalUSD *float64
-		for _, key := range []string{"hard_limit_usd", "system_hard_limit_usd", "soft_limit_usd"} {
+	var totalUSD *float64
+	for _, key := range []string{"hard_limit_usd", "system_hard_limit_usd", "soft_limit_usd"} {
+		if value, ok := subscriptionPayload[key].(float64); ok {
+			totalUSD = &value
+			break
+		}
+	}
+
+	var remainingUSD *float64
+	if totalUSD != nil && usedUSD != nil {
+		remaining := *totalUSD - *usedUSD
+		remainingUSD = &remaining
+	} else {
+		for _, key := range []string{"total_available", "remain_quota", "remaining", "balance"} {
 			if value, ok := subscriptionPayload[key].(float64); ok {
-				totalUSD = &value
+				remainingUSD = &value
 				break
 			}
 		}
+	}
 
-		var remainingUSD *float64
-		if totalUSD != nil && usedUSD != nil {
-			remaining := *totalUSD - *usedUSD
-			remainingUSD = &remaining
-		} else {
-			for _, key := range []string{"total_available", "remain_quota", "remaining", "balance"} {
-				if value, ok := subscriptionPayload[key].(float64); ok {
-					remainingUSD = &value
-					break
-				}
-			}
-		}
-
-		if totalUSD == nil && remainingUSD == nil {
-			apperr.WriteJSON(w, http.StatusOK, map[string]any{
-				"ok": false, "message": "无法从响应中识别余额字段",
-			})
-			return
-		}
-
-		apperr.WriteJSON(w, http.StatusOK, map[string]any{
-			"ok":            true,
-			"provider":      "new-api",
-			"total_usd":     totalUSD,
-			"used_usd":      usedUSD,
-			"remaining_usd": remainingUSD,
-		})
+	if totalUSD == nil && remainingUSD == nil {
+		return map[string]any{"ok": false, "message": "无法从响应中识别余额字段"}
+	}
+	return map[string]any{
+		"ok":            true,
+		"provider":      "new-api",
+		"total_usd":     totalUSD,
+		"used_usd":      usedUSD,
+		"remaining_usd": remainingUSD,
 	}
 }
 
 // AdminFetchUpstreamSub2APIBalance reads a sub2api style usage endpoint.
 func AdminFetchUpstreamSub2APIBalance(state *appstate.State) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, err := pathID(r)
-		if err != nil {
-			apperr.WriteError(w, err)
-			return
-		}
-		row, found, err := db.GetUpstream(r.Context(), state.DB, id)
-		if err != nil {
-			apperr.WriteError(w, err)
-			return
-		}
-		if !found {
-			apperr.WriteError(w, apperr.NotFound("upstream not found"))
-			return
-		}
+	return serveBalances(state, readSub2APIBalance)
+}
 
-		extra, err := parseExtraHeaders(row.ExtraHeaders)
-		if err != nil {
-			apperr.WriteError(w, err)
-			return
+// readSub2APIBalance reads one key's sub2api usage, which carries its balance.
+func readSub2APIBalance(ctx context.Context, state *appstate.State, baseURL string,
+	probe consoleProbe, timeout time.Duration) map[string]any {
+	probe.url = buildProbeURL(baseURL, "usage", "")
+	outcome, err := sendAndLogProbe(ctx, state, probe, timeout)
+	if err != nil {
+		return map[string]any{
+			"ok": false, "provider": "sub2api", "message": "请求失败: " + err.Error(),
 		}
-		if err := validateOverrides(extra); err != nil {
-			apperr.WriteError(w, err)
-			return
-		}
-
-		usageURL := buildProbeURL(row.BaseURL, "usage", "")
-		headers := buildChannelRequestHeaders(nil, row.APIKey, extra)
-
-		outcome, err := sendAndLogProbe(r.Context(), state, consoleProbe{
-			clientType:   probeBalance,
-			method:       http.MethodGet,
-			url:          usageURL,
-			headers:      headers,
-			upstreamID:   &row.ID,
-			upstreamName: &row.Name,
-		}, probeTimeout(state, row.TimeoutSeconds))
-		if err != nil {
-			apperr.WriteJSON(w, http.StatusOK, map[string]any{
-				"ok": false, "provider": "sub2api", "message": "请求失败: " + err.Error(),
-			})
-			return
-		}
-
-		if outcome.status < 200 || outcome.status >= 300 {
-			message := fmt.Sprintf("渠道返回 HTTP %d", outcome.status)
-			if preview := truncateRunes(outcome.body, 160); preview != "" {
-				message += ": " + preview
-			}
-			apperr.WriteJSON(w, http.StatusOK, map[string]any{
-				"ok": false, "provider": "sub2api", "message": message,
-			})
-			return
-		}
-
-		var payload map[string]any
-		if err := json.Unmarshal([]byte(outcome.body), &payload); err != nil {
-			apperr.WriteJSON(w, http.StatusOK, map[string]any{
-				"ok": false, "provider": "sub2api", "message": "渠道未返回 JSON",
-			})
-			return
-		}
-
-		parsed, ok := parseSub2APIBalancePayload(payload)
-		if !ok {
-			apperr.WriteJSON(w, http.StatusOK, map[string]any{
-				"ok": false, "provider": "sub2api",
-				"message": "无法从 sub2api 响应中识别余额字段",
-			})
-			return
-		}
-		apperr.WriteJSON(w, http.StatusOK, parsed)
 	}
+
+	if outcome.status < 200 || outcome.status >= 300 {
+		message := fmt.Sprintf("渠道返回 HTTP %d", outcome.status)
+		if preview := truncateRunes(outcome.body, 160); preview != "" {
+			message += ": " + preview
+		}
+		return map[string]any{"ok": false, "provider": "sub2api", "message": message}
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(outcome.body), &payload); err != nil {
+		return map[string]any{"ok": false, "provider": "sub2api", "message": "渠道未返回 JSON"}
+	}
+
+	parsed, ok := parseSub2APIBalancePayload(payload)
+	if !ok {
+		return map[string]any{
+			"ok": false, "provider": "sub2api",
+			"message": "无法从 sub2api 响应中识别余额字段",
+		}
+	}
+	return parsed
 }
 
 // jsonNumberAt reads the first pointer that holds a number, accepting a numeric
@@ -1968,13 +2015,15 @@ func AdminExportUpstreams(state *appstate.State) http.HandlerFunc {
 			}
 			// Include API key if requested and present
 			if req.IncludeAPIKeys {
-				row, found, err := db.GetUpstream(ctx, state.DB, out.ID)
+				keys, err := db.ListUpstreamKeyValues(ctx, state.DB, out.ID)
 				if err != nil {
 					apperr.WriteError(w, err)
 					return
 				}
-				if found && row.APIKey != nil {
-					item.APIKey = row.APIKey
+				for _, key := range keys {
+					item.Keys = append(item.Keys, models.ChannelExportKey{
+						Name: key.Name, APIKey: key.APIKey, Enabled: key.Enabled,
+					})
 				}
 			} else {
 				// A key moved into a header is still a key.
@@ -2037,6 +2086,21 @@ func keepSensitiveHeaders(stored string, imported map[string]string) map[string]
 	return merged
 }
 
+// importedKeys turns a document's keys into a key list, nil when it carries
+// none: then its older api_key, if any, is the one key, and an overwrite
+// keeps the keys the channel has.
+func importedKeys(keys []models.ChannelExportKey) *[]models.UpstreamKeyIn {
+	if len(keys) == 0 {
+		return nil
+	}
+	listed := make([]models.UpstreamKeyIn, 0, len(keys))
+	for _, key := range keys {
+		enabled := key.Enabled
+		listed = append(listed, models.UpstreamKeyIn{Name: key.Name, APIKey: key.APIKey, Enabled: &enabled})
+	}
+	return &listed
+}
+
 // AdminImportUpstreams imports channels from a JSON document.
 func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -2061,6 +2125,7 @@ func AdminImportUpstreams(state *appstate.State) http.HandlerFunc {
 			input := models.UpstreamIn{
 				Name:              item.Name,
 				BaseURL:           item.BaseURL,
+				Keys:              importedKeys(item.Keys),
 				APIKey:            item.APIKey,
 				ModelNames:        item.ModelNames,
 				ModelPrefixes:     item.ModelPrefixes,

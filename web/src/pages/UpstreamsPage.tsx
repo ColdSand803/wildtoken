@@ -11,6 +11,7 @@ import {
   fetchUpstreamModels,
   fetchUpstreamStats,
   getUpstream,
+  revealUpstreamKey,
   importUpstreams,
   listGroups,
   listUpstreams,
@@ -45,6 +46,7 @@ import {
 import type { SortKey } from "../upstreamSort";
 import type {
   ChannelExportDocument,
+  DraftKey,
   ImportResult,
   Upstream,
   UpstreamHealth,
@@ -52,6 +54,17 @@ import type {
 } from "../types";
 
 type StatusFilter = "" | "enabled" | "disabled" | "effective-zero";
+
+/** 把渠道的每把 key 取回明文：复制和撤销删除要带着它们建新渠道。 */
+async function revealAllKeys(upstream: Upstream): Promise<DraftKey[]> {
+  const keys = upstream.keys ?? [];
+  const credentials = await Promise.all(keys.map((key) => revealUpstreamKey(upstream.id, key.id)));
+  return credentials.map((credential, index) => ({
+    name: credential.key_name,
+    api_key: credential.api_key,
+    enabled: keys[index].enabled,
+  }));
+}
 
 /** 可显隐的列。键名就是 data-col 的值，隐藏靠表格上的 col-hide-{key} 类。 */
 const COLUMNS = [
@@ -111,7 +124,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   // 归档区默认收起，和旧版一致。
   const [archivedOpen, setArchivedOpen] = useState(false);
   // null = 关闭；{ upstream: null } = 新增；{ upstream } = 编辑。
-  const [editing, setEditing] = useState<{ upstream: Upstream | null } | null>(null);
+  const [editing, setEditing] = useState<{ upstream: Upstream | null; draftKeys?: DraftKey[] } | null>(null);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   // 站点存储被禁用时，取 localStorage 这个全局本身就会抛错。
@@ -369,10 +382,10 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         id: 0,
         name,
         base_url: baseUrl,
-        api_key: apiKey,
-        /* 表单只用它决定要不要显示「清空 API Key」。草稿还没有已存的密钥，
-           给 true 会让那个勾选框冒出来，勾了还会把刚填的 Key 清掉。 */
         api_key_set: false,
+        key_count: 0,
+        enabled_key_count: 0,
+        keys: [],
         model_names: modelNames,
         model_prefixes: [],
         model_mappings: {},
@@ -392,6 +405,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         effective_weight: 100,
         group_ids: [],
       },
+      draftKeys: apiKey ? [{ name: "", api_key: apiKey, enabled: true }] : undefined,
     });
   }
 
@@ -516,10 +530,17 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     }
   }
 
-  /** 复制：拿完整配置开一个新建表单，名字加后缀。API Key 不会回来，得重填。 */
+  /** 复制：拿完整配置开一个新建表单，名字加后缀，key 逐把取回来作为新 key 预填。 */
   async function duplicate(upstream: Upstream) {
     const full = await getUpstream(upstream.id).catch(() => upstream);
-    setEditing({ upstream: { ...full, id: 0, name: `${full.name}-copy`, api_key_set: false } });
+    let draftKeys: DraftKey[] | undefined;
+    try {
+      draftKeys = await revealAllKeys(full);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) return onUnauthorized(err.message);
+      toast("取 Key 失败，副本里的 Key 需要重填。", { tone: "error" });
+    }
+    setEditing({ upstream: { ...full, id: 0, name: `${full.name}-copy`, api_key_set: false, keys: [] }, draftKeys });
   }
 
   async function removeUpstream(upstream: Upstream) {
@@ -530,9 +551,17 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     });
     if (!confirmed) return;
 
-    /* 先把配置拿到手，删掉之后才能提供「撤销」——后端没有回收站，
-       撤销实际上是用同一份配置重建。API Key 回不来。 */
-    const snapshot = await getUpstream(upstream.id).catch(() => null);
+    /* 先把配置和每把 key 拿到手，删掉之后才能提供「撤销」——后端没有回收站，
+       撤销实际上是用同一份配置重建。取 key 失败就不给撤销：重建出来没有 key
+       的渠道，不算撤销。 */
+    let snapshot: Upstream | null = null;
+    let snapshotKeys: DraftKey[] = [];
+    try {
+      snapshot = await getUpstream(upstream.id);
+      snapshotKeys = await revealAllKeys(snapshot);
+    } catch {
+      snapshot = null;
+    }
     try {
       await deleteUpstream(upstream.id);
       await reload();
@@ -542,12 +571,14 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         actionLabel: snapshot ? "撤销" : undefined,
         onAction: snapshot
           ? async () => {
-              /* 快照来自详情，带着 Key。归档的渠道带上归档状态和归档前的启用
-                 状态，后端在同一个事务里重建并归档，恢复出来还在归档区。 */
+              /* 快照来自详情，key 是删之前取回的明文，按新 key 重建。归档的渠道
+                 带上归档状态和归档前的启用状态，后端在同一个事务里重建并归档，
+                 恢复出来还在归档区。 */
               const { id: _id, api_key_set: _set, ...rest } = snapshot;
               try {
                 await createUpstream({
                   ...rest,
+                  keys: snapshotKeys.map((key) => ({ id: 0, ...key })),
                   enabled: snapshot.archived ? Boolean(snapshot.enabled_before_archive) : snapshot.enabled,
                 });
                 await reload();
@@ -949,6 +980,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       <UpstreamDialog
         open={editing !== null}
         upstream={editing?.upstream ?? null}
+        draftKeys={editing?.draftKeys}
         groups={groups}
         busy={saving}
         onSubmit={(payload) => void saveUpstream(payload)}
@@ -1234,7 +1266,15 @@ function UpstreamRow({
       <td className="name-cell" data-col="name">
         <div className="name-stack">
           {diagnostics}
-          <strong title={upstream.name}>{upstream.name}</strong>
+          <span className="name-inline">
+            <strong title={upstream.name}>{upstream.name}</strong>
+            {/* 一把 key 的渠道照旧不标；多把才值得在列表里看到。 */}
+            {upstream.key_count > 1 ? (
+              <span className="badge neutral" title="这个渠道的 Key 数，以及其中启用的">
+                {`${upstream.key_count} Key · ${upstream.enabled_key_count} 启用`}
+              </span>
+            ) : null}
+          </span>
           <BaseUrlCell upstream={upstream} />
         </div>
       </td>

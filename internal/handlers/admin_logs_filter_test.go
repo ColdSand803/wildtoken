@@ -68,10 +68,10 @@ func TestAdminListLogsAppliesStatusAndTokenFilters(t *testing.T) {
 		{query: "?status=5xx", wantIDs: []int64{5}},
 		{query: "?status=other", wantIDs: []int64{2}},
 		{query: "?status=none", wantIDs: []int64{6}},
-		{query: "?status=error", wantIDs: []int64{2, 3, 4, 5, 6}},
+		{query: "?status=error", wantIDs: []int64{2, 3, 5, 6}},
 		{query: "?downstream_token_id=10", wantIDs: []int64{1, 2}},
 		{query: "?downstream_token_id=20", wantIDs: []int64{3, 4, 5, 6}},
-		{query: "?downstream_token_id=20&status=error", wantIDs: []int64{3, 4, 5, 6}},
+		{query: "?downstream_token_id=20&status=error", wantIDs: []int64{3, 5, 6}},
 	}
 	for _, testCase := range testCases {
 		t.Run(testCase.query, func(t *testing.T) {

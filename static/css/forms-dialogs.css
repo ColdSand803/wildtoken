@@ -881,6 +881,31 @@ button.model-selection-remove:focus-visible {
   font-weight: 600;
 }
 
+/* 多把 Key 时每把一节：Key 名作标题，下面是它的金额或失败原因。 */
+.balance-key {
+  display: grid;
+  gap: 8px;
+}
+
+.balance-key + .balance-key {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.balance-key h3 {
+  color: var(--text);
+  font-size: var(--text-base);
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 失败原因：间距交给 grid 的 gap，段落自带的上下外边距会把它撑开。 */
+.balance-key p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .modal-head,
 .model-toolbar,
 .modal-actions {
@@ -1168,4 +1193,54 @@ dialog.is-maximized .log-detail-panel {
   font-size: 0.9em;
   white-space: nowrap;
   cursor: pointer;
+}
+
+/* A channel's keys, one row each: name, value with its reveal button, switch,
+   remove. The value takes the slack. */
+.key-list {
+  display: grid;
+  gap: 6px;
+}
+
+.key-row {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(84px, 0.7fr) minmax(0, 2fr) auto auto;
+}
+
+.key-row-secret {
+  font-family: var(--font-secret);
+  font-variant-ligatures: none;
+  letter-spacing: 0;
+}
+
+.key-row-enabled {
+  align-items: center;
+  color: var(--muted-strong);
+  display: flex;
+  font-size: var(--text-sm);
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.key-row-cooling {
+  color: var(--warning-text);
+  font-size: var(--text-sm);
+  grid-column: 1 / -1;
+}
+
+.key-list-add {
+  justify-self: start;
+}
+
+/* Narrow drawers put the name on a line of its own. */
+@media (max-width: 640px) {
+  .key-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .key-row-name {
+    grid-column: 1 / -1;
+  }
 }

@@ -31,6 +31,7 @@ func TestLogOverviewAggregatesTheSelectedWindow(t *testing.T) {
 		t.Fatalf("seed logs: %v", err)
 	}
 
+	rebuildStats(t, database)
 	day, err := LogOverview(ctx, database, LogTopWindowOneDay, "", "", 0)
 	if err != nil {
 		t.Fatalf("1d overview: %v", err)
@@ -169,6 +170,7 @@ func TestOverviewBucketsFollowTheOperatorsMidnight(t *testing.T) {
 	}
 
 	const offset = 8 * 3600
+	rebuildStats(t, database)
 	out, err := LogOverview(context.Background(), database, LogTopWindowThirtyDays, "", "", offset)
 	if err != nil {
 		t.Fatal(err)
@@ -204,6 +206,7 @@ func TestTodayCanStartAtTheOperatorsMidnight(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	rebuildStats(t, database)
 	out, err := LogOverview(context.Background(), database, LogTopWindowToday, startAt, "", 0)
 	if err != nil {
 		t.Fatal(err)

@@ -438,6 +438,10 @@ func DetectClientType(r *http.Request, anthropic bool) string {
 	//
 	case isPiClient(originator, userAgent):
 		return "pi"
+	// Observed as "deepseek-harness/0.2.1-rc.5 (+https://github.com/deepseek-ai/deepseek-harness)".
+	// Ahead of the Anthropic branch for the same reason as pi.
+	case strings.Contains(userAgent, "deepseek-harness"):
+		return "dsh"
 	case strings.Contains(originator, "codex") || strings.Contains(userAgent, "codex"):
 		return "codex"
 	case anthropic || strings.Contains(userAgent, "claude") || r.Header.Get("anthropic-version") != "":

@@ -112,6 +112,25 @@ func TestPiImpersonatingAnotherClientKeepsThatLabel(t *testing.T) {
 	}
 }
 
+// The user-agent is the one observed in production.
+func TestRecognizesDeepseekHarnessOnEitherProtocol(t *testing.T) {
+	const userAgent = "deepseek-harness/0.2.1-rc.5 (+https://github.com/deepseek-ai/deepseek-harness)"
+
+	responses := requestWithHeaders(map[string]string{"user-agent": userAgent})
+	if got := DetectClientType(responses, false); got != "dsh" {
+		t.Errorf("deepseek-harness gave %q, want dsh", got)
+	}
+
+	// The Anthropic branch keys on the protocol, not the sender.
+	messages := requestWithHeaders(map[string]string{
+		"user-agent":        userAgent,
+		"anthropic-version": "2023-06-01",
+	})
+	if got := DetectClientType(messages, true); got != "dsh" {
+		t.Errorf("deepseek-harness on the Anthropic path gave %q, want dsh", got)
+	}
+}
+
 // "pi" is two letters, and a substring match would claim every client that
 // happens to contain them.
 func TestClientsContainingPiAreNotMistakenForIt(t *testing.T) {

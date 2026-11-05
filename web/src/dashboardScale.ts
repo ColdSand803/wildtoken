@@ -1,4 +1,11 @@
-import type { LogOverview, TokenUsage, TokenUsageWindow, TopItem, TopStats } from "./types";
+import type {
+  DailyUsage,
+  LogOverview,
+  TokenUsage,
+  TokenUsageWindow,
+  TopItem,
+  TopStats,
+} from "./types";
 
 /**
  * 看板显示倍率：请求数和 Tokens 数乘上倍率再显示。
@@ -37,6 +44,7 @@ export function scaleDashboard(
       status_2xx: n(overview.status_2xx),
       status_4xx: n(overview.status_4xx),
       status_5xx: n(overview.status_5xx),
+      status_cancelled: n(overview.status_cancelled),
       status_other: n(overview.status_other),
       duration_count: n(overview.duration_count),
       latency_series: overview.latency_series.map((b) => ({ ...b, count: n(b.count) })),
@@ -58,6 +66,19 @@ export function scaleDashboard(
       all_time: usageWindow(usage.all_time)!,
     },
   };
+}
+
+/** 日历的每日计数同样乘倍率取整。 */
+export function scaleDailyUsage(days: DailyUsage[], multiplier: number): DailyUsage[] {
+  const m = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+  if (m === 1) return days;
+  return days.map((day) => ({
+    ...day,
+    requests: Math.round(day.requests * m),
+    errors: Math.round(day.errors * m),
+    cancelled: Math.round(day.cancelled * m),
+    total_tokens: Math.round(day.total_tokens * m),
+  }));
 }
 
 /**

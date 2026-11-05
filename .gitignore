@@ -35,6 +35,10 @@ wildtoken.db*
 *.sqlite3
 data/
 /images/
+# The key that seals credentials, made beside the database on first start.
+*.key
+/backups/
+/.backup/
 
 # Editors and operating systems
 .idea/

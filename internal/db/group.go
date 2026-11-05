@@ -315,6 +315,6 @@ func ListEnabledUpstreamsInGroup(ctx context.Context, database *sql.DB, groupID 
 	return queryUpstreamRows(ctx, database,
 		"SELECT "+upstreamColumns+` FROM upstreams
          WHERE enabled = 1 AND archived = 0
-           AND id IN (SELECT upstream_id FROM upstream_groups WHERE group_id = ?)
+           AND id IN (SELECT upstream_id FROM upstream_groups WHERE group_id = ?)`+routableKeys+`
          ORDER BY priority DESC, id ASC`, groupID)
 }

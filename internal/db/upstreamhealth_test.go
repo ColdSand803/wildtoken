@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-
 // TestUpstreamHealthExcludesClientCancellations pins the corrected health
 // accounting: a client-initiated 499 is not an upstream failure, a legitimate
 // 0ms sample counts as a timed sample, and rows without a duration stay out of
@@ -40,6 +39,7 @@ func TestUpstreamHealthExcludesClientCancellations(t *testing.T) {
 		}
 	}
 
+	rebuildStats(t, database)
 	health, err := UpstreamHealthHistory(ctx, database, 24, 0, nil)
 	if err != nil {
 		t.Fatalf("health history: %v", err)
@@ -103,6 +103,7 @@ func TestUpstreamHealthWeightsAveragesByTimedSamples(t *testing.T) {
 		}
 	}
 
+	rebuildStats(t, database)
 	health, err := UpstreamHealthHistory(ctx, database, 24, 0, nil)
 	if err != nil {
 		t.Fatalf("health history: %v", err)
@@ -157,6 +158,7 @@ func TestUpstreamHealthExcludesProbeClientTypes(t *testing.T) {
 	}
 
 	excluded := []string{"model-test", "channel-test", "model-list", "balance"}
+	rebuildStats(t, database)
 	health, err := UpstreamHealthHistory(ctx, database, 24, 0, excluded)
 	if err != nil {
 		t.Fatalf("health history: %v", err)
@@ -184,6 +186,7 @@ func TestUpstreamHealthExcludesProbeClientTypes(t *testing.T) {
 
 	// Without the exclusion the same rows still aggregate, so the filter is
 	// what changed the answer rather than the fixture being empty.
+	rebuildStats(t, database)
 	unfiltered, err := UpstreamHealthHistory(ctx, database, 24, 0, nil)
 	if err != nil {
 		t.Fatalf("unfiltered health history: %v", err)
@@ -208,6 +211,7 @@ func TestHealthHoursFollowTheOperatorsOffset(t *testing.T) {
 	}
 
 	const offset = 5*3600 + 1800
+	rebuildStats(t, database)
 	health, err := UpstreamHealthHistory(context.Background(), database, 24, offset, nil)
 	if err != nil {
 		t.Fatal(err)

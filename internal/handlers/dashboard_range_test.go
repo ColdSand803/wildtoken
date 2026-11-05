@@ -122,11 +122,10 @@ func TestDashboardHandlersAcceptSharedTimeRanges(t *testing.T) {
         (2, datetime('now'), 'POST', '/v1/r', 'codex', 'gpt-test', 0, 20)`); err != nil {
 		t.Fatalf("insert logs: %v", err)
 	}
-	cache, err := db.LoadLogStatsCache(t.Context(), state.DB)
-	if err != nil {
-		t.Fatalf("load log stats: %v", err)
+	// Inserted by hand, so filed into stats_hourly as the log writer would.
+	if err := db.AddStats(t.Context(), state.DB, 1, 2); err != nil {
+		t.Fatalf("add stats: %v", err)
 	}
-	state.LogStats = cache
 
 	request := httptest.NewRequest(http.MethodGet,
 		"/api/admin/logs/token-usage?range=all", nil)

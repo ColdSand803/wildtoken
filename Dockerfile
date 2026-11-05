@@ -67,6 +67,7 @@ ENV APP__SERVER__HOST=0.0.0.0 \
     APP__SERVER__PORT=3100 \
     DATABASE_URL=sqlite:/data/wildtoken.db?mode=rwc \
     WILDTOKEN_IMAGE_DIR=/data/images \
+    WILDTOKEN_BACKUP_DIR=/data/backups \
     WILDTOKEN_LOG=info \
     LANG=en_US.UTF-8 \
     LANGUAGE=en_US:en \

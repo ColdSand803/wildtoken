@@ -10,6 +10,6 @@ test("a stale balance response cannot overwrite a newer channel's balance", asyn
   const pending = []; const { BalanceDialog } = loadTS("web/src/components/BalanceDialog.tsx", { overrides: { "web/src/api.ts": { UnauthorizedError: class extends Error {}, fetchUpstreamBalance: (id) => new Promise((resolve) => pending.push({ id, resolve })) } } });
   const close = () => {}; const view = ui.render(h(BalanceDialog, { open: true, upstream: { id: 1, name: "one" }, provider: "new-api", onClose: close }));
   view.rerender(h(BalanceDialog, { open: true, upstream: { id: 2, name: "two" }, provider: "new-api", onClose: close }));
-  await ui.act(async () => pending[1].resolve({ ok: true, remaining_usd: 22 })); await view.findByText("$22");
-  await ui.act(async () => pending[0].resolve({ ok: true, remaining_usd: 11 })); assert.equal(view.queryByText("$11"), null); assert.ok(view.getByText("$22"));
+  await ui.act(async () => pending[1].resolve({ keys: [{ key_id: 2, ok: true, remaining_usd: 22 }] })); await view.findByText("$22");
+  await ui.act(async () => pending[0].resolve({ keys: [{ key_id: 1, ok: true, remaining_usd: 11 }] })); assert.equal(view.queryByText("$11"), null); assert.ok(view.getByText("$22"));
 });

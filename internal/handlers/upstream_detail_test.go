@@ -63,9 +63,7 @@ func namedTestState(t *testing.T, instance string) *appstate.State {
 		ProbeRuns:   appstate.NewProbeRunState(),
 		// Wired because the server does (internal/app/server.go): the token-usage
 		// endpoint reads this snapshot before it looks at any request, so a nil
-		// cache here is a panic rather than an empty result.
-		LogStats: db.NewLogStatsCache(),
-		// Wired because the server does: applyRuntimeHealth publishes the scrape
+		// cache here is a panic rather than an empty result.		// Wired because the server does: applyRuntimeHealth publishes the scrape
 		// gauge from the channel-list path, so a state without it would only stay
 		// safe on the nil-receiver guard rather than exercising what production runs.
 		Prometheus: metrics.NewPrometheus(),
