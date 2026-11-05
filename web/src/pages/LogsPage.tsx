@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { UnauthorizedError, listLogs, listUpstreams } from "../api";
+import { UnauthorizedError, listLogClientTypes, listLogs, listUpstreams } from "../api";
+import { clientTypeOptions } from "../clientTypes";
 import { LogDetailDialog } from "../components/LogDetailDialog";
 import { RetriedMark } from "../components/RetriedMark";
 import {
@@ -69,22 +70,6 @@ function ReasoningCell({ log }: { log: ReasoningSource }) {
     </span>
   );
 }
-
-/** 客户端筛选的固定档位。后三个是控制台探测，不是真实客户端。 */
-const CLIENT_TYPES = [
-  "codex-desktop",
-  "codex-tui",
-  "codex",
-  "opencode",
-  "claude",
-  "pi",
-  "dsh",
-  "unknown",
-  "model-test",
-  "channel-test",
-  "model-list",
-  "balance",
-];
 
 function readColumns(): Record<ColumnKey, boolean> {
   const fallback = Object.fromEntries(COLUMNS.map((c) => [c.key, true])) as Record<ColumnKey, boolean>;
@@ -315,6 +300,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   const [statusFilter, setStatusFilter] = useState("");
   const [upstreamFilter, setUpstreamFilter] = useState("");
   const [upstreams, setUpstreams] = useState<Array<{ id: number; name: string }>>([]);
+  const [clientTypes, setClientTypes] = useState<string[]>([]);
   /* 输入框的实时值和真正拿去查的值分开。每敲一下键都发一次查询的话，
      输一个模型名会打出十几次全库扫描。 */
   const [searchInput, setSearchInput] = useState("");
@@ -408,6 +394,13 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
       .catch(() => setUpstreams([]));
   }, []);
 
+  // 客户端下拉同理，取库里出现过的全部类型。
+  useEffect(() => {
+    listLogClientTypes()
+      .then(setClientTypes)
+      .catch(() => setClientTypes([]));
+  }, []);
+
   const onResync = useCallback(() => {
     if (onLatestPage) void load();
     else setMissedNew(true);
@@ -462,6 +455,16 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
        的比流里攒着的还新，直接拼在前面顺序就乱了。 */
     return merged.sort((a, b) => b.id - a.id);
   }, [stream.logs, page?.items, onLatestPage, filters]);
+
+  const clientOptions = useMemo(
+    () =>
+      clientTypeOptions(
+        clientTypes,
+        [...stream.logs, ...(page?.items ?? [])].map((log) => log.client_type),
+        clientFilter,
+      ),
+    [clientTypes, stream.logs, page?.items, clientFilter],
+  );
 
   /* 在途集合：只在最新页显示。流连着就以它为准，断了退回快照里的那份。 */
   const activeFromPage = page?.active ?? [];
@@ -558,13 +561,20 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
               onChange={(event) => applyFilter(setClientFilter, event.target.value)}
             >
               <option value="">全部客户端</option>
-              {/* 固定清单，和旧版一致。从当前页数据里凑的话，没出现在这几十行
-                  里的客户端就根本选不到。 */}
-              {CLIENT_TYPES.map((type) => (
+              {clientOptions.clients.map((type) => (
                 <option key={type} value={type}>
                   {type}
                 </option>
               ))}
+              {clientOptions.probes.length > 0 ? (
+                <optgroup label="控制台探测">
+                  {clientOptions.probes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </optgroup>
+              ) : null}
             </select>
           </label>
           <label className="log-filter">

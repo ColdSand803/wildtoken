@@ -1051,6 +1051,24 @@ func AdminDailyUsage(state *appstate.State) http.HandlerFunc {
 	}
 }
 
+type logClientTypesResponse struct {
+	ClientTypes []string `json:"client_types"`
+}
+
+// AdminListLogClientTypes lists the client types the logs hold, for the log
+// page's client filter. Imported history carries types this build does not
+// detect, such as axonhub; a fixed list could not offer them.
+func AdminListLogClientTypes(state *appstate.State) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		types, err := db.LogClientTypes(r.Context(), state.DB)
+		if err != nil {
+			apperr.WriteError(w, err)
+			return
+		}
+		apperr.WriteJSON(w, http.StatusOK, logClientTypesResponse{ClientTypes: types})
+	}
+}
+
 // AdminTopLogStats ranks models and channels over a window.
 func AdminTopLogStats(state *appstate.State) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

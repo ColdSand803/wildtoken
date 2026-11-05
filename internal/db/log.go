@@ -252,6 +252,38 @@ func (f LogFilter) appendFilters(query *strings.Builder, args []any) []any {
 	return args
 }
 
+// logClientTypesQuery reads one index entry per client type: each step seeks
+// the first type after the last one found, instead of reading every row.
+const logClientTypesQuery = `WITH RECURSIVE seen(client_type) AS (
+        SELECT MIN(client_type) FROM request_logs
+        UNION ALL
+        SELECT (SELECT MIN(client_type) FROM request_logs WHERE client_type > seen.client_type)
+        FROM seen WHERE seen.client_type IS NOT NULL)
+    SELECT client_type FROM seen WHERE client_type IS NOT NULL`
+
+// LogClientTypes lists the client types the logs hold, in name order: what the
+// log page's client filter offers, e.g. ["axonhub", "claude", "pi"].
+func LogClientTypes(ctx context.Context, database *sql.DB) ([]string, error) {
+	rows, err := database.QueryContext(ctx, logClientTypesQuery)
+	if err != nil {
+		return nil, apperr.Database(err)
+	}
+	defer rows.Close()
+
+	types := []string{}
+	for rows.Next() {
+		var clientType string
+		if err := rows.Scan(&clientType); err != nil {
+			return nil, apperr.Database(err)
+		}
+		types = append(types, clientType)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, apperr.Database(err)
+	}
+	return types, nil
+}
+
 // LogCursor is the keyset position a page continues from.
 type LogCursor struct {
 	CreatedAt string
@@ -308,8 +340,8 @@ func scanLogListRow(row interface{ Scan(...any) error }) (models.RequestLogOut, 
 
 // LogQueryTimeout bounds how long one log listing may run.
 //
-// None of the filters can use an index: client_type and status_code have none,
-// and the search is a leading-wildcard LIKE, which nothing can. LIMIT bounds the
+// The status and search filters cannot use an index: status_code has none, and
+// the search is a leading-wildcard LIKE, which nothing can. LIMIT bounds the
 // rows returned, not the rows examined, so a filter matching little or nothing
 // reads the whole table — holding one of the few pooled connections while the
 // proxy path waits for one. The deadline turns that into an error the operator

@@ -355,6 +355,11 @@ export function fetchDailyUsage(): Promise<{ page: DailyUsagePage; multiplier: n
   ]).then(([page, settings]) => ({ page, multiplier: settings.dashboard_multiplier }));
 }
 
+/** 日志里出现过的客户端类型，按名称排序。日志页的客户端下拉用。 */
+export function listLogClientTypes(): Promise<string[]> {
+  return api<{ client_types: string[] }>("/api/admin/logs/clients").then((body) => body.client_types);
+}
+
 export function listTokens(): Promise<APIToken[]> {
   return api<APIToken[]>("/api/admin/tokens/");
 }

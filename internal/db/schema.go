@@ -90,6 +90,11 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// took the write lock for as long as that scan, with every proxied
 		// request's log write queued behind it.
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_downstream_token_created_at ON request_logs(downstream_token_id, created_at);",
+		// The log page's client filter, and the list of clients it offers.
+		// created_at is in it because the page sorts by it: on client_type
+		// alone, a page of pi (120k of 232k rows) sorted all of them, 33 ms
+		// against 0.2 ms.
+		"CREATE INDEX IF NOT EXISTS idx_request_logs_client_created_at ON request_logs(client_type, created_at);",
 		createAPITokens,
 		createGroups,
 		seedDefaultGroup,
