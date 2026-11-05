@@ -1,9 +1,12 @@
 import { useState } from "react";
 
 import { UnauthorizedError, revealUpstreamKey } from "../api";
-import { newKeyRow } from "../keyRows";
+import { hideKey, newKeyRow, showKey } from "../keyRows";
 import type { KeyRow } from "../keyRows";
 import { useToast } from "./feedback";
+
+/** 已保存的 key 在框里的样子。定长，不透露真实长度。 */
+const SAVED_MASK = "*".repeat(16);
 
 export function KeyListEditor({
   upstreamId,
@@ -18,22 +21,32 @@ export function KeyListEditor({
   const toast = useToast();
   const [revealing, setRevealing] = useState<number | null>(null);
 
-  function update(row: number, patch: Partial<KeyRow>) {
-    onChange((current) => current.map((item) => (item.row === row ? { ...item, ...patch } : item)));
+  /** 按最新的行改，不按点下去那一刻的快照：取明文是异步的。 */
+  function apply(row: number, change: (item: KeyRow) => KeyRow) {
+    onChange((current) => current.map((item) => (item.row === row ? change(item) : item)));
   }
 
-  async function reveal(item: KeyRow) {
+  function update(row: number, patch: Partial<KeyRow>) {
+    apply(row, (item) => ({ ...item, ...patch }));
+  }
+
+  async function toggle(item: KeyRow) {
+    if (item.shown) {
+      apply(item.row, hideKey);
+      return;
+    }
+
+    // 框里有字或取过明文就不再取：每取一次后端记一条审计日志。
+    if (item.value !== "" || item.revealed !== null) {
+      apply(item.row, showKey);
+      return;
+    }
+
     setRevealing(item.row);
     try {
       const credential = await revealUpstreamKey(upstreamId, item.id);
-      // 只填还空着的框：取的这会儿可能已经开始改了。
-      onChange((current) =>
-        current.map((row) =>
-          row.row === item.row
-            ? { ...row, revealed: credential.api_key, value: row.value === "" ? credential.api_key : row.value }
-            : row,
-        ),
-      );
+      // 取的这会儿可能已经开始改了，showKey 只填还空着的框。
+      apply(item.row, (row) => showKey({ ...row, revealed: credential.api_key }));
     } catch (err) {
       if (!(err instanceof UnauthorizedError)) {
         toast(`取 Key 失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
@@ -46,7 +59,7 @@ export function KeyListEditor({
   return (
     <div className="key-list">
       {rows.map((item, index) => {
-        const masked = item.id !== 0 && item.revealed === null;
+        const saved = item.id !== 0;
         return (
           <div key={item.row} className="key-row">
             <input
@@ -58,28 +71,32 @@ export function KeyListEditor({
               aria-label={`第 ${index + 1} 把 Key 的名称`}
             />
             <div className="field-with-action">
+              {/* 已保存没动过的框是空的，星号是占位符：直接输入即替换，清空即恢复。 */}
               <input
                 className="key-row-secret"
-                type={masked ? "password" : "text"}
+                type={saved && !item.shown ? "password" : "text"}
                 value={item.value}
                 onChange={(event) => update(item.row, { value: event.target.value })}
-                placeholder={item.id !== 0 ? "已保存，留空不修改" : "sk-…"}
+                placeholder={saved ? SAVED_MASK : "sk-…"}
                 autoComplete="off"
                 spellCheck={false}
                 aria-label={`第 ${index + 1} 把 Key`}
               />
-              {masked ? (
+              {saved ? (
                 <button
                   type="button"
                   className="secondary field-action"
-                  title="查看已保存的 Key"
-                  aria-label={`查看第 ${index + 1} 把已保存的 Key`}
+                  title={item.shown ? "隐藏明文" : "显示明文"}
+                  aria-label={`显示第 ${index + 1} 把 Key 的明文`}
+                  aria-pressed={item.shown}
                   disabled={revealing === item.row}
-                  onClick={() => void reveal(item)}
+                  onClick={() => void toggle(item)}
                 >
                   <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
                     <circle cx="12" cy="12" r="3" />
+                    {/* 亮着时划一道：再点就遮回去。 */}
+                    {item.shown ? <line x1="3" y1="3" x2="21" y2="21" /> : null}
                   </svg>
                 </button>
               ) : null}

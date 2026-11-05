@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { keyRowsFrom, keysPayload, newKeyRow, probeKeyOf } from "../web/src/keyRows.ts";
+import { hideKey, keyRowsFrom, keysPayload, newKeyRow, probeKeyOf, showKey } from "../web/src/keyRows.ts";
 
 const saved = (id, extra = {}) => ({ ...newKeyRow(), id, ...extra });
 
@@ -25,6 +25,24 @@ test("取回的明文没改过照样发空，改过才发新值", () => {
     keysPayload([untouched, edited]).map((key) => key.api_key),
     ["", "sk-replaced"],
   );
+});
+
+test("眼睛：遮回时没改过的清空回星号，再亮用取过的明文；改过的遮住也留着", () => {
+  const shown = showKey(saved(1, { revealed: "sk-old" }));
+  assert.deepEqual([shown.value, shown.shown], ["sk-old", true]);
+
+  const hidden = hideKey(shown);
+  assert.deepEqual([hidden.value, hidden.shown], ["", false]);
+  assert.equal(keysPayload([hidden])[0].api_key, "");
+  assert.equal(showKey(hidden).value, "sk-old");
+
+  const edited = hideKey({ ...shown, value: "sk-new" });
+  assert.deepEqual([edited.value, edited.shown], ["sk-new", false]);
+  assert.equal(keysPayload([edited])[0].api_key, "sk-new");
+
+  // 没取过、框里是新填的：亮的就是新填的，不拿旧值盖掉。
+  const typed = showKey(saved(2, { value: "sk-typed" }));
+  assert.deepEqual([typed.value, typed.shown], ["sk-typed", true]);
 });
 
 test("打开时：编辑已有渠道按名称列出 key，值不回显；复制来的草稿 id 不带过去", () => {
