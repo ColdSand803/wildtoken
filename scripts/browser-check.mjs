@@ -11,6 +11,7 @@
  * 用法：
  *   node scripts/browser-check.mjs           # 复用已构建的 web/dist
  *   node scripts/browser-check.mjs --build   # 先跑 npm run build
+ *   node scripts/browser-check.mjs --copy-only # 渠道复制及其前置检查
  *
  * 端口另选，不碰 3100 上跑着的部署实例。
  */
@@ -582,7 +583,7 @@ async function seed() {
 async function openRowMenu(page, nameFragment) {
   const opened = await page.evaluate((fragment) => {
     const rows = [...document.querySelectorAll("table.upstream-table tbody tr")];
-    const row = rows.find((r) => r.querySelector("[data-col=name]")?.textContent?.includes(fragment));
+    const row = rows.find((r) => r.querySelector("[data-col=name], .name-cell")?.textContent?.includes(fragment));
     const trigger = row?.querySelector("button.action-menu-trigger");
     if (!trigger) return false;
     trigger.click();
@@ -650,6 +651,12 @@ async function clickMenuItem(page, label) {
 // ── 断言 ─────────────────────────────────────────────────────────────────────
 
 const results = [];
+
+function reportResults() {
+  const failed = results.filter((result) => !result.ok);
+  console.log(`\n${results.length - failed.length}/${results.length} 项通过`);
+  if (failed.length > 0) process.exitCode = 1;
+}
 
 async function check(name, fn) {
   try {
@@ -1122,6 +1129,11 @@ async function main() {
           .some((row) => row.textContent.includes("copy-check-")), { label: "复制检查渠道清理" });
       }
     });
+
+    if (process.argv.includes("--copy-only")) {
+      reportResults();
+      return;
+    }
 
     /* 克隆是「拿完整配置开一个新建表单」。id 0 的草稿一旦被当成编辑，
        标题会写成「编辑渠道 #0」，保存就打 PUT /upstreams/0，后端 404。 */
@@ -3858,9 +3870,7 @@ async function main() {
     await cleanupAndWait();
   }
 
-  const failed = results.filter((r) => !r.ok);
-  console.log(`\n${results.length - failed.length}/${results.length} 项通过`);
-  if (failed.length > 0) process.exitCode = 1;
+  reportResults();
 }
 
 await main();
