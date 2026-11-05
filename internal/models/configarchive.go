@@ -103,12 +103,20 @@ type ConfigArchiveGroup struct {
 type ConfigArchiveChannel struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"base_url"`
-	// APIKey is present only in an archive exported with secrets, which requires a
-	// password — so a key is never written to disk in the clear by this endpoint.
-	APIKey        *string           `json:"api_key,omitempty"`
-	ModelNames    []string          `json:"model_names"`
-	ModelPrefixes []string          `json:"model_prefixes"`
-	ModelMappings map[string]string `json:"model_mappings"`
+	// APIKey is the channel's first enabled key, present only in an archive
+	// exported with secrets. It is what an archive from before channels had more
+	// than one key carries, and it is still written alongside Keys so an older
+	// importer keeps a working credential. A new importer prefers Keys when that
+	// field is present.
+	APIKey *string `json:"api_key,omitempty"`
+	// Keys is every key, in rotation order, and only in an archive with secrets.
+	// Nil means the archive says nothing about keys — an older document, or one
+	// exported without secrets — so an import must leave whatever is stored
+	// alone. An empty list means the channel has no keys.
+	Keys          *[]ConfigArchiveKey `json:"keys,omitempty"`
+	ModelNames    []string            `json:"model_names"`
+	ModelPrefixes []string            `json:"model_prefixes"`
+	ModelMappings map[string]string   `json:"model_mappings"`
 	// EffortMappings is a pointer so that an archive written before channels
 	// carried effort rewrites is distinguishable from one that carries none. A
 	// missing field leaves an existing channel's rewrites alone on import; an
@@ -123,6 +131,13 @@ type ConfigArchiveChannel struct {
 	TimeoutSeconds    float64            `json:"timeout_seconds"`
 	RateLimit         *string            `json:"rate_limit,omitempty"`
 	GroupNames        []string           `json:"group_names"`
+}
+
+// ConfigArchiveKey is one channel key inside an archive that includes secrets.
+type ConfigArchiveKey struct {
+	Name    string `json:"name"`
+	APIKey  string `json:"api_key"`
+	Enabled bool   `json:"enabled"`
 }
 
 // ConfigArchiveToken is one downstream credential's policy.
@@ -154,17 +169,17 @@ type ConfigArchiveToken struct {
 // source's value would either be refused as stale or overwrite a concurrent edit.
 // The import reads the local revision and applies against that.
 type ConfigArchiveSettings struct {
-	LogBodyKeepCount                  int64  `json:"log_body_keep_count"`
-	LogRetentionDays                  int64  `json:"log_retention_days"`
-	LogBodyMaxBytes                   int64  `json:"log_body_max_bytes"`
-	MaxRetries                        int64  `json:"max_retries"`
-	SameUpstreamRetryIntervalMs       int64  `json:"same_upstream_retry_interval_ms"`
-	AutoWeightFailurePenalty          int64  `json:"auto_weight_failure_penalty"`
-	AutoWeightSuccessIncrement        int64  `json:"auto_weight_success_increment"`
-	AutoWeightRecoveryIncrement       int64  `json:"auto_weight_recovery_increment"`
-	AutoWeightRecoveryIntervalSeconds int64  `json:"auto_weight_recovery_interval_seconds"`
-	ProxyEnabled                      bool   `json:"proxy_enabled"`
-	ProxyURL                          string `json:"proxy_url"`
+	LogBodyKeepCount                  int64   `json:"log_body_keep_count"`
+	LogRetentionDays                  int64   `json:"log_retention_days"`
+	LogBodyMaxBytes                   int64   `json:"log_body_max_bytes"`
+	MaxRetries                        int64   `json:"max_retries"`
+	SameUpstreamRetryIntervalMs       int64   `json:"same_upstream_retry_interval_ms"`
+	AutoWeightFailurePenalty          int64   `json:"auto_weight_failure_penalty"`
+	AutoWeightSuccessIncrement        int64   `json:"auto_weight_success_increment"`
+	AutoWeightRecoveryIncrement       int64   `json:"auto_weight_recovery_increment"`
+	AutoWeightRecoveryIntervalSeconds int64   `json:"auto_weight_recovery_interval_seconds"`
+	ProxyEnabled                      bool    `json:"proxy_enabled"`
+	ProxyURL                          string  `json:"proxy_url"`
 	LoadBalanceStrategy               string  `json:"load_balance_strategy"`
 	DefaultUpstreamTimeoutSeconds     int64   `json:"default_upstream_timeout_seconds"`
 	ImageStorageMaxMB                 int64   `json:"image_storage_max_mb"`

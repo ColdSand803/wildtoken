@@ -91,6 +91,12 @@ func New(ctx context.Context) (*Server, error) {
 	if err := db.CheckAutoVacuum(ctx, database); err != nil {
 		slog.Warn("could not read the SQLite auto-vacuum mode", "error", err)
 	}
+	if err := setUpSecrets(ctx, database, settings.Database); err != nil {
+		database.Close()
+		return nil, err
+	}
+	// Like the admin token, the passphrase is not kept past startup.
+	settings.Database.EncryptionKey = ""
 
 	credential, err := loadOrBootstrapAdminCredential(ctx, database, settings.Admin.Token,
 		settings.Server.Host)
@@ -140,6 +146,7 @@ func New(ctx context.Context) (*Server, error) {
 		Routing:             proxy.NewRoutingCache(),
 		Latency:             proxy.NewLatencyTracker(),
 		ActiveRequests:      proxy.NewActiveRegistry(),
+		Keys:                proxy.NewKeyPicker(),
 		TokenRateLimiter:    ratelimit.NewLimiter(),
 		UpstreamRateLimiter: ratelimit.NewLimiter(),
 		Quotas:              quotas,
@@ -170,6 +177,7 @@ func New(ctx context.Context) (*Server, error) {
 	go imagestore.RunCleanupLoop(jobsCtx, state.Images, func() int64 {
 		return state.Runtime.Get().ImageStorageMaxMB << 20
 	})
+	go runBackupLoop(jobsCtx, database, settings.Backup)
 
 	bindAddr := net.JoinHostPort(settings.Server.Host,
 		fmt.Sprintf("%d", settings.Server.Port))
@@ -328,8 +336,8 @@ func openDatabase(ctx context.Context, settings config.DatabaseSettings) (*sql.D
 }
 
 // restrictDatabaseFiles keeps the database readable by its owner alone. It
-// holds every channel's API key and every token in the clear; left to the
-// umask it was 0644, open to any local user. A new file is created 0600, and
+// holds request logs and, sealed, every credential; left to the umask it was
+// 0644, open to any local user. A new file is created 0600, and
 // SQLite gives the journal files it adds the main file's mode; ones already
 // there lose their group and world access.
 func restrictDatabaseFiles(path string) {

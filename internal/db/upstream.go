@@ -14,7 +14,9 @@ import (
 const upstreamColumns = `id, name, base_url, api_key, model_names, model_prefixes,
     model_mappings, effort_mappings, priority, weight, auto_weight_enabled, enabled,
     archived, archived_prev_enabled,
-    extra_headers, timeout_seconds, rate_limit, created_at, updated_at`
+    extra_headers, timeout_seconds, rate_limit, created_at, updated_at,
+    (SELECT COUNT(*) FROM upstream_keys k WHERE k.upstream_id = upstreams.id),
+    (SELECT COUNT(*) FROM upstream_keys k WHERE k.upstream_id = upstreams.id AND k.enabled = 1)`
 
 // parseJSONArray decodes a stored list. A stored null reads as empty: decoding
 // it leaves the slice nil, which the API sent on as null and the console's
@@ -55,12 +57,17 @@ func scanUpstreamRow(row interface{ Scan(...any) error }) (models.UpstreamRow, e
 		&effortMappings, &upstream.Priority, &upstream.Weight,
 		&upstream.AutoWeightEnabled, &upstream.Enabled, &upstream.Archived,
 		&upstream.ArchivedPrevEnabled, &upstream.ExtraHeaders,
-		&upstream.TimeoutSeconds, &rateLimit, &upstream.CreatedAt, &upstream.UpdatedAt)
+		&upstream.TimeoutSeconds, &rateLimit, &upstream.CreatedAt, &upstream.UpdatedAt,
+		&upstream.KeyCount, &upstream.EnabledKeyCount)
 	if err != nil {
 		return upstream, err
 	}
 	if apiKey.Valid {
-		upstream.APIKey = &apiKey.String
+		plain, err := openSecret(apiKey.String)
+		if err != nil {
+			return upstream, err
+		}
+		upstream.APIKey = &plain
 	}
 	if rateLimit.Valid && rateLimit.String != "" {
 		upstream.RateLimit = &rateLimit.String
@@ -100,7 +107,9 @@ func RowToUpstreamOut(row *models.UpstreamRow) (models.UpstreamOut, error) {
 		ID:                 row.ID,
 		Name:               row.Name,
 		BaseURL:            row.BaseURL,
-		APIKeySet:          row.APIKey != nil,
+		APIKeySet:          row.KeyCount > 0,
+		KeyCount:           row.KeyCount,
+		EnabledKeyCount:    row.EnabledKeyCount,
 		ModelNames:         modelNames,
 		ModelPrefixes:      modelPrefixes,
 		ModelMappings:      modelMappings,
@@ -184,7 +193,7 @@ func ListEnabledUpstreams(ctx context.Context, db *sql.DB) ([]models.UpstreamRow
 	// enabled at 1. This is the query the proxy picks candidates from.
 	return queryUpstreamRows(ctx, db,
 		"SELECT "+upstreamColumns+" FROM upstreams WHERE enabled = 1 AND archived = 0"+
-			" ORDER BY priority DESC, id ASC")
+			routableKeys+" ORDER BY priority DESC, id ASC")
 }
 
 // SetUpstreamArchived parks a channel out of routing, or puts it back.
@@ -325,7 +334,6 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn) (
 	if err != nil {
 		return models.UpstreamOut{}, apperr.BadRequest(err.Error())
 	}
-
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
 		return models.UpstreamOut{}, apperr.Database(err)
@@ -333,11 +341,11 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn) (
 	defer tx.Rollback()
 
 	result, err := tx.ExecContext(ctx, `INSERT INTO upstreams
-        (name, base_url, api_key, model_names, model_prefixes, model_mappings,
+        (name, base_url, model_names, model_prefixes, model_mappings,
          effort_mappings, priority, weight, auto_weight_enabled, enabled,
          extra_headers, timeout_seconds, rate_limit, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		input.Name, input.BaseURL, input.APIKey, encoded.Names, encoded.Prefixes,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		input.Name, input.BaseURL, encoded.Names, encoded.Prefixes,
 		encoded.ModelMappings, encoded.EffortMappings, input.Priority, input.Weight,
 		boolToInt64(input.AutoWeightEnabled), boolToInt64(input.Enabled),
 		encoded.Headers, timeout, rateLimit)
@@ -352,6 +360,9 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn) (
 	// Membership commits with the channel, so a channel can never exist without
 	// belonging to a group and therefore being unreachable.
 	if err := ReplaceUpstreamGroups(ctx, tx, id, input.GroupIDs); err != nil {
+		return models.UpstreamOut{}, err
+	}
+	if err := replaceUpstreamKeys(ctx, tx, id, createKeys(input)); err != nil {
 		return models.UpstreamOut{}, err
 	}
 
@@ -387,6 +398,18 @@ func CreateUpstream(ctx context.Context, db *sql.DB, input *models.UpstreamIn) (
 	return out, nil
 }
 
+// createKeys is the key list a new channel starts with: keys as given, or the
+// older single api_key as its one key.
+func createKeys(input *models.UpstreamIn) []models.UpstreamKeyIn {
+	if input.Keys != nil {
+		return *input.Keys
+	}
+	if input.APIKey != nil {
+		return []models.UpstreamKeyIn{{APIKey: *input.APIKey}}
+	}
+	return nil
+}
+
 func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.UpstreamUpdate) (models.UpstreamOut, error) {
 	encoded, err := encodeUpstreamCollections(&input.UpstreamIn)
 	if err != nil {
@@ -416,14 +439,6 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 		return models.UpstreamOut{}, apperr.NotFound(fmt.Sprintf("upstream %d not found", id))
 	}
 
-	apiKey := existing.APIKey
-	switch {
-	case input.ClearAPIKey:
-		apiKey = nil
-	case input.APIKey != nil:
-		apiKey = input.APIKey
-	}
-
 	timeout := existing.TimeoutSeconds
 	if input.TimeoutSeconds != nil {
 		timeout = *input.TimeoutSeconds
@@ -440,13 +455,13 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 	// An archived channel stays off whatever the edit says, as archiving
 	// guarantees; unarchiving restores what it was.
 	_, err = tx.ExecContext(ctx, `UPDATE upstreams
-        SET name = ?, base_url = ?, api_key = ?,
+        SET name = ?, base_url = ?,
             model_names = ?, model_prefixes = ?, model_mappings = ?,
             effort_mappings = ?, priority = ?, weight = ?, auto_weight_enabled = ?,
             enabled = CASE WHEN archived = 1 THEN 0 ELSE ? END, extra_headers = ?,
             timeout_seconds = ?, rate_limit = ?, updated_at = datetime('now')
         WHERE id = ?`,
-		input.Name, input.BaseURL, apiKey, encoded.Names, encoded.Prefixes,
+		input.Name, input.BaseURL, encoded.Names, encoded.Prefixes,
 		encoded.ModelMappings, encoded.EffortMappings, input.Priority, input.Weight,
 		boolToInt64(input.AutoWeightEnabled), boolToInt64(input.Enabled),
 		encoded.Headers, timeout, rateLimit, id)
@@ -454,6 +469,18 @@ func UpdateUpstream(ctx context.Context, db *sql.DB, id int64, input *models.Ups
 		return models.UpstreamOut{}, apperr.Database(err)
 	}
 	if err := ReplaceUpstreamGroups(ctx, tx, id, input.GroupIDs); err != nil {
+		return models.UpstreamOut{}, err
+	}
+	// Keys the edit does not mention stay as they are.
+	switch {
+	case input.ClearAPIKey:
+		err = replaceUpstreamKeys(ctx, tx, id, nil)
+	case input.Keys != nil:
+		err = replaceUpstreamKeys(ctx, tx, id, *input.Keys)
+	case input.APIKey != nil:
+		err = setLegacyKey(ctx, tx, id, *input.APIKey)
+	}
+	if err != nil {
 		return models.UpstreamOut{}, err
 	}
 

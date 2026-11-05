@@ -103,7 +103,7 @@ func channelGroupNames(t *testing.T, database *sql.DB, channelName string) []str
 	return names
 }
 
-func countRows(t *testing.T, database *sql.DB, table string) int64 {
+func countTableRows(t *testing.T, database *sql.DB, table string) int64 {
 	t.Helper()
 	var count int64
 	if err := database.QueryRowContext(context.Background(),
@@ -189,7 +189,7 @@ func TestAMissingGroupIsRefusedRatherThanSilentlyDefaulted(t *testing.T) {
 	if !strings.Contains(strings.Join(response.Errors, " "), "production") {
 		t.Errorf("errors = %v, want the missing group named", response.Errors)
 	}
-	if count := countRows(t, target, "upstreams"); count != 0 {
+	if count := countTableRows(t, target, "upstreams"); count != 0 {
 		t.Errorf("%d channels written by a refused import, want 0", count)
 	}
 }
@@ -219,7 +219,7 @@ func TestARefusedImportWritesNothingAtAll(t *testing.T) {
 		t.Fatal("an import with an invalid entry was applied")
 	}
 
-	if count := countRows(t, target, "upstreams"); count != 0 {
+	if count := countTableRows(t, target, "upstreams"); count != 0 {
 		t.Errorf("%d channels survived a refused import, want 0", count)
 	}
 	// The group created before the failure must be gone too — it is in the same
@@ -272,7 +272,7 @@ func TestADryRunPlansWithoutWriting(t *testing.T) {
 	if plan.Created == 0 {
 		t.Fatalf("the plan created nothing: %+v", plan)
 	}
-	if count := countRows(t, target, "upstreams"); count != 0 {
+	if count := countTableRows(t, target, "upstreams"); count != 0 {
 		t.Fatalf("%d channels written by a dry run, want 0", count)
 	}
 
@@ -378,7 +378,7 @@ func TestTheFailPolicyIgnoresTheSeededDefaultGroup(t *testing.T) {
 		if !response.Applied {
 			t.Fatalf("a fresh instance refused a full archive: %v", response.Errors)
 		}
-		if count := countRows(t, target, "upstreams"); count != 1 {
+		if count := countTableRows(t, target, "upstreams"); count != 1 {
 			t.Errorf("%d channels imported, want 1", count)
 		}
 	})
@@ -395,7 +395,7 @@ func TestTheFailPolicyIgnoresTheSeededDefaultGroup(t *testing.T) {
 		if response.Applied {
 			t.Error("a group whose description disagrees was accepted under the fail policy")
 		}
-		if count := countRows(t, target, "upstreams"); count != 0 {
+		if count := countTableRows(t, target, "upstreams"); count != 0 {
 			t.Errorf("%d channels written by a refused import, want 0", count)
 		}
 	})
@@ -695,10 +695,10 @@ func TestAScopedImportTouchesNothingElse(t *testing.T) {
 		t.Fatalf("import failed: %+v", response)
 	}
 
-	if count := countRows(t, target, "api_tokens"); count != 1 {
+	if count := countTableRows(t, target, "api_tokens"); count != 1 {
 		t.Errorf("%d tokens, want the scoped import applied", count)
 	}
-	if count := countRows(t, target, "upstreams"); count != 0 {
+	if count := countTableRows(t, target, "upstreams"); count != 0 {
 		t.Errorf("%d channels, want a token-only import to leave channels alone", count)
 	}
 	for _, item := range response.Items {

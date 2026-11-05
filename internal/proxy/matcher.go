@@ -40,6 +40,9 @@ type parsedUpstream struct {
 	// groupIDs are the groups this channel serves. A token may only reach a
 	// channel that shares its group.
 	groupIDs map[int64]bool
+	// keys are its enabled keys in rotation order; none means it signs in
+	// through its headers.
+	keys []models.UpstreamKey
 }
 
 func newParsedUpstream(row models.UpstreamRow, groupIDs []int64) *parsedUpstream {
@@ -94,7 +97,8 @@ type routingSnapshot struct {
 	byName    map[string]*parsedUpstream
 }
 
-func newRoutingSnapshot(rows []models.UpstreamRow, membership map[int64][]int64) *routingSnapshot {
+func newRoutingSnapshot(rows []models.UpstreamRow, membership map[int64][]int64,
+	keys map[int64][]models.UpstreamKey) *routingSnapshot {
 	snapshot := &routingSnapshot{
 		byID:   make(map[int64]*parsedUpstream, len(rows)),
 		byName: make(map[string]*parsedUpstream, len(rows)),
@@ -104,6 +108,7 @@ func newRoutingSnapshot(rows []models.UpstreamRow, membership map[int64][]int64)
 			continue
 		}
 		upstream := newParsedUpstream(row, membership[row.ID])
+		upstream.keys = keys[row.ID]
 		snapshot.upstreams = append(snapshot.upstreams, upstream)
 		snapshot.byID[row.ID] = upstream
 		snapshot.byName[row.Name] = upstream
@@ -157,7 +162,11 @@ func (c *RoutingCache) getOrLoad(ctx context.Context, database *sql.DB) (*routin
 		if err != nil {
 			return nil, err
 		}
-		loaded := newRoutingSnapshot(rows, membership)
+		keys, err := db.ListEnabledUpstreamKeys(ctx, database)
+		if err != nil {
+			return nil, err
+		}
+		loaded := newRoutingSnapshot(rows, membership, keys)
 
 		c.mu.Lock()
 		if c.value != nil {
@@ -176,13 +185,16 @@ func (c *RoutingCache) getOrLoad(ctx context.Context, database *sql.DB) (*routin
 
 func (c *RoutingCache) isCached() bool { return c.get() != nil }
 
-// modelMatchScore returns a match score 0–4.
+// modelMatchScore ranks how a channel serves a model:
 //
-//   - 4: exact match in model_mappings or model_names
-//   - 3: prefix match in model_prefixes
-//   - 2: any non-exact candidate in model_names starts with the requested model
-//   - 1: any non-exact candidate in model_names ends with the requested model
+//   - 2: exact match in model_mappings or model_names
+//   - 1: prefix match in model_prefixes
 //   - 0: no match
+//
+// A listed name that merely starts or ends with the request is no match. It
+// used to be one: a request for gpt-4o went to a channel listing only
+// gpt-4o-mini, rewritten to fit, and failover away from a channel that did list
+// gpt-4o landed there too.
 func modelMatchScore(upstream *parsedUpstream, model *string) int32 {
 	if model == nil {
 		return 0
@@ -191,29 +203,20 @@ func modelMatchScore(upstream *parsedUpstream, model *string) int32 {
 
 	for _, mapping := range upstream.modelMappings {
 		if mapping.keyNormalized == request {
-			return 4
+			return 2
 		}
 	}
 	for _, name := range upstream.modelNames {
 		if name.normalized == request {
-			return 4
+			return 2
 		}
 	}
 	for _, prefix := range upstream.modelPrefixes {
 		if strings.HasPrefix(request, prefix) {
-			return 3
+			return 1
 		}
 	}
-
-	var best int32
-	for _, name := range upstream.modelNames {
-		if strings.HasPrefix(name.normalized, request) {
-			best = max(best, 2)
-		} else if strings.HasSuffix(name.normalized, request) {
-			best = max(best, 1)
-		}
-	}
-	return best
+	return 0
 }
 
 func matchesModel(upstream *parsedUpstream, model *string) bool {
@@ -223,17 +226,8 @@ func matchesModel(upstream *parsedUpstream, model *string) bool {
 // selectForwardModel picks the model name sent upstream.
 //
 //  1. An exact mapping key returns the mapped value.
-//  2. Else a model_names candidate equal to the request.
-//  3. Else a model_names candidate that starts with the request.
-//  4. Else a model_names candidate that ends with the request.
-//  5. Otherwise the original model is forwarded unchanged.
-//
-// Each rank is a full pass over model_names, which is what modelMatchScore
-// already ranks by. Testing equality inside the prefix pass made the answer
-// depend on the order the operator happened to list the models in: a channel
-// serving both gpt-4o-mini and gpt-4o answered a request for gpt-4o with
-// whichever came first, so asking for the larger model silently got the
-// smaller one.
+//  2. Else a model_names entry equal to the request, as the channel spells it.
+//  3. Otherwise the original model is forwarded unchanged.
 func selectForwardModel(upstream *parsedUpstream, requestedModel *string) *string {
 	if requestedModel == nil {
 		return nil
@@ -252,30 +246,20 @@ func selectForwardModel(upstream *parsedUpstream, requestedModel *string) *strin
 			return &original
 		}
 	}
-	for _, name := range upstream.modelNames {
-		if strings.HasPrefix(name.normalized, request) {
-			original := name.original
-			return &original
-		}
-	}
-	for _, name := range upstream.modelNames {
-		if name.normalized != "" && strings.HasSuffix(name.normalized, request) {
-			original := name.original
-			return &original
-		}
-	}
 
 	forwarded := *requestedModel
 	return &forwarded
 }
 
-// Selection is the chosen upstream and the model name to forward.
+// Selection is the chosen upstream, the model name to forward, and the keys
+// an attempt picks one of.
 type Selection struct {
 	Upstream     models.UpstreamRow
 	ForwardModel *string
 	// Mapped reports that ForwardModel comes from the channel's explicit model
 	// mapping, written by an operator, rather than from fuzzy name matching.
 	Mapped bool
+	Keys   []models.UpstreamKey
 }
 
 func newSelection(upstream *parsedUpstream, model *string) *Selection {
@@ -283,6 +267,7 @@ func newSelection(upstream *parsedUpstream, model *string) *Selection {
 		Upstream:     upstream.row,
 		ForwardModel: selectForwardModel(upstream, model),
 		Mapped:       mapsModel(upstream, model),
+		Keys:         upstream.keys,
 	}
 }
 

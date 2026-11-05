@@ -1,5 +1,11 @@
 package db
 
+import (
+	"fmt"
+
+	"github.com/liguangsheng/wildtoken/internal/models"
+)
+
 // Schema statements, kept verbatim so an existing wildtoken.db opens unchanged.
 
 const createUpstreams = `
@@ -25,6 +31,25 @@ CREATE TABLE IF NOT EXISTS upstreams (
     created_at      TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );`
+
+// createUpstreamKeys holds each channel's API keys, used in id order. A
+// channel with none signs in through its headers alone.
+//
+// upstreams.api_key stays as a copy of the first enabled key, NULL when there
+// is none: probes read it, and so does a build from before this table, which
+// a rollback may run.
+const createUpstreamKeys = `
+CREATE TABLE IF NOT EXISTS upstream_keys (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    upstream_id INTEGER NOT NULL REFERENCES upstreams(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL DEFAULT '',
+    api_key     TEXT NOT NULL,
+    enabled     INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);`
+
+const createUpstreamKeysIndex = `CREATE INDEX IF NOT EXISTS idx_upstream_keys_upstream ON upstream_keys(upstream_id, id);`
 
 const createModelTestPromptTemplates = `
 CREATE TABLE IF NOT EXISTS model_test_prompt_templates (
@@ -129,21 +154,83 @@ CREATE TABLE IF NOT EXISTS request_logs (
     error               TEXT
 );`
 
-const createRequestLogPayloads = `
-CREATE TABLE IF NOT EXISTS request_log_payloads (
+// Log bodies are stored by content (see package logbody): a snapshot's
+// metadata once per distinct value, its body as chunks each stored once, and
+// per log row a record of which chunks make up which body.
+
+// Snapshot metadata — method, url and headers, or status and headers. A gateway
+// forwards the same few header sets on most requests: stored per row they took
+// 11 MB for 208 distinct values.
+const createLogMetas = `
+CREATE TABLE IF NOT EXISTS log_metas (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    hash  BLOB NOT NULL UNIQUE,
+    size  INTEGER NOT NULL,
+    codec INTEGER NOT NULL,
+    data  BLOB NOT NULL
+);`
+
+// Body chunks. No foreign key points here: a chunk is shared by many bodies,
+// and CollectLogChunks removes the ones nothing lists any more. AUTOINCREMENT
+// keeps an id from ever naming a second chunk, and lets the collector tell the
+// chunks stored after it looked from the ones before.
+const createLogChunks = `
+CREATE TABLE IF NOT EXISTS log_chunks (
+    id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    hash  BLOB NOT NULL UNIQUE,
+    size  INTEGER NOT NULL CHECK (size BETWEEN 1 AND 65536),
+    codec INTEGER NOT NULL,
+    data  BLOB NOT NULL
+);`
+
+// A log row's four snapshots by metadata id, NULL where the row has no such
+// snapshot. The row lives as long as its log; bodies_cleared marks one whose
+// bodies the keep-count policy dropped.
+const createRequestLogSnapshots = `
+CREATE TABLE IF NOT EXISTS request_log_snapshots (
     request_log_id INTEGER PRIMARY KEY
         REFERENCES request_logs(id) ON DELETE CASCADE,
-    request_snapshot TEXT,
-    upstream_request_override TEXT,
-    upstream_request_is_override INTEGER NOT NULL DEFAULT 0
-        CHECK (upstream_request_is_override IN (0, 1)),
-    response_snapshot TEXT,
-    downstream_response_override TEXT,
-    downstream_response_is_override INTEGER NOT NULL DEFAULT 0
-        CHECK (downstream_response_is_override IN (0, 1)),
+    downstream_request_meta  INTEGER,
+    upstream_request_meta    INTEGER,
+    upstream_response_meta   INTEGER,
+    downstream_response_meta INTEGER,
     bodies_cleared INTEGER NOT NULL DEFAULT 0
         CHECK (bodies_cleared IN (0, 1))
 );`
+
+// A log row's bodies, as a logbody record. Deleting the row is what clears
+// the bodies and lets their chunks go; rewriting a smaller value in place, as
+// before, left the pages half empty.
+const createRequestLogBodies = `
+CREATE TABLE IF NOT EXISTS request_log_bodies (
+    request_log_id INTEGER PRIMARY KEY
+        REFERENCES request_logs(id) ON DELETE CASCADE,
+    record BLOB NOT NULL
+);`
+
+// Request, failure and token totals per UTC hour, kept apart from the logs so
+// retention cannot empty them. hour_start is the hour's first second in unix
+// time: 1762257600 is 2025-11-04 12:00:00 UTC.
+const createUsageHourly = `
+CREATE TABLE usage_hourly (
+    hour_start   INTEGER PRIMARY KEY,
+    requests     INTEGER NOT NULL DEFAULT 0,
+    errors       INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0
+);`
+
+// Fills a new usage_hourly from the logs still on disk. Failure is the test
+// the overview applies: no status, or one outside 2xx.
+const backfillUsageHourly = `
+INSERT INTO usage_hourly (hour_start, requests, errors, total_tokens)
+SELECT CAST(strftime('%s', created_at) AS INTEGER) / 3600 * 3600 AS hour,
+       COUNT(*),
+       SUM(CASE WHEN status_code IS NULL OR status_code < 200 OR status_code >= 300
+                THEN 1 ELSE 0 END),
+       COALESCE(SUM(total_tokens), 0)
+FROM request_logs
+WHERE strftime('%s', created_at) IS NOT NULL
+GROUP BY hour`
 
 const createAPITokens = `
 CREATE TABLE IF NOT EXISTS api_tokens (
@@ -254,12 +341,25 @@ const dropModelPrices = `DROP TABLE IF EXISTS model_prices`
 
 const dropModelPricesIndex = `DROP INDEX IF EXISTS idx_model_prices_lookup`
 
-const createRuntimeSettings = `
-CREATE TABLE IF NOT EXISTS runtime_settings (
+// keepCountCheck and maxBytesCheck are the two log limits as their CHECK
+// constraints read, shared by the table definition and by the test that tells
+// a table still carrying the old, narrower limits.
+var (
+	keepCountCheck = fmt.Sprintf("log_body_keep_count BETWEEN 1 AND %d", models.MaxLogBodyKeepCount)
+	maxBytesCheck  = fmt.Sprintf("log_body_max_bytes BETWEEN 0 AND %d", models.MaxLogBodyMaxBytes)
+)
+
+// runtimeSettingsTable defines the settings table under the name it is given:
+// Init creates it, and widenRuntimeSettingsLimits builds it under another name
+// to replace a table whose constraints SQLite cannot alter in place. It lists
+// every column, including those older databases gained through ensureColumn.
+func runtimeSettingsTable(name string) string {
+	return `
+CREATE TABLE IF NOT EXISTS ` + name + ` (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    log_body_keep_count INTEGER NOT NULL CHECK (log_body_keep_count BETWEEN 1 AND 10000),
+    log_body_keep_count INTEGER NOT NULL CHECK (` + keepCountCheck + `),
     log_retention_days INTEGER NOT NULL CHECK (log_retention_days BETWEEN 1 AND 3650),
-    log_body_max_bytes INTEGER NOT NULL CHECK (log_body_max_bytes BETWEEN 0 AND 1048576),
+    log_body_max_bytes INTEGER NOT NULL CHECK (` + maxBytesCheck + `),
     max_retries INTEGER NOT NULL DEFAULT 1 CHECK (max_retries BETWEEN 0 AND 5),
     same_upstream_retry_interval_ms INTEGER NOT NULL DEFAULT 1000 CHECK (same_upstream_retry_interval_ms BETWEEN 0 AND 60000),
     auto_weight_failure_penalty INTEGER NOT NULL DEFAULT 20 CHECK (auto_weight_failure_penalty BETWEEN 0 AND 100),
@@ -273,8 +373,12 @@ CREATE TABLE IF NOT EXISTS runtime_settings (
     -- decide what an unknown strategy means on the hot path.
     load_balance_strategy TEXT NOT NULL DEFAULT 'weighted'
         CHECK (load_balance_strategy IN ('weighted', 'least_latency')),
+    default_upstream_timeout_seconds INTEGER NOT NULL DEFAULT 0 CHECK (default_upstream_timeout_seconds BETWEEN 0 AND 3600),
+    image_storage_max_mb INTEGER NOT NULL DEFAULT 10240 CHECK (image_storage_max_mb BETWEEN 0 AND 1048576),
+    dashboard_multiplier REAL NOT NULL DEFAULT 1 CHECK (dashboard_multiplier > 0 AND dashboard_multiplier <= 1000),
     revision INTEGER NOT NULL DEFAULT 1 CHECK (revision >= 1),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`
+}
 
 const seedRuntimeSettings = `INSERT INTO runtime_settings (id, log_body_keep_count, log_retention_days, log_body_max_bytes, revision) VALUES (1, 100, 30, 200000, 1) ON CONFLICT(id) DO NOTHING`

@@ -16,10 +16,25 @@ import (
 )
 
 func main() {
+	// `wildtoken backup` takes one backup beside a running server and exits.
+	if len(os.Args) > 1 && os.Args[1] == "backup" {
+		os.Exit(runBackup())
+	}
 	if runTray() {
 		return
 	}
 	os.Exit(runServer(false))
+}
+
+func runBackup() int {
+	initLogging(false)
+	path, err := app.BackupNow(context.Background())
+	if err != nil {
+		slog.Error("backup failed", "error", err)
+		return 1
+	}
+	slog.Info("backup written", "path", path)
+	return 0
 }
 
 // runServer starts the gateway and blocks until it stops. It returns the

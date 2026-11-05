@@ -109,8 +109,8 @@ test("rail themes retain the mobile bottom navigation dock", () => {
     assertSomeRule(navRules, /display:\s*grid\s*;/, `${theme} mobile navigation must become a dock`);
     assertSomeRule(
       navRules,
-      /grid-template-columns:\s*repeat\(6,\s*minmax\(0,\s*1fr\)\)\s*;/,
-      `${theme} mobile dock must retain all six destinations`,
+      /grid-template-columns:\s*repeat\(8,\s*minmax\(0,\s*1fr\)\)\s*;/,
+      `${theme} mobile dock must retain all eight destinations`,
     );
     assertSomeRule(navRules, /position:\s*fixed\s*;/, `${theme} mobile dock must stay reachable while content scrolls`);
   }

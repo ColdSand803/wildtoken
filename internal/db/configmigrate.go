@@ -108,6 +108,17 @@ func exportChannels(ctx context.Context, database *sql.DB,
 		return nil, err
 	}
 
+	var keysByChannel map[int64][]models.UpstreamKey
+	if includeSecrets {
+		// One read for every key, opened, so a sealed value cannot leave as
+		// ciphertext and a key edit cannot land between two channels.
+		var err error
+		keysByChannel, err = exportChannelKeys(ctx, database)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	channels := make([]models.ConfigArchiveChannel, 0, len(rows))
 	for index := range rows {
 		out, err := RowToUpstreamOut(&rows[index])
@@ -138,11 +149,38 @@ func exportChannels(ctx context.Context, database *sql.DB,
 			channel.GroupNames = []string{}
 		}
 		if includeSecrets {
+			// APIKey stays the first enabled key, which is all an older importer
+			// reads. Keys is the whole list, including ones that are off.
+			listed := archiveKeys(keysByChannel[out.ID])
+			channel.Keys = &listed
 			channel.APIKey = rows[index].APIKey
 		}
 		channels = append(channels, channel)
 	}
 	return channels, nil
+}
+
+// exportChannelKeys returns every channel's keys, opened, in rotation order.
+func exportChannelKeys(ctx context.Context, database *sql.DB) (map[int64][]models.UpstreamKey, error) {
+	keys, err := queryUpstreamKeys(ctx, database,
+		`SELECT id, upstream_id, name, api_key, enabled FROM upstream_keys
+        ORDER BY upstream_id, id`)
+	if err != nil {
+		return nil, err
+	}
+	byChannel := map[int64][]models.UpstreamKey{}
+	for _, key := range keys {
+		byChannel[key.UpstreamID] = append(byChannel[key.UpstreamID], key)
+	}
+	return byChannel, nil
+}
+
+func archiveKeys(keys []models.UpstreamKey) []models.ConfigArchiveKey {
+	listed := make([]models.ConfigArchiveKey, len(keys))
+	for i, key := range keys {
+		listed[i] = models.ConfigArchiveKey{Name: key.Name, APIKey: key.APIKey, Enabled: key.Enabled}
+	}
+	return listed
 }
 
 // upstreamGroupNames maps each channel onto the group names it belongs to.
@@ -172,8 +210,10 @@ func upstreamGroupNames(ctx context.Context, database *sql.DB) (map[int64][]stri
 
 func exportTokens(ctx context.Context, database *sql.DB,
 	includeSecrets bool) ([]models.ConfigArchiveToken, error) {
-	// token_plain is NULL for rows written before it was kept, so a secrets export
-	// can be partial. That is reported per token by the caller rather than failing
+	// token_plain is NULL for rows written before it was kept, and sealed once a
+	// key is configured. A secrets export opens it, so the archive carries the
+	// credential a client already uses rather than the ciphertext. A row with
+	// nothing stored stays absent and is reported per token rather than failing
 	// the export: the other tokens are still migratable.
 	rows, err := database.QueryContext(ctx, `SELECT t.name, t.description, t.token_plain,
             t.enabled, t.expires_at, g.name, t.limit_tokens, t.rate_limit,
@@ -189,8 +229,9 @@ func exportTokens(ctx context.Context, database *sql.DB,
 	for rows.Next() {
 		var token models.ConfigArchiveToken
 		var enabled int64
-		var plaintext, allowedModels *string
-		if err := rows.Scan(&token.Name, &token.Description, &plaintext, &enabled,
+		var storedPlain sql.NullString
+		var allowedModels *string
+		if err := rows.Scan(&token.Name, &token.Description, &storedPlain, &enabled,
 			&token.ExpiresAt, &token.GroupName, &token.LimitTokens, &token.RateLimit,
 			&allowedModels, &token.QuotaPeriod, &token.QuotaTimezone); err != nil {
 			return nil, apperr.Database(err)
@@ -199,8 +240,12 @@ func exportTokens(ctx context.Context, database *sql.DB,
 		// Shared with the token list endpoint, so a whitelist reads the same way in
 		// an archive as it does in the console.
 		token.AllowedModels = allowedModelsOut(allowedModels)
-		if includeSecrets {
-			token.Token = plaintext
+		if includeSecrets && storedPlain.Valid && storedPlain.String != "" {
+			plain, err := openSecret(storedPlain.String)
+			if err != nil {
+				return nil, apperr.Database(fmt.Errorf("token %s: %w", token.Name, err))
+			}
+			token.Token = &plain
 		}
 		tokens = append(tokens, token)
 	}
@@ -524,7 +569,6 @@ func (a *configApplier) applyChannels(channels []models.ConfigArchiveChannel) er
 		input := models.UpstreamIn{
 			Name:              channel.Name,
 			BaseURL:           channel.BaseURL,
-			APIKey:            channel.APIKey,
 			ModelNames:        channel.ModelNames,
 			ModelPrefixes:     channel.ModelPrefixes,
 			ModelMappings:     channel.ModelMappings,
@@ -565,7 +609,7 @@ func (a *configApplier) applyChannels(channels []models.ConfigArchiveChannel) er
 				a.record(models.ConfigScopeChannels, input.Name, action, "已存在，保留现有渠道")
 				continue
 			}
-			detail, err := a.updateChannel(existingID, &input, channel.APIKey != nil,
+			detail, err := a.updateChannel(existingID, &input, channel,
 				channel.EffortMappings != nil)
 			if err != nil {
 				return err
@@ -575,12 +619,12 @@ func (a *configApplier) applyChannels(channels []models.ConfigArchiveChannel) er
 		}
 
 		detail := ""
-		if channel.APIKey == nil {
+		if !channelCarriesKeys(channel) {
 			// Stated rather than left to be discovered by a failing request: a channel
 			// imported without its key is configured and unusable.
 			detail = "归档不含密钥，需在导入后补填 API Key"
 		}
-		if err := a.insertChannel(&input); err != nil {
+		if err := a.insertChannel(&input, channel); err != nil {
 			return err
 		}
 		a.record(models.ConfigScopeChannels, input.Name, models.ConfigImportCreate, detail)
@@ -600,7 +644,7 @@ func (a *configApplier) channelIDByName(name string) (int64, bool, error) {
 	return id, true, nil
 }
 
-func (a *configApplier) insertChannel(input *models.UpstreamIn) error {
+func (a *configApplier) insertChannel(input *models.UpstreamIn, channel models.ConfigArchiveChannel) error {
 	encoded, err := encodeUpstreamCollections(input)
 	if err != nil {
 		return err
@@ -610,12 +654,15 @@ func (a *configApplier) insertChannel(input *models.UpstreamIn) error {
 		return refuse(models.ConfigScopeChannels, input.Name, err.Error())
 	}
 
+	// api_key is not written here. replaceUpstreamKeys and setLegacyKey seal the
+	// value and mirror the first enabled key; a plaintext column with no
+	// upstream_keys row is what routing cannot sign in with.
 	result, err := a.tx.ExecContext(a.ctx, `INSERT INTO upstreams
-        (name, base_url, api_key, model_names, model_prefixes, model_mappings,
+        (name, base_url, model_names, model_prefixes, model_mappings,
          effort_mappings, priority, weight, auto_weight_enabled, enabled,
          extra_headers, timeout_seconds, rate_limit, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		input.Name, input.BaseURL, input.APIKey, encoded.Names, encoded.Prefixes,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+		input.Name, input.BaseURL, encoded.Names, encoded.Prefixes,
 		encoded.ModelMappings, encoded.EffortMappings, input.Priority, input.Weight,
 		boolToInt64(input.AutoWeightEnabled), boolToInt64(input.Enabled),
 		encoded.Headers, *input.TimeoutSeconds, rateLimit)
@@ -629,19 +676,22 @@ func (a *configApplier) insertChannel(input *models.UpstreamIn) error {
 	if err != nil {
 		return apperr.Database(err)
 	}
-	return ReplaceUpstreamGroups(a.ctx, a.tx, id, input.GroupIDs)
+	if err := ReplaceUpstreamGroups(a.ctx, a.tx, id, input.GroupIDs); err != nil {
+		return err
+	}
+	return a.writeChannelKeys(id, channel)
 }
 
-// updateChannel overwrites an existing channel, keeping its key when the archive
+// updateChannel overwrites an existing channel, keeping its keys when the archive
 // carried none.
 //
-// Clearing the key on an archive exported without secrets would break a working
+// Clearing the keys on an archive exported without secrets would break a working
 // channel as a side effect of a migration that never mentioned credentials.
 // hasEffortMappings draws the same line for the effort rewrites: an archive
 // written before channels carried them says nothing about them, so they are left
 // as they are rather than reset to empty.
 func (a *configApplier) updateChannel(id int64, input *models.UpstreamIn,
-	hasKey bool, hasEffortMappings bool) (string, error) {
+	channel models.ConfigArchiveChannel, hasEffortMappings bool) (string, error) {
 	encoded, err := encodeUpstreamCollections(input)
 	if err != nil {
 		return "", err
@@ -669,20 +719,57 @@ func (a *configApplier) updateChannel(id int64, input *models.UpstreamIn,
 		args = slices.Insert(args, 4, any(encoded.EffortMappings))
 	}
 
-	if hasKey {
-		query = strings.Replace(query, "SET base_url = ?", "SET api_key = ?, base_url = ?", 1)
-		args = append([]any{input.APIKey}, args...)
-	} else {
-		detail = "归档不含密钥，已保留现有 API Key"
-	}
-
 	if _, err := a.tx.ExecContext(a.ctx, query, args...); err != nil {
 		return "", apperr.Database(err)
 	}
 	if err := ReplaceUpstreamGroups(a.ctx, a.tx, id, input.GroupIDs); err != nil {
 		return "", err
 	}
+	if !channelCarriesKeys(channel) {
+		return "归档不含密钥，已保留现有 API Key", nil
+	}
+	if err := a.writeChannelKeys(id, channel); err != nil {
+		return "", err
+	}
 	return detail, nil
+}
+
+// channelCarriesKeys reports whether the archive names credentials at all.
+// A nil Keys with no APIKey is an archive that must not touch stored keys.
+func channelCarriesKeys(channel models.ConfigArchiveChannel) bool {
+	if channel.Keys != nil {
+		return true
+	}
+	return channel.APIKey != nil && strings.TrimSpace(*channel.APIKey) != ""
+}
+
+// writeChannelKeys applies an archive's credentials.
+//
+// Keys, when present, is the whole list — including an empty one, which clears
+// them — and is what a multi-key archive round-trips. APIKey alone is the older
+// single-key document; setLegacyKey adds or updates the channel's first key.
+func (a *configApplier) writeChannelKeys(id int64, channel models.ConfigArchiveChannel) error {
+	if channel.Keys != nil {
+		for _, key := range *channel.Keys {
+			if strings.TrimSpace(key.APIKey) == "" {
+				return refuse(models.ConfigScopeChannels, channel.Name, "an archived key must include its value")
+			}
+		}
+		return replaceUpstreamKeys(a.ctx, a.tx, id, archiveKeyInputs(*channel.Keys))
+	}
+	if channel.APIKey != nil && strings.TrimSpace(*channel.APIKey) != "" {
+		return setLegacyKey(a.ctx, a.tx, id, *channel.APIKey)
+	}
+	return nil
+}
+
+func archiveKeyInputs(keys []models.ConfigArchiveKey) []models.UpstreamKeyIn {
+	inputs := make([]models.UpstreamKeyIn, len(keys))
+	for i, key := range keys {
+		enabled := key.Enabled
+		inputs[i] = models.UpstreamKeyIn{Name: key.Name, APIKey: key.APIKey, Enabled: &enabled}
+	}
+	return inputs
 }
 
 func (a *configApplier) applyTokens(tokens []models.ConfigArchiveToken) error {
@@ -815,12 +902,16 @@ func (a *configApplier) insertToken(record archiveTokenRecord,
 	}
 
 	digest := TokenDigest(value)
+	sealed, err := sealTokenPlain(value)
+	if err != nil {
+		return "", err
+	}
 	if _, err := a.tx.ExecContext(a.ctx, `INSERT INTO api_tokens
         (name, description, token, token_hash, token_preview, token_plain, enabled,
          expires_at, group_id, used_tokens, limit_tokens, rate_limit, allowed_models,
          quota_period, quota_timezone, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
-		record.name, record.description, digest, digest, TokenPreview(value), value,
+		record.name, record.description, digest, digest, TokenPreview(value), sealed,
 		boolToInt64(record.enabled), record.expiresAt, record.groupID, record.limitTokens,
 		record.rateLimit, record.allowedModels, record.quotaPeriod,
 		record.quotaTimezone); err != nil {
@@ -860,11 +951,15 @@ func (a *configApplier) updateToken(id int64, record archiveTokenRecord,
 	}
 	value := strings.TrimSpace(*archived)
 	digest := TokenDigest(value)
+	sealed, err := sealTokenPlain(value)
+	if err != nil {
+		return "", err
+	}
 	if _, err := a.tx.ExecContext(a.ctx, `UPDATE api_tokens
         SET token = ?, token_hash = ?, token_preview = ?, token_plain = ?,
             updated_at = datetime('now')
         WHERE id = ?`,
-		digest, digest, TokenPreview(value), value, id); err != nil {
+		digest, digest, TokenPreview(value), sealed, id); err != nil {
 		if IsUniqueViolation(err) {
 			return "", refuse(models.ConfigScopeTokens, record.name,
 				"the archived token value is already used by another token on this instance")
@@ -872,6 +967,17 @@ func (a *configApplier) updateToken(id int64, record archiveTokenRecord,
 		return "", apperr.Database(err)
 	}
 	return detail, nil
+}
+
+// sealTokenPlain stores the credential the console copies. With no cipher
+// configured the value is kept as given, which is what tests and an unsealed
+// database already do.
+func sealTokenPlain(value string) (string, error) {
+	sealed, err := sealSecret(value)
+	if err != nil {
+		return "", apperr.Internal("could not seal the token")
+	}
+	return sealed, nil
 }
 
 // applySettings writes the runtime policy row.

@@ -131,10 +131,9 @@ const contracts = [
     name: "渠道创建/更新 UpstreamIn",
     keys: tsKeys(upstreamDialog, "function payloadFromForm", { after: "return {" }),
     fields: goFields(models.upstream, "UpstreamIn"),
-    // clear_api_key 在 UpstreamUpdateIn 上，创建时后端也收。
-    extraAllowed: new Set(["clear_api_key"]),
-    // archived 只有撤销删除时带；表单不管归档，不带就是不改。
-    allowMissing: new Set(["archived"]),
+    /* archived 只有撤销删除时带；表单不管归档，不带就是不改。api_key 是有
+       多 key 之前的单 key 字段，只在不带 keys 时读，表单发的是 keys。 */
+    allowMissing: new Set(["archived", "api_key"]),
   },
   {
     name: "令牌创建 APITokenIn",

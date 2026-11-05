@@ -484,6 +484,11 @@ function metaRows(log: RequestLog, sensitiveHidden = false): Array<{ label: stri
   push("来源 IP", sensitiveHidden && log.client_ip ? SENSITIVE_MASK : log.client_ip ?? "-");
   push("令牌", sensitiveHidden && log.downstream_token_name ? SENSITIVE_MASK : log.downstream_token_name ?? "-");
   push("渠道", sensitiveHidden && log.upstream_name ? SENSITIVE_MASK : log.upstream_name ?? "-");
+  // 没配 key 的渠道和有 key 之前的旧日志没有这一项。名称和渠道一样，隐藏敏感信息时打码。
+  if (log.upstream_key_id) {
+    const keyLabel = log.upstream_key_name || `#${log.upstream_key_id}`;
+    push("Key", sensitiveHidden && log.upstream_key_name ? SENSITIVE_MASK : keyLabel);
+  }
   push("模型", modelChain(log));
 
   for (const step of reasoningChain(log)) push(step.label, step.value);

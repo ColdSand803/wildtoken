@@ -6,6 +6,7 @@ import type { LogFilters } from "../logFilters";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchDashboard } from "../api";
+import { UsageCalendar } from "../components/UsageCalendar";
 import { compactCount, scaleDashboard } from "../dashboardScale";
 import { formatTimestamp } from "../logFormat";
 import type { LogOverview, RequestLog, TokenUsage, TopItem, TopStats } from "../types";
@@ -347,6 +348,8 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [recent, setRecent] = useState<RequestLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // 日历不跟时间档，只在点「刷新」时重取。
+  const [calendarRefresh, setCalendarRefresh] = useState(0);
 
   /* 选了自定义但日期还没填齐时不发请求。点一下那个档位就能打出三个
      start_date= 空值的 400，而界面上只会变成一片破折号。 */
@@ -697,7 +700,14 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
                     {maskChannels ? <path className="log-sensitive-slash" d="m4 4 16 16" /> : null}
                   </svg>
                 </button>
-                <button type="button" className="secondary" onClick={() => void load()}>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => {
+                    void load();
+                    setCalendarRefresh((value) => value + 1);
+                  }}
+                >
                   刷新
                 </button>
               </div>
@@ -735,6 +745,8 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
               />
             </div>
           </section>
+
+          <UsageCalendar refreshKey={calendarRefresh} onUnauthorized={onUnauthorized} />
 
           <article className="dashboard-card dashboard-card-wide wt-card">
             <div className="panel-head dashboard-card-head wt-card-head">

@@ -2,7 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { UnauthorizedError, fetchModelsPreview } from "../api";
 import { joinMappingLines, parseMappingLines } from "../mappingLines";
-import type { Upstream } from "../types";
+import type { DraftKey, Upstream } from "../types";
+import { keyRowsFrom, keysPayload, probeKeyOf } from "../keyRows";
+import type { KeyPayload, KeyRow } from "../keyRows";
+import { KeyListEditor } from "./KeyListEditor";
 import { ModelDialog } from "./ModelDialog";
 import type { ModelSelection } from "./ModelDialog";
 import { useToast } from "./feedback";
@@ -15,7 +18,8 @@ const PREVIEW_LIMIT = 6;
 export interface UpstreamPayload {
   name: string;
   base_url: string;
-  api_key: string | null;
+  /** 渠道的全部 key：没列出的会被删掉。 */
+  keys: KeyPayload[];
   model_names: string[];
   model_prefixes: string[];
   model_mappings: Record<string, string>;
@@ -28,7 +32,6 @@ export interface UpstreamPayload {
   enabled: boolean;
   extra_headers: Record<string, string>;
   rate_limit: string | null;
-  clear_api_key: boolean;
   group_ids: number[];
 }
 
@@ -155,8 +158,7 @@ function joinHeaderLines(headers: Record<string, string>): string {
 interface FormState {
   name: string;
   baseUrl: string;
-  apiKey: string;
-  clearApiKey: boolean;
+  keys: KeyRow[];
   groupIds: number[];
   modelNames: string[];
   /** 手动添加输入框里还没提交的文本，只收模型名。 */
@@ -180,8 +182,7 @@ function emptyForm(): FormState {
   return {
     name: "",
     baseUrl: "",
-    apiKey: "",
-    clearApiKey: false,
+    keys: keyRowsFrom(null),
     groupIds: [DEFAULT_GROUP_ID],
     modelNames: [],
     manual: "",
@@ -199,13 +200,11 @@ function emptyForm(): FormState {
   };
 }
 
-function formFromUpstream(upstream: Upstream): FormState {
+function formFromUpstream(upstream: Upstream, draftKeys?: DraftKey[]): FormState {
   return {
     name: upstream.name,
     baseUrl: upstream.base_url,
-    /* 详情接口会把密钥带回来，直接回显：编辑渠道时要能核对当前用的是哪把 Key。 */
-    apiKey: upstream.api_key ?? "",
-    clearApiKey: false,
+    keys: keyRowsFrom(upstream, draftKeys),
     groupIds: upstream.group_ids.length > 0 ? upstream.group_ids : [DEFAULT_GROUP_ID],
     modelNames: upstream.model_names,
     manual: "",
@@ -228,7 +227,7 @@ function payloadFromForm(form: FormState): UpstreamPayload {
   return {
     name: form.name.trim(),
     base_url: form.baseUrl.trim(),
-    api_key: form.apiKey.trim() || null,
+    keys: keysPayload(form.keys),
     model_names: form.modelNames,
     model_prefixes: splitList(form.modelPrefixes),
     model_mappings: parseMappingLines(form.modelMappings, "模型映射"),
@@ -249,7 +248,6 @@ function payloadFromForm(form: FormState): UpstreamPayload {
     enabled: form.enabled,
     extra_headers: parseHeaderLines(form.extraHeaders),
     rate_limit: form.rateLimit.trim() || null,
-    clear_api_key: form.clearApiKey,
     group_ids: form.groupIds,
   };
 }
@@ -300,6 +298,7 @@ function SelectionPreview({
 export function UpstreamDialog({
   open,
   upstream,
+  draftKeys,
   groups,
   busy,
   onSubmit,
@@ -308,6 +307,8 @@ export function UpstreamDialog({
   open: boolean;
   /** null 表示新增。 */
   upstream: Upstream | null;
+  /** 带值预填的 key：复制渠道、快速导入时给。 */
+  draftKeys?: DraftKey[];
   groups: Array<{ id: number; name: string }>;
   busy: boolean;
   onSubmit: (payload: UpstreamPayload) => void;
@@ -337,7 +338,7 @@ export function UpstreamDialog({
     setPicker(null);
     setFetching(false);
     if (!open) return;
-    setForm(upstream ? formFromUpstream(upstream) : emptyForm());
+    setForm(upstream ? formFromUpstream(upstream, draftKeys) : emptyForm());
     // 配过高级项的渠道直接展开，否则那些值藏起来像丢了。
     setAdvanced(
       Boolean(
@@ -347,7 +348,7 @@ export function UpstreamDialog({
             upstream.rate_limit),
       ),
     );
-  }, [open, upstream]);
+  }, [open, upstream, draftKeys]);
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
@@ -401,16 +402,6 @@ export function UpstreamDialog({
     return { names: state.modelNames, mappings: parseMappingLines(state.modelMappings, "模型映射") };
   }
 
-  /**
-   * 拿哪把 Key 去探上游。
-   *
-   * 输入框留空意思是「保持不变」，此时要用已存的那把；勾了清除就真的不带。
-   * 不这么判的话，编辑一个已配好的渠道时点拉取总是拿不到模型。
-   */
-  function probeApiKey(): string | null {
-    if (form.clearApiKey) return null;
-    return form.apiKey.trim() || upstream?.api_key || null;
-  }
 
   async function fetchCatalog() {
     const baseUrl = form.baseUrl.trim();
@@ -434,9 +425,15 @@ export function UpstreamDialog({
     const request = ++fetchRequest.current;
     setFetching(true);
     try {
-      const result = await fetchModelsPreview(baseUrl, probeApiKey(), {
+      /* 已存的 key 表单里只有名字，没填新值时让服务端用库里那把。 */
+      const probe = probeKeyOf(form.keys);
+      const upstreamId = upstream?.id ?? 0;
+      const result = await fetchModelsPreview(baseUrl, probe.apiKey, {
         extraHeaders: headers,
         timeoutSeconds: form.timeoutSeconds.trim() !== "" && timeout > 0 ? timeout : undefined,
+        storedKey: upstreamId > 0 && probe.storedKeyId > 0
+          ? { upstreamId, keyId: probe.storedKeyId }
+          : undefined,
       });
       if (request !== fetchRequest.current) return;
       setPicker({ catalog: result.models, selection: currentSelection(formRef.current) });
@@ -557,20 +554,18 @@ export function UpstreamDialog({
                 <span className="field-hint">支持根地址或已包含 /v1 的地址。</span>
               </label>
 
-              <label className="field span-2">
+              <div className="field span-2">
                 <span className="field-label">API Key</span>
-                <input
-                  type="text"
-                  value={form.apiKey}
-                  onChange={(event) => set("apiKey", event.target.value)}
-                  placeholder="未配置时留空"
-                  autoComplete="off"
-                  spellCheck={false}
+                <KeyListEditor
+                  upstreamId={upstream?.id ?? 0}
+                  rows={form.keys}
+                  onChange={(update) => setForm((current) => ({ ...current, keys: update(current.keys) }))}
                 />
                 <span className="field-hint">
-                  留空表示不改动；要移除已存密钥请勾选下方的清空。
+                  多把 Key 按顺序轮流使用；某把被上游拒绝（401、403、429）时，请求先换本渠道的下一把。
+                  一把都不填就只靠额外请求头鉴权。
                 </span>
-              </label>
+              </div>
 
               <div className="field span-2">
                 <span className="field-label">分组</span>
@@ -599,21 +594,6 @@ export function UpstreamDialog({
                 </span>
               </div>
 
-              {upstream?.api_key_set ? (
-                <div className="toggle-list span-2">
-                  <label className="toggle-row span-2">
-                    <input
-                      type="checkbox"
-                      checked={form.clearApiKey}
-                      onChange={(event) => set("clearApiKey", event.target.checked)}
-                    />
-                    <span>
-                      <strong>清空 API Key</strong>
-                      <small>保存后会移除当前渠道密钥。</small>
-                    </span>
-                  </label>
-                </div>
-              ) : null}
             </div>
           </section>
 

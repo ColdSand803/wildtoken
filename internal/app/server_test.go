@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/liguangsheng/wildtoken/internal/models"
@@ -54,6 +55,9 @@ func TestARedirectDowngradingToHTTPIsRefused(t *testing.T) {
 // The database holds keys and tokens in the clear, so it and its journal are
 // the owner's alone, whether created now or found open to others.
 func TestTheDatabaseIsReadableByItsOwnerAlone(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("os.Chmod does not apply Unix permission bits on Windows")
+	}
 	directory := t.TempDir()
 	fresh := filepath.Join(directory, "fresh.db")
 	restrictDatabaseFiles(fresh)

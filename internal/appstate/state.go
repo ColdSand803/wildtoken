@@ -241,6 +241,8 @@ type State struct {
 	// ActiveRequests holds what is being proxied right now, which no log row
 	// covers: a row only exists once the request is over.
 	ActiveRequests *proxy.ActiveRegistry
+	// Keys rotates each channel's keys and sits out the ones refused.
+	Keys *proxy.KeyPicker
 	// TokenRateLimiter and UpstreamRateLimiter enforce the per-token and
 	// per-channel rate expressions. They must stay separate instances: both key
 	// their windows by an int64 id, so sharing one would let a token and a

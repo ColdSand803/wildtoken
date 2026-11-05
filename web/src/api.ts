@@ -8,6 +8,7 @@ import type {
   APIToken,
   BalanceResult,
   ChannelExportDocument,
+  DailyUsagePage,
   Group,
   ImportResult,
   LogOverview,
@@ -165,10 +166,10 @@ export function getUpstream(id: number): Promise<Upstream> {
  * 测连接。和模型测试一样，上游不通或报错也回 200，成败看 ok；不看的话
  * Key 错、地址不通的渠道也提示「测试连接成功」。
  */
-export async function testUpstream(id: number, path = "/v1/models"): Promise<void> {
+export async function testUpstream(id: number, path = "/v1/models", keyId = 0): Promise<void> {
   const result = await api<{ ok: boolean; status_code: number | null; message?: string; preview?: string }>(
     `/api/admin/upstreams/${id}/test`,
-    { method: "POST", body: JSON.stringify({ path }) },
+    { method: "POST", body: JSON.stringify({ path, key_id: keyId }) },
   );
   if (result.ok) return;
   const detail = result.message || result.preview?.slice(0, 200) || "";
@@ -189,7 +190,7 @@ export function fetchUpstreamModels(id: number): Promise<{ models: string[] }> {
  */
 export function testUpstreamModel(
   id: number,
-  body: { model: string; protocol: string; prompt_template_id: number; prompt: string },
+  body: { model: string; protocol: string; prompt_template_id: number; prompt: string; key_id: number },
 ): Promise<ModelTestResult> {
   return api<ModelTestResult>(`/api/admin/upstreams/${id}/test-model`, {
     method: "POST",
@@ -356,6 +357,14 @@ export function fetchDashboard(
   }));
 }
 
+/** 近一年每天的用量，带上看板倍率。日历不跟随看板的时间档，单独取。 */
+export function fetchDailyUsage(): Promise<{ page: DailyUsagePage; multiplier: number }> {
+  return Promise.all([
+    api<DailyUsagePage>(`/api/admin/logs/daily?${tzOffsetParam().slice(1)}`),
+    getSettings(),
+  ]).then(([page, settings]) => ({ page, multiplier: settings.dashboard_multiplier }));
+}
+
 export function listTokens(): Promise<APIToken[]> {
   return api<APIToken[]>("/api/admin/tokens/");
 }
@@ -493,7 +502,12 @@ export function importUpstreams(
 export function fetchModelsPreview(
   baseUrl: string,
   apiKey: string | null,
-  options: { extraHeaders?: Record<string, string>; timeoutSeconds?: number } = {},
+  options: {
+    extraHeaders?: Record<string, string>;
+    timeoutSeconds?: number;
+    /** apiKey 为空时用这个渠道存着的 key：keyId 那把，0 是第一把启用的。 */
+    storedKey?: { upstreamId: number; keyId: number };
+  } = {},
 ): Promise<{ models: string[] }> {
   return api<{ models: string[] }>("/api/admin/upstreams/fetch-models", {
     method: "POST",
@@ -502,8 +516,23 @@ export function fetchModelsPreview(
       api_key: apiKey,
       extra_headers: options.extraHeaders ?? {},
       timeout_seconds: options.timeoutSeconds ?? null,
+      upstream_id: options.storedKey?.upstreamId ?? 0,
+      key_id: options.storedKey?.keyId ?? 0,
     }),
   });
+}
+
+/** 取出渠道的一把 key 的明文。keyId 不传是第一把。每次取都会记一条审计日志。 */
+export function revealUpstreamKey(id: number, keyId?: number): Promise<UpstreamCredential> {
+  const query = keyId ? `?key_id=${keyId}` : "";
+  return api<UpstreamCredential>(`/api/admin/upstreams/${id}/credential${query}`);
+}
+
+export interface UpstreamCredential {
+  base_url: string;
+  api_key: string;
+  key_id: number;
+  key_name: string;
 }
 
 export function setUpstreamArchived(id: number, archived: boolean): Promise<Upstream> {

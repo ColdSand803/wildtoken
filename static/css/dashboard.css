@@ -1628,3 +1628,199 @@ html[data-theme] button.wt-seg-btn.is-active:focus-visible {
 
 }
 
+
+/* ── 近一年用量日历 ─────────────────────────────────────────────── */
+
+/* 色阶。亮度写死、色相取主题强调色，换主题不用动这里：浅色主题越多越深，
+   深色主题越多越亮。四档亮度隔 0.11–0.12，最浅一档对卡面不低于 2:1。
+   彩度封顶在任何色相都放得进 sRGB 的值，再艳的强调色也不会被裁成别的颜色。
+   不认 light-dark() 或相对颜色的浏览器用开头这组 color-mix。 */
+.usage-calendar {
+  --calendar-label: 18px;
+  --calendar-min: 11px;
+  /* 格子随卡片变宽，到 22px 封顶，再宽就只是拉稀。底栏跟着同宽，图例对齐网格右缘。 */
+  --calendar-max: calc(var(--calendar-label) + var(--calendar-weeks) * 22px);
+  --heat-0: color-mix(in oklab, var(--text) 8%, var(--panel-solid));
+  --heat-1: color-mix(in oklab, var(--accent) 45%, var(--panel-solid));
+  --heat-2: color-mix(in oklab, var(--accent) 70%, var(--panel-solid));
+  --heat-3: var(--accent);
+  --heat-4: color-mix(in oklab, var(--accent) 60%, var(--text));
+}
+
+@supports (color: light-dark(oklch(from red l min(c, 0.1) h), red)) {
+  .usage-calendar {
+    --heat-1: light-dark(oklch(from var(--accent) 0.72 min(c, 0.12) h),
+      oklch(from var(--accent) 0.45 min(c, 0.075) h));
+    --heat-2: light-dark(oklch(from var(--accent) 0.61 min(c, 0.1) h),
+      oklch(from var(--accent) 0.57 min(c, 0.095) h));
+    --heat-3: light-dark(oklch(from var(--accent) 0.5 min(c, 0.085) h),
+      oklch(from var(--accent) 0.69 min(c, 0.115) h));
+    --heat-4: light-dark(oklch(from var(--accent) 0.39 min(c, 0.065) h),
+      oklch(from var(--accent) 0.81 min(c, 0.09) h));
+  }
+}
+
+.usage-calendar .segmented-control {
+  flex: 0 0 auto;
+}
+
+.usage-calendar-body {
+  container-type: inline-size;
+  position: relative;
+}
+
+/* 窄屏横向滚动，不撑宽页面。上下留 2px 给悬停描边。 */
+.usage-calendar-scroll {
+  overflow-x: auto;
+  padding: 2px 0;
+  scrollbar-width: thin;
+}
+
+.usage-calendar-grid {
+  max-width: var(--calendar-max);
+  min-width: calc(var(--calendar-label) + var(--calendar-weeks) * var(--calendar-min));
+}
+
+.usage-calendar-months,
+.usage-calendar-row {
+  display: grid;
+  grid-template-columns:
+    var(--calendar-label)
+    repeat(var(--calendar-weeks), minmax(var(--calendar-min), 1fr));
+}
+
+.usage-calendar-months {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  height: 18px;
+  line-height: 18px;
+}
+
+.usage-calendar-months span {
+  grid-row: 1;
+  white-space: nowrap;
+}
+
+.usage-calendar-weekday {
+  align-self: center;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1;
+}
+
+/* 放不下整年时会横向滚动，周几那一列钉在左边。601px 是网格的最小宽度：
+   18px 标签列加 53 列 × 11px。不滚动时不钉，免得底色和半透明的卡面差一档。 */
+@container (max-width: 601px) {
+  .usage-calendar-weekday {
+    align-self: stretch;
+    align-content: center;
+    background: var(--panel-solid);
+    display: grid;
+    left: 0;
+    position: sticky;
+    z-index: 1;
+  }
+}
+
+/* 格子整块是命中区，色块画在内缩 1.5px 的 ::before 上：格间 3px 的缝也
+   算这一格，指针落在缝里不会扑空。 */
+.usage-calendar-cell {
+  aspect-ratio: 1;
+  outline: none;
+  position: relative;
+}
+
+.usage-calendar-cell::before {
+  background: var(--heat-0);
+  border-radius: 2px;
+  content: "";
+  inset: 1.5px;
+  position: absolute;
+}
+
+.usage-calendar-cell.is-future::before {
+  content: none;
+}
+
+.usage-calendar-cell:hover::before,
+.usage-calendar-cell:focus-visible::before {
+  box-shadow: 0 0 0 1.5px var(--text);
+}
+
+.usage-calendar-swatch {
+  background: var(--heat-0);
+  border-radius: 2px;
+  display: inline-block;
+  height: 11px;
+  width: 11px;
+}
+
+.usage-calendar-cell[data-level="1"]::before,
+.usage-calendar-swatch[data-level="1"] {
+  background: var(--heat-1);
+}
+
+.usage-calendar-cell[data-level="2"]::before,
+.usage-calendar-swatch[data-level="2"] {
+  background: var(--heat-2);
+}
+
+.usage-calendar-cell[data-level="3"]::before,
+.usage-calendar-swatch[data-level="3"] {
+  background: var(--heat-3);
+}
+
+.usage-calendar-cell[data-level="4"]::before,
+.usage-calendar-swatch[data-level="4"] {
+  background: var(--heat-4);
+}
+
+/* 数值在前、日期在后：读者要的是这天多少。 */
+.usage-calendar-tip {
+  background: var(--panel-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  color: var(--muted);
+  display: grid;
+  font-size: var(--text-xs);
+  gap: 2px;
+  padding: 7px 10px;
+  pointer-events: none;
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 6px));
+  white-space: nowrap;
+  z-index: 5;
+}
+
+.usage-calendar-tip strong {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+.usage-calendar-foot {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  justify-content: space-between;
+  margin-top: 8px;
+  max-width: var(--calendar-max);
+}
+
+.usage-calendar-legend {
+  align-items: center;
+  display: inline-flex;
+  gap: 3px;
+}
+
+.usage-calendar-legend .wt-meta {
+  margin: 0 3px;
+}
+
+.usage-calendar-summary {
+  font-variant-numeric: tabular-nums;
+  white-space: normal;
+}

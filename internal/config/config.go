@@ -23,6 +23,17 @@ type Settings struct {
 	Themes   ThemeSettings    `toml:"themes"`
 	Metrics  MetricsSettings  `toml:"metrics"`
 	Images   ImageSettings    `toml:"images"`
+	Backup   BackupSettings   `toml:"backup"`
+}
+
+// BackupSettings schedules the daily database backup.
+type BackupSettings struct {
+	// Dir holds the backups; blank turns them off.
+	Dir string `toml:"dir"`
+	// At is the local time of day one is taken, as HH:MM.
+	At string `toml:"at"`
+	// Keep is how many are kept, newest first.
+	Keep int `toml:"keep"`
 }
 
 type ServerSettings struct {
@@ -37,6 +48,9 @@ type DatabaseSettings struct {
 	SQLiteStatementCacheCapacity int    `toml:"sqlite_statement_cache_capacity"`
 	SQLiteMmapSizeBytes          int64  `toml:"sqlite_mmap_size_bytes"`
 	IdleTimeoutSeconds           int64  `toml:"idle_timeout_seconds"`
+	// EncryptionKey seals channel API keys and token plaintext at rest. Blank
+	// uses a key file beside the database, made on first start.
+	EncryptionKey string `toml:"encryption_key"`
 }
 
 type LoggingSettings struct {
@@ -111,6 +125,7 @@ func Default() Settings {
 		// traffic volumes and channel health to whatever can reach the port.
 		Metrics: MetricsSettings{Enabled: false},
 		Images:  ImageSettings{Dir: "images"},
+		Backup:  BackupSettings{Dir: "backups", At: "05:00", Keep: 10},
 	}
 }
 
@@ -144,11 +159,18 @@ func Load() (Settings, error) {
 	if url := os.Getenv("DATABASE_URL"); url != "" {
 		settings.Database.URL = url
 	}
+	// faketoken's name for it, so one value can serve both.
+	if key := os.Getenv("ENCRYPTION_KEY"); key != "" {
+		settings.Database.EncryptionKey = key
+	}
 	if dir := os.Getenv("WILDTOKEN_THEME_DIR"); dir != "" {
 		settings.Themes.Dir = dir
 	}
 	if dir := os.Getenv("WILDTOKEN_IMAGE_DIR"); dir != "" {
 		settings.Images.Dir = dir
+	}
+	if dir := os.Getenv("WILDTOKEN_BACKUP_DIR"); dir != "" {
+		settings.Backup.Dir = dir
 	}
 
 	return settings, nil
@@ -201,6 +223,7 @@ func applyEnvOverrides(settings *Settings) error {
 		{"APP__DATABASE__IDLE_TIMEOUT_SECONDS", func(s *Settings, v string) error {
 			return parseInt(v, func(n int64) { s.Database.IdleTimeoutSeconds = n })
 		}},
+		{"APP__DATABASE__ENCRYPTION_KEY", func(s *Settings, v string) error { s.Database.EncryptionKey = v; return nil }},
 		{"APP__LOGGING__LOG_QUEUE_CAPACITY", func(s *Settings, v string) error {
 			return parseInt(v, func(n int64) { s.Logging.LogQueueCapacity = int(n) })
 		}},
@@ -225,6 +248,11 @@ func applyEnvOverrides(settings *Settings) error {
 		}},
 		{"APP__METRICS__TOKEN", func(s *Settings, v string) error { s.Metrics.Token = v; return nil }},
 		{"APP__IMAGES__DIR", func(s *Settings, v string) error { s.Images.Dir = v; return nil }},
+		{"APP__BACKUP__DIR", func(s *Settings, v string) error { s.Backup.Dir = v; return nil }},
+		{"APP__BACKUP__AT", func(s *Settings, v string) error { s.Backup.At = v; return nil }},
+		{"APP__BACKUP__KEEP", func(s *Settings, v string) error {
+			return parseInt(v, func(n int64) { s.Backup.Keep = int(n) })
+		}},
 	}
 
 	for _, override := range overrides {

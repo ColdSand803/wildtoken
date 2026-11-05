@@ -130,6 +130,9 @@ func scanTokenRow(row interface{ Scan(...any) error }) (models.APITokenRow, stri
 		token.QuotaTimezone = quotaTimezone.String
 	}
 	token.QuotaPeriodStamp = quotaPeriodStamp.String
+	if token.Token, err = openSecret(token.Token); err != nil {
+		return token, "", err
+	}
 	if expiresAt.Valid {
 		token.ExpiresAt = &expiresAt.String
 	}
@@ -426,6 +429,10 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
 	}
 	digest := TokenDigest(tokenValue)
 	preview := TokenPreview(tokenValue)
+	sealedToken, err := sealSecret(tokenValue)
+	if err != nil {
+		return models.APITokenCreatedOut{}, apperr.Internal("could not seal the token")
+	}
 
 	limitTokens, err := input.ParsedLimit()
 	if err != nil {
@@ -465,7 +472,7 @@ func CreateToken(ctx context.Context, db *sql.DB, input *models.APITokenIn) (mod
         (name, description, token, token_hash, token_preview, token_plain, enabled, expires_at, group_id, limit_tokens, rate_limit, allowed_models, quota_period, quota_timezone, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
 		trimSpace(input.Name), trimSpace(input.Description), digest, digest, preview,
-		tokenValue, boolToInt64(input.Enabled), expiresAt, groupID, limitTokens, rateLimit,
+		sealedToken, boolToInt64(input.Enabled), expiresAt, groupID, limitTokens, rateLimit,
 		allowedModels, quotaPeriod, quotaTimezone)
 	if err != nil {
 		return models.APITokenCreatedOut{}, apperr.Database(err)
@@ -616,8 +623,12 @@ func UpdateToken(ctx context.Context, db *sql.DB, id int64, input *models.APITok
 		// `token` column takes the digest because the startup migration
 		// overwrites it from token_hash anyway.
 		digest := TokenDigest(replacement)
+		sealed, err := sealSecret(replacement)
+		if err != nil {
+			return models.APITokenOut{}, apperr.Internal("could not seal the token")
+		}
 		query += ", token = ?, token_hash = ?, token_preview = ?, token_plain = ?"
-		args = append(args, digest, digest, TokenPreview(replacement), replacement)
+		args = append(args, digest, digest, TokenPreview(replacement), sealed)
 	}
 	query += " WHERE id = ?"
 	args = append(args, id)
