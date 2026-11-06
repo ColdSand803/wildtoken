@@ -90,8 +90,7 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      # Every target builds without cgo, so a single Linux runner can verify
-      # them all.
+      # CLI targets remain pure Go; the desktop application is built on macOS.
       - name: Build every release target
         shell: bash
         env:
@@ -103,6 +102,14 @@ jobs:
           GOOS=darwin GOARCH=amd64 go build -o /dev/null ./cmd/wildtoken
           GOOS=darwin GOARCH=arm64 go build -o /dev/null ./cmd/wildtoken
           GOOS=linux GOARCH=arm64 go build -o /dev/null ./cmd/wildtoken
+
+  macos-app:
+    name: macOS desktop checks
+    needs: checks
+    uses: ./.github/workflows/macos-app.yml
+    with:
+      ref: ${{ github.sha }}
+      version: "0.0.0"
 
   docker-smoke:
     name: Docker smoke test

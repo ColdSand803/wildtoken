@@ -15,14 +15,22 @@ import (
 
 // Settings is the fully resolved startup configuration.
 type Settings struct {
-	Server   ServerSettings   `toml:"server"`
-	Database DatabaseSettings `toml:"database"`
-	Logging  LoggingSettings  `toml:"logging"`
-	Upstream UpstreamSettings `toml:"upstream"`
-	Admin    AdminSettings    `toml:"admin"`
-	Themes   ThemeSettings    `toml:"themes"`
-	Images   ImageSettings    `toml:"images"`
-	Backup   BackupSettings   `toml:"backup"`
+	// ResourcesDir is set by the desktop launcher, never by downloaded config.
+	// Empty preserves the CLI's working-directory resource lookup.
+	ResourcesDir string           `toml:"-"`
+	Server       ServerSettings   `toml:"server"`
+	Database     DatabaseSettings `toml:"database"`
+	Logging      LoggingSettings  `toml:"logging"`
+	Upstream     UpstreamSettings `toml:"upstream"`
+	Admin        AdminSettings    `toml:"admin"`
+	Themes       ThemeSettings    `toml:"themes"`
+	Images       ImageSettings    `toml:"images"`
+	Backup       BackupSettings   `toml:"backup"`
+}
+
+// ResourcePath resolves a read-only application asset.
+func (s Settings) ResourcePath(parts ...string) string {
+	return filepath.Join(append([]string{s.ResourcesDir}, parts...)...)
 }
 
 // BackupSettings schedules the daily database backup.

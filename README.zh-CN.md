@@ -36,7 +36,7 @@
   API Key，导入时同名渠道可跳过或覆盖。
 - 🧹 **正文保留策略：** 可以保留日志元数据，同时清理旧请求/响应正文，控制 SQLite 体积。
 - 🎨 **主题包：** 后台支持 `themes/` 下的 CSS-only 主题包，不执行主题 JavaScript。
-- 🖥️ **桌面友好：** Windows 发布包可在系统托盘运行；Linux、macOS、Docker 和源码运行保持普通服务模式。
+- 🖥️ **桌面运行：** Windows 使用系统托盘，macOS 桌面包使用菜单栏；CLI、Docker 和默认源码运行保持前台服务模式。
 
 ## 🖼️ 界面截图
 
@@ -82,7 +82,7 @@ Compose 会把 SQLite 数据保存到 `wildtoken-data` 卷，并发布 `3100` �
 要求：
 
 - Go 1.25 或更新版本
-- 无需 C 工具链：SQLite 驱动为纯 Go 实现，所有目标平台均可在 `CGO_ENABLED=0` 下构建
+- CLI 无需 C 工具链：SQLite 驱动为纯 Go 实现，所有 CLI 目标均可在 `CGO_ENABLED=0` 下构建；macOS 桌面版另需 macOS SDK。
 
 本地运行：
 
@@ -103,7 +103,50 @@ ADMIN_TOKEN=replace-with-a-long-random-token go run ./cmd/wildtoken
 - 日志写入工作目录下的 `wildtoken.log`
 - 需要无托盘服务模式时，可设置 `WILDTOKEN_NO_TRAY=1`，或使用 `--no-tray` / `--console`
 
-Linux、macOS 和 Docker 版本仍按前台服务方式运行。
+Linux、macOS CLI 和 Docker 版本仍按前台服务方式运行。
+
+### macOS 菜单栏应用
+
+macOS 12 或更新版本可使用 `wildtoken-v<版本>-macos-aarch64-app.zip`（Apple Silicon）或
+`wildtoken-v<版本>-macos-x86_64-app.zip`（Intel）。解压后把 `WildToken.app` 放到“应用程序”目录，双击启动。
+应用只显示菜单栏图标，不占终端或 Dock；菜单提供打开管理后台、复制 API 地址、查看运行日志、打开数据目录和退出。
+退出会等待现有请求和日志排空，第二个实例不会同时打开同一数据目录。
+
+默认地址为 `http://127.0.0.1:3100/console`。未配置管理员令牌的新库首次使用 `change-me`，登录后应在设置页更换。
+端口冲突、数据库或配置读取失败会弹出错误提示。
+
+桌面版的目录固定为：
+
+| 内容 | 位置 |
+| --- | --- |
+| 配置 | `~/Library/Application Support/WildToken/config/default.toml` |
+| 环境变量文件 | `~/Library/Application Support/WildToken/.env`（需要时自行创建） |
+| 数据库、密钥、图片和备份 | `~/Library/Application Support/WildToken/` |
+| 运行日志 | `~/Library/Logs/WildToken/wildtoken.log` |
+| 网页资源和内置主题 | `WildToken.app/Contents/Resources/`（只读） |
+
+首次启动只在配置不存在时复制默认配置。更新或移动 `.app` 不会替换用户数据，也不会自动读取或迁移 CLI 的旧数据库。
+相对数据库、图片和备份路径以用户数据目录为起点；默认 `themes` 指向应用内置主题，自定义主题可通过
+`.env` 中的 `WILDTOKEN_THEME_DIR` 指定绝对目录。不要让 CLI 与桌面版同时打开同一数据库。
+
+排障和手动备份可以直接使用包内程序，仍沿用桌面数据目录：
+
+```bash
+/Applications/WildToken.app/Contents/MacOS/wildtoken --console
+/Applications/WildToken.app/Contents/MacOS/wildtoken backup
+```
+
+当前桌面包未配置 Developer ID 签名或 Apple 公证，首次打开可能被 Gatekeeper 拦截；下载后应先核对发布页的 `SHA256SUMS`。
+暂不提供开机自启。
+
+本地构建需 Go 1.25+、Node.js 22+ 和 Xcode Command Line Tools，在对应架构的 Mac 上执行：
+
+```bash
+npm --prefix web ci
+npm --prefix web run build
+scripts/package-macos.sh 0.2.3 arm64 /tmp/wildtoken-release  # Intel 使用 amd64
+scripts/smoke-macos.sh /tmp/wildtoken-release/*-app.zip
+```
 
 ## ✅ 首次配置
 
@@ -355,4 +398,7 @@ docker compose ps
 
 ## 📦 发布
 
-推送与 `internal/handlers/admin.go` 中服务版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。发布压缩包包含运行所需的 `static/`、`config/`、`themes/` 目录以及 `SHA256SUMS`。当前发布目标包括 Windows x86_64、Linux x86_64、Linux aarch64、macOS x86_64 和 macOS aarch64。
+推送与 `internal/handlers/admin.go` 中服务版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。
+发布包含原有五个平台包、Intel 与 Apple Silicon 两个 macOS `.app.zip`，以及覆盖七份归档的 `SHA256SUMS`。
+CLI 包包含可执行文件与 `static/`、`config/`、`themes/`、`web/dist/`；桌面包把这些资源放进 `.app`。
+macOS 桌面版在对应架构的 macOS runner 上原生测试、构建，并验证解压后的应用启动和退出。

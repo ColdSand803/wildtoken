@@ -104,7 +104,7 @@ jobs:
   build:
     name: Build ${{ matrix.label }}
     needs: [prepare, test]
-    # Every target is pure Go, so one Linux runner cross-compiles them all.
+    # CLI targets are pure Go; desktop applications have a separate macOS job.
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -251,9 +251,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  macos-app:
+    name: Build macOS desktop applications
+    needs: [prepare, test]
+    uses: ./.github/workflows/macos-app.yml
+    with:
+      ref: ${{ needs.prepare.outputs.commit }}
+      version: ${{ needs.prepare.outputs.version }}
+
   release:
     name: Publish GitHub Release
-    needs: [prepare, build]
+    needs: [prepare, build, macos-app]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -275,8 +283,8 @@ jobs:
               \( -name '*.zip' -o -name '*.tar.gz' \) \
               -printf '%f\n' | sort
           )
-          if [[ "${#archives[@]}" -ne 5 ]]; then
-            printf 'Expected 5 archives, found %s\n' "${#archives[@]}" >&2
+          if [[ "${#archives[@]}" -ne 7 ]]; then
+            printf 'Expected 7 archives, found %s\n' "${#archives[@]}" >&2
             exit 1
           fi
           sha256sum "${archives[@]}" > SHA256SUMS

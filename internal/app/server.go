@@ -67,6 +67,11 @@ func New(ctx context.Context) (*Server, error) {
 		return nil, fmt.Errorf("load configuration: %w", err)
 	}
 
+	return NewWithSettings(ctx, settings)
+}
+
+// NewWithSettings binds an instance with already-resolved startup paths.
+func NewWithSettings(ctx context.Context, settings config.Settings) (*Server, error) {
 	database, err := openDatabase(ctx, settings.Database)
 	if err != nil {
 		return nil, err

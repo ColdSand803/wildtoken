@@ -63,8 +63,8 @@ an admin console for day-to-day operations.
   bodies to limit SQLite growth.
 - 🎨 **Theme packs:** optional CSS-only admin themes under `themes/`, loaded without
   executing theme JavaScript.
-- 🖥️ **Desktop-friendly release mode:** Windows builds can run from the system tray;
-  Linux, macOS, Docker, and source builds run as normal services.
+- 🖥️ **Desktop mode:** Windows uses the system tray and the macOS desktop package
+  uses the menu bar. CLI, Docker and default source builds stay in the foreground.
 
 ## 🖼️ Screenshots
 
@@ -118,8 +118,8 @@ ASCII, contain no spaces, and not be `change-me`.
 Requirements:
 
 - Go 1.25 or newer
-- No C toolchain: the SQLite driver is pure Go, so `CGO_ENABLED=0` builds work
-  on every supported target
+- CLI builds need no C toolchain: SQLite is pure Go, so `CGO_ENABLED=0` works
+  on every CLI target. The macOS desktop build additionally needs the macOS SDK.
 
 Run locally:
 
@@ -143,7 +143,58 @@ system-tray mode:
 - set `WILDTOKEN_NO_TRAY=1`, or pass `--no-tray` / `--console`, for service or CI
   usage without the tray UI
 
-Linux, macOS, and Docker builds keep the foreground service behavior.
+Linux, macOS CLI and Docker builds keep the foreground service behavior.
+
+### macOS Menu Bar Application
+
+For macOS 12 or later, download `wildtoken-v<version>-macos-aarch64-app.zip`
+(Apple Silicon) or `wildtoken-v<version>-macos-x86_64-app.zip` (Intel).
+Extract `WildToken.app`, move it to Applications, and double-click it.
+The app lives in the menu bar, without a terminal or Dock icon. Its menu opens
+the console, copies the API address, opens logs or the data directory, and quits.
+Quitting drains requests and logs; a second instance cannot open the same data
+directory concurrently.
+
+The default console address is `http://127.0.0.1:3100/console`. A new local-only
+database without a configured admin token starts with `change-me`; rotate it in
+Settings. Startup failures, including a busy port or unreadable database, display
+an error dialog.
+
+| Content | Location |
+| --- | --- |
+| Configuration | `~/Library/Application Support/WildToken/config/default.toml` |
+| Environment file | `~/Library/Application Support/WildToken/.env` (create when needed) |
+| Database, key, images and backups | `~/Library/Application Support/WildToken/` |
+| Logs | `~/Library/Logs/WildToken/wildtoken.log` |
+| Console assets and bundled themes | `WildToken.app/Contents/Resources/` (read-only) |
+
+First launch copies the default configuration only if it does not exist.
+Updating or moving the app does not replace user data or migrate a CLI database.
+Relative writable paths start in the user data directory. The default `themes`
+path names bundled themes; use an absolute `WILDTOKEN_THEME_DIR` in `.env` for
+custom themes. Do not run CLI and desktop instances against the same database.
+
+The bundled executable also supports foreground diagnosis and manual backups,
+using the same desktop data directory:
+
+```bash
+/Applications/WildToken.app/Contents/MacOS/wildtoken --console
+/Applications/WildToken.app/Contents/MacOS/wildtoken backup
+```
+
+Developer ID signing and Apple notarization are not configured yet. Gatekeeper
+may block the first launch; verify the archive against the release's
+`SHA256SUMS`. Launch at login is not enabled.
+
+To build locally, install Go 1.25+, Node.js 22+ and Xcode Command Line Tools,
+then run on a Mac of the target architecture:
+
+```bash
+npm --prefix web ci
+npm --prefix web run build
+scripts/package-macos.sh 0.2.3 arm64 /tmp/wildtoken-release  # amd64 for Intel
+scripts/smoke-macos.sh /tmp/wildtoken-release/*-app.zip
+```
 
 ## ✅ First Configuration
 
@@ -491,7 +542,10 @@ the theme contract tests under `tests/*.mjs`.
 ## 📦 Releases
 
 Pushing a `v*` tag matching the service version in `internal/handlers/admin.go`
-creates a GitHub Release through Actions. Release archives include the required
-`static/`, `config/`, and `themes/` directories plus `SHA256SUMS`. Current
-release targets are Windows x86_64, Linux x86_64, Linux aarch64, macOS x86_64,
-and macOS aarch64.
+creates a GitHub Release through Actions. The original five platform archives
+remain, joined by Intel and Apple Silicon macOS `.app.zip` packages.
+`SHA256SUMS` covers all seven archives. CLI packages include the executable and
+`static/`, `config/`, `themes/`, and `web/dist/`; desktop packages keep those
+resources inside the app. Each desktop target is tested and built on its native
+macOS runner, including a smoke test of the unpacked application's startup and
+shutdown.
