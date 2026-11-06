@@ -66,6 +66,7 @@ func createChannel(t *testing.T, state *appstate.State, name, baseURL string,
 	input.Name = name
 	input.BaseURL = baseURL
 	input.ModelNames = []string{"test-model"}
+	input.AutoWeightEnabled = true
 	input.Priority = priority
 	input.RateLimit = rateLimit
 	if _, err := db.CreateUpstream(context.Background(), state.DB, &input); err != nil {

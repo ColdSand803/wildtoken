@@ -42,7 +42,7 @@ func TestImportFillsWhatTheDocumentLeavesOut(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("imported channel: found=%v err=%v", found, err)
 	}
-	if row.Weight != 100 || row.Priority != 100 || row.Enabled != 1 || row.AutoWeightEnabled != 1 {
+	if row.Weight != 100 || row.Priority != 100 || row.Enabled != 1 || row.AutoWeightEnabled != 0 {
 		t.Errorf("weight=%d priority=%d enabled=%d auto=%d, want the create defaults",
 			row.Weight, row.Priority, row.Enabled, row.AutoWeightEnabled)
 	}

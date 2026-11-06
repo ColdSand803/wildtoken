@@ -390,7 +390,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         effort_mappings: {},
         priority: 999,
         weight: 100,
-        auto_weight_enabled: true,
+        auto_weight_enabled: false,
         enabled: true,
         archived: false,
         extra_headers: {},

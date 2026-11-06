@@ -193,7 +193,7 @@ function emptyForm(): FormState {
     // 留空：新建渠道以设置页的默认上游超时为初始值，而不是写死 300。
     timeoutSeconds: "",
     enabled: true,
-    fixedWeight: false,
+    fixedWeight: true,
     extraHeaders: "",
     effortMappings: "",
     rateLimit: "",
