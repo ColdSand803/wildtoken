@@ -96,6 +96,8 @@ func Init(ctx context.Context, db *sql.DB) error {
 		// against 0.2 ms.
 		"CREATE INDEX IF NOT EXISTS idx_request_logs_client_created_at ON request_logs(client_type, created_at);",
 		createAPITokens,
+		createResponseRoutes,
+		"CREATE INDEX IF NOT EXISTS idx_response_routes_upstream ON response_routes(upstream_id);",
 		createGroups,
 		seedDefaultGroup,
 		createUpstreamGroups,

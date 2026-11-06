@@ -332,6 +332,7 @@ func requestsStreaming(body []byte, members []member) bool {
 // real upstream call, instead of each redoing the same JSON parsing and
 // truncation work.
 type PreparedRequest struct {
+	Path           string
 	URL            string
 	ForwardHeaders map[string]string
 	UpstreamBody   []byte
@@ -355,7 +356,10 @@ func PrepareRequest(downstreamHeaders http.Header, upstream *models.UpstreamRow,
 	}
 
 	effortMappings := EffortMappingsFromRow(upstream.EffortMappings)
-	upstreamBody := PrepareUpstreamBody(body, forwardModel, path, effortMappings)
+	upstreamBody, err := prepareRequestBody(downstreamHeaders, body, forwardModel, path, effortMappings)
+	if err != nil {
+		return nil, err
+	}
 
 	// Both efforts are logged: the one the caller asked for, and the one the
 	// upstream was actually sent. Without the second, a channel that rewrites
@@ -373,6 +377,7 @@ func PrepareRequest(downstreamHeaders http.Header, upstream *models.UpstreamRow,
 	}
 
 	return &PreparedRequest{
+		Path:                    path,
 		URL:                     url,
 		ForwardHeaders:          forwardHeaders,
 		UpstreamBody:            upstreamBody,
@@ -430,6 +435,8 @@ type RequestContext struct {
 	// RequestID is written on this attempt's row, tying it to the other rows
 	// of the same downstream request. 0 leaves it unset.
 	RequestID int64
+	// RememberResponse persists provider state before its ID reaches the caller.
+	RememberResponse func(string) error
 	// HoldFailure, when set, receives the row of an attempt that got no answer
 	// instead of the log writer: the caller writes it once it knows whether
 	// another attempt replaces this one. nil writes it at once.
@@ -565,6 +572,7 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 		stream := newSSEStream(ctx, response.Body, attempt, start, status, responseHeaders,
 			requestCtx.LogBodyMaxBytes, captureBytes, entry, deps, policy, autoWeightEnabled, upstream.ID,
 			prepared.UpstreamBody)
+		stream.rememberResponse = requestCtx.RememberResponse
 		attempt.streaming.Store(true)
 		return &Response{Status: status, Headers: responseHeaders, Body: stream}, nil
 	}
@@ -655,6 +663,22 @@ func ProxyRequest(ctx context.Context, deps Deps, policy AutoWeightPolicy,
 	entry.UpstreamResponse = responseSnapshot
 	entry.DownstreamResponse = responseSnapshot
 
+	if status >= 200 && status < 300 && requestCtx.RememberResponse != nil {
+		id := responseID(bodyBytes)
+		if id == "" {
+			id = observation.responseID
+		}
+		if id != "" {
+			if err := requestCtx.RememberResponse(id); err != nil {
+				failed := int32(http.StatusInternalServerError)
+				entry.StatusCode = &failed
+				entry.Error = ptrTo("could not preserve response account: " + err.Error())
+				requestCtx.logFailure(deps, entry)
+				return nil, apperr.Internal("could not preserve response account")
+			}
+		}
+	}
+
 	// Scheduled when the body is closed rather than here. Here is before the
 	// response has reached the client at all, so a client that leaves during
 	// delivery would be recorded as having received what the upstream sent.
@@ -692,7 +716,7 @@ func buildUpstreamRequest(ctx context.Context, method string, prepared *Prepared
 		}
 		request.Header.Set(name, value)
 	}
-	return request, nil
+	return markRelayRequest(request, prepared.Path), nil
 }
 
 // baseLogEntry fills the fields every attempt reports, regardless of outcome.

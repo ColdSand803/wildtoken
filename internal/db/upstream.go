@@ -62,6 +62,9 @@ func scanUpstreamRow(row interface{ Scan(...any) error }) (models.UpstreamRow, e
 	if err != nil {
 		return upstream, err
 	}
+	if upstream.ExtraHeaders, err = openSecret(upstream.ExtraHeaders); err != nil {
+		return upstream, err
+	}
 	if apiKey.Valid {
 		plain, err := openSecret(apiKey.String)
 		if err != nil {
@@ -297,6 +300,9 @@ func encodeUpstreamCollections(input *models.UpstreamIn) (encodedCollections, er
 		return encoded, err
 	}
 	encoded.Headers, err = encode(input.ExtraHeaders)
+	if err == nil && hasHeaderSecrets(encoded.Headers) {
+		encoded.Headers, err = sealSecret(encoded.Headers)
+	}
 	return encoded, err
 }
 

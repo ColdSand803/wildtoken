@@ -41,18 +41,6 @@ var hopByHopResponseHeaders = []string{
 	"content-length",
 }
 
-func parseModelFromBody(body []byte) *string {
-	var request map[string]any
-	if err := json.Unmarshal(body, &request); err != nil {
-		return nil
-	}
-	model, ok := request["model"].(string)
-	if !ok || model == "" {
-		return nil
-	}
-	return &model
-}
-
 // upstreamSelector reads an explicit channel hint from the header or query.
 func upstreamSelector(r *http.Request) *string {
 	if value := strings.TrimSpace(r.Header.Get("x-wildtoken-upstream")); value != "" {
@@ -437,7 +425,27 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			return
 		}
 
-		model := parseModelFromBody(body)
+		model, err := proxy.RequestModel(r.Header, body)
+		if err != nil {
+			guard.logAndDisarm(http.StatusBadRequest, err.Error())
+			writeProtocolError(w, http.StatusBadRequest, path, err.Error(), "invalid_request_error")
+			return
+		}
+		route, err := loadResponseRoute(r, state, auth.TokenID, path, body)
+		if err != nil {
+			status := int32(http.StatusInternalServerError)
+			var appErr *apperr.AppError
+			if errors.As(err, &appErr) {
+				code, _ := appErr.StatusAndMessage()
+				status = int32(code)
+			}
+			guard.logAndDisarm(status, err.Error())
+			writeProxyError(w, path, err)
+			return
+		}
+		if route != nil && model == nil && route.RequestModel != "" {
+			model = &route.RequestModel
+		}
 		guard.setModel(model)
 
 		// Checked before routing so a refused model never reaches a channel. A
@@ -447,6 +455,14 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			message := modelNotAllowedMessage(model)
 			guard.logAndDisarm(http.StatusForbidden, message)
 			writeProtocolError(w, http.StatusForbidden, r.URL.Path, message, "permission_error")
+			return
+		}
+
+		if route != nil && len(auth.AllowedModels) > 0 &&
+			!models.ModelAllowed(auth.AllowedModels, route.RequestModel) {
+			message := modelNotAllowedMessage(&route.RequestModel)
+			guard.logAndDisarm(http.StatusForbidden, message)
+			writeProtocolError(w, http.StatusForbidden, path, message, "permission_error")
 			return
 		}
 
@@ -468,6 +484,25 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			}
 		}
 
+		if route != nil {
+			selector, err = responseRouteSelector(route, directSelection, selector)
+			if err != nil {
+				guard.logAndDisarm(http.StatusNotFound, err.Error())
+				writeProxyError(w, path, err)
+				return
+			}
+			directSelection, err = proxy.SelectUpstream(r.Context(), state.DB, state.Routing,
+				state.AutoWeight, policy, selector, model, auth.GroupID, nil)
+			if err != nil || directSelection == nil || directSelection.Upstream.ID != route.UpstreamID {
+				if err == nil {
+					err = apperr.NotFound("response channel is no longer available")
+				}
+				guard.logAndDisarm(http.StatusNotFound, err.Error())
+				writeProxyError(w, path, err)
+				return
+			}
+		}
+
 		client := &downstream{w: w}
 		response, err := runProxyAttempts(r, state, proxyAttemptConfig{
 			guard:           guard,
@@ -480,6 +515,7 @@ func ProxyHandler(state *appstate.State) http.HandlerFunc {
 			model:           model,
 			selector:        selector,
 			directSelection: directSelection,
+			responseRoute:   route,
 			policy:          policy,
 			runtimeSettings: runtimeSettings,
 		})
@@ -518,6 +554,7 @@ type proxyAttemptConfig struct {
 	model           *string
 	selector        *string
 	directSelection *proxy.Selection
+	responseRoute   *models.ResponseRoute
 	policy          proxy.AutoWeightPolicy
 	runtimeSettings models.RuntimeSettings
 }
@@ -625,7 +662,19 @@ func runProxyAttempts(r *http.Request, state *appstate.State,
 			}
 
 			upstream, key = selected.Upstream, models.UpstreamKey{}
-			if len(selected.Keys) > 0 {
+			if config.responseRoute != nil {
+				var available bool
+				key, available = responseRouteKey(config.responseRoute, selected)
+				if !available {
+					config.guard.logAndDisarm(http.StatusNotFound, "response key is no longer available")
+					writeProtocolError(w, http.StatusNotFound, config.path,
+						"response key is no longer available", "not_found_error")
+					return nil, nil
+				}
+				if key.ID != 0 {
+					upstream.APIKey = &key.APIKey
+				}
+			} else if len(selected.Keys) > 0 {
 				picked, benched, ok := state.Keys.Pick(selected.Upstream.ID, selected.Keys, refused)
 				if !ok {
 					// Every one of its keys has turned this request away.
@@ -655,6 +704,13 @@ func runProxyAttempts(r *http.Request, state *appstate.State,
 				excluded[selected.Upstream.ID] = true
 				anyMisconfigured = true
 				continue
+			}
+			if config.responseRoute != nil && config.responseRoute.CredentialDigest !=
+				proxy.ResponseCredentialDigest(&upstream, prepared.ForwardHeaders) {
+				config.guard.logAndDisarm(http.StatusConflict, "response account credentials have changed")
+				writeProtocolError(w, http.StatusConflict, config.path,
+					"response account credentials have changed", "invalid_request_error")
+				return nil, nil
 			}
 			// Another key of the channel spends the admission it already gave.
 			if stayed || proxy.UpstreamRateLimitAdmits(state.UpstreamRateLimiter, &selected.Upstream) {
@@ -739,17 +795,18 @@ func runProxyAttempts(r *http.Request, state *appstate.State,
 				DownstreamTokenName: config.auth.TokenName,
 				// The success path builds its own LogEntry from this context, so
 				// the guard's copy never reaches it.
-				ClientIP:        clientIP(r),
-				ClientType:      config.auth.ClientType,
-				RequestModel:    config.model,
-				ForwardModel:    selected.ForwardModel,
-				Method:          r.Method,
-				Path:            config.path,
-				LogBodyMaxBytes: logBodyMaxBytes,
-				UpstreamKeyID:   key.ID,
-				UpstreamKeyName: key.Name,
-				RequestID:       config.guard.requestID,
-				HoldFailure:     func(entry proxy.LogEntry) { held = &entry },
+				ClientIP:         clientIP(r),
+				ClientType:       config.auth.ClientType,
+				RequestModel:     config.model,
+				ForwardModel:     selected.ForwardModel,
+				Method:           r.Method,
+				Path:             config.path,
+				LogBodyMaxBytes:  logBodyMaxBytes,
+				UpstreamKeyID:    key.ID,
+				UpstreamKeyName:  key.Name,
+				RequestID:        config.guard.requestID,
+				RememberResponse: rememberResponseRoute(r, state, config, upstream, key, prepared),
+				HoldFailure:      func(entry proxy.LogEntry) { held = &entry },
 			}, prepared)
 
 		failed := err != nil || response.Status < 200 || response.Status >= 300
@@ -785,7 +842,7 @@ func runProxyAttempts(r *http.Request, state *appstate.State,
 			if response.Status != http.StatusTooManyRequests {
 				refused[key.ID] = true
 			}
-			if state.Keys.HasFresh(selected.Keys, refused) {
+			if config.responseRoute == nil && state.Keys.HasFresh(selected.Keys, refused) {
 				stay = selected
 			}
 		}

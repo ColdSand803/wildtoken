@@ -559,6 +559,7 @@ type sseObservation struct {
 	terminalEventSeen       bool
 	usage                   usageReport
 	responseReasoningEffort *string
+	responseID              string
 	// streamError is the failure an error event reported, nil for a stream
 	// that ended normally. streamErrorFault says whether it blames the channel.
 	streamError      *string
@@ -606,6 +607,12 @@ func (o *sseObservation) observeLine(line []byte, elapsedMs func() int32) {
 	var payload jsonValue
 	if err := json.Unmarshal([]byte(data), &payload); err != nil {
 		return
+	}
+	if o.responseID == "" {
+		o.responseID, _ = valueAt(payload, "response", "id").(string)
+		if o.responseID == "" {
+			o.responseID, _ = payload["id"].(string)
+		}
 	}
 	o.usage.add(payload)
 	if usageObject(payload) != nil && payload["type"] != "message_start" {

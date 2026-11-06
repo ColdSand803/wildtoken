@@ -523,8 +523,9 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   async function openEditor(upstream: Upstream) {
     try {
       setEditing({ upstream: await getUpstream(upstream.id) });
-    } catch {
-      setEditing({ upstream });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`读取渠道失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
     }
   }
 

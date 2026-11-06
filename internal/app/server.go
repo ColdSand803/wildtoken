@@ -333,6 +333,9 @@ func guardRedirect(req, original *http.Request) error {
 	if original.URL.Scheme == "https" && req.URL.Scheme != "https" {
 		return fmt.Errorf("upstream redirected from https to %s", req.URL.Scheme)
 	}
+	if err := proxy.ValidateRelayRedirect(req, original); err != nil {
+		return err
+	}
 	if req.URL.Host != original.URL.Host {
 		for name := range req.Header {
 			if proxy.IsSensitiveHeaderName(name) {

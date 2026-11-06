@@ -237,6 +237,13 @@ saved keys masked: the eye button fetches one, and every key handed out is
 logged. A balance query reads each enabled key and lists it on its own, and
 the log page shows which key an in-flight request is using.
 
+Stored Responses IDs are bound in SQLite to the downstream token, channel and
+key that created them. Retrieval, cancellation, deletion and continuations with
+`previous_response_id` use that account and still enforce the token's current
+group and model restrictions. A disabled channel or changed credential returns
+an error. Explicit `store: false` skips this record; responses created before
+this upgrade or outside the gateway have no ownership record and return 404.
+
 ## 🗺️ Model Mapping
 
 Model mappings let clients use a stable downstream model name while WildToken
@@ -437,8 +444,8 @@ theme packs.
   `change-me` credential before exposure.
 - Keep `.env`, SQLite data, logs, and release archives with live configuration
   out of public repositories.
-- Provider API keys and the token copies the console shows are sealed in SQLite
-  with AES-256-GCM; authentication resolves a SHA-256 digest. The key is
+- Provider API keys, sensitive static headers and the token copies the console
+  shows are sealed in SQLite with AES-256-GCM; authentication resolves a SHA-256 digest. The key is
   `ENCRYPTION_KEY` (generate one with `openssl rand -hex 32`); without it,
   WildToken creates `wildtoken.key` (mode 0600) beside the database on first
   start. Keep the key out of database backups — under Docker, set

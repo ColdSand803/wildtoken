@@ -50,8 +50,10 @@ type sseStream struct {
 
 	// held is what prime read ahead, handed to the caller before anything
 	// else; heldErr is how that read ended, returned once held is drained.
-	held    []byte
-	heldErr error
+	held             []byte
+	heldErr          error
+	rememberResponse func(string) error
+	rememberedID     string
 }
 
 // primeHoldBytes caps what a stream holds back while it waits for content.
@@ -110,9 +112,15 @@ func (s *sseStream) Read(buffer []byte) (int, error) {
 		chunk := buffer[:read]
 		s.capture.push(chunk)
 		s.observation.observeChunk(chunk, s.measure)
-		if s.observation.terminalEventSeen {
-			s.finishComplete()
-		}
+	}
+	if err == io.EOF {
+		s.observation.finish(s.measure)
+	}
+	if routeErr := s.remember(); routeErr != nil {
+		return 0, routeErr
+	}
+	if s.observation.terminalEventSeen {
+		s.finishComplete()
 	}
 	s.finishRead(err)
 	return read, err
@@ -154,6 +162,10 @@ func (s *sseStream) prime(onHold func()) bool {
 			// the stream.
 			s.observation.finish(s.measure)
 		}
+		if routeErr := s.remember(); routeErr != nil {
+			s.held, s.heldErr = nil, routeErr
+			return false
+		}
 
 		switch {
 		case s.observation.firstTokenMs != nil:
@@ -171,6 +183,21 @@ func (s *sseStream) prime(onHold func()) bool {
 			onHold()
 		}
 	}
+}
+
+// remember runs before any chunk containing the response ID reaches the client.
+func (s *sseStream) remember() error {
+	id := s.observation.responseID
+	if s.rememberResponse == nil || id == "" || id == s.rememberedID {
+		return nil
+	}
+	if err := s.rememberResponse(id); err != nil {
+		s.finishLog(500, ptrTo("could not preserve response account: "+err.Error()))
+		s.rememberResponse = nil
+		return err
+	}
+	s.rememberedID = id
+	return nil
 }
 
 // abandon logs a stream that failed before any content as an attempt another
