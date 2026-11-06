@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { loadTS, read, setupDOM, jsonResponse, renderStatic, h } from "./react-harness.mjs";
-const { logFilterQuery, matchesLogFilters, navigateToLogs, readLogDrilldown, saveLogDrilldown, clearLogDrilldown } = loadTS("web/src/logFilters.ts");
+const { logFilterQuery, matchesLogFilters, matchesActiveLogFilters, navigateToLogs, readLogDrilldown, saveLogDrilldown, clearLogDrilldown } = loadTS("web/src/logFilters.ts");
 const log = { id: 4, created_at: "2026-09-23 01:00:00", upstream_id: 2, downstream_token_id: 7, client_type: "pi", status_code: 200, stream: 1, duration_ms: 1000, model: "gpt-5", client_ip: "192.0.2.1" };
 const all = { search: " gpt ", clientType: "pi", status: "2xx", upstreamId: "2", tokenId: "7", start: "2026-09-23T00:00:00Z", end: "2026-09-23T02:00:00Z", stream: "true", minDurationMs: "0" };
 test("all advanced fields serialize to the backend list/SSE contract, including zero", () => assert.deepEqual(Object.fromEntries(logFilterQuery(all)), { search: "gpt", client_type: "pi", status: "2xx", upstream_id: "2", downstream_token_id: "7", start: all.start, end: all.end, stream: "true", min_duration_ms: "0" }));
@@ -36,4 +36,69 @@ test("a client cancellation remains a 4xx but is not a failed request", () => {
   const cancelled = { ...log, status_code: 499 };
   assert.equal(matchesLogFilters(cancelled, { status: "4xx" }), true);
   assert.equal(matchesLogFilters(cancelled, { status: "error" }), false);
+});
+
+const activeRequest = {
+  id: 9001, started_at: "2026-09-23T01:00:00Z", elapsed_ms: 1200,
+  upstream_id: 2, upstream_name: "channel", downstream_token_id: 7,
+  downstream_token_name: "cli", client_type: "pi", client_ip: "192.0.2.1",
+  model: "gpt-5", request_model: "gpt-5", upstream_model: "gpt-5",
+};
+test("in-flight filters preserve token, time and elapsed-duration drill-down", () => {
+  const filters = { upstreamId: "2", tokenId: "7", clientType: "pi", status: "none",
+    start: "2026-09-23T00:00:00Z", end: "2026-09-23T02:00:00Z", minDurationMs: "1200" };
+  assert.equal(matchesActiveLogFilters(activeRequest, filters), true);
+  for (const patch of [{ tokenId: "8" }, { minDurationMs: "1201" },
+    { start: "2026-09-23T02:00:00Z" }, { end: "2026-09-23T01:00:00Z" }]) {
+    assert.equal(matchesActiveLogFilters(activeRequest, { ...filters, ...patch }), false);
+  }
+});
+test("in-flight search keeps IP filtering without borrowing registry ids or statuses", () => {
+  assert.equal(matchesActiveLogFilters(activeRequest, { search: "192.0.2" }), true);
+  assert.equal(matchesActiveLogFilters(activeRequest, { search: "Gpt" }), true);
+  for (const search of ["9001", "200", "timeout"]) {
+    assert.equal(matchesActiveLogFilters(activeRequest, { search }), false);
+  }
+});
+test("in-flight snapshots do not invent completed status or stream metadata", () => {
+  for (const status of ["2xx", "4xx", "5xx", "other", "error"]) {
+    assert.equal(matchesActiveLogFilters(activeRequest, { status }), false);
+  }
+  for (const stream of ["true", "false"]) {
+    assert.equal(matchesActiveLogFilters(activeRequest, { stream }), false);
+  }
+});
+test("channel ID input retains saved drill-down, incoming navigation and clear actions", async () => {
+  ui.cleanup();
+  clearLogDrilldown();
+  saveLogDrilldown({ upstreamId: "7", tokenId: "9" });
+  const calls = [];
+  const stream = { connected: true, logs: [], active: [], activeTotal: 0, evictedNewestId: 0 };
+  const { LogsPage } = loadTS("web/src/pages/LogsPage.tsx", { overrides: {
+    "web/src/api.ts": { UnauthorizedError: class extends Error {},
+      listLogClientTypes: async () => [], listLogs: async (filters) => {
+        calls.push(filters);
+        return { items: [], has_more: false, active: [], active_total: 0 };
+      } },
+    "web/src/useLogStream.ts": { useLogStream: () => stream },
+  } });
+  const view = ui.render(h(LogsPage, { onUnauthorized() {} }));
+  try {
+    const channel = view.getByRole("textbox", { name: "按渠道 ID 筛选日志" });
+    assert.equal(channel.value, "7");
+    await ui.act(async () => new Promise((resolve) => setTimeout(resolve, 450)));
+    assert.ok(calls.some((filters) => filters.upstreamId === "7" && filters.tokenId === "9"));
+    await ui.act(async () => navigateToLogs({ upstreamId: "8", tokenId: "10" }));
+    assert.equal(channel.value, "8");
+    await ui.act(async () => new Promise((resolve) => setTimeout(resolve, 450)));
+    assert.ok(calls.some((filters) => filters.upstreamId === "8" && filters.tokenId === "10"));
+    await ui.act(async () => ui.fireEvent.click(view.getByRole("button", { name: "清除筛选" })));
+    assert.equal(channel.value, "");
+    await ui.act(async () => new Promise((resolve) => setTimeout(resolve, 450)));
+    assert.equal(calls.at(-1).upstreamId, "");
+    assert.deepEqual(readLogDrilldown(), {});
+  } finally {
+    ui.cleanup();
+    clearLogDrilldown();
+  }
 });
