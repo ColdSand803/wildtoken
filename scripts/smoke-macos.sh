@@ -28,9 +28,12 @@ trap cleanup EXIT
 /usr/bin/ditto -x -k "$archive" "$stage/unpacked"
 bundle="$stage/unpacked/WildToken.app"
 binary="$bundle/Contents/MacOS/wildtoken"
+client="$bundle/Contents/MacOS/wildtokenctl"
 /usr/bin/plutil -lint "$bundle/Contents/Info.plist"
 test "$(/usr/bin/plutil -extract LSUIElement raw "$bundle/Contents/Info.plist")" = true
 test -x "$binary"
+test -x "$client"
+"$client" version --json
 test -s "$bundle/Contents/Resources/WildToken.icns"
 mkdir -p "$stage/home" "$stage/unrelated"
 cd "$stage/unrelated"
@@ -82,6 +85,12 @@ grep -q 'WildToken Console' "$stage/console.html"
 curl -fsS "http://$address/static/styles.css" >/dev/null
 curl -fsS "http://$address/theme-packs/ark/theme.css" >/dev/null
 curl -fsS -H 'x-admin-token: ci-macos-placeholder-token' "http://$address/api/admin/system" >/dev/null
+WILDTOKEN_ADMIN_TOKEN=ci-macos-placeholder-token "$client" --server "http://$address" status --json >/dev/null
+HOME="$stage/home" "$client" skill install --apply --yes >/dev/null
+HOME="$stage/home" PI_CODING_AGENT_DIR="$stage/home/.pi/agent" \
+  "$client" clients pi --protocol chat --model smoke-model --apply --yes >/dev/null
+test -f "$stage/home/.agents/skills/wildtoken/SKILL.md"
+test -f "$stage/home/.pi/agent/models.json"
 test -f "$data/wildtoken.db"
 test -f "$data/wildtoken.key"
 test -f "$data/config/default.toml"

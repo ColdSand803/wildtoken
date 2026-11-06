@@ -175,10 +175,15 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           EXTRA_LDFLAGS: ${{ matrix.ldflags }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           go build -trimpath -ldflags "-s -w $EXTRA_LDFLAGS" \
             -o "build/${{ matrix.binary }}" ./cmd/wildtoken
+          client=wildtokenctl
+          if [[ "$GOOS" == windows ]]; then client=wildtokenctl.exe; fi
+          go build -trimpath -ldflags "-s -w -X github.com/liguangsheng/wildtoken/internal/ctl.Version=$RELEASE_VERSION" \
+            -o "build/$client" ./cmd/wildtokenctl
 
       - name: Package
         shell: bash
@@ -190,7 +195,12 @@ jobs:
           mkdir -p "$package"
           binary="${{ matrix.binary }}"
           install -m 755 "build/$binary" "$package/$binary"
+          client=wildtokenctl
+          if [[ "$binary" == *.exe ]]; then client=wildtokenctl.exe; fi
+          install -m 755 "build/$client" "$package/$client"
           cp -R static config themes "$package/"
+          mkdir -p "$package/skills"
+          cp -R skills/wildtoken "$package/skills/"
           # The console is looked up at web/dist under the working directory.
           mkdir -p "$package/web"
           cp -R web/dist "$package/web/"
@@ -225,6 +235,9 @@ jobs:
             sleep 1
           done
           curl -fsS 'http://127.0.0.1:3110/health' >/dev/null
+          WILDTOKEN_ADMIN_TOKEN=ci-admin-token-for-smoke-test \
+            ./wildtokenctl --server http://127.0.0.1:3110 status --json >/dev/null
+          ./wildtokenctl skill show --json >/dev/null
           console_html="$RUNNER_TEMP/wildtoken-console.html"
           curl -fsS 'http://127.0.0.1:3110/console' -o "$console_html"
           grep -q 'WildToken Console' "$console_html"

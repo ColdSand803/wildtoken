@@ -192,9 +192,44 @@ then run on a Mac of the target architecture:
 ```bash
 npm --prefix web ci
 npm --prefix web run build
-scripts/package-macos.sh 0.2.3 arm64 /tmp/wildtoken-release  # amd64 for Intel
+scripts/package-macos.sh 0.2.4 arm64 /tmp/wildtoken-release  # amd64 for Intel
 scripts/smoke-macos.sh /tmp/wildtoken-release/*-app.zip
 ```
+
+### CLI and Agent Skills
+
+`wildtoken` starts the service; the separate `wildtokenctl` manages it over HTTP.
+Platform archives include both programs, and the macOS app also includes
+`Contents/MacOS/wildtokenctl`. The client covers channels, groups, tokens,
+settings, prompt templates, logs and models, with JSON/NDJSON output.
+
+With Go 1.25+, install the client and shared skill without cloning the repository:
+
+```sh
+go install github.com/liguangsheng/wildtoken/cmd/wildtokenctl@v0.2.4
+wildtokenctl skill install --apply --yes
+```
+
+Ensure `GOBIN`, or `GOPATH/bin` when `GOBIN` is unset, is on `PATH`.
+Without Go, extract `wildtokenctl` (`wildtokenctl.exe` on Windows) from a verified
+platform archive and put it on `PATH`, then run the skill command above. The
+client does not need the server executable or web assets. Skill installation
+requires no API credentials; reload Pi or restart OpenCode afterwards.
+
+Common operations:
+
+```sh
+wildtokenctl --admin-token-file /private/admin-token status --json
+wildtokenctl commands --json
+wildtokenctl clients pi --protocol responses --model model-id
+wildtokenctl clients opencode --protocol chat --model model-id --apply --yes
+wildtokenctl skill install --apply --yes
+```
+
+Client setup previews changes before applying them. It uses downstream-token
+environment references, never upstream keys, and preserves JSONC comments,
+other providers and symlinks. The bundled skill installs into the Agent Skills
+directory shared by Pi and OpenCode. See the [CLI guide](docs/cli.md).
 
 ## ✅ First Configuration
 
@@ -544,8 +579,8 @@ the theme contract tests under `tests/*.mjs`.
 Pushing a `v*` tag matching the service version in `internal/handlers/admin.go`
 creates a GitHub Release through Actions. The original five platform archives
 remain, joined by Intel and Apple Silicon macOS `.app.zip` packages.
-`SHA256SUMS` covers all seven archives. CLI packages include the executable and
-`static/`, `config/`, `themes/`, and `web/dist/`; desktop packages keep those
+`SHA256SUMS` covers all seven archives. CLI packages include `wildtoken`,
+`wildtokenctl`, and `static/`, `config/`, `themes/`, and `web/dist/`; desktop packages keep those
 resources inside the app. Each desktop target is tested and built on its native
 macOS runner, including a smoke test of the unpacked application's startup and
 shutdown.

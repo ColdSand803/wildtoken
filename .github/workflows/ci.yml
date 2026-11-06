@@ -102,6 +102,9 @@ jobs:
           GOOS=darwin GOARCH=amd64 go build -o /dev/null ./cmd/wildtoken
           GOOS=darwin GOARCH=arm64 go build -o /dev/null ./cmd/wildtoken
           GOOS=linux GOARCH=arm64 go build -o /dev/null ./cmd/wildtoken
+          for target in linux/amd64 linux/arm64 windows/amd64 darwin/amd64 darwin/arm64; do
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build -o /dev/null ./cmd/wildtokenctl
+          done
 
   macos-app:
     name: macOS desktop checks

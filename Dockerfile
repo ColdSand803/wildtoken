@@ -24,10 +24,12 @@ RUN go mod download
 
 COPY cmd ./cmd
 COPY internal ./internal
+COPY skills ./skills
 
 # CGO stays off: the SQLite driver is pure Go, so the runtime image needs no
 # SQLite library and the binary is portable across glibc versions.
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/wildtoken ./cmd/wildtoken
+RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/wildtoken ./cmd/wildtoken \
+    && CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/wildtokenctl ./cmd/wildtokenctl
 
 # ── Runtime stage ────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
@@ -47,6 +49,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY --from=builder /out/wildtoken /usr/local/bin/wildtoken
+COPY --from=builder /out/wildtokenctl /usr/local/bin/wildtokenctl
 COPY static ./static
 COPY config ./config
 

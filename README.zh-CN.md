@@ -144,9 +144,38 @@ macOS 12 或更新版本可使用 `wildtoken-v<版本>-macos-aarch64-app.zip`（
 ```bash
 npm --prefix web ci
 npm --prefix web run build
-scripts/package-macos.sh 0.2.3 arm64 /tmp/wildtoken-release  # Intel 使用 amd64
+scripts/package-macos.sh 0.2.4 arm64 /tmp/wildtoken-release  # Intel 使用 amd64
 scripts/smoke-macos.sh /tmp/wildtoken-release/*-app.zip
 ```
+
+### CLI 与大模型入口
+
+`wildtoken` 启动服务，独立的 `wildtokenctl` 通过 HTTP 管理它。平台包同时包含客户端，macOS 应用内也提供
+`Contents/MacOS/wildtokenctl`。CLI 覆盖渠道、分组、令牌、设置、模板、日志和模型接口，支持 JSON/NDJSON 输出。
+
+有 Go 1.25+ 时，无需克隆仓库即可安装客户端和共享 skill：
+
+```sh
+go install github.com/liguangsheng/wildtoken/cmd/wildtokenctl@v0.2.4
+wildtokenctl skill install --apply --yes
+```
+
+请把 `GOBIN` 加入 `PATH`；未设置 `GOBIN` 时，安装目录是 `GOPATH/bin`。
+没有 Go 时，从校验过的对应平台包取出 `wildtokenctl`（Windows 为 `wildtokenctl.exe`）放进 `PATH`，再执行上面的 skill 安装命令。
+客户端不依赖服务端程序或网页资源。安装 skill 不需要任何令牌；安装后 Pi 执行 `/reload`，OpenCode 重新打开会话。
+
+常用操作：
+
+```sh
+wildtokenctl --admin-token-file /private/admin-token status --json
+wildtokenctl commands --json
+wildtokenctl clients pi --protocol responses --model model-id
+wildtokenctl clients opencode --protocol chat --model model-id --apply --yes
+wildtokenctl skill install --apply --yes
+```
+
+客户端配置默认先预览，只写入下游令牌的环境变量引用，不分发上游 Key。确认后增量合并，保留 JSONC 注释、其他 provider 和符号链接。
+Skill 安装到 Pi/OpenCode 共用的 Agent Skills 目录。详见 [CLI 使用说明](docs/cli.md)。
 
 ## ✅ 首次配置
 
@@ -400,5 +429,5 @@ docker compose ps
 
 推送与 `internal/handlers/admin.go` 中服务版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。
 发布包含原有五个平台包、Intel 与 Apple Silicon 两个 macOS `.app.zip`，以及覆盖七份归档的 `SHA256SUMS`。
-CLI 包包含可执行文件与 `static/`、`config/`、`themes/`、`web/dist/`；桌面包把这些资源放进 `.app`。
+CLI 包包含服务端 `wildtoken`、客户端 `wildtokenctl` 与 `static/`、`config/`、`themes/`、`web/dist/`；桌面包把程序和资源放进 `.app`。
 macOS 桌面版在对应架构的 macOS runner 上原生测试、构建，并验证解压后的应用启动和退出。

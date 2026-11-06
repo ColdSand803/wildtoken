@@ -26,7 +26,10 @@ mkdir -p "$contents/MacOS" "$resources/web" "$resources/config"
 test -f web/dist/index.html || { echo '先在 web/ 执行 npm ci && npm run build' >&2; exit 1; }
 CGO_ENABLED=1 GOOS=darwin GOARCH="$arch" MACOSX_DEPLOYMENT_TARGET=12.0 \
   go build -tags desktop -trimpath -ldflags '-s -w' -o "$contents/MacOS/wildtoken" ./cmd/wildtoken
-chmod 755 "$contents/MacOS/wildtoken"
+CGO_ENABLED=0 GOOS=darwin GOARCH="$arch" \
+  go build -trimpath -ldflags "-s -w -X github.com/liguangsheng/wildtoken/internal/ctl.Version=$version" \
+  -o "$contents/MacOS/wildtokenctl" ./cmd/wildtokenctl
+chmod 755 "$contents/MacOS/wildtoken" "$contents/MacOS/wildtokenctl"
 cp -R static themes "$resources/"
 cp -R web/dist "$resources/web/"
 cp config/default.toml "$resources/config/"
