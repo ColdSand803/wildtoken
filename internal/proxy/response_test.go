@@ -61,7 +61,8 @@ func TestResponseIDsAreRememberedBeforeStreamingThem(t *testing.T) {
 			}
 			buffer := make([]byte, 4096)
 			read, err := response.Body.Read(buffer)
-			if err != nil || read == 0 || len(remembered) != 1 || remembered[0] != "resp_saved" {
+			// The final bytes may arrive together with EOF.
+			if (err != nil && !errors.Is(err, io.EOF)) || read == 0 || len(remembered) != 1 || remembered[0] != "resp_saved" {
 				t.Fatalf("delivered=%d remembered=%v err=%v", read, remembered, err)
 			}
 			io.Copy(io.Discard, response.Body)
