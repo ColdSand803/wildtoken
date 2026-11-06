@@ -1,4 +1,3 @@
-import { formatUpstreamClipboardText } from "../channelTransfer";
 import { ChannelDiagnostics, ChannelDiagnosticBadge, useChannelDiagnostics } from "../components/ChannelDiagnostics";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -44,6 +43,7 @@ import {
   readStoredSort,
 } from "../upstreamSort";
 import type { SortKey } from "../upstreamSort";
+import { upstreamCredentialsText } from "../upstreamCopy";
 import type {
   ChannelExportDocument,
   DraftKey,
@@ -597,11 +597,12 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     }
   }
 
-  async function copyInfo(upstream: Upstream) {
+  async function copyCredentials(upstream: Upstream) {
     try {
-      const detail = await getUpstream(upstream.id);
-      await copyText(formatUpstreamClipboardText(detail));
-      toast("Base URL 与 API Key 已复制，请勿公开分享。", { tone: "ok" });
+      const full = await getUpstream(upstream.id);
+      const keys = await revealAllKeys(full);
+      await copyText(upstreamCredentialsText(full.base_url, keys));
+      toast(keys.length ? "渠道地址和 API Key 已复制，请勿公开分享。" : "渠道地址已复制，未配置 API Key。", { tone: "ok" });
     } catch (err) {
       if (err instanceof UnauthorizedError) onUnauthorized(err.message);
       else toast(`复制失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
@@ -614,7 +615,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       return [
         { key: "unarchive", label: "恢复", tone: "primary", onSelect: () => void mutate(upstream.id, () => setUpstreamArchived(upstream.id, false)) },
         { key: "edit", label: "编辑", onSelect: () => void openEditor(upstream) },
-        { key: "copy-info", label: "复制渠道信息", onSelect: () => void copyInfo(upstream) },
+        { key: "copy-credentials", label: "复制地址和 API Key", onSelect: () => void copyCredentials(upstream) },
         MENU_SEPARATOR,
         { key: "delete", label: "删除", tone: "danger", onSelect: () => void removeUpstream(upstream) },
       ];
@@ -630,7 +631,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       MENU_SEPARATOR,
       { key: "edit", label: "编辑", onSelect: () => void openEditor(upstream) },
       { key: "duplicate", label: "复制渠道", onSelect: () => void duplicate(upstream) },
-      { key: "copy-info", label: "复制渠道信息", onSelect: () => void copyInfo(upstream) },
+      { key: "copy-credentials", label: "复制地址和 API Key", onSelect: () => void copyCredentials(upstream) },
       MENU_SEPARATOR,
       { key: "archive", label: "归档", onSelect: () => void mutate(upstream.id, () => setUpstreamArchived(upstream.id, true)) },
       { key: "delete", label: "删除", tone: "danger", onSelect: () => void removeUpstream(upstream) },

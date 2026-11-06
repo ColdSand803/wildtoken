@@ -1,5 +1,6 @@
 import { parseLogTime } from "./logFormat";
-import type { RequestLog } from "./types";
+import type { ActiveRequest, RequestLog } from "./types";
+import { activeMatchesFilters as matchesActiveCoreFilters } from "./logFilter";
 
 export interface LogFilters {
   search?: string;
@@ -43,6 +44,23 @@ export function matchesLogFilters(log: RequestLog, filters: LogFilters): boolean
   if (filters.end && (at === undefined || at >= Date.parse(filters.end))) return false;
   const needle = filters.search?.trim().toLowerCase();
   return !needle || [log.id, log.model, log.request_model, log.upstream_model, log.upstream_name, log.downstream_token_name, log.client_ip, log.error, log.status_code].some((value) => value != null && String(value).toLowerCase().includes(needle));
+}
+
+/** Match only facts present in an in-flight snapshot, never a made-up log id. */
+export function matchesActiveLogFilters(request: ActiveRequest, filters: LogFilters): boolean {
+  if (!matchesActiveCoreFilters(request, { ...filters, search: "" })) return false;
+  if (filters.tokenId && String(request.downstream_token_id ?? "") !== filters.tokenId) return false;
+  // Active snapshots have no stream flag. An explicit transmission filter
+  // cannot classify them yet, just as a final status filter cannot.
+  if (filters.stream) return false;
+  if (filters.minDurationMs && request.elapsed_ms < Number(filters.minDurationMs)) return false;
+  const at = parseLogTime(request.started_at)?.getTime();
+  if (filters.start && (at === undefined || at < Date.parse(filters.start))) return false;
+  if (filters.end && (at === undefined || at >= Date.parse(filters.end))) return false;
+  const needle = filters.search?.trim().toLowerCase();
+  return !needle || [request.model, request.request_model, request.upstream_model,
+    request.upstream_name, request.downstream_token_name, request.client_ip]
+    .some((value) => value != null && String(value).toLowerCase().includes(needle));
 }
 
 const DRILLDOWN_KEY = "wildtoken_log_drilldown";

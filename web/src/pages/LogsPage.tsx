@@ -1,9 +1,9 @@
-import { clearLogDrilldown, logFilterQuery, matchesLogFilters, readLogDrilldown, saveLogDrilldown } from "../logFilters";
+import { clearLogDrilldown, logFilterQuery, matchesLogFilters, matchesLogFilters as logMatchesFilters, matchesActiveLogFilters as activeMatchesFilters, readLogDrilldown, saveLogDrilldown } from "../logFilters";
 import type { LogFilters } from "../logFilters";
 import { LogTiming } from "../components/LogTiming";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { UnauthorizedError, listLogClientTypes, listLogs, listUpstreams } from "../api";
+import { UnauthorizedError, listLogClientTypes, listLogs } from "../api";
 import { clientTypeOptions } from "../clientTypes";
 import { LogDetailDialog } from "../components/LogDetailDialog";
 import { RetriedMark } from "../components/RetriedMark";
@@ -18,7 +18,6 @@ import {
 import { reasoningChain } from "../reasoningChain";
 import type { ReasoningSource } from "../reasoningChain";
 import type { ActiveRequest, RequestLog, RequestLogPage } from "../types";
-import { logMatchesFilters } from "../logFilter";
 import { useLogStream } from "../useLogStream";
 import { elapsedMs, formatElapsed, useTicker } from "../useTicker";
 
@@ -324,7 +323,8 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   const [clientFilter, setClientFilter] = useState(initial.clientType ?? "");
   const [statusFilter, setStatusFilter] = useState(initial.status ?? "");
   const [upstreamFilter, setUpstreamFilter] = useState(initial.upstreamId ?? "");
-  const [upstreams, setUpstreams] = useState<Array<{ id: number; name: string }>>([]);
+  /* 渠道 ID 输入和实际查询值分开，保留看板下钻的初始筛选。 */
+  const [channelInput, setChannelInput] = useState(initial.upstreamId ?? "");
   const [clientTypes, setClientTypes] = useState<string[]>([]);
   /* 输入框的实时值和真正拿去查的值分开。每敲一下键都发一次查询的话，
      输一个模型名会打出十几次全库扫描。 */
@@ -354,7 +354,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
     const receive = (event: Event) => {
       const next = (event as CustomEvent<LogFilters>).detail;
       setAdvanced(next); setSearchInput(next.search ?? ""); setSearch(next.search ?? "");
-      setClientFilter(next.clientType ?? ""); setStatusFilter(next.status ?? ""); setUpstreamFilter(next.upstreamId ?? "");
+      setClientFilter(next.clientType ?? ""); setStatusFilter(next.status ?? ""); setUpstreamFilter(next.upstreamId ?? ""); setChannelInput(next.upstreamId ?? "");
     };
     window.addEventListener("console:log-filters", receive);
     return () => window.removeEventListener("console:log-filters", receive);
@@ -434,13 +434,16 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
     setPage(null);
   }, [filterQuery]);
 
-  /* 渠道下拉要全量渠道，不能从当前页数据里凑——凑出来的话，没出现在这
-     50 行里的渠道就根本选不到。 */
+  // 渠道 ID 和搜索框一样等 400ms 再查，敲 142 不会打出三次全库扫描。
   useEffect(() => {
-    listUpstreams()
-      .then((list) => setUpstreams(list.map((item) => ({ id: item.id, name: item.name }))))
-      .catch(() => setUpstreams([]));
-  }, []);
+    const value = channelInput.replace(/^0+(?=\d)/, "");
+    if (value === upstreamFilter) return;
+    const timer = setTimeout(() => {
+      setUpstreamFilter(value);
+      backToLatest();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [channelInput, upstreamFilter, backToLatest]);
 
   // 客户端下拉同理，取库里出现过的全部类型。
   useEffect(() => {
@@ -510,7 +513,9 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   /* 在途集合：只在最新页显示。流连着就以它为准，断了退回快照里的那份。 */
   const activeFromPage = page?.active ?? [];
   const activeLatest = stream.connected ? stream.active : activeFromPage;
-  const active = onLatestPage ? activeLatest : [];
+  const active = onLatestPage
+    ? activeLatest.filter((request) => activeMatchesFilters(request, filters))
+    : [];
   const activeTotal = stream.connected ? stream.activeTotal : (page?.active_total ?? 0);
 
   function toggleColumn(key: ColumnKey) {
@@ -569,18 +574,16 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
 
         <div className="log-toolbar">
           <label className="log-filter log-filter-channel">
-            <select
-              aria-label="按渠道筛选日志"
-              value={upstreamFilter}
-              onChange={(event) => applyFilter(setUpstreamFilter, event.target.value)}
-            >
-              <option value="">全部渠道</option>
-              {upstreams.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+            <input
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              placeholder="渠道 ID"
+              aria-label="按渠道 ID 筛选日志"
+              value={channelInput}
+              // 粘进来的 #142 也认：只留数字。
+              onChange={(event) => setChannelInput(event.target.value.replace(/\D/g, ""))}
+            />
           </label>
 
           <label className="log-filter">
@@ -706,7 +709,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
           <label>传输<select aria-label="日志传输方式" value={advanced.stream ?? ""} onChange={(e) => setAdvanced((value) => ({ ...value, stream: e.target.value }))}><option value="">全部</option><option value="true">流式 SSE</option><option value="false">非流式</option></select></label>
           <label>最小耗时（ms）<input aria-label="最小耗时" type="number" min="0" step="1" value={advanced.minDurationMs ?? ""} onChange={(e) => setAdvanced((value) => ({ ...value, minDurationMs: e.target.value }))} /></label>
           <label>令牌 ID<input aria-label="日志令牌 ID" type="number" min="1" value={advanced.tokenId ?? ""} onChange={(e) => setAdvanced((value) => ({ ...value, tokenId: e.target.value }))} /></label>
-          <button type="button" className="secondary" onClick={() => { clearLogDrilldown(); setAdvanced({}); setRangeStart(""); setRangeEnd(""); setSearchInput(""); setSearch(""); setStatusFilter(""); setClientFilter(""); setUpstreamFilter(""); }}>清除筛选</button>
+          <button type="button" className="secondary" onClick={() => { clearLogDrilldown(); setAdvanced({}); setRangeStart(""); setRangeEnd(""); setSearchInput(""); setSearch(""); setStatusFilter(""); setClientFilter(""); setUpstreamFilter(""); setChannelInput(""); }}>清除筛选</button>
           <button type="button" className="secondary" aria-pressed={live} onClick={() => setLive((value) => !value)}>{live ? "暂停实时" : "恢复实时"}</button>
           {advanced.start && advanced.end && <span className="field-hint">{new Date(advanced.start).toLocaleString("zh-CN")} — {new Date(advanced.end).toLocaleString("zh-CN")}{historical ? " · 历史时间窗" : ""}</span>}
         </form>
@@ -749,7 +752,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
               </tr>
             </thead>
             <tbody>
-              <ActiveRows active={active} sensitiveHidden={sensitiveHidden} />
+              <ActiveRows active={active} snapshot={activeLatest} sensitiveHidden={sensitiveHidden} />
               <LogRows
                 logs={logs}
                 loading={loading}
@@ -844,16 +847,17 @@ function activeKeyName(request: ActiveRequest): string | undefined {
 
 function ActiveRows({
   active,
+  snapshot,
   sensitiveHidden,
 }: {
   active: ActiveRequest[];
+  snapshot: ActiveRequest[];
   sensitiveHidden: boolean;
 }) {
   const [receivedAt, setReceivedAt] = useState(() => Date.now());
-  /* 带上 elapsed_ms：同一批请求的字段变了（重试换渠道），服务端也会推一份
-     新快照，里面的 elapsed_ms 已经是最新的。只看 id 的话 receivedAt 不重置，
-     已用时会把这段时间再加一遍。 */
-  const signature = active.map((request) => `${request.id}:${request.elapsed_ms}`).join(",");
+  /* 计时跟原始快照走，切筛选不重置。elapsed_ms 变了说明重试等状态已更新，
+     基准时间也要随新快照更新。 */
+  const signature = snapshot.map((request) => `${request.id}:${request.elapsed_ms}`).join(",");
 
   useEffect(() => {
     setReceivedAt(Date.now());
