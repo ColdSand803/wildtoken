@@ -12,6 +12,16 @@ const PROTOCOLS = [
   { value: "messages", label: "Messages（claude-cli）" },
 ] as const;
 
+function modelSelection(model: string): { model: string; protocol: string } {
+  const name = model.toLowerCase();
+  const protocol = name.includes("gpt")
+    ? "responses"
+    : name.includes("claude")
+      ? "messages"
+      : "chat_completions";
+  return { model, protocol };
+}
+
 /**
  * 渠道已配置的模型。
  *
@@ -85,8 +95,7 @@ export function ModelTestDialog({
 }) {
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
   const [models, setModels] = useState<string[]>([]);
-  const [model, setModel] = useState("");
-  const [protocol, setProtocol] = useState<string>(PROTOCOLS[0].value);
+  const [{ model, protocol }, setSelection] = useState(() => modelSelection(""));
   const [templateId, setTemplateId] = useState("");
   const [prompt, setPrompt] = useState("");
   /* 不止一把 key 时才让选，0 是第一把启用的。列表接口不带 key，打开时补拉详情。 */
@@ -107,8 +116,7 @@ export function ModelTestDialog({
     if (!open || !upstream) return;
     const available = sorted(configuredModels(upstream));
     setModels(available);
-    setModel(available[0] ?? "");
-    setProtocol(PROTOCOLS[0].value);
+    setSelection(modelSelection(available[0] ?? ""));
     setResult(null);
     setSending(false);
     setRefreshing(false);
@@ -161,7 +169,9 @@ export function ModelTestDialog({
       if (started !== session.current) return;
       const available = sorted(fetched.models ?? []);
       setModels(available);
-      setModel((current) => (available.includes(current) ? current : (available[0] ?? "")));
+      setSelection((current) =>
+        available.includes(current.model) ? current : modelSelection(available[0] ?? ""),
+      );
     } catch (err) {
       if (started !== session.current) return;
       if (!(err instanceof UnauthorizedError)) {
@@ -245,7 +255,7 @@ export function ModelTestDialog({
         <div className="upstream-dialog-body">
           <label className="field">
             <span className="field-label">模型</span>
-            <select value={model} onChange={(event) => setModel(event.target.value)} required>
+            <select value={model} onChange={(event) => setSelection(modelSelection(event.target.value))} required>
               {models.length === 0 ? (
                 <option value="" disabled>
                   此渠道尚未配置模型
@@ -278,14 +288,21 @@ export function ModelTestDialog({
 
           <label className="field">
             <span className="field-label">请求协议</span>
-            <select value={protocol} onChange={(event) => setProtocol(event.target.value)} required>
+            <select
+              value={protocol}
+              onChange={(event) => {
+                const protocol = event.target.value;
+                setSelection((current) => ({ ...current, protocol }));
+              }}
+              required
+            >
               {PROTOCOLS.map((item) => (
                 <option key={item.value} value={item.value}>
                   {item.label}
                 </option>
               ))}
             </select>
-            <span className="field-hint">请求格式和头部由协议决定。</span>
+            <span className="field-hint">按模型名自动选择，可手动切换；请求格式和头部由协议决定。</span>
           </label>
 
           <label className="field">
