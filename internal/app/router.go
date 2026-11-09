@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -34,9 +33,9 @@ func NewRouter(state *appstate.State) http.Handler {
 	console.Get("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/console", http.StatusSeeOther)
 	})
-	console.Get("/console", serveConsoleHTML)
+	console.Get("/console", serveConsoleFile(state.Settings.ResourcePath("web", "dist", "index.html")))
 	console.Mount("/console/assets", noStore(http.StripPrefix("/console/assets",
-		http.FileServer(http.Dir(filepath.Join("web", "dist", "assets"))))))
+		http.FileServer(http.Dir(state.Settings.ResourcePath("web", "dist", "assets"))))))
 	console.Get("/api/themes", handlers.ListPublicThemePacks(state))
 
 	// Outside the admin group: Prometheus authenticates with its own bearer token,
@@ -45,7 +44,7 @@ func NewRouter(state *appstate.State) http.Handler {
 	router.Get("/metrics", handlers.PrometheusMetrics(state))
 
 	console.Mount("/static", noStore(http.StripPrefix("/static",
-		noDirectoryListing(http.FileServer(http.Dir("static"))))))
+		noDirectoryListing(http.FileServer(http.Dir(state.Settings.ResourcePath("static")))))))
 	console.Mount("/theme-packs", noStore(http.StripPrefix("/theme-packs",
 		serveThemePackCSS(state.Settings.Themes.Dir))))
 	// Saved generated images. Public on purpose: <img> and a pasted link cannot
@@ -240,24 +239,25 @@ func allowAnyOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// serveConsoleHTML serves the console from web/dist.
+// serveConsoleFile serves the console from its resolved resource path.
 //
 // The build output lives under web/dist; the bundle's asset paths are already
 // prefixed with /console/ by Vite's base setting. A missing build is reported
 // rather than served as an empty page, so the cause is visible instead of
 // looking like a blank console.
-func serveConsoleHTML(w http.ResponseWriter, r *http.Request) {
-	index := filepath.Join("web", "dist", "index.html")
-	html, err := os.ReadFile(index)
-	if err != nil {
-		w.WriteHeader(http.StatusNotFound)
-		w.Write([]byte("Console build not found; run npm run build in web/"))
-		return
+func serveConsoleFile(index string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		html, err := os.ReadFile(index)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("Console build not found; run npm run build in web/"))
+			return
+		}
+		w.Header().Set("content-type", "text/html; charset=utf-8")
+		w.Header().Set("cache-control", noStoreCacheControl)
+		w.Header().Set("content-security-policy", consolePolicy(html))
+		w.Write(html)
 	}
-	w.Header().Set("content-type", "text/html; charset=utf-8")
-	w.Header().Set("cache-control", noStoreCacheControl)
-	w.Header().Set("content-security-policy", consolePolicy(html))
-	w.Write(html)
 }
 
 // AdminURLFromSettings builds the browser-facing console URL.

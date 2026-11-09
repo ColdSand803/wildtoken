@@ -36,7 +36,7 @@
   API Key，导入时同名渠道可跳过或覆盖。
 - 🧹 **正文保留策略：** 可以保留日志元数据，同时清理旧请求/响应正文，控制 SQLite 体积。
 - 🎨 **主题包：** 后台支持 `themes/` 下的 CSS-only 主题包，不执行主题 JavaScript。
-- 🖥️ **桌面友好：** Windows 发布包可在系统托盘运行；Linux、macOS、Docker 和源码运行保持普通服务模式。
+- 🖥️ **桌面运行：** Windows 使用系统托盘，macOS 桌面包使用菜单栏；CLI、Docker 和默认源码运行保持前台服务模式。
 
 ## 🖼️ 界面截图
 
@@ -82,7 +82,7 @@ Compose 会把 SQLite 数据保存到 `wildtoken-data` 卷，并发布 `3100` �
 要求：
 
 - Go 1.25 或更新版本
-- 无需 C 工具链：SQLite 驱动为纯 Go 实现，所有目标平台均可在 `CGO_ENABLED=0` 下构建
+- CLI 无需 C 工具链：SQLite 驱动为纯 Go 实现，所有 CLI 目标均可在 `CGO_ENABLED=0` 下构建；macOS 桌面版另需 macOS SDK。
 
 本地运行：
 
@@ -103,7 +103,79 @@ ADMIN_TOKEN=replace-with-a-long-random-token go run ./cmd/wildtoken
 - 日志写入工作目录下的 `wildtoken.log`
 - 需要无托盘服务模式时，可设置 `WILDTOKEN_NO_TRAY=1`，或使用 `--no-tray` / `--console`
 
-Linux、macOS 和 Docker 版本仍按前台服务方式运行。
+Linux、macOS CLI 和 Docker 版本仍按前台服务方式运行。
+
+### macOS 菜单栏应用
+
+macOS 12 或更新版本可使用 `wildtoken-v<版本>-macos-aarch64-app.zip`（Apple Silicon）或
+`wildtoken-v<版本>-macos-x86_64-app.zip`（Intel）。解压后把 `WildToken.app` 放到“应用程序”目录，双击启动。
+应用只显示菜单栏图标，不占终端或 Dock；菜单提供打开管理后台、复制 API 地址、查看运行日志、打开数据目录和退出。
+退出会等待现有请求和日志排空，第二个实例不会同时打开同一数据目录。
+
+默认地址为 `http://127.0.0.1:3100/console`。未配置管理员令牌的新库首次使用 `change-me`，登录后应在设置页更换。
+端口冲突、数据库或配置读取失败会弹出错误提示。
+
+桌面版的目录固定为：
+
+| 内容 | 位置 |
+| --- | --- |
+| 配置 | `~/Library/Application Support/WildToken/config/default.toml` |
+| 环境变量文件 | `~/Library/Application Support/WildToken/.env`（需要时自行创建） |
+| 数据库、密钥、图片和备份 | `~/Library/Application Support/WildToken/` |
+| 运行日志 | `~/Library/Logs/WildToken/wildtoken.log` |
+| 网页资源和内置主题 | `WildToken.app/Contents/Resources/`（只读） |
+
+首次启动只在配置不存在时复制默认配置。更新或移动 `.app` 不会替换用户数据，也不会自动读取或迁移 CLI 的旧数据库。
+相对数据库、图片和备份路径以用户数据目录为起点；默认 `themes` 指向应用内置主题，自定义主题可通过
+`.env` 中的 `WILDTOKEN_THEME_DIR` 指定绝对目录。不要让 CLI 与桌面版同时打开同一数据库。
+
+排障和手动备份可以直接使用包内程序，仍沿用桌面数据目录：
+
+```bash
+/Applications/WildToken.app/Contents/MacOS/wildtoken --console
+/Applications/WildToken.app/Contents/MacOS/wildtoken backup
+```
+
+当前桌面包未配置 Developer ID 签名或 Apple 公证，首次打开可能被 Gatekeeper 拦截；下载后应先核对发布页的 `SHA256SUMS`。
+暂不提供开机自启。
+
+本地构建需 Go 1.25+、Node.js 22+ 和 Xcode Command Line Tools，在对应架构的 Mac 上执行：
+
+```bash
+npm --prefix web ci
+npm --prefix web run build
+scripts/package-macos.sh 0.2.4 arm64 /tmp/wildtoken-release  # Intel 使用 amd64
+scripts/smoke-macos.sh /tmp/wildtoken-release/*-app.zip
+```
+
+### CLI 与大模型入口
+
+`wildtoken` 启动服务，独立的 `wildtokenctl` 通过 HTTP 管理它。平台包同时包含客户端，macOS 应用内也提供
+`Contents/MacOS/wildtokenctl`。CLI 覆盖渠道、分组、令牌、设置、模板、日志和模型接口，支持 JSON/NDJSON 输出。
+
+有 Go 1.25+ 时，无需克隆仓库即可安装客户端和共享 skill：
+
+```sh
+go install github.com/liguangsheng/wildtoken/cmd/wildtokenctl@v0.2.4
+wildtokenctl skill install --apply --yes
+```
+
+请把 `GOBIN` 加入 `PATH`；未设置 `GOBIN` 时，安装目录是 `GOPATH/bin`。
+没有 Go 时，从校验过的对应平台包取出 `wildtokenctl`（Windows 为 `wildtokenctl.exe`）放进 `PATH`，再执行上面的 skill 安装命令。
+客户端不依赖服务端程序或网页资源。安装 skill 不需要任何令牌；安装后 Pi 执行 `/reload`，OpenCode 重新打开会话。
+
+常用操作：
+
+```sh
+wildtokenctl --admin-token-file /private/admin-token status --json
+wildtokenctl commands --json
+wildtokenctl clients pi --protocol responses --model model-id
+wildtokenctl clients opencode --protocol chat --model model-id --apply --yes
+wildtokenctl skill install --apply --yes
+```
+
+客户端配置默认先预览，只写入下游令牌的环境变量引用，不分发上游 Key。确认后增量合并，保留 JSONC 注释、其他 provider 和符号链接。
+Skill 安装到 Pi/OpenCode 共用的 Agent Skills 目录。详见 [CLI 使用说明](docs/cli.md)。
 
 ## ✅ 首次配置
 
@@ -176,6 +248,8 @@ WildToken 按以下顺序选择上游：
 显式指定渠道会跳过自动池选择。自动重试每次都会重新选择渠道；选到不同渠道立即重试，选回同一渠道则等待配置的同渠道重试间隔。
 
 一个渠道可以配多把 API Key，请求按顺序轮流使用启用的 Key。某把 Key 被上游以 401、403、429 拒绝时冷却 10 秒，连续被拒每次翻倍，最长 5 分钟（上游给了 `Retry-After` 就按它，同样不超过 5 分钟）；同一个请求先换本渠道的下一把 Key，再换别的渠道。Key 全部停用的渠道退出路由；一把 Key 都没有的渠道只靠额外 Header 鉴权。控制台里已保存的 Key 默认遮住，点眼睛才取回一把，每次取回都记日志。查余额时逐把查启用的 Key，各列一节；日志页的在途请求显示正在用哪把 Key。
+
+已存储的 Responses 响应会在 SQLite 中记录所属下游令牌、渠道和 Key。查询、取消、删除，以及带 `previous_response_id` 的续接请求沿用创建时的账户，并继续检查当前分组和模型权限；原渠道停用或凭据改变时直接报错。显式 `store: false` 不保存这份路由；升级前或网关外创建的响应没有归属记录，查询返回 404。
 
 ## 🗺️ 模型映射
 
@@ -321,7 +395,7 @@ scripts/restore.sh .backup/wildtoken-20261104-050000.db
 - 在可信机器或内网之外暴露 WildToken 前，请放到 TLS 和常规网络访问控制之后。
 - 非 localhost 监听必须使用强 `ADMIN_TOKEN`；暴露前请轮换遗留的 `change-me` 凭证。
 - 不要把 `.env`、SQLite 数据、日志或带真实配置的发布压缩包提交到公开仓库。
-- 渠道 API Key 和控制台可复制的令牌在 SQLite 里用 AES-256-GCM 加密存储；认证走 SHA-256 摘要。
+- 渠道 API Key、敏感静态 Header 和控制台可复制的令牌在 SQLite 里用 AES-256-GCM 加密存储；认证走 SHA-256 摘要。
   密钥取 `ENCRYPTION_KEY`（可用 `openssl rand -hex 32` 生成）；没设时，首次启动在数据库旁生成
   `wildtoken.key`（权限 0600）。密钥别和数据库备份放在一起——Docker 部署请在 `.env` 里设
   `ENCRYPTION_KEY`，否则密钥就在数据卷里。之后再设也行，下次启动会自动换成新密钥。密钥丢了只能重填
@@ -353,4 +427,7 @@ docker compose ps
 
 ## 📦 发布
 
-推送与 `internal/handlers/admin.go` 中服务版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。发布压缩包包含运行所需的 `static/`、`config/`、`themes/` 目录以及 `SHA256SUMS`。当前发布目标包括 Windows x86_64、Linux x86_64、Linux aarch64、macOS x86_64 和 macOS aarch64。
+推送与 `internal/handlers/admin.go` 中服务版本一致的 `v*` 标签后，GitHub Actions 会创建 Release。
+发布包含原有五个平台包、Intel 与 Apple Silicon 两个 macOS `.app.zip`，以及覆盖七份归档的 `SHA256SUMS`。
+CLI 包包含服务端 `wildtoken`、客户端 `wildtokenctl` 与 `static/`、`config/`、`themes/`、`web/dist/`；桌面包把程序和资源放进 `.app`。
+macOS 桌面版在对应架构的 macOS runner 上原生测试、构建，并验证解压后的应用启动和退出。

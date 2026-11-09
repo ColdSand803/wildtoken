@@ -56,8 +56,10 @@ type sseStream struct {
 
 	// held is what prime read ahead, handed to the caller before anything
 	// else; heldErr is how that read ended, returned once held is drained.
-	held    []byte
-	heldErr error
+	held             []byte
+	heldErr          error
+	rememberResponse func(string) error
+	rememberedID     string
 }
 
 // primeHoldBytes caps what a stream holds back while it waits for content.
@@ -96,6 +98,11 @@ func newSSEStream(requestCtx context.Context, upstream io.ReadCloser, attempt *a
 }
 
 func (s *sseStream) Read(buffer []byte) (int, error) {
+	// The first-event gate may have already read the response ID into pending.
+	if routeErr := s.remember(); routeErr != nil {
+		s.pending, s.held, s.heldErr = nil, nil, routeErr
+		return 0, routeErr
+	}
 	// The gate's bytes are delivered first, and only from memory: a stream whose
 	// whole answer fit in the lead is complete before the upstream is touched
 	// again, and reading it here would block on a body that has nothing left.
@@ -133,9 +140,15 @@ func (s *sseStream) Read(buffer []byte) (int, error) {
 		chunk := buffer[:read]
 		s.capture.push(chunk)
 		s.observation.observeChunk(chunk, s.measure)
-		if s.observation.terminalEventSeen {
-			s.finishComplete()
-		}
+	}
+	if err == io.EOF {
+		s.observation.finish(s.measure)
+	}
+	if routeErr := s.remember(); routeErr != nil {
+		return 0, routeErr
+	}
+	if s.observation.terminalEventSeen {
+		s.finishComplete()
 	}
 	s.finishRead(err)
 	return read, err
@@ -160,6 +173,10 @@ func (s *sseStream) finishRead(err error) {
 // event, the channel's timeout, the upstream gone. A stream that ends cleanly
 // without content, or outgrows primeHoldBytes, is delivered as it is.
 func (s *sseStream) prime(onHold func()) bool {
+	if routeErr := s.remember(); routeErr != nil {
+		s.pending, s.held, s.heldErr = nil, nil, routeErr
+		return false
+	}
 	// The first-event gate may already have observed a complete answer.
 	if s.observation.firstTokenMs != nil || s.observation.terminalEventSeen {
 		return s.observation.streamError == nil
@@ -181,6 +198,10 @@ func (s *sseStream) prime(onHold func()) bool {
 			// the stream.
 			s.observation.finish(s.measure)
 		}
+		if routeErr := s.remember(); routeErr != nil {
+			s.held, s.heldErr = nil, routeErr
+			return false
+		}
 
 		switch {
 		case s.observation.firstTokenMs != nil:
@@ -198,6 +219,21 @@ func (s *sseStream) prime(onHold func()) bool {
 			onHold()
 		}
 	}
+}
+
+// remember runs before any chunk containing the response ID reaches the client.
+func (s *sseStream) remember() error {
+	id := s.observation.responseID
+	if s.rememberResponse == nil || id == "" || id == s.rememberedID {
+		return nil
+	}
+	if err := s.rememberResponse(id); err != nil {
+		s.finishLog(500, ptrTo("could not preserve response account: "+err.Error()), FailureStageGateway)
+		s.rememberResponse = nil
+		return err
+	}
+	s.rememberedID = id
+	return nil
 }
 
 // abandon logs a stream that failed before any content as an attempt another

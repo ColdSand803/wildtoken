@@ -104,7 +104,7 @@ jobs:
   build:
     name: Build ${{ matrix.label }}
     needs: [prepare, test]
-    # Every target is pure Go, so one Linux runner cross-compiles them all.
+    # CLI targets are pure Go; desktop applications have a separate macOS job.
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -175,10 +175,15 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
           EXTRA_LDFLAGS: ${{ matrix.ldflags }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           go build -trimpath -ldflags "-s -w $EXTRA_LDFLAGS" \
             -o "build/${{ matrix.binary }}" ./cmd/wildtoken
+          client=wildtokenctl
+          if [[ "$GOOS" == windows ]]; then client=wildtokenctl.exe; fi
+          go build -trimpath -ldflags "-s -w -X github.com/liguangsheng/wildtoken/internal/ctl.Version=$RELEASE_VERSION" \
+            -o "build/$client" ./cmd/wildtokenctl
 
       - name: Package
         shell: bash
@@ -190,7 +195,12 @@ jobs:
           mkdir -p "$package"
           binary="${{ matrix.binary }}"
           install -m 755 "build/$binary" "$package/$binary"
+          client=wildtokenctl
+          if [[ "$binary" == *.exe ]]; then client=wildtokenctl.exe; fi
+          install -m 755 "build/$client" "$package/$client"
           cp -R static config themes "$package/"
+          mkdir -p "$package/skills"
+          cp -R skills/wildtoken "$package/skills/"
           # The console is looked up at web/dist under the working directory.
           mkdir -p "$package/web"
           cp -R web/dist "$package/web/"
@@ -225,6 +235,9 @@ jobs:
             sleep 1
           done
           curl -fsS 'http://127.0.0.1:3110/health' >/dev/null
+          WILDTOKEN_ADMIN_TOKEN=ci-admin-token-for-smoke-test \
+            ./wildtokenctl --server http://127.0.0.1:3110 status --json >/dev/null
+          ./wildtokenctl skill show --json >/dev/null
           console_html="$RUNNER_TEMP/wildtoken-console.html"
           curl -fsS 'http://127.0.0.1:3110/console' -o "$console_html"
           grep -q 'WildToken Console' "$console_html"
@@ -251,9 +264,17 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  macos-app:
+    name: Build macOS desktop applications
+    needs: [prepare, test]
+    uses: ./.github/workflows/macos-app.yml
+    with:
+      ref: ${{ needs.prepare.outputs.commit }}
+      version: ${{ needs.prepare.outputs.version }}
+
   release:
     name: Publish GitHub Release
-    needs: [prepare, build]
+    needs: [prepare, build, macos-app]
     runs-on: ubuntu-22.04
     permissions:
       contents: write
@@ -275,8 +296,8 @@ jobs:
               \( -name '*.zip' -o -name '*.tar.gz' \) \
               -printf '%f\n' | sort
           )
-          if [[ "${#archives[@]}" -ne 5 ]]; then
-            printf 'Expected 5 archives, found %s\n' "${#archives[@]}" >&2
+          if [[ "${#archives[@]}" -ne 7 ]]; then
+            printf 'Expected 7 archives, found %s\n' "${#archives[@]}" >&2
             exit 1
           fi
           sha256sum "${archives[@]}" > SHA256SUMS

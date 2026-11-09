@@ -55,6 +55,7 @@ var secretColumns = []struct{ table, column string }{
 	{"upstreams", "api_key"},
 	{"upstream_keys", "api_key"},
 	{"api_tokens", "token_plain"},
+	{"upstreams", "extra_headers"},
 }
 
 // storedSecret is one credential as the database holds it.
@@ -77,6 +78,9 @@ func loadStoredSecrets(ctx context.Context, db Queryer) ([]storedSecret, error) 
 			if err := rows.Scan(&s.id, &s.value); err != nil {
 				rows.Close()
 				return nil, err
+			}
+			if s.column == "extra_headers" && !secret.IsSealed(s.value) && !hasHeaderSecrets(s.value) {
+				continue
 			}
 			stored = append(stored, s)
 		}
