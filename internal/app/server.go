@@ -69,6 +69,11 @@ func New(ctx context.Context) (*Server, error) {
 		return nil, fmt.Errorf("load configuration: %w", err)
 	}
 
+	return NewWithSettings(ctx, settings)
+}
+
+// NewWithSettings binds an instance with already-resolved startup paths.
+func NewWithSettings(ctx context.Context, settings config.Settings) (*Server, error) {
 	// A staged restore is adopted here, before anything opens the database. This is
 	// the only moment nothing holds the file: once the pool is open, replacing it
 	// would leave the existing connections reading the database that was moved aside.
@@ -402,6 +407,9 @@ const maxUpstreamRedirects = 3
 func guardRedirect(req, original *http.Request) error {
 	if original.URL.Scheme == "https" && req.URL.Scheme != "https" {
 		return fmt.Errorf("upstream redirected from https to %s", req.URL.Scheme)
+	}
+	if err := proxy.ValidateRelayRedirect(req, original); err != nil {
+		return err
 	}
 	if req.URL.Host != original.URL.Host {
 		for name := range req.Header {

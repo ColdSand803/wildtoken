@@ -6,6 +6,7 @@ require (
 	fyne.io/systray v1.12.2
 	github.com/BurntSushi/toml v1.6.0
 	github.com/go-chi/chi/v5 v5.3.1
+	github.com/tailscale/hujson v0.0.0-20241010212012-29efb4a0184b
 	golang.org/x/crypto v0.54.0
 	modernc.org/sqlite v1.56.0
 )

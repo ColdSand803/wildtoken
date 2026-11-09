@@ -45,9 +45,27 @@ func IsAnthropicMessages(proxyPath string) bool {
 // free. A stored response is still reachable by its id, which only the
 // request that created it holds.
 func ProxyEndpointAllowed(method, proxyPath string) bool {
+	// URL.Path is already decoded once; a remaining escape or backslash can
+	// acquire another meaning at the next proxy.
+	if strings.ContainsAny(proxyPath, "%\\?#") {
+		return false
+	}
+	segments := strings.Split(proxyPath, "/")
+	for _, segment := range segments {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
 	switch {
-	case proxyPath == "responses" || strings.HasPrefix(proxyPath, "responses/"):
-		return true
+	case proxyPath == "responses" || proxyPath == "responses/compact":
+		return method == "POST"
+	case segments[0] == "responses":
+		if len(segments) == 2 {
+			return method == "GET" || method == "DELETE"
+		}
+		return len(segments) == 3 &&
+			(method == "GET" && segments[2] == "input_items" ||
+				method == "POST" && segments[2] == "cancel")
 	case method == "GET" && strings.HasPrefix(proxyPath, "models/"):
 		return true
 	case method != "POST":

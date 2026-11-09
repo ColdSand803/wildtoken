@@ -392,7 +392,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         effort_mappings: {},
         priority: 999,
         weight: 100,
-        auto_weight_enabled: true,
+        auto_weight_enabled: false,
         enabled: true,
         archived: false,
         extra_headers: {},
@@ -525,8 +525,9 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   async function openEditor(upstream: Upstream) {
     try {
       setEditing({ upstream: await getUpstream(upstream.id) });
-    } catch {
-      setEditing({ upstream });
+    } catch (err) {
+      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+      else toast(`读取渠道失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
     }
   }
 

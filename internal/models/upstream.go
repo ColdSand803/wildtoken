@@ -122,7 +122,7 @@ func DefaultUpstreamIn() UpstreamIn {
 		EffortMappings:    map[string]string{},
 		Priority:          100,
 		Weight:            100,
-		AutoWeightEnabled: true,
+		AutoWeightEnabled: false,
 		Enabled:           true,
 		ExtraHeaders:      map[string]string{},
 	}

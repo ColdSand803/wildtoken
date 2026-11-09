@@ -1,8 +1,7 @@
 // Command wildtoken runs the WildToken gateway.
 //
-// On Linux and macOS it is a foreground console server. On Windows it defaults
-// to a system tray application with no console window; set WILDTOKEN_NO_TRAY=1
-// or pass --no-tray / --console for headless and CI use.
+// CLI builds on Linux and macOS run in the foreground. The macOS desktop
+// build runs from an application bundle; Windows defaults to a system tray.
 package main
 
 import (
@@ -16,6 +15,9 @@ import (
 )
 
 func main() {
+	if handled, code := desktopMain(); handled {
+		os.Exit(code)
+	}
 	// `wildtoken backup` takes one backup beside a running server and exits.
 	if len(os.Args) > 1 && os.Args[1] == "backup" {
 		os.Exit(runBackup())

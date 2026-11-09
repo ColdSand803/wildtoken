@@ -121,8 +121,10 @@ export async function send(path: string, init: RequestInit = {}): Promise<Respon
       // 非 JSON 错误体，保留 HTTP 状态说明。
     }
     if (response.status === 401) {
-      clearAdminToken();
-      reportUnauthorized(message);
+      // 读取错误体期间也可能重新登录，清理前再核对一次。
+      const current = getAdminToken();
+      if (current && current !== token) return send(path, init);
+      rejectAdminToken(token, message);
       throw new UnauthorizedError(message);
     }
     throw new HTTPError(message, response.status);

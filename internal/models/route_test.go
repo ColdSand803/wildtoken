@@ -47,7 +47,8 @@ func TestOnlyInferenceEndpointsAreRelayed(t *testing.T) {
 		{"POST", "chat/completions"}, {"POST", "messages"}, {"POST", "messages/count_tokens"},
 		{"POST", "responses"}, {"GET", "responses/resp_1"}, {"POST", "responses/compact"},
 		{"POST", "images/generations"}, {"POST", "images/edits"}, {"POST", "embeddings"},
-		{"GET", "models/gpt-5"},
+		{"GET", "models/gpt-5"}, {"DELETE", "responses/resp_1"},
+		{"GET", "responses/resp_1/input_items"}, {"POST", "responses/resp_1/cancel"},
 	} {
 		if !ProxyEndpointAllowed(allowed[0], allowed[1]) {
 			t.Errorf("%s %s was refused", allowed[0], allowed[1])
@@ -57,6 +58,10 @@ func TestOnlyInferenceEndpointsAreRelayed(t *testing.T) {
 		{"GET", "files"}, {"POST", "files"}, {"DELETE", "files/file-1"}, {"POST", "batches"},
 		{"GET", "fine_tuning/jobs"}, {"POST", "messages/batches"}, {"GET", "chat/completions"},
 		{"POST", "audio/speech"}, {"POST", "vector_stores"}, {"POST", "chat//completions"},
+		{"GET", "responses/../files"}, {"DELETE", "responses/../files/file-1"},
+		{"GET", "models/%2e%2e/files"}, {"GET", "models/..\\files"},
+		{"GET", "responses"}, {"POST", "responses/resp_1/unknown"},
+		{"DELETE", "responses/resp_1/cancel"},
 	} {
 		if ProxyEndpointAllowed(refused[0], refused[1]) {
 			t.Errorf("%s %s was relayed", refused[0], refused[1])
