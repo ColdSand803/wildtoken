@@ -508,10 +508,12 @@ export function fetchModelsPreview(
     timeoutSeconds?: number;
     /** apiKey 为空时用这个渠道存着的 key：keyId 那把，0 是第一把启用的。 */
     storedKey?: { upstreamId: number; keyId: number };
+    signal?: AbortSignal;
   } = {},
 ): Promise<{ models: string[] }> {
   return api<{ models: string[] }>("/api/admin/upstreams/fetch-models", {
     method: "POST",
+    signal: options.signal,
     body: JSON.stringify({
       base_url: baseUrl,
       api_key: apiKey,

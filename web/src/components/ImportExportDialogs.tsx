@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 
-import { UnauthorizedError, fetchModelsPreview } from "../api";
 import { useDialog } from "../useDialog";
+import { useQuickImport } from "../useQuickImport";
+import { QuickImportActions, QuickImportContent } from "./QuickImportContent";
 import { copyText } from "../clipboard";
 
 import type { ChannelExportDocument, ImportResult } from "../types";
+
+export { parseQuickImport } from "../quickImport";
 
 /** 导出文档的固定头。导入时靠它拒掉不相干的 JSON。 */
 export const CHANNEL_DOCUMENT_KIND = "wildtoken.channels";
@@ -21,6 +24,9 @@ function TransferDialog({
   onClose,
   children,
   actions,
+  className = "",
+  initialFocus = "textarea",
+  onCancel,
 }: {
   open: boolean;
   title: string;
@@ -28,16 +34,20 @@ function TransferDialog({
   onClose: () => void;
   children: ReactNode;
   actions: ReactNode;
+  className?: string;
+  initialFocus?: string;
+  onCancel?: () => void;
 }) {
   const ref = useDialog(open, onClose);
 
   // 初始焦点留给文本框，打开后可直接粘贴。
   useEffect(() => {
-    if (open) ref.current?.querySelector("textarea")?.focus();
-  }, [open]);
+    if (open) ref.current?.querySelector<HTMLElement>(initialFocus)?.focus();
+  }, [open, initialFocus]);
 
   return (
-    <dialog className="quick-import-dialog dialog--drawer" ref={ref} onCancel={onClose} aria-label={title}>
+    <dialog className={["quick-import-dialog dialog--drawer", className].filter(Boolean).join(" ")} ref={ref}
+      onCancel={(event) => { if (onCancel) { event.preventDefault(); onCancel(); } else onClose(); }} aria-label={title}>
       <div className="quick-import-panel">
         <div className="modal-head upstream-modal-head">
           <div>
@@ -300,44 +310,6 @@ export function ChannelImportDialog({
   );
 }
 
-/**
- * 快速导入：从一段乱文本里认出 Base URL 和 Key。
- *
- * 解析规则照抄旧版——sk- 开头取最长的那个；URL 按含 /v1 和 api 打分，
- * 取分最高的再退回 origin。
- */
-export function parseQuickImport(text: string): { baseUrl: string | null; apiKey: string | null } {
-  const keys = text.match(/sk-[a-zA-Z0-9_-]{16,}/g) ?? [];
-  const apiKey = [...keys].sort((a, b) => b.length - a.length)[0] ?? null;
-
-  const urls = (text.match(/https?:\/\/[^\s"'<>()[\]“”，、；]+/g) ?? [])
-    .map((url) => url.replace(/[.,;:)\]}"'，。；、]+$/, ""))
-    .filter(Boolean);
-
-  const score = (url: string) => {
-    const lower = url.toLowerCase();
-    return (lower.includes("/v1") ? 2 : 0) + (lower.includes("api") ? 1 : 0);
-  };
-
-  let baseUrl: string | null = null;
-  if (urls.length > 0) {
-    const best = [...urls].sort((a, b) => score(b) - score(a))[0];
-    try {
-      baseUrl = new URL(best).origin;
-    } catch {
-      // 认不出来就让用户自己填。
-      baseUrl = null;
-    }
-  }
-  return { baseUrl, apiKey };
-}
-
-/** 从返回里取出模型名。形状不对就当失败——沉默的空列表看不出是上游没给还是我们读错了。 */
-function readModels(payload: { models?: unknown }): string[] {
-  if (!Array.isArray(payload?.models)) throw new Error("返回里没有模型列表。");
-  return payload.models as string[];
-}
-
 export function QuickImportDialog({
   open,
   onSubmit,
@@ -350,207 +322,19 @@ export function QuickImportDialog({
   onClose: () => void;
   onUnauthorized: (message: string) => void;
 }) {
-  const [raw, setRaw] = useState("");
-  const [name, setName] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  /* 拉到的模型，默认全选。null 是「还没拉」，和拉回 0 个要分开。 */
-  const [pull, setPull] = useState<{ models: string[]; picked: Set<string> } | null>(null);
-  const [pulling, setPulling] = useState(false);
-  const [pullError, setPullError] = useState("");
-
-  useEffect(() => {
-    if (!open) return;
-    setRaw("");
-    setName("");
-    setBaseUrl("");
-    setApiKey("");
-  }, [open]);
-
-  /* 拉到的列表只属于发起时的地址和 Key。改了其中一个、或者关窗重开，列表和
-     还在路上的请求都作废：否则按 A 地址拉的模型会跟着 B 地址填进表单。 */
-  const pullRequest = useRef(0);
-  useEffect(() => {
-    pullRequest.current += 1;
-    setPull(null);
-    setPulling(false);
-    setPullError("");
-  }, [open, baseUrl, apiKey]);
-
-  /** 从 URL 猜个名字，省得每次手打。 */
-  function suggestName(url: string): string {
-    try {
-      return new URL(url).hostname.split(".").slice(0, -1).join("-") || "";
-    } catch {
-      return "";
-    }
-  }
-
-  /**
-   * 拉模型列表。渠道还没存，直接拿当前填的地址和 Key 问预览接口。
-   *
-   * 这里不建临时渠道再拉：建完失败会留下一个没建成功却已经落库的渠道。
-   */
-  async function pullModels() {
-    const url = baseUrl.trim();
-    if (!url) {
-      setPullError("请先填写 Base URL 再拉取模型。");
-      return;
-    }
-
-    const request = ++pullRequest.current;
-    setPulling(true);
-    setPullError("");
-    try {
-      // 不带超时，后端按设置页的默认上游超时。
-      const models = readModels(await fetchModelsPreview(url, apiKey.trim() || null));
-      if (request !== pullRequest.current) return;
-      // 拉到的默认全选：拉回来就是为了用，逐个勾是反过来的默认。
-      setPull({ models, picked: new Set(models) });
-    } catch (err) {
-      if (request !== pullRequest.current) return;
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else setPullError(err instanceof Error ? err.message : String(err));
-    } finally {
-      if (request === pullRequest.current) setPulling(false);
-    }
-  }
-
-  /** 勾/取消一个拉回来的模型。 */
-  function toggleModel(model: string, checked: boolean) {
-    setPull((current) => {
-      if (!current) return current;
-      const picked = new Set(current.picked);
-      if (checked) picked.add(model);
-      else picked.delete(model);
-      return { ...current, picked };
-    });
-  }
-
+  const editor = useQuickImport({ open, onSubmit, onClose, onUnauthorized });
   return (
     <TransferDialog
       open={open}
-      title="快速导入"
-      description="粘贴一段包含 Base URL 和 API Key 的文本，自动识别后填进新增表单。"
-      onClose={onClose}
-      actions={
-        <>
-          <button type="button" className="secondary" onClick={onClose}>
-            取消
-          </button>
-          <button
-            className="primary"
-            type="button"
-            disabled={!name.trim() || !baseUrl.trim()}
-            onClick={() =>
-              onSubmit(
-                name.trim(),
-                baseUrl.trim(),
-                apiKey.trim() || null,
-                pull ? pull.models.filter((model) => pull.picked.has(model)) : [],
-              )
-            }
-          >
-            填入表单
-          </button>
-        </>
-      }
+      title="快速导入渠道"
+      description="识别连接信息，填入一条新增草稿。不直接创建渠道。"
+      className={["quick-import-recognition", editor.view === "models" && "qi-is-models"].filter(Boolean).join(" ")}
+      initialFocus={editor.initialFocus}
+      onClose={editor.close}
+      onCancel={editor.cancel}
+      actions={<QuickImportActions editor={editor} />}
     >
-      <label className="field">
-        <span className="field-label">原始文本</span>
-        <textarea
-          rows={5}
-          value={raw}
-          placeholder="https://api.example.com/v1  sk-xxxxxxxxxxxxxxxx"
-          onChange={(event) => {
-            const next = event.target.value;
-            setRaw(next);
-            const parsed = parseQuickImport(next);
-            if (parsed.baseUrl) {
-              setBaseUrl(parsed.baseUrl);
-              if (!name) setName(suggestName(parsed.baseUrl));
-            }
-            if (parsed.apiKey) setApiKey(parsed.apiKey);
-          }}
-        />
-      </label>
-
-      <label className="field">
-        <span className="field-label">名称</span>
-        <input value={name} onChange={(event) => setName(event.target.value)} autoComplete="off" />
-      </label>
-
-      <label className="field">
-        <span className="field-label">Base URL</span>
-        <div className="quick-import-url-row">
-          <input
-            value={baseUrl}
-            onChange={(event) => setBaseUrl(event.target.value)}
-            autoComplete="off"
-          />
-          <button
-            type="button"
-            className="secondary"
-            disabled={pulling}
-            onClick={() => void pullModels()}
-          >
-            {pulling ? "拉取中…" : "拉取模型"}
-          </button>
-        </div>
-      </label>
-
-      <label className="field">
-        <span className="field-label">API Key</span>
-        <input
-          type="password"
-          value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
-          autoComplete="off"
-        />
-      </label>
-
-      {pullError ? (
-        <p className="field-hint" role="alert" style={{ color: "var(--danger)" }}>
-          {pullError}
-        </p>
-      ) : null}
-
-      {/* 拉回来就默认全选，这里只用来摘掉不想要的。没拉过就不出现——
-          空列表和「拉回 0 个」是两回事。 */}
-      {pull ? (
-        <div className="field">
-          <div className="model-picker-label-row">
-            <span className="field-label">模型</span>
-            <span className="model-selection-count">
-              {pull.models.length === 0
-                ? "上游没返回模型"
-                : `已选 ${pull.picked.size} / ${pull.models.length}`}
-            </span>
-          </div>
-          {pull.models.length > 0 ? (
-            <>
-              <div className="model-options quick-import-models">
-                {pull.models.map((model) => (
-                  <label
-                    key={model}
-                    className={pull.picked.has(model) ? "model-option is-selected" : "model-option"}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={pull.picked.has(model)}
-                      onChange={(event) => toggleModel(model, event.target.checked)}
-                    />
-                    <span className="model-option-name">{model}</span>
-                  </label>
-                ))}
-              </div>
-              <span className="field-hint">
-                选中的写成渠道的精确模型；一个都不选则接收全部模型。
-              </span>
-            </>
-          ) : null}
-        </div>
-      ) : null}
+      <QuickImportContent editor={editor} />
     </TransferDialog>
   );
 }

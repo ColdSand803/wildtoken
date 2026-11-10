@@ -16,7 +16,7 @@ test("三种导入导出窗口共用完整抽屉骨架", () => {
 test("内容型抽屉将正文放进独立滚动区", () => {
   for (const file of [
     "components/ImportExportDialogs.tsx",
-    "components/UpstreamDialog.tsx",
+    "components/UpstreamEditorLayout.tsx",
     "components/TokenDialog.tsx",
     "components/ModelDialog.tsx",
     "components/ModelTestDialog.tsx",

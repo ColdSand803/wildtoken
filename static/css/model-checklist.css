@@ -1,0 +1,193 @@
+/* 模型勾选列表：渠道编辑和快速导入共用。
+   固定区只留标题行和工具区，其余高度全给列表。 */
+.mc {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+
+.mc[hidden] {
+  display: none;
+}
+
+.mc-head {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  padding: 10px var(--drawer-gutter) 0;
+}
+
+.mc-head h3 {
+  flex: 1;
+  font-size: var(--text-md);
+  font-weight: 600;
+  margin: 0;
+  min-width: 0;
+}
+
+/* 负边距让箭头和正文左缘对齐；不许折行，否则窄标题会把按钮挤成两行。 */
+.mc-back {
+  flex-shrink: 0;
+  margin-left: -10px;
+  white-space: nowrap;
+}
+
+.mc-count {
+  color: var(--muted);
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.mc-count strong {
+  color: var(--text);
+  font-size: var(--text-md);
+}
+
+.mc-tools {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px var(--drawer-gutter);
+}
+
+.mc-search {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.mc-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+.mc-search button {
+  flex-shrink: 0;
+}
+
+.mc-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  justify-content: space-between;
+}
+
+.mc-scopes,
+.mc-batch {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.mc-scopes button {
+  font-size: var(--text-sm);
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+}
+
+.mc-scopes .is-active {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.mc-batch .field-hint {
+  margin-right: 6px;
+}
+
+.mc-list {
+  border-top: 1px solid var(--line);
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* 不分页，上千个候选也整列渲染；屏外的行交给浏览器跳过布局和绘制。 */
+.mc-row {
+  align-items: center;
+  border-bottom: 1px solid var(--line-soft);
+  contain-intrinsic-size: auto 36px;
+  content-visibility: auto;
+  display: flex;
+  gap: 12px;
+  height: 36px;
+  padding: 0 var(--drawer-gutter);
+}
+
+.mc-row:has(:checked) {
+  background: var(--panel-subtle);
+}
+
+.mc-row label {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex: 1;
+  gap: 10px;
+  height: 100%;
+  min-width: 0;
+}
+
+.mc-row input {
+  accent-color: var(--accent);
+  flex-shrink: 0;
+  height: 16px;
+  margin: 0;
+  min-height: 0;
+  width: 16px;
+}
+
+.mc-row code {
+  font: var(--text-sm) var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mc-row > span {
+  color: var(--warning-strong);
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+}
+
+.mc-empty {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  margin: 0;
+  padding: 28px var(--drawer-gutter);
+  text-align: center;
+}
+
+@media (max-width: 520px) {
+  .mc-search {
+    flex-wrap: wrap;
+  }
+
+  /* 16px 以下 iOS 聚焦时会放大页面。 */
+  .mc-search input {
+    flex-basis: 100%;
+    font-size: 16px;
+  }
+
+  /* 状态说明独占一行，两个批量按钮并排在下一行。 */
+  .mc-batch {
+    flex-basis: 100%;
+  }
+
+  .mc-batch .field-hint {
+    flex-basis: 100%;
+    margin-right: 0;
+  }
+
+  /* 手指点按，行高放回 44px。 */
+  .mc-row {
+    contain-intrinsic-size: auto 44px;
+    height: 44px;
+  }
+}
