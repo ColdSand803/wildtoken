@@ -24,6 +24,7 @@ import {
   tokenPreview,
 } from "../tokenFormat";
 import type { APIToken } from "../types";
+import { useFailure } from "../useFailure";
 
 /** 创建于明文保存启用之前的令牌，完整值已经取不回来了。 */
 const SEALED_TITLE = "这个令牌创建于明文保存启用之前，完整值已经无法恢复。需要完整令牌只能删除后重建。";
@@ -101,18 +102,18 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
 
   const toast = useToast();
   const confirm = useConfirm();
+  const fail = useFailure(onUnauthorized);
 
   const reload = useCallback(async () => {
     try {
       setTokens(await listTokens());
       setError("");
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
+      fail(err, { into: setError });
     } finally {
       setLoading(false);
     }
-  }, [onUnauthorized]);
+  }, [fail]);
 
   useEffect(() => {
     void reload();
@@ -166,8 +167,7 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
       await reload();
       toast(`令牌 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`保存失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "保存失败" });
     } finally {
       setSaving(false);
     }
@@ -185,8 +185,7 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
       await reload();
       toast(`令牌「${token.name}」已删除。`, { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`删除失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "删除失败" });
     }
   }
 
@@ -267,7 +266,7 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
         </div>
 
         {error ? (
-          <p className="field-hint" role="alert" style={{ color: "var(--danger)" }}>
+          <p className="field-hint field-hint-error" role="alert">
             {error}
           </p>
         ) : null}

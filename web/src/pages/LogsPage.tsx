@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { UnauthorizedError, listLogClientTypes, listLogs } from "../api";
+import { listLogClientTypes, listLogs } from "../api";
 import { clientTypeOptions } from "../clientTypes";
+import { ColumnMenu } from "../components/ColumnMenu";
 import { LogDetailDialog } from "../components/LogDetailDialog";
 import { RetriedMark } from "../components/RetriedMark";
 import {
@@ -17,38 +18,59 @@ import type { ReasoningSource } from "../reasoningChain";
 import type { ActiveRequest, RequestLog, RequestLogPage } from "../types";
 import { activeMatchesFilters, logMatchesFilters } from "../logFilter";
 import type { LogFilters } from "../logFilter";
+import { readStored, writeStored } from "../storage";
+import { useColumns } from "../useColumns";
+import type { ColumnDef } from "../useColumns";
+import { useFailure } from "../useFailure";
 import { useLogStream } from "../useLogStream";
 import { elapsedMs, formatElapsed, useTicker } from "../useTicker";
 
-/** 可显隐的列。键就是 data-col 的值，隐藏靠表格上的 col-hide-{key}。 */
-const COLUMNS = [
+type ColumnKey =
+  | "time" | "channel" | "token" | "client" | "model" | "reasoning" | "status" | "duration" | "tokens" | "ip" | "detail";
+
+/**
+ * 日志表的列，唯一来源：表头、列菜单、占位行的列数都从这里出。
+ *
+ * 行里的单元格仍是手写的，顺序要和这里一致——在途行和已完成行各有一份，
+ * tests/in-flight-requests 逐列对着查。
+ */
+const COLUMNS: ReadonlyArray<ColumnDef<ColumnKey> & { className?: string }> = [
   { key: "time", label: "时间" },
   { key: "channel", label: "渠道" },
   { key: "token", label: "令牌" },
   { key: "client", label: "客户端" },
   { key: "model", label: "模型" },
+  { key: "reasoning", label: "思考强度", className: "col-reasoning" },
   { key: "status", label: "状态码" },
   { key: "duration", label: "响应性能" },
   { key: "tokens", label: "Tokens" },
+  { key: "ip", label: "IP" },
   { key: "detail", label: "详情" },
-] as const;
-
-type ColumnKey = (typeof COLUMNS)[number]["key"];
+];
 
 const COLUMNS_STORAGE_KEY = "wildtoken_log_columns";
 const SENSITIVE_STORAGE_KEY = "wildtoken_log_sensitive_hidden";
 const PAGE_SIZES = [20, 50, 100, 200];
 
-/** 单值平铺，多值用 ↳ 排成路由链，和模型列同一套写法。 */
+/** 思考强度：请求、上游、响应各环节的值，写法和模型列一致。 */
 function ReasoningCell({ log }: { log: ReasoningSource }) {
   const chain = reasoningChain(log);
   if (chain.length === 0) return <span className="muted">-</span>;
 
   const title = chain.map((step) => `${step.label}：${step.value}`).join("；");
+  return <RouteChain chain={chain.map((step) => step.value)} title={title} />;
+}
+
+/**
+ * 路由链：单值平铺，多值用 ↳ 逐级排下去。模型列和思考强度列共用。
+ *
+ * 例：["fast", "gpt-5.5-mini"] 画成两行，第二行带箭头。
+ */
+function RouteChain({ chain, title }: { chain: string[]; title: string }) {
   if (chain.length === 1) {
     return (
-      <span className="model-text model-single" title={chain[0].value}>
-        {chain[0].value}
+      <span className="model-text model-single" title={chain[0]}>
+        {chain[0]}
       </span>
     );
   }
@@ -57,39 +79,20 @@ function ReasoningCell({ log }: { log: ReasoningSource }) {
   return (
     <span className="model-route" title={title}>
       <span className="model-route-line">
-        <span className="model-text model-request">{first.value}</span>
+        <span className="model-text model-request">{first}</span>
       </span>
-      {rest.map((step, index) => (
+      {rest.map((value, index) => (
         <span key={index} className="model-route-line model-route-target">
           <span className="model-route-icon" aria-hidden="true">
             ↳
           </span>
-          <span className="model-text model-upstream">{step.value}</span>
+          <span className="model-text model-upstream">{value}</span>
         </span>
       ))}
     </span>
   );
 }
 
-function readColumns(): Record<ColumnKey, boolean> {
-  const fallback = Object.fromEntries(COLUMNS.map((c) => [c.key, true])) as Record<ColumnKey, boolean>;
-  try {
-    const raw = localStorage.getItem(COLUMNS_STORAGE_KEY);
-    return raw ? { ...fallback, ...(JSON.parse(raw) as Record<string, boolean>) } : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function readSensitiveHidden(): boolean {
-  try {
-    return localStorage.getItem(SENSITIVE_STORAGE_KEY) === "true";
-  } catch {
-    return false;
-  }
-}
-
-/** 遮罩：留首尾各两个字符，中间打点。太短的整串遮掉。 */
 /* 旧版的遮罩就是固定六个星号，不按长度变。自造一个「前两位 + 点 + 后两位」
    的遮罩反而泄露了长度和首尾字符。 */
 const SENSITIVE_MASK = "******";
@@ -263,27 +266,10 @@ function ModelCell({ log }: { log: { request_model: string | null; upstream_mode
   if (!request && !upstream) return <span className="muted">-</span>;
 
   if (!request || !upstream || request === upstream) {
-    const value = request || upstream;
-    return (
-      <span className="model-text model-single" title={value}>
-        {value}
-      </span>
-    );
+    return <RouteChain chain={[request || upstream]} title={request || upstream} />;
   }
 
-  return (
-    <span className="model-route" title={`请求模型：${request}；上游模型：${upstream}`}>
-      <span className="model-route-line">
-        <span className="model-text model-request">{request}</span>
-      </span>
-      <span className="model-route-line model-route-target">
-        <span className="model-route-icon" aria-hidden="true">
-          ↳
-        </span>
-        <span className="model-text model-upstream">{upstream}</span>
-      </span>
-    </span>
-  );
+  return <RouteChain chain={[request, upstream]} title={`请求模型：${request}；上游模型：${upstream}`} />;
 }
 
 /**
@@ -307,9 +293,8 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
      输一个模型名会打出十几次全库扫描。 */
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [columns, setColumns] = useState<Record<ColumnKey, boolean>>(readColumns);
-  const [colMenuOpen, setColMenuOpen] = useState(false);
-  const [sensitiveHidden, setSensitiveHidden] = useState(readSensitiveHidden);
+  const columns = useColumns(COLUMNS_STORAGE_KEY, COLUMNS);
+  const [sensitiveHidden, setSensitiveHidden] = useState(() => readStored(SENSITIVE_STORAGE_KEY) === "true");
   const [pageSize, setPageSize] = useState(50);
   /* 游标栈：每翻一页压一个起点，回退时弹出。纯 offset 在持续写入时会
      重复或漏行——新日志插在头部会把后面的整体挤后。 */
@@ -321,6 +306,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
   const [missedNew, setMissedNew] = useState(false);
 
   const onLatestPage = cursors.length === 0;
+  const fail = useFailure(onUnauthorized);
 
   /* 每次加载一个序号，只收最新那次的结果。快速切筛选时，先发的请求可能后到，
      把 B 条件下的列表换成 A 的。 */
@@ -351,13 +337,12 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
         setError("");
       } catch (err) {
         if (request !== loadRequest.current) return;
-        if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-        else setError(err instanceof Error ? err.message : String(err));
+        fail(err, { into: setError });
       } finally {
         if (request === loadRequest.current) setLoading(false);
       }
     },
-    [onUnauthorized, pageSize, search, clientFilter, statusFilter, upstreamFilter],
+    [fail, pageSize, search, clientFilter, statusFilter, upstreamFilter],
   );
 
   useEffect(() => {
@@ -446,7 +431,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
     void load();
   }, [stream.evictedNewestId, onLatestPage, load]);
 
-  const logs = useMemo(() => {
+  const merged = useMemo(() => {
     const seen = new Set<number>();
     const merged: RequestLog[] = [];
     const streamed = onLatestPage ? stream.logs.filter((log) => logMatchesFilters(log, filters)) : [];
@@ -459,6 +444,11 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
        的比流里攒着的还新，直接拼在前面顺序就乱了。 */
     return merged.sort((a, b) => b.id - a.id);
   }, [stream.logs, page?.items, onLatestPage, filters]);
+
+  /* 最新页也只显示「每页」那么多行。流推来的新行把旧行挤到下一页，而不是让
+     表格一直长下去：每页 20 时，不截的话进来 60 条就成了 80 行。 */
+  const logs = useMemo(() => merged.slice(0, pageSize), [merged, pageSize]);
+  const hasMore = Boolean(page?.has_more) || merged.length > logs.length;
 
   const clientOptions = useMemo(
     () =>
@@ -478,33 +468,16 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
     : [];
   const activeTotal = stream.connected ? stream.activeTotal : (page?.active_total ?? 0);
 
-  function toggleColumn(key: ColumnKey) {
-    setColumns((current) => {
-      const next = { ...current, [key]: !current[key] };
-      try {
-        localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        return next;
-      }
-      return next;
-    });
-  }
-
   function toggleSensitive() {
-    setSensitiveHidden((current) => {
-      const next = !current;
-      try {
-        localStorage.setItem(SENSITIVE_STORAGE_KEY, String(next));
-      } catch {
-        return next;
-      }
-      return next;
-    });
+    const next = !sensitiveHidden;
+    setSensitiveHidden(next);
+    writeStored(SENSITIVE_STORAGE_KEY, String(next));
   }
 
-  function openDetail(log: RequestLog) {
+  // 引用稳定：行组件是 memo 的，每次渲染换一个函数等于没 memo。
+  const openDetail = useCallback((log: RequestLog) => {
     setDetail(log);
-  }
+  }, []);
 
   function goLatest() {
     setCursors([]);
@@ -595,29 +568,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
             </select>
           </label>
 
-          <div className="col-menu-wrap">
-            <button
-              type="button"
-              className="secondary ghost col-menu-btn"
-              aria-haspopup="true"
-              aria-expanded={colMenuOpen}
-              onClick={() => setColMenuOpen((open) => !open)}
-            >
-              列
-            </button>
-            <div className="col-menu" hidden={!colMenuOpen} role="menu" aria-label="日志列显示">
-              {COLUMNS.map((column) => (
-                <label key={column.key}>
-                  <input
-                    type="checkbox"
-                    checked={columns[column.key]}
-                    onChange={() => toggleColumn(column.key)}
-                  />
-                  <span>{column.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
+          <ColumnMenu label="日志列显示" columns={COLUMNS} visible={columns.visible} onToggle={columns.toggle} />
 
           <button
             type="button"
@@ -649,7 +600,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
         </div>
 
         {error ? (
-          <p className="field-hint" role="alert" style={{ color: "var(--danger)" }}>
+          <p className="field-hint field-hint-error" role="alert">
             {error}
           </p>
         ) : null}
@@ -663,26 +614,14 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
         </div>
 
         <div className="table-wrap">
-          <table
-            className={[
-              "admin-table",
-              "log-table",
-              ...COLUMNS.filter((c) => !columns[c.key]).map((c) => `col-hide-${c.key}`),
-            ].join(" ")}
-          >
+          <table className={["admin-table", "log-table", ...columns.hiddenClasses].join(" ")}>
             <thead>
               <tr>
-                <th data-col="time">时间</th>
-                <th data-col="channel">渠道</th>
-                <th data-col="token">令牌</th>
-                <th data-col="client">客户端</th>
-                <th data-col="model">模型</th>
-                <th className="col-reasoning" data-col="reasoning">思考强度</th>
-                <th data-col="status">状态码</th>
-                <th data-col="duration">响应性能</th>
-                <th data-col="tokens">Tokens</th>
-                <th data-col="ip">IP</th>
-                <th data-col="detail">详情</th>
+                {COLUMNS.map((column) => (
+                  <th key={column.key} className={column.className} data-col={column.key}>
+                    {column.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
@@ -735,9 +674,10 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
             <button
               type="button"
               className="secondary"
-              disabled={!page?.has_more}
+              disabled={!hasMore}
               onClick={() => {
-                const last = page?.items.at(-1);
+                // 取屏幕上的最后一行，不是查询结果的最后一行：截断后两者不一定相同。
+                const last = logs.at(-1);
                 if (!last) return;
                 // 新页到之前 page 还是这一页，连点会把同一个游标压两次，页号和数据错开一页。
                 setCursors((stack) =>
@@ -758,7 +698,7 @@ export function LogsPage({ onUnauthorized }: { onUnauthorized: (message: string)
 
 /* 占位行要横跨整表。写死字面量的话，加一列就会忘了改——加 IP 列时
    就漏了，加载态和空态都短一列。 */
-export const LOG_TABLE_COLUMN_COUNT = 11;
+export const LOG_TABLE_COLUMN_COUNT = COLUMNS.length;
 
 function RatePill({ label, value }: { label: string; value: number | null }) {
   /* 千分位分隔。TPM 常常五六位，不分隔读不出量级。RPM 走同一个组件，
@@ -914,25 +854,21 @@ function LogRows({
   return (
     <>
       {logs.map((log) => (
-        <LogRow
-          key={log.id}
-          log={log}
-          sensitiveHidden={sensitiveHidden}
-          onOpenDetail={() => onOpenDetail(log)}
-        />
+        <LogRow key={log.id} log={log} sensitiveHidden={sensitiveHidden} onOpenDetail={onOpenDetail} />
       ))}
     </>
   );
 }
 
-function LogRow({
+/* memo：流每 80ms 推一批，没变的行不必跟着重渲染。 */
+const LogRow = memo(function LogRow({
   log,
   sensitiveHidden,
   onOpenDetail,
 }: {
   log: RequestLog;
   sensitiveHidden: boolean;
-  onOpenDetail: () => void;
+  onOpenDetail: (log: RequestLog) => void;
 }) {
   return (
     /* 整行可点。tabIndex 让它能被键盘达到，回车和空格等同点击。 */
@@ -941,11 +877,11 @@ function LogRow({
       title={log.error || "点击查看请求详情"}
       data-log-id={log.id}
       tabIndex={0}
-      onClick={onOpenDetail}
+      onClick={() => onOpenDetail(log)}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
-        onOpenDetail();
+        onOpenDetail(log);
       }}
     >
       <td className="time-cell" data-col="time">
@@ -1036,7 +972,7 @@ function LogRow({
       </td>
     </tr>
   );
-}
+});
 
 function DurationTime({ log }: { log: RequestLog }) {
   const label = formatSeconds(log.duration_ms);
@@ -1060,6 +996,3 @@ function StatusBadge({ code }: { code: number | null }) {
   if (code >= 500) return <span className="badge danger status-5xx">{code}</span>;
   return <span className="badge neutral status-other">{code}</span>;
 }
-
-/** 扫列表要的是量级，2500000 这种长度会挤掉别的列。 */
-/* 缩写档位要到 T。只到 M 的话，25 亿 token 会显示成 2500M，还不如不缩。 */

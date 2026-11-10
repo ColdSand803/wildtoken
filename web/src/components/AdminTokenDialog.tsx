@@ -74,7 +74,7 @@ export function AdminTokenDialog({
         {/* 旧版把错误塞在一个 id 的 span 里。这里直接渲染——同一份信息，
             少一个 DOM 契约。 */}
         {error ? (
-          <p className="field-hint" role="alert" style={{ color: "var(--danger)" }}>
+          <p className="field-hint field-hint-error" role="alert">
             {error}
           </p>
         ) : null}

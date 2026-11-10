@@ -281,7 +281,7 @@ export function ChannelImportDialog({
       </label>
 
       {parseError ? (
-        <p className="field-hint" role="alert" style={{ color: "var(--danger)" }}>
+        <p className="field-hint field-hint-error" role="alert">
           {parseError}
         </p>
       ) : null}

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
-import { UnauthorizedError, fetchDashboard } from "../api";
+import { fetchDashboard } from "../api";
 import { UsageCalendar } from "../components/UsageCalendar";
 import { RetriedMark } from "../components/RetriedMark";
 import { compactCount, scaleDashboard } from "../dashboardScale";
 import { formatTimestamp } from "../logFormat";
+import { readStored, writeStored } from "../storage";
 import type { LogOverview, RequestLog, TokenUsage, TopItem, TopStats } from "../types";
+import { useFailure } from "../useFailure";
 
 /* 时间档。值直接进 query，必须是后端 parseDashboardRange 认的词。
 
@@ -28,22 +30,6 @@ const MASK_KEY = "wildtoken_dashboard_channel_name_hidden";
 const DEFAULT_RANGE = "30d";
 
 const VALID_RANGES = new Set([...RANGES.map((item) => item.key), "custom"]);
-
-function readStored(key: string): string | null {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-}
-
-function writeStored(key: string, value: string): void {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // 存不进去不影响当前页面。
-  }
-}
 
 /**
  * 接受纯日期和带时刻两种。
@@ -288,6 +274,8 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
      「全部」后到会把「今天」的数据盖掉。 */
   const loadRequest = useRef(0);
 
+  const fail = useFailure(onUnauthorized);
+
   const load = useCallback(async () => {
     const request = ++loadRequest.current;
     if (pending) {
@@ -313,12 +301,11 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
       setError("");
     } catch (err) {
       if (request !== loadRequest.current) return;
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
+      fail(err, { into: setError });
     } finally {
       if (request === loadRequest.current) setLoading(false);
     }
-  }, [range, custom, pending, onUnauthorized]);
+  }, [range, custom, pending, fail]);
 
   useEffect(() => {
     void load();

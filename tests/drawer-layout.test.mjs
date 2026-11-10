@@ -18,7 +18,6 @@ test("内容型抽屉将正文放进独立滚动区", () => {
     "components/ImportExportDialogs.tsx",
     "components/UpstreamEditorLayout.tsx",
     "components/TokenDialog.tsx",
-    "components/ModelDialog.tsx",
     "components/ModelTestDialog.tsx",
     "components/LogDetailDialog.tsx",
     "components/BalanceDialog.tsx",

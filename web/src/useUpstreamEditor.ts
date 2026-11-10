@@ -15,6 +15,8 @@ export interface UpstreamEditorProps {
   open: boolean;
   upstream: Upstream | null;
   draftKeys?: DraftKey[];
+  /** 打开就落在“管理模型”并拉一次目录：列表菜单的「拉取模型」用。 */
+  startInModels?: boolean;
   groups: Array<{ id: number; name: string }>;
   busy: boolean;
   onSubmit: (payload: UpstreamPayload) => void;
@@ -85,7 +87,7 @@ function validate(form: FormState, helpers: Helpers): UpstreamErrors {
 }
 
 export function useUpstreamEditor(props: UpstreamEditorProps, helpers: Helpers) {
-  const { open, upstream, draftKeys, groups, busy, onClose, onSubmit } = props;
+  const { open, upstream, draftKeys, startInModels, groups, busy, onClose, onSubmit } = props;
   const [form, setForm] = useState(helpers.emptyForm);
   const [baseline, setBaseline] = useState(form);
   const [tab, setTab] = useState<UpstreamTab>("connection");
@@ -198,8 +200,15 @@ export function useUpstreamEditor(props: UpstreamEditorProps, helpers: Helpers) 
     formRef.current = next; setForm(next); setBaseline(next); setKnownNames([...next.modelNames]);
     setCatalog(null); setTab("connection"); setSession((value) => value + 1);
     if (bodyRef.current) bodyRef.current.scrollTop = 0;
+
+    if (startInModels) {
+      // 焦点由管理模型自己放到搜索框。
+      setTab("models"); setWorkspace(true);
+      void fetchCatalog();
+      return;
+    }
     requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLElement>('[data-ue-field="name"]')?.focus({ preventScroll: true }));
-  }, [open, upstream, draftKeys]);
+  }, [open, upstream, draftKeys, startInModels]);
 
   useEffect(() => () => { request.current += 1; abort.current?.abort(); }, []);
   useEffect(() => {

@@ -117,14 +117,18 @@ test("存储被挡住时回落默认，不抛", () => {
   assert.deepEqual(readStoredSort(undefined), DEFAULT_UPSTREAM_SORT);
 });
 
-// 页面侧：读用 readStoredSort，四个表头都必须走 applySort——漏一个就变成
-// 「那一列点了不生效且不记住」，而且看不出来。
+// 页面侧：读用 readStoredSort，表头都必须走 applySort——漏一个就变成
+// 「那一列点了不生效且不记住」，而且看不出来。表头由列定义生成，所以页面只把
+// applySort 交给表格一次，表格里四个可排序的列共用同一条渲染分支。
 test("四个表头都接到写入路径上", () => {
   const page = read("web/src/pages/UpstreamsPage.tsx");
+  const table = read("web/src/components/UpstreamTable.tsx");
 
   // 取 localStorage 这个全局本身就可能抛错（站点存储被禁用），所以初始化包了一层 try。
   assert.match(page, /useState<[^>]*>\(\(\) => \{\s*try \{\s*return readStoredSort\(localStorage\);/);
   assert.equal(page.includes("onSort={setSort}"), false, "不能有绕过落盘的表头");
-  assert.equal(page.match(/onSort=\{applySort\}/g).length, 4);
+  assert.equal(page.match(/onSort=\{applySort\}/g).length, 1);
+  assert.equal(table.match(/sortKey: "/g).length, 4);
+  assert.equal(table.match(/onSort=\{onSort\}/g).length, 1, "可排序表头只有一条渲染分支");
   assert.match(page, /localStorage\.setItem\(UPSTREAM_SORT_KEY, JSON\.stringify\(next\)\)/);
 });

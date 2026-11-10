@@ -17,6 +17,7 @@
 @import url("./css/model-checklist.css");
 @import url("./css/quick-import.css");
 @import url("./css/upstream-editor.css");
+@import url("./css/lists.css");
 
 html[data-theme] .token-preview-code,
 html[data-theme] #api-key,
