@@ -120,6 +120,10 @@ html[data-theme="gojo"] {
   --gojo-purple: #a983ff;
   --gojo-white: #f7f9ff;
   --gojo-ink: #05070d;
+  --gojo-control: #a7d4e2;
+  --gojo-control-hover: #b9dfeb;
+  --gojo-control-pressed: #8fbfce;
+  --gojo-control-radius: 6px;
   --gojo-rail-width: 118px;
   --gojo-weave:
     repeating-linear-gradient(135deg, rgb(255 255 255 / 2%) 0 1px, transparent 1px 5px),
@@ -795,111 +799,162 @@ html[data-theme="gojo"] .status[data-tone="error"] {
 }
 
 /* ── Buttons ───────────────────────────────────────────────
-   Primary actions are the blue technique: a cool fill with a bright top edge.
-   Navigation and the inline utility controls are excluded by name — they own
-   their own states, and a filled treatment on a table's sort control would read
-   as a primary action. The list is repeated per state rather than factored out
-   because :is()/:not() cannot be shared across separate rules. */
+   主操作用冰蓝实底，其余靠明暗和边框分层。 */
 
 html[data-theme="gojo"] button.primary {
-  background: linear-gradient(180deg, #63dcff 0%, #2fb2dd 52%, #1a86ad 100%);
-  border: 1px solid rgb(24 128 165 / 90%);
-  border-radius: var(--radius);
-  box-shadow:
-    inset 0 1px 0 rgb(233 250 255 / 62%),
-    0 1px 3px rgb(0 0 0 / 42%);
+  background: var(--gojo-control);
+  border: 1px solid transparent;
+  border-radius: var(--gojo-control-radius);
+  box-shadow: none;
   color: var(--accent-on);
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0;
 }
 
-html[data-theme="gojo"] button.primary:hover {
-  background: linear-gradient(180deg, #86e8ff 0%, #45c3ea 52%, #2295bd 100%);
-  box-shadow:
-    inset 0 1px 0 rgb(244 253 255 / 76%),
-    0 2px 10px rgb(99 220 255 / 26%);
+html[data-theme="gojo"] button.primary:hover:where(:not(:disabled)) {
+  background: var(--gojo-control-hover);
+  border-color: transparent;
+  box-shadow: none;
   color: var(--accent-on);
 }
 
-html[data-theme="gojo"] button.primary:active:not(:disabled) {
-  box-shadow: inset 0 2px 5px rgb(0 0 0 / 34%);
-  transform: translateY(1px);
+html[data-theme="gojo"] button.primary:active:where(:not(:disabled)) {
+  background: var(--gojo-control-pressed);
+  box-shadow: none;
+  transform: none;
 }
 
 html[data-theme="gojo"] button.primary:disabled,
 html[data-theme="gojo"] button.primary:disabled:hover {
-  background: rgb(40 47 65 / 82%);
-  border-color: rgb(139 156 187 / 22%);
+  background: #232c3a;
+  border-color: #303b4b;
   box-shadow: none;
-  color: #8a95ab;
+  color: var(--muted-strong);
   transform: none;
 }
 
 html[data-theme="gojo"] button.secondary {
-  background: rgb(24 29 43 / 92%);
-  border-color: rgb(139 156 187 / 26%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+  background: #151b26;
+  border-color: #303b4b;
+  border-radius: var(--gojo-control-radius);
+  box-shadow: none;
   color: var(--text-secondary);
+  letter-spacing: 0;
 }
 
-html[data-theme="gojo"] button.secondary:hover {
-  background: rgb(32 39 57 / 94%);
-  border-color: rgb(99 220 255 / 38%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 7%);
+html[data-theme="gojo"] button.secondary:hover:where(:not(:disabled)) {
+  background: #1d2633;
+  border-color: #4b5a6e;
+  box-shadow: none;
   color: var(--gojo-white);
+}
+
+html[data-theme="gojo"] button.secondary:active:where(:not(:disabled)) {
+  background: #101620;
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="gojo"] button.secondary:disabled,
+html[data-theme="gojo"] button.secondary:disabled:hover {
+  background: #151b26;
+  border-color: #303b4b;
+  box-shadow: none;
+  color: var(--muted-strong);
+  transform: none;
 }
 
 html[data-theme="gojo"] button.ghost {
   background: transparent;
   border-color: transparent;
+  border-radius: var(--gojo-control-radius);
   box-shadow: none;
   color: var(--muted-strong);
+  letter-spacing: 0;
 }
 
-html[data-theme="gojo"] button.ghost:hover {
-  background: rgb(99 220 255 / 12%);
+html[data-theme="gojo"] button.ghost:hover:where(:not(:disabled)) {
+  background: rgb(184 195 216 / 8%);
   border-color: transparent;
   box-shadow: none;
   color: var(--gojo-white);
   transform: none;
 }
 
-/* These two ship as .secondary.ghost, and the ghost rule above strips them to
-   bare text. Next to two filled buttons in a toolbar that reads as a label
-   someone forgot to style, so they take the secondary surface they claim. */
+html[data-theme="gojo"] button.ghost:active:where(:not(:disabled)) {
+  background: rgb(184 195 216 / 12%);
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="gojo"] button.ghost:disabled,
+html[data-theme="gojo"] button.ghost:disabled:hover {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: var(--muted-strong);
+  transform: none;
+}
+
+/* 工具栏图标保留边界，与筛选框对齐。 */
 html[data-theme="gojo"] .view > .panel .col-menu-btn.secondary.ghost,
+html[data-theme="gojo"] .view > .panel .view-toggle-btn.secondary.ghost,
 html[data-theme="gojo"] .view > .panel .log-sensitive-toggle.secondary.ghost {
-  background: rgb(24 29 43 / 92%);
-  border: 1px solid rgb(139 156 187 / 26%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+  background: #151b26;
+  border: 1px solid #303b4b;
+  box-shadow: none;
   color: var(--text-secondary);
 }
 
-html[data-theme="gojo"] .view > .panel .col-menu-btn.secondary.ghost:hover,
-html[data-theme="gojo"] .view > .panel .log-sensitive-toggle.secondary.ghost:hover {
-  background: rgb(32 39 57 / 94%);
-  border-color: rgb(99 220 255 / 38%);
+html[data-theme="gojo"] .view > .panel .col-menu-btn.secondary.ghost:hover:where(:not(:disabled)),
+html[data-theme="gojo"] .view > .panel .view-toggle-btn.secondary.ghost:hover:where(:not(:disabled)),
+html[data-theme="gojo"] .view > .panel .log-sensitive-toggle.secondary.ghost:hover:where(:not(:disabled)) {
+  background: #1d2633;
+  border-color: #4b5a6e;
+  box-shadow: none;
   color: var(--gojo-white);
 }
 
-html[data-theme="gojo"] .view > .panel .log-sensitive-toggle.secondary.ghost.is-active {
-  border-color: var(--accent-border);
-  color: var(--accent);
+html[data-theme="gojo"] .view > .panel .view-toggle-btn.secondary.ghost[aria-pressed="true"],
+html[data-theme="gojo"] .view > .panel .view-toggle-btn.secondary.ghost[aria-pressed="true"]:hover,
+html[data-theme="gojo"] .view > .panel .view-toggle-btn.secondary.ghost[aria-pressed="true"]:focus-visible,
+html[data-theme="gojo"] .view > .panel .log-sensitive-toggle.secondary.ghost.is-active,
+html[data-theme="gojo"] .view > .panel .log-sensitive-toggle.secondary.ghost.is-active:hover {
+  background: #1c303c;
+  border-color: #446572;
+  box-shadow: none;
+  color: var(--gojo-control);
 }
 
-/* Red is the reversal technique and stays reserved for destructive pressure. */
 html[data-theme="gojo"] button.danger {
-  background: rgb(255 97 120 / 12%);
-  border-color: var(--danger-border);
+  background: transparent;
+  border-color: rgb(255 97 120 / 30%);
+  border-radius: var(--gojo-control-radius);
   box-shadow: none;
   color: var(--danger-strong);
+  letter-spacing: 0;
 }
 
-html[data-theme="gojo"] button.danger:hover {
-  background: rgb(255 97 120 / 20%);
-  border-color: var(--danger);
+html[data-theme="gojo"] button.danger:hover:where(:not(:disabled)) {
+  background: rgb(255 97 120 / 8%);
+  border-color: rgb(255 97 120 / 52%);
   box-shadow: none;
   color: #ffc2cc;
+}
+
+html[data-theme="gojo"] button.danger:active:where(:not(:disabled)) {
+  background: var(--danger-soft);
+  box-shadow: none;
+  transform: none;
+}
+
+html[data-theme="gojo"] button.danger:disabled,
+html[data-theme="gojo"] button.danger:disabled:hover {
+  background: transparent;
+  border-color: rgb(255 97 120 / 30%);
+  box-shadow: none;
+  color: var(--danger-strong);
+  transform: none;
 }
 
 html[data-theme="gojo"] .table-sort-button,
@@ -996,31 +1051,25 @@ html[data-theme="gojo"] textarea:focus-visible {
   box-shadow: inset 0 1px 2px rgb(0 0 0 / 36%), 0 0 0 3px rgb(99 220 255 / 18%);
 }
 
-/* Log snapshots switch between a reader and a wire-level view. Treat the pair
-   as one compact blindfold control instead of two unrelated primary actions;
-   the selected segment is the Six Eyes reveal. */
+/* 分段选择与按钮共用色面，选中项不发光。 */
 html[data-theme="gojo"] .log-view-mode {
-  background:
-    linear-gradient(90deg, rgb(99 220 255 / 7%), transparent 44%, rgb(169 131 255 / 8%)),
-    #070a12;
-  border: 1px solid rgb(139 156 187 / 28%);
-  border-radius: var(--radius);
-  box-shadow:
-    inset 0 1px 3px rgb(0 0 0 / 55%),
-    0 0 0 1px rgb(5 7 13 / 78%);
+  background: #0b1019;
+  border: 1px solid #303b4b;
+  border-radius: var(--gojo-control-radius);
+  box-shadow: none;
   gap: 2px;
   padding: 3px;
 }
 
 html[data-theme="gojo"] .log-view-mode-button {
   background: transparent;
-  border: 0;
-  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  border-radius: 3px;
   box-shadow: none;
-  color: #929db4;
+  color: var(--muted-strong);
   font-size: var(--text-xs);
-  font-weight: 600;
-  letter-spacing: 0.08em;
+  font-weight: 500;
+  letter-spacing: 0;
   min-height: 28px;
   min-width: 64px;
   padding: 0 14px;
@@ -1029,7 +1078,8 @@ html[data-theme="gojo"] .log-view-mode-button {
 }
 
 html[data-theme="gojo"] .log-view-mode-button:hover {
-  background: rgb(99 220 255 / 8%);
+  background: #151f2b;
+  border-color: transparent;
   box-shadow: none;
   color: var(--gojo-white);
   transform: none;
@@ -1037,39 +1087,25 @@ html[data-theme="gojo"] .log-view-mode-button:hover {
 
 html[data-theme="gojo"] .log-view-mode-button[aria-pressed="true"],
 html[data-theme="gojo"] .log-view-mode-button[aria-pressed="true"]:hover {
-  background:
-    linear-gradient(135deg, rgb(99 220 255 / 24%), rgb(169 131 255 / 18%)),
-    #111a29;
-  box-shadow:
-    inset 0 0 0 1px rgb(99 220 255 / 48%),
-    inset 0 1px 0 rgb(255 255 255 / 10%),
-    0 0 12px rgb(99 220 255 / 12%);
-  color: #c9f4ff;
-  text-shadow: 0 0 9px rgb(99 220 255 / 32%);
+  background: #1c303c;
+  border-color: #446572;
+  box-shadow: none;
+  color: var(--gojo-control);
 }
 
 html[data-theme="gojo"] .log-view-mode-button:focus-visible {
-  background: rgb(99 220 255 / 10%);
-  box-shadow: var(--focus-ring);
-  color: var(--gojo-white);
-  outline: none;
+  box-shadow: none;
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
   position: relative;
   z-index: 1;
 }
 
-html[data-theme="gojo"] .log-view-mode-button[aria-pressed="true"]:focus-visible {
-  background:
-    linear-gradient(135deg, rgb(99 220 255 / 24%), rgb(169 131 255 / 18%)),
-    #111a29;
-  box-shadow: var(--focus-ring);
-  color: #c9f4ff;
-}
-
 html[data-theme="gojo"] .segmented-control {
-  background: rgb(6 8 14 / 76%);
-  border: 1px solid rgb(139 156 187 / 22%);
-  border-radius: var(--radius);
-  box-shadow: inset 0 1px 2px rgb(0 0 0 / 32%);
+  background: #0b1019;
+  border: 1px solid #303b4b;
+  border-radius: var(--gojo-control-radius);
+  box-shadow: none;
 }
 
 html[data-theme="gojo"] .segmented-control button,
@@ -1087,7 +1123,19 @@ html[data-theme="gojo"] .upstream-action-menu button {
   transform: none;
 }
 
+html[data-theme="gojo"] .segmented-control button:hover {
+  background: #151f2b;
+  color: var(--gojo-white);
+}
+
 html[data-theme="gojo"] .segmented-control button.is-selected,
+html[data-theme="gojo"] .segmented-control button[aria-pressed="true"] {
+  background: #1c303c;
+  border-color: #446572;
+  box-shadow: none;
+  color: var(--gojo-control);
+}
+
 html[data-theme="gojo"] .theme-menu button.is-selected,
 html[data-theme="gojo"] .select-panel button.is-selected {
   background: var(--accent-soft);
@@ -1283,12 +1331,7 @@ html[data-theme="gojo"] .toast {
 
 /* ── Switches and scrollbars ────────────────────────────── */
 
-/* The switch is a track and a thumb, so it carries no surface of its own. It is
-   deliberately NOT stripped of its focus state the way the neighbouring packs
-   strip theirs: it is a keyboard-operable toggle, and `outline: none` on
-   :focus-visible leaves it the one control in the console a keyboard user
-   cannot locate. The ring goes on the track below, which is the part with a
-   visible edge to hang it on. */
+/* 焦点画在轨道外，不改变滑块的位置和尺寸。 */
 html[data-theme="gojo"] .status-switch,
 html[data-theme="gojo"] .status-switch:hover {
   background: transparent;
@@ -1307,31 +1350,55 @@ html[data-theme="gojo"] .status-switch:focus-visible {
   padding: 0;
 }
 
-html[data-theme="gojo"] .status-switch:focus-visible .status-switch-track {
-  border-color: var(--focus);
-  box-shadow:
-    0 0 0 2px var(--bg),
-    0 0 0 4px rgb(99 220 255 / 82%);
-}
-
-html[data-theme="gojo"] .status-switch-track {
-  background: rgb(24 29 43 / 92%);
-  border: 1px solid rgb(139 156 187 / 26%);
+html[data-theme="gojo"] .status-switch-track,
+html[data-theme="gojo"] .status-switch.off .status-switch-track {
+  background: #242e3d;
+  border: 1px solid #526075;
   border-radius: var(--radius-full);
+  box-shadow: none;
+  transition: background-color 160ms ease, border-color 160ms ease;
 }
 
 html[data-theme="gojo"] .status-switch-thumb {
-  background: #cfd9ec;
+  background: #acb9cb;
   border-radius: 50%;
+  box-shadow: none;
+  transition:
+    background-color 160ms ease,
+    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+html[data-theme="gojo"] .status-switch.off:hover:not(:disabled) .status-switch-track {
+  background: #303c4d;
+  border-color: #687a92;
 }
 
 html[data-theme="gojo"] .status-switch.on .status-switch-track {
-  background: linear-gradient(90deg, #1a86ad, #63dcff);
-  border-color: rgb(99 220 255 / 52%);
+  background: var(--gojo-control);
+  border-color: var(--gojo-control);
+  box-shadow: none;
+}
+
+html[data-theme="gojo"] .status-switch.on:hover:not(:disabled) .status-switch-track {
+  background: var(--gojo-control-hover);
+  border-color: var(--gojo-control-hover);
 }
 
 html[data-theme="gojo"] .status-switch.on .status-switch-thumb {
-  background: #ffffff;
+  background: #102a34;
+  box-shadow: none;
+}
+
+html[data-theme="gojo"] .status-switch:focus-visible .status-switch-track {
+  border-color: var(--focus);
+  box-shadow: none;
+  outline: 2px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* 16px 轨道减去边框和两侧留白，正好容下 12px 滑块。 */
+html[data-theme="gojo"][data-density="compact"] .status-switch-track {
+  padding: 1px;
 }
 
 html[data-theme="gojo"] ::-webkit-scrollbar {

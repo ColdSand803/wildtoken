@@ -75,16 +75,32 @@ test("Gojo gives the status switch a keyboard focus indicator", () => {
   assert.ok(rule, "the switch track has no :focus-visible rule");
   assert.match(rule[0], /border-color: var\(--focus\)/);
   assert.match(rule[0], /box-shadow:/);
+  // 焦点不用阴影，避免被状态样式覆盖。
+  assert.match(rule[0], /outline: 2px solid var\(--focus\)/);
 
   // The switch itself may drop its outline only because the track carries it.
   const stripped = css.match(/\.status-switch:focus-visible \{[^}]+\}/);
   assert.ok(stripped, "expected an explicit :focus-visible rule on the switch");
 });
 
-test("Gojo renders the log view picker as a themed segmented control", () => {
-  assert.match(css, /\.log-view-mode \{[\s\S]*?background:[\s\S]*?#070a12;[\s\S]*?padding: 3px;[\s\S]*?\}/);
-  assert.match(css, /\.log-view-mode-button\[aria-pressed="true"\][\s\S]*?linear-gradient\(135deg/);
-  assert.match(css, /\.log-view-mode-button:focus-visible \{[\s\S]*?box-shadow: var\(--focus-ring\)/);
+test("Gojo renders the log and upstream view pickers with visible selected states", () => {
+  const logPicker = css.match(/\.log-view-mode \{[^}]+\}/);
+  assert.ok(logPicker, "missing log view picker container");
+  assert.match(logPicker[0], /padding: 3px;/);
+  for (const selector of [
+    '.log-view-mode-button[aria-pressed="true"]:hover',
+    '.view-toggle-btn.secondary.ghost[aria-pressed="true"]:focus-visible',
+  ]) {
+    const start = css.indexOf(selector);
+    assert.notEqual(start, -1, `missing selected state: ${selector}`);
+    const rule = css.slice(css.indexOf("{", start), css.indexOf("}", start));
+    assert.match(rule, /background: (?!transparent)[^;]+;/);
+    assert.match(rule, /border-color: (?!transparent)[^;]+;/);
+    assert.match(rule, /color: [^;]+;/);
+  }
+  const focus = css.match(/\.log-view-mode-button:focus-visible \{[^}]+\}/);
+  assert.ok(focus, "missing log view picker keyboard focus");
+  assert.match(focus[0], /outline: 2px solid var\(--focus\)/);
 
   // 主操作只认显式的 .primary（5639f9c），日志视图切换不会再被全局规则刷成主按钮。
   assert.doesNotMatch(css, /button:not\(:where\(/, "a global primary-action rule is back");
