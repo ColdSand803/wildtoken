@@ -26,6 +26,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { TokensPage } from "./pages/TokensPage";
 import { UpstreamsPage } from "./pages/UpstreamsPage";
 import { getAdminToken } from "./api";
+import { readStored } from "./storage";
 
 export type ViewId = "dashboard" | "upstreams" | "logs" | "tokens" | "groups" | "debug" | "images" | "settings";
 
@@ -44,12 +45,8 @@ function isView(value: string | null): value is ViewId {
 }
 
 function defaultHome(): ViewId {
-  try {
-    const saved = localStorage.getItem(DEFAULT_HOME_KEY);
-    return isView(saved) ? saved : FALLBACK_VIEW;
-  } catch {
-    return FALLBACK_VIEW;
-  }
+  const saved = readStored(DEFAULT_HOME_KEY);
+  return isView(saved) ? saved : FALLBACK_VIEW;
 }
 
 /**

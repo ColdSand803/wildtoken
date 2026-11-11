@@ -8,12 +8,15 @@ const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf
 const ADMIN_SOURCE = "internal/handlers/admin.go";
 const LOGS_SOURCE = "web/src/pages/LogsPage.tsx";
 
-/** 日志表头声明的列。 */
+/** 日志表声明的列。表头由 COLUMNS 生成，所以读列定义而不是 <thead>。 */
 function logTableColumns() {
   const source = read(LOGS_SOURCE);
-  const head = source.slice(source.indexOf("<thead>"), source.indexOf("</thead>"));
-  const columns = [...head.matchAll(/data-col="([a-z-]+)"/g)].map((match) => match[1]);
-  assert.notEqual(columns.length, 0, "表头必须声明列");
+  const start = source.indexOf("const COLUMNS:");
+  assert.notEqual(start, -1, "日志表必须有列定义");
+  const block = source.slice(start, source.indexOf("];", start));
+  const columns = [...block.matchAll(/key: "([a-z-]+)"/g)].map((match) => match[1]);
+  assert.notEqual(columns.length, 0, "列定义不能为空");
+  assert.match(source, /COLUMNS\.map\(\(column\) => \(\s*<th key=\{column\.key\}/, "表头必须由列定义生成");
   return columns;
 }
 
@@ -76,8 +79,8 @@ test("并发胶囊读总数，不是被截断的列表长度", () => {
    这样漏的。 */
 test("占位行的 colspan 等于表头列数", () => {
   const source = read(LOGS_SOURCE);
-  const declared = Number(/LOG_TABLE_COLUMN_COUNT = (\d+)/.exec(source)?.[1]);
-  assert.equal(declared, logTableColumns().length, "列数常量与表头脱节");
+  // 列数从列定义算出来，不是手写的数字：加一列不会忘了改。
+  assert.match(source, /LOG_TABLE_COLUMN_COUNT = COLUMNS\.length;/, "列数应取自列定义");
 
   const spans = [...source.matchAll(/colSpan=\{([^}]+)\}/g)].map((match) => match[1]);
   assert.notEqual(spans.length, 0, "占位行必须存在");

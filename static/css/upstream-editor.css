@@ -1,0 +1,108 @@
+:root dialog.dialog--drawer.upstream-editor { --drawer-width: 960px; --drawer-gutter: 28px; }
+:root dialog.dialog--drawer.upstream-editor > .upstream-dialog-panel { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+.upstream-editor [hidden] { display: none !important; }
+.upstream-editor .ue-eyebrow { display: block; color: var(--muted); font-size: var(--text-xs); margin-bottom: 5px; }
+.upstream-editor .ue-enabled { display: flex; align-items: center; gap: 7px; font-size: var(--text-sm); cursor: pointer; }
+.upstream-editor .ue-enabled input { width: 16px; height: 16px; min-height: 0; accent-color: var(--accent); }
+.upstream-editor .ue-tabs { display: flex; align-items: stretch; gap: 24px; padding: 0 28px; border-bottom: 1px solid var(--line); }
+.upstream-editor .ue-tab { display: flex; gap: 8px; align-items: center; position: relative; color: var(--muted); border: 0; border-radius: 0; background: transparent; box-shadow: none; padding: 13px 0; font-size: var(--text-sm); }
+.upstream-editor .ue-tab[aria-selected="true"] { color: var(--text); }
+.upstream-editor .ue-tab[aria-selected="true"]::after { content: ""; position: absolute; height: 2px; left: 0; right: 0; bottom: -1px; background: var(--accent); }
+/* 修改标记排进页签内部，不悬在两个页签之间。 */
+.upstream-editor .ue-tab.has-change::before, .upstream-editor .ue-tab.has-error::before { content: ""; width: 6px; height: 6px; order: 1; flex-shrink: 0; border-radius: 50%; background: var(--warning); }
+.upstream-editor .ue-tab.has-error::before { background: var(--danger); }
+.upstream-editor .ue-count { display: inline-flex; align-items: center; padding: 1px 6px; font-size: var(--text-xs); font-weight: 400; border-radius: 4px; background: var(--panel-muted); color: var(--muted-strong); font-variant-numeric: tabular-nums; }
+.upstream-editor .ue-section + .ue-section { border-top: 1px solid var(--line); padding-top: 23px; margin-top: 24px; }
+.upstream-editor .ue-section-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+.upstream-editor h3 { font-size: var(--text-md); font-weight: 600; margin: 0; color: var(--text); }
+.upstream-editor .ue-section-head p { margin: 5px 0 0; }
+.upstream-editor .ue-fields { display: grid; gap: 19px; }
+/* 单值字段按内容长度定宽：文本 600px，数值 240px。列表、映射和多行文本仍占满。 */
+.upstream-editor .ue-fields, .upstream-editor .ue-weight-options, .upstream-editor .ue-disclosure-body > .field:not(:has(textarea)) { max-width: 600px; }
+.upstream-editor .ue-disclosure-body > .ue-number, .upstream-editor .ue-number { max-width: 240px; }
+.upstream-editor .ue-error { display: block; font-size: var(--text-sm); color: var(--danger); }
+.upstream-editor .ue-warning { font-size: var(--text-sm); color: var(--warning-strong); }
+.upstream-editor .ue-required { color: var(--accent); }
+.upstream-editor [aria-invalid="true"] { border-color: var(--danger); }
+.upstream-editor .ue-mono, .upstream-editor textarea { font-family: var(--font-mono); font-size: var(--text-sm); }
+.upstream-editor .ue-section-hint { margin: 10px 0 0; }
+.upstream-editor .ue-disclosure { margin-top: 20px; border-top: 1px solid var(--line); }
+.upstream-editor .ue-disclosure summary { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 54px; cursor: pointer; font-size: var(--text-base); list-style: none; }
+.upstream-editor .ue-disclosure summary::-webkit-details-marker { display: none; }
+.upstream-editor .ue-disclosure-value { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: var(--text-sm); text-align: right; min-width: 0; overflow-wrap: anywhere; }
+.upstream-editor .ue-disclosure-value > span { display: block; font-size: 22px; }
+.upstream-editor .ue-disclosure[open] .ue-disclosure-value > span { transform: rotate(90deg); }
+.upstream-editor .ue-disclosure-body { padding-bottom: 12px; }
+.upstream-editor .ue-format-help { font-size: var(--text-sm); color: var(--muted); margin-top: 12px; }
+.upstream-editor .ue-format-help summary { min-height: 28px; font-size: var(--text-sm); }
+.upstream-editor .ue-model-preview { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin: 0 0 13px; }
+.upstream-editor .ue-preview-chip { padding: 4px 8px; border: 1px solid var(--line); background: var(--panel-subtle); border-radius: var(--radius-sm); font: var(--text-sm) var(--font-mono); max-width: min(220px, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.upstream-editor .ue-preview-more { color: var(--muted); font-size: var(--text-sm); }
+.upstream-editor .ue-mapping-head, .upstream-editor .ue-mapping-row { display: grid; grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr) 32px; gap: 9px; align-items: center; }
+.upstream-editor .ue-mapping-head { color: var(--muted); font-size: var(--text-sm); margin-bottom: 7px; }
+.upstream-editor .ue-mapping-rows { display: grid; gap: 9px; }
+.upstream-editor .ue-mapping-row input { min-width: 0; font-family: var(--font-mono); }
+.upstream-editor .ue-map-arrow { color: var(--muted); text-align: center; }
+.upstream-editor .ue-mobile-label { display: none; }
+.upstream-editor .ue-add-mapping { margin-top: 10px; }
+.upstream-editor .ue-section > .field-hint, .upstream-editor .ue-section > .ue-error { margin-top: 10px; }
+.upstream-editor .ue-groups { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.upstream-editor .ue-group { display: flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 8px 13px; font-size: var(--text-sm); cursor: pointer; }
+.upstream-editor .ue-group:has(:checked) { border-color: var(--accent-border); background: var(--accent-soft); }
+.upstream-editor .ue-group input, .upstream-editor .ue-weight-options input { min-height: 0; width: 15px; height: 15px; accent-color: var(--accent); flex-shrink: 0; }
+.upstream-editor .ue-weight-options { margin: 20px 0 18px; border: 0; padding: 0; }
+.upstream-editor .ue-weight-options legend { margin-bottom: 9px; }
+.upstream-editor .ue-weight-options > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+.upstream-editor .ue-weight-options label { display: flex; align-items: flex-start; gap: 9px; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 12px; cursor: pointer; }
+.upstream-editor .ue-weight-options label:has(:checked) { border-color: var(--accent-border); background: var(--accent-soft); }
+.upstream-editor .ue-weight-options strong { font-size: var(--text-sm); font-weight: 600; display: block; }
+.upstream-editor .ue-weight-options small { display: block; color: var(--muted); margin-top: 4px; font-size: var(--text-xs); }
+.upstream-editor .ue-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+:root .upstream-editor .ue-footer { position: relative; justify-content: space-between; }
+.upstream-editor .ue-save-state { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--muted); }
+.upstream-editor .ue-save-state > .has-change { color: var(--warning-strong); }
+.upstream-editor .ue-change-panel { position: absolute; left: 20px; right: 20px; bottom: calc(100% + 8px); max-height: min(380px, calc(100dvh - 220px)); overflow: auto; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-solid); box-shadow: var(--shadow-lg); z-index: 5; }
+.upstream-editor .ue-change { border-top: 1px solid var(--line); padding: 10px 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
+.upstream-editor .ue-change strong { font-weight: 600; }
+.upstream-editor .ue-change p { margin: 5px 0 0; white-space: pre-wrap; }
+.upstream-editor .ue-change p > span:first-child, .upstream-editor .ue-change small { color: var(--muted); }
+.upstream-editor .ue-change small { display: block; margin-top: 5px; }
+.upstream-editor .ue-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+/* 管理模型：收起副标题和页签行，高度让给列表。 */
+:root dialog.dialog--drawer.upstream-editor.ue-workspace-open > .upstream-dialog-panel { grid-template-rows: auto minmax(0, 1fr) auto; }
+.upstream-editor.ue-workspace-open .ue-tabs, .upstream-editor.ue-workspace-open .upstream-modal-head p { display: none; }
+:root dialog.dialog--drawer.upstream-editor.ue-workspace-open .upstream-dialog-body { display: grid; grid-template-rows: minmax(0, 1fr); align-content: stretch; padding: 0; overflow: hidden; gap: 0; }
+.upstream-editor.ue-workspace-open #ue-panel-models { min-height: 0; display: grid; grid-template-rows: minmax(0, 1fr); }
+.upstream-editor .ue-manual { display: grid; gap: 8px; padding: 10px; border-radius: var(--radius-sm); background: var(--panel-subtle); }
+.upstream-editor .ue-manual textarea { min-height: 84px; resize: vertical; }
+.upstream-editor .ue-manual-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; }
+.upstream-editor .mc-tools > .ue-warning, .upstream-editor .mc-tools > .ue-error { margin: 0; }
+@media (max-width: 760px) {
+  :root dialog.dialog--drawer.upstream-editor { --drawer-gutter: 20px; }
+  /* 共享规则给页脚里每个按钮 140px 下限：保存按钮被挤出屏幕，变更摘要的关闭按钮被撑宽。 */
+  .upstream-editor .ue-footer .ue-actions { flex-wrap: nowrap; }
+  .upstream-editor .ue-footer button { flex: 0 0 auto; min-width: 0; width: auto; }
+  .upstream-editor .ue-tabs { padding-inline: 20px; gap: 20px; }
+}
+@media (max-width: 520px) {
+  :root dialog.dialog--drawer.upstream-editor { --drawer-gutter: 16px; }
+  .upstream-editor .modal-head-actions { gap: 8px; }
+  .upstream-editor .ue-tabs { padding-inline: 16px; gap: 0; justify-content: space-between; }
+  .upstream-editor .ue-tab { font-size: var(--text-sm); gap: 5px; }
+  .upstream-editor .ue-section-head { align-items: flex-start; }
+  .upstream-editor .ue-weight-options > div { grid-template-columns: minmax(0, 1fr); }
+  .upstream-editor .ue-number { max-width: none; }
+  .upstream-editor .ue-mapping-head { display: none; }
+  .upstream-editor .ue-mapping-row { grid-template-columns: minmax(0, 1fr) 32px; gap: 5px 9px; border-bottom: 1px solid var(--line); padding-bottom: 16px; }
+  .upstream-editor .ue-mapping-row .field:first-child { grid-area: 1 / 1; }
+  .upstream-editor .ue-mapping-row .field:nth-child(3) { grid-area: 3 / 1; }
+  .upstream-editor .ue-mapping-row button { grid-area: 1 / 2 / 4; align-self: start; margin-top: 24px; min-height: 44px; }
+  .upstream-editor .ue-map-arrow { grid-area: 2 / 1; justify-self: start; transform: rotate(90deg); margin-left: 10px; }
+  .upstream-editor .ue-mobile-label { display: block; font-size: var(--text-sm); color: var(--muted); }
+  .upstream-editor .field input, .upstream-editor .ue-mapping-row input, .upstream-editor .ue-manual textarea { font-size: 16px; min-height: 42px; }
+  .upstream-editor .ue-save-state { display: grid; gap: 0; font-size: var(--text-xs); }
+  .upstream-editor .ue-save-state button { justify-content: flex-start; min-height: 26px; padding: 0; font-size: var(--text-xs); }
+  .upstream-editor .ue-footer > .ue-actions { gap: 7px; }
+  .upstream-editor .ue-change-panel { left: 12px; right: 12px; padding: 14px; }
+}

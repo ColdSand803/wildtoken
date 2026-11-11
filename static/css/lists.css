@@ -1,0 +1,191 @@
+/* 渠道表和日志表的列宽、窄屏布局。
+   放在共享样式之后：盖过 tables.css 和 responsive.css 里按旧内容定的默认值。 */
+
+/* ── 共用 ──────────────────────────────────────────────── */
+
+/* .panel p 和主题包的 .field-hint 特异性都更高，不加权错误提示会变灰。 */
+:root .field-hint.field-hint-error {
+  color: var(--danger);
+}
+
+/* ── 渠道表 ────────────────────────────────────────────── */
+
+.upstream-table {
+  min-width: 960px;
+}
+
+/* max-width: 0 让长名字和长地址不参与列宽计算，按列宽截断；
+   否则一条长 Base URL 就能把这一列撑到 480px，状态和操作被挤出屏幕。 */
+.upstream-table td.name-cell {
+  max-width: 0;
+}
+
+.upstream-table .url-cell-inner code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 最多 3 个芯片加 +N，每个不超过半格宽：两行以内，行高不被芯片撑开。 */
+.upstream-table .match-cell {
+  min-width: 220px;
+}
+
+.upstream-table .model-chip-list {
+  max-width: 280px;
+}
+
+.upstream-table .model-chip {
+  max-width: 128px;
+}
+
+.upstream-table .group-cell {
+  min-width: 96px;
+}
+
+.upstream-table [data-col="priority"] {
+  min-width: 84px;
+}
+
+.upstream-table .col-weight {
+  min-width: 108px;
+}
+
+.upstream-table .col-status {
+  min-width: 120px;
+}
+
+/* 说明放得下就一行，放不下折行，不把状态列撑宽。 */
+.upstream-table .effective-zero-note {
+  white-space: normal;
+}
+
+/* 操作列钉在右边：表格比容器宽时，菜单仍然够得着。
+   底色要不透明，否则横向滚动时下面的内容会透出来。 */
+.upstream-table .col-actions {
+  background: var(--panel-solid);
+  box-shadow: -1px 0 0 var(--line-soft);
+  position: sticky;
+  right: 0;
+  /* 压住滚到它下面的格子：状态开关自带层级，不压会从底下透出来。 */
+  z-index: 1;
+}
+
+.upstream-table th.col-actions {
+  z-index: 2;
+}
+
+/* ── 日志表 ────────────────────────────────────────────── */
+
+.log-table.col-hide-ip [data-col="ip"] {
+  display: none;
+}
+
+/* 令牌名和渠道名单行截断，完整值在 title 里；折行会把行高撑到三行。
+   上限按 1250px 的容器算：两个名字都很长时十一列也放得下。 */
+.log-table .token-cell {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-table .channel-cell {
+  max-width: 170px;
+}
+
+.log-table .channel-stack > * {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 详情列固定占一成多，不看内容（max-width: 0 让错误文本不参与列宽计算），
+   剩下的宽度由其他列按比例分。
+   让它吃掉剩余宽度的话，宽屏上其他列全挤在左边、右边一片空白；按内容定宽的话，
+   报错行每进出一次页面，所有列都跟着跳。 */
+.log-table .detail-cell {
+  max-width: 0;
+  min-width: 110px;
+  width: 12%;
+}
+
+/* ── 窄屏 ──────────────────────────────────────────────── */
+
+@media (max-width: 760px) {
+  /* 摘要三格排一行，不竖着摞成三行。 */
+  .summary-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .summary-strip span,
+  .summary-strip span:nth-child(2n),
+  .summary-strip span:nth-last-child(-n + 2) {
+    border-bottom: 0;
+    border-right: 1px solid var(--line);
+    padding: 8px 12px;
+  }
+
+  .summary-strip span:last-child {
+    border-right: 0;
+  }
+
+  /* 渠道工具栏：搜索一行；状态筛选、列、视图切换一行；操作按钮一行。 */
+  .view-toolbar.upstream-toolbar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .upstream-toolbar > .filter-field:first-of-type,
+  .upstream-toolbar > .toolbar-batch,
+  .upstream-toolbar > .toolbar-actions {
+    grid-column: 1 / -1;
+  }
+
+  .upstream-toolbar > .view-toggle-wrap {
+    order: 0;
+    width: auto;
+  }
+
+  .upstream-toolbar > .toolbar-actions {
+    gap: 6px;
+  }
+
+  .upstream-toolbar > .toolbar-actions button {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding-inline: 8px;
+    white-space: nowrap;
+  }
+
+  /* 日志工具栏：渠道 ID 和搜索一行；两个下拉一行；列、遮罩、刷新一行。 */
+  .log-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .log-toolbar > .log-filter {
+    flex: 1 1 calc(50% - 4px);
+  }
+
+  .log-toolbar > .log-filter-channel {
+    flex: 0 0 96px;
+  }
+
+  /* 搜索框占满第一行剩下的宽度，下拉才会落到第二行。 */
+  .log-toolbar > .log-filter-channel + .log-filter {
+    flex: 1 1 calc(100% - 104px);
+  }
+
+  .log-toolbar > .toolbar-actions {
+    flex: 0 0 auto;
+    margin-inline-start: auto;
+  }
+
+  .log-toolbar > .toolbar-actions > button {
+    flex: 0 0 auto;
+    width: auto;
+  }
+}

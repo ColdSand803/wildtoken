@@ -7,7 +7,6 @@ import {
   deleteUpstream,
   exportUpstreams,
   fetchUpstreamHealth,
-  fetchUpstreamModels,
   fetchUpstreamStats,
   getUpstream,
   revealUpstreamKey,
@@ -21,21 +20,21 @@ import {
   updateUpstream,
 } from "../api";
 import { copyText } from "../clipboard";
-import { ActionMenu, MENU_SEPARATOR } from "../components/ActionMenu";
+import { MENU_SEPARATOR } from "../components/ActionMenu";
 import type { MenuEntry } from "../components/ActionMenu";
 import { BalanceDialog } from "../components/BalanceDialog";
 import type { BalanceProvider } from "../components/BalanceDialog";
 import { ChannelCard } from "../components/ChannelCard";
+import { ColumnMenu } from "../components/ColumnMenu";
 import {
   ChannelExportDialog,
   ChannelImportDialog,
   QuickImportDialog,
 } from "../components/ImportExportDialogs";
-import { ModelDialog } from "../components/ModelDialog";
-import type { ModelSelection } from "../components/ModelDialog";
 import { ModelTestDialog } from "../components/ModelTestDialog";
 import { UpstreamDialog } from "../components/UpstreamDialog";
 import type { UpstreamPayload } from "../components/UpstreamDialog";
+import { ArchivedTable, UPSTREAM_COLUMNS, UpstreamTable } from "../components/UpstreamTable";
 import { useConfirm, useToast } from "../components/feedback";
 import {
   UPSTREAM_SORT_KEY,
@@ -43,7 +42,10 @@ import {
   readStoredSort,
 } from "../upstreamSort";
 import type { SortKey } from "../upstreamSort";
+import { readStored, writeStored } from "../storage";
 import { upstreamCredentialsText } from "../upstreamCopy";
+import { useColumns } from "../useColumns";
+import { useFailure } from "../useFailure";
 import type {
   ChannelExportDocument,
   DraftKey,
@@ -66,45 +68,8 @@ async function revealAllKeys(upstream: Upstream): Promise<DraftKey[]> {
   }));
 }
 
-/** 可显隐的列。键名就是 data-col 的值，隐藏靠表格上的 col-hide-{key} 类。 */
-const COLUMNS = [
-  { key: "check", label: "选择" },
-  { key: "id", label: "ID" },
-  { key: "name", label: "渠道名" },
-  { key: "models", label: "模型匹配" },
-  { key: "groups", label: "分组" },
-  { key: "priority", label: "优先级" },
-  { key: "weight", label: "权重" },
-  { key: "status", label: "状态" },
-  { key: "actions", label: "操作" },
-] as const;
-
-type ColumnKey = (typeof COLUMNS)[number]["key"];
-
-/* 固定列不给隐藏：勾选、ID、渠道名、操作一藏，行就认不出或点不了。和旧版一致。 */
-const LOCKED_COLUMNS: ReadonlySet<ColumnKey> = new Set(["check", "id", "name", "actions"]);
-
 const COLUMNS_STORAGE_KEY = "wildtoken_upstream_columns";
 const VIEW_STORAGE_KEY = "wildtoken_upstream_view";
-
-function readColumns(): Record<ColumnKey, boolean> {
-  const fallback = Object.fromEntries(COLUMNS.map((c) => [c.key, true])) as Record<ColumnKey, boolean>;
-  try {
-    const raw = localStorage.getItem(COLUMNS_STORAGE_KEY);
-    if (!raw) return fallback;
-
-    // 旧存档里固定列可能是 false，读回时强制显示。
-    const stored = { ...fallback, ...(JSON.parse(raw) as Record<string, boolean>) };
-    for (const key of LOCKED_COLUMNS) stored[key] = true;
-    return stored;
-  } catch {
-    // 存储不可用或内容坏了：全部显示。
-    return fallback;
-  }
-}
-
-/** 排序时的状态分档：启用 > 有效权重 0 > 停用，和旧版一致。 */
-
 
 /**
  * 渠道页。
@@ -124,7 +89,9 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   // 归档区默认收起，和旧版一致。
   const [archivedOpen, setArchivedOpen] = useState(false);
   // null = 关闭；{ upstream: null } = 新增；{ upstream } = 编辑。
-  const [editing, setEditing] = useState<{ upstream: Upstream | null; draftKeys?: DraftKey[] } | null>(null);
+  const [editing, setEditing] = useState<
+    { upstream: Upstream | null; draftKeys?: DraftKey[]; startInModels?: boolean } | null
+  >(null);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   // 站点存储被禁用时，取 localStorage 这个全局本身就会抛错。
@@ -146,17 +113,9 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       // 存储不可用时当前页面仍然生效。
     }
   }, []);
-  const [columns, setColumns] = useState<Record<ColumnKey, boolean>>(readColumns);
-  const [colMenuOpen, setColMenuOpen] = useState(false);
-  // 正在行内编辑优先级的渠道 id。
-  const [editingPriority, setEditingPriority] = useState<number | null>(null);
-  const [view, setView] = useState<"list" | "grid">(() => {
-    try {
-      return localStorage.getItem(VIEW_STORAGE_KEY) === "grid" ? "grid" : "list";
-    } catch {
-      return "list";
-    }
-  });
+  // 列显隐和旧版共用一个存储键，两边切换不丢设置。
+  const columns = useColumns(COLUMNS_STORAGE_KEY, UPSTREAM_COLUMNS);
+  const [view, setView] = useState<"list" | "grid">(() => (readStored(VIEW_STORAGE_KEY) === "grid" ? "grid" : "list"));
   const [stats, setStats] = useState<Record<string, UpstreamStats>>({});
   const [health, setHealth] = useState<Record<string, UpstreamHealth>>({});
   const [exportDoc, setExportDoc] = useState<ChannelExportDocument | null>(null);
@@ -169,29 +128,23 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [quickOpen, setQuickOpen] = useState(false);
   const [busyDialog, setBusyDialog] = useState(false);
-  /* 模型选择器。catalog 和 selection 必须跟着这一个对象走：它们是弹窗重置
-     效应的依赖，每次渲染新造一份的话每敲一下键盘都会把已选清回去。 */
-  const [picker, setPicker] = useState<
-    { upstream: Upstream; catalog: string[] | null; selection: ModelSelection } | null
-  >(null);
-  const [pickerSaving, setPickerSaving] = useState(false);
   const [testing, setTesting] = useState<Upstream | null>(null);
   const [balance, setBalance] = useState<{ upstream: Upstream; provider: BalanceProvider } | null>(null);
 
   const toast = useToast();
   const confirm = useConfirm();
+  const fail = useFailure(onUnauthorized);
 
   const reload = useCallback(async () => {
     try {
       setUpstreams(await listUpstreams());
       setError("");
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
+      fail(err, { into: setError });
     } finally {
       setLoading(false);
     }
-  }, [onUnauthorized]);
+  }, [fail]);
 
   useEffect(() => {
     void reload();
@@ -205,24 +158,28 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   }, []);
 
   /* 统计和健康只给卡片视图用，列表视图不请求——省两次没人看的往返。 */
-  useEffect(() => {
-    if (view !== "grid") return;
+  const reloadCards = useCallback(() => {
     fetchUpstreamStats()
       .then(setStats)
       .catch(() => setStats({}));
     fetchUpstreamHealth()
       .then(setHealth)
       .catch(() => setHealth({}));
-  }, [view]);
+  }, []);
+
+  useEffect(() => {
+    if (view === "grid") reloadCards();
+  }, [view, reloadCards]);
+
+  /** 「刷新」按钮：卡片视图下连统计和健康一起重拉。 */
+  function refresh() {
+    void reload();
+    if (view === "grid") reloadCards();
+  }
 
   function switchView(next: "list" | "grid") {
     setView(next);
-    try {
-      localStorage.setItem(VIEW_STORAGE_KEY, next);
-    } catch {
-      // 存储不可用时当前页面仍然生效。
-      return;
-    }
+    writeStored(VIEW_STORAGE_KEY, next);
   }
 
   /* 归档渠道走折叠区，不在主列表——和旧版一致。 */
@@ -246,6 +203,8 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   /* 归档区只吃搜索词：状态筛选描述的是路由状态，而归档渠道本就不参与
      路由，拿它去筛只会把折叠区筛成空的。 */
   const archived = upstreams.filter((u) => u.archived && matchesQuery(u));
+  // 摘要里的归档数是总数，和「渠道」「启用」一样不随搜索词变。
+  const archivedTotal = upstreams.length - active.length;
 
   const filtered = active
     .filter((u) => {
@@ -256,23 +215,10 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     })
     .sort(compareUpstreams(sort));
 
-  /* 选中集只对当前筛选结果有意义：筛掉的行看不见，批量操作不该动它们。 */
+  /* 选中集只对看得见勾选框的行有意义：筛掉的行、卡片视图里的卡片都没有勾选框，
+     批量操作和导出不该动它们。 */
   const visibleSelected = filtered.filter((u) => selected.has(u.id));
-  const allVisibleSelected = filtered.length > 0 && visibleSelected.length === filtered.length;
-
-  /** 列显隐存 localStorage，和旧版共用一个键，两边切换不丢设置。 */
-  function toggleColumn(key: ColumnKey) {
-    setColumns((current) => {
-      const next = { ...current, [key]: !current[key] };
-      try {
-        localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(next));
-      } catch {
-        // 存储不可用时当前页面仍然生效。
-        return next;
-      }
-      return next;
-    });
-  }
+  const allVisibleSelected = filtered.length > 0 && filtered.every((u) => selected.has(u.id));
 
   /** 批量启停。一条失败不应该把剩下的也停下来，所以逐个跑完再报总数。 */
   async function batchSetEnabled(enabled: boolean) {
@@ -305,7 +251,6 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
 
   /** 优先级行内编辑提交。值没变就不发请求。 */
   async function savePriority(upstream: Upstream, raw: string) {
-    setEditingPriority(null);
     // 清空是放弃编辑，不是 0：Number("") 为 0，失焦就把渠道静默降到最低层。
     if (raw.trim() === "") return;
     const next = Number(raw);
@@ -334,8 +279,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       if (request === exportRequest.current) setExportDoc(doc);
     } catch (err) {
       if (request !== exportRequest.current) return;
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`导出失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "导出失败" });
       setExportOpen(false);
     } finally {
       if (request === exportRequest.current) setBusyDialog(false);
@@ -355,8 +299,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       const tone = result.failed > 0 ? "warn" : "ok";
       toast(`新建 ${result.created} · 更新 ${result.updated} · 跳过 ${result.skipped} · 失败 ${result.failed}`, { tone });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`导入失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "导入失败" });
     } finally {
       setBusyDialog(false);
     }
@@ -415,8 +358,8 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       const updated = await run();
       setUpstreams((list) => list.map((u) => (u.id === updated.id ? updated : u)));
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
+      // 和其他操作一样弹提示；写进页面顶部的错误位不会自己消失。
+      fail(err, { prefix: "操作失败" });
     } finally {
       setPending(null);
     }
@@ -429,8 +372,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       await run();
       toast(`${label}成功。`, { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`${label}失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "${label}失败" });
     } finally {
       setPending(null);
     }
@@ -448,86 +390,22 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       await reload();
       toast(`渠道 ${saved.name} 已${isEdit ? "保存" : "创建"}。`, { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`保存失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "保存失败" });
     } finally {
       setSaving(false);
     }
   }
 
   /**
-   * 拉取上游模型列表，然后开选择器。
+   * 编辑前重拉一次：列表里的那份可能不是最新的。
    *
-   * 旧版就是这个顺序：拉到什么就拿什么作为候选，当前已选一并带进去。先重拉
-   * 一次渠道，因为保存是整体替换，拿陈旧快照当底会把别人刚改的字段覆回去。
+   * 「拉取模型」也走这里，带 startInModels：抽屉直接落在管理模型并拉目录。
    */
-  async function openModelPicker(upstream: Upstream) {
-    setPending(upstream.id);
+  async function openEditor(upstream: Upstream, extra: { startInModels?: boolean } = {}) {
     try {
-      const fresh = await getUpstream(upstream.id).catch(() => upstream);
-      const result = await fetchUpstreamModels(upstream.id);
-      setPicker({
-        upstream: fresh,
-        catalog: result.models,
-        selection: { names: fresh.model_names, mappings: fresh.model_mappings || {} },
-      });
-      toast(`已拉取 ${result.models.length} 个模型。`, { tone: "ok" });
+      setEditing({ upstream: await getUpstream(upstream.id), ...extra });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`拉取模型失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
-    } finally {
-      setPending(null);
-    }
-  }
-
-  /**
-   * 把选择写回渠道。
-   *
-   * 这个弹窗只改模型，但 PUT 是整体替换：不带的字段会被后端按默认值写回去，
-   * 也就是被清空。除了模型本身，其余全部原样回填。
-   */
-  async function saveModelSelection(next: ModelSelection) {
-    if (!picker) return;
-    const target = picker.upstream;
-    setPickerSaving(true);
-    try {
-      await updateUpstream(target.id, {
-        name: target.name,
-        base_url: target.base_url,
-        // null 加不清除，意思是「保持原有 Key」。
-        api_key: null,
-        clear_api_key: false,
-        model_names: next.names,
-        model_prefixes: target.model_prefixes,
-        model_mappings: next.mappings,
-        effort_mappings: target.effort_mappings || {},
-        priority: target.priority,
-        weight: target.weight,
-        auto_weight_enabled: target.auto_weight_enabled,
-        timeout_seconds: target.timeout_seconds,
-        enabled: target.enabled,
-        extra_headers: target.extra_headers || {},
-        rate_limit: target.rate_limit ?? null,
-        group_ids: target.group_ids ?? [],
-      });
-      setPicker(null);
-      await reload();
-      toast(`已保存 ${next.names.length} 个模型到 ${target.name}。`, { tone: "ok" });
-    } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`保存模型失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
-    } finally {
-      setPickerSaving(false);
-    }
-  }
-
-  /** 编辑前重拉一次：列表里的那份可能不是最新的。 */
-  async function openEditor(upstream: Upstream) {
-    try {
-      setEditing({ upstream: await getUpstream(upstream.id) });
-    } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`读取渠道失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "读取渠道失败" });
     }
   }
 
@@ -586,15 +464,13 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                 toast(`已恢复渠道「${snapshot.name}」。`, { tone: "ok" });
               } catch (err) {
                 // 提示条的按钮不接异常，这里不报的话，失败时提示条直接消失。
-                if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-                else toast(`恢复失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+                fail(err, { prefix: "恢复失败" });
               }
             }
           : undefined,
       });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`删除失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "删除失败" });
     }
   }
 
@@ -605,8 +481,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       await copyText(upstreamCredentialsText(full.base_url, keys));
       toast(keys.length ? "渠道地址和 API Key 已复制，请勿公开分享。" : "渠道地址已复制，未配置 API Key。", { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`复制失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "复制失败" });
     }
   }
 
@@ -626,7 +501,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
          排查渠道能不能用时第一个要点的就是它。 */
       { key: "test-model", label: "测试模型", onSelect: () => setTesting(upstream) },
       { key: "test", label: "测试连接", onSelect: () => void runAction(upstream.id, "测试连接", () => testUpstream(upstream.id)) },
-      { key: "models", label: "拉取模型", onSelect: () => void openModelPicker(upstream) },
+      { key: "models", label: "拉取模型", onSelect: () => void openEditor(upstream, { startInModels: true }) },
       { key: "balance", label: "查询 new-api 余额", onSelect: () => setBalance({ upstream, provider: "new-api" }) },
       { key: "balance-sub2api", label: "查询 sub2api 余额", onSelect: () => setBalance({ upstream, provider: "sub2api" }) },
       MENU_SEPARATOR,
@@ -653,7 +528,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         <div id="upstream-summary" className="summary-strip" aria-live="polite">
           <Summary label="渠道" value={active.length} />
           <Summary label="启用" value={active.filter((u) => u.enabled).length} />
-          <Summary label="归档" value={archived.length} />
+          <Summary label="归档" value={archivedTotal} />
         </div>
 
         <div className="view-toolbar upstream-toolbar">
@@ -679,33 +554,14 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
               <option value="effective-zero">有效权重为 0</option>
             </select>
           </label>
-          <div className="col-menu-wrap">
-            <button
-              type="button"
-              className="secondary ghost col-menu-btn"
-              aria-haspopup="true"
-              aria-expanded={colMenuOpen}
-              onClick={() => setColMenuOpen((open) => !open)}
-            >
-              列
-            </button>
-            <div className="col-menu" hidden={!colMenuOpen} role="menu" aria-label="渠道列显示">
-              {COLUMNS.map((column) => {
-                const locked = LOCKED_COLUMNS.has(column.key);
-                return (
-                  <label key={column.key} className={locked ? "is-locked" : undefined}>
-                    <input
-                      type="checkbox"
-                      checked={columns[column.key]}
-                      disabled={locked}
-                      onChange={() => toggleColumn(column.key)}
-                    />
-                    <span>{column.label + (locked ? "（固定）" : "")}</span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
+          {view === "list" ? (
+            <ColumnMenu
+              label="渠道列显示"
+              columns={UPSTREAM_COLUMNS}
+              visible={columns.visible}
+              onToggle={columns.toggle}
+            />
+          ) : null}
 
           <div className="view-toggle-wrap">
             <button
@@ -767,7 +623,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
             <button type="button" className="secondary" onClick={() => setQuickOpen(true)}>
               快速导入
             </button>
-            <button type="button" className="secondary" onClick={() => void reload()}>
+            <button type="button" className="secondary" onClick={refresh}>
               刷新
             </button>
             <button type="button" className="primary" onClick={() => setEditing({ upstream: null })}>
@@ -777,7 +633,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         </div>
 
         {error ? (
-          <p className="field-hint" role="alert" style={{ color: "var(--danger)" }}>
+          <p className="field-hint field-hint-error" role="alert">
             {error}
           </p>
         ) : null}
@@ -818,98 +674,22 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
             )}
           </div>
         ) : (
-        <div className="table-wrap">
-          {/* 列显隐靠表格上的 col-hide-{key} 类，CSS 负责藏对应的 td/th。 */}
-          <table
-            className={[
-              "admin-table",
-              "upstream-table",
-              ...COLUMNS.filter((c) => !columns[c.key]).map((c) => `col-hide-${c.key}`),
-            ].join(" ")}
-          >
-            <thead>
-              <tr>
-                <th className="col-check" data-col="check">
-                  <input
-                    type="checkbox"
-                    aria-label="全选当前筛选渠道"
-                    checked={allVisibleSelected}
-                    onChange={(event) =>
-                      setSelected(event.target.checked ? new Set(filtered.map((u) => u.id)) : new Set())
-                    }
-                  />
-                </th>
-                <SortableHeader
-                  label="ID"
-                  sortKey="id"
-                  col="id"
-                  className="col-id"
-                  sort={sort}
-                  onSort={applySort}
-                />
-                <SortableHeader label="渠道名" sortKey="name" col="name" sort={sort} onSort={applySort} />
-                <th data-col="models">模型匹配</th>
-                <th data-col="groups">分组</th>
-                <SortableHeader
-                  label="优先级"
-                  sortKey="priority"
-                  col="priority"
-                  className="col-priority"
-                  sort={sort}
-                  onSort={applySort}
-                />
-                <th className="col-weight" data-col="weight">权重</th>
-                <SortableHeader
-                  label="状态"
-                  sortKey="status"
-                  col="status"
-                  className="col-status"
-                  sort={sort}
-                  onSort={applySort}
-                />
-                <th className="col-actions" data-col="actions">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={9} className="muted">加载中…</td>
-                </tr>
-              ) : filtered.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="muted">
-                    {active.length === 0 ? "暂无渠道" : "无匹配渠道"}
-                  </td>
-                </tr>
-              ) : (
-                filtered.map((upstream) => (
-                  <UpstreamRow
-                    key={upstream.id}
-                    upstream={upstream}
-                    groups={groups}
-                    diagnostics={<ChannelDiagnosticBadge id={upstream.id} state={diagnostics} />}
-                    busy={pending === upstream.id}
-                    menu={menuFor(upstream)}
-                    checked={selected.has(upstream.id)}
-                    onCheck={(next) =>
-                      setSelected((current) => {
-                        const copy = new Set(current);
-                        if (next) copy.add(upstream.id);
-                        else copy.delete(upstream.id);
-                        return copy;
-                      })
-                    }
-                    editingPriority={editingPriority === upstream.id}
-                    onPriorityEdit={() => setEditingPriority(upstream.id)}
-                    onPriorityCommit={(raw) => void savePriority(upstream, raw)}
-                    onPriorityCancel={() => setEditingPriority(null)}
-                    onToggle={() => void mutate(upstream.id, () => setUpstreamEnabled(upstream.id, !upstream.enabled))}
-                  />
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+          <UpstreamTable
+            rows={filtered}
+            groups={groups}
+            loading={loading}
+            emptyText={active.length === 0 ? "暂无渠道" : "无匹配渠道"}
+            hiddenClasses={columns.hiddenClasses}
+            pendingId={pending}
+            selected={selected}
+            onSelect={setSelected}
+            sort={sort}
+            onSort={applySort}
+            menuFor={menuFor}
+            renderDiagnostics={(upstream) => <ChannelDiagnosticBadge id={upstream.id} state={diagnostics} />}
+            onPriority={(upstream, raw) => void savePriority(upstream, raw)}
+            onToggle={(upstream) => void mutate(upstream.id, () => setUpstreamEnabled(upstream.id, !upstream.enabled))}
+          />
         )}
 
         {archived.length > 0 ? (
@@ -930,50 +710,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
               <span className="archived-hint">不参与路由</span>
             </button>
             <div className="archived-body" hidden={!archivedOpen}>
-              <div className="table-wrap">
-                <table className="admin-table upstream-table">
-                  <tbody>
-                    {archived.map((upstream) => (
-                      <tr key={upstream.id} className="row-archived">
-                        <td className="col-id">{upstream.id}</td>
-                        <td className="name-cell">
-                          <div className="name-stack">
-                            <strong title={upstream.name}>{upstream.name}</strong>
-                            <span className="url-cell-inner">{upstream.base_url}</span>
-                          </div>
-                        </td>
-                        <td className="col-status">
-                          <span className="archived-tag">
-                            <span className="archived-tag-dot" aria-hidden="true" />
-                            已归档
-                          </span>
-                        </td>
-                        <td className="row-actions col-actions">
-                          <ActionMenu
-                            label={`${upstream.name} 的操作菜单`}
-                            entries={menuFor(upstream)}
-                            trigger={({ ref, onClick, expanded }) => (
-                              <button
-                                ref={ref}
-                                type="button"
-                                className="secondary action-menu-trigger"
-                                aria-haspopup="menu"
-                                aria-expanded={expanded}
-                                aria-label={`打开 ${upstream.name} 的操作菜单`}
-                                title="操作"
-                                disabled={pending === upstream.id}
-                                onClick={onClick}
-                              >
-                                <span aria-hidden="true">⋮</span>
-                              </button>
-                            )}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ArchivedTable rows={archived} pendingId={pending} menuFor={menuFor} />
             </div>
           </section>
         ) : null}
@@ -983,6 +720,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         open={editing !== null}
         upstream={editing?.upstream ?? null}
         draftKeys={editing?.draftKeys}
+        startInModels={editing?.startInModels}
         groups={groups}
         busy={saving}
         onSubmit={(payload) => void saveUpstream(payload)}
@@ -1032,57 +770,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
         onClose={() => setBalance(null)}
       />
 
-      {picker ? (
-        <ModelDialog
-          open
-          channelName={picker.upstream.name}
-          catalog={picker.catalog}
-          selection={picker.selection}
-          busy={pickerSaving}
-          onSave={(next) => void saveModelSelection(next)}
-          onClose={() => setPicker(null)}
-        />
-      ) : null}
     </section>
-  );
-}
-
-/**
- * 可排序表头。
- *
- * aria-sort 和箭头跟着当前排序状态走，类名照抄旧版的 table-sort-button。
- * 点同一列翻转方向，点别的列从降序开始。
- */
-function SortableHeader({
-  label,
-  sortKey,
-  col,
-  className,
-  sort,
-  onSort,
-}: {
-  label: string;
-  sortKey: SortKey;
-  col: string;
-  className?: string;
-  sort: { key: SortKey; desc: boolean };
-  onSort: (next: { key: SortKey; desc: boolean }) => void;
-}) {
-  const activeSort = sort.key === sortKey;
-  return (
-    <th
-      className={className}
-      data-col={col}
-      aria-sort={activeSort ? (sort.desc ? "descending" : "ascending") : "none"}
-    >
-      <button
-        type="button"
-        className="table-sort-button"
-        onClick={() => onSort({ key: sortKey, desc: activeSort ? !sort.desc : true })}
-      >
-        {label} <span aria-hidden="true">{activeSort ? (sort.desc ? "↓" : "↑") : ""}</span>
-      </button>
-    </th>
   );
 }
 
@@ -1094,306 +782,5 @@ function Summary({ label, value }: { label: string; value: number }) {
       <strong>{value}</strong>
       {label}
     </span>
-  );
-}
-
-/**
- * 只放行 http(s)。
- *
- * base_url 是管理员填的，不校就把一个 javascript: 开头的值变成了可点击的
- * 脚本执行入口。照抄旧版 normalizeHttpUrl。
- */
-function httpUrlOrNull(value: string): string | null {
-  const raw = String(value || "").trim();
-  if (!raw) return null;
-  const candidate = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw}`;
-  try {
-    const url = new URL(candidate);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Base URL 格。
- *
- * 旧版是 code 加两个按钮：复制、在新标签打开。只渲染纯文本的话，想拿地址
- * 去试一下得自己选中拷贝，而这一格宽度有限、地址常常被截。
- */
-function BaseUrlCell({ upstream }: { upstream: Upstream }) {
-  const toast = useToast();
-  const openable = httpUrlOrNull(upstream.base_url);
-
-  async function copy() {
-    try {
-      await copyText(upstream.base_url);
-      toast("Base URL 已复制。", { tone: "ok" });
-    } catch {
-      toast("复制失败：浏览器拒绝了剪贴板访问。", { tone: "error" });
-    }
-  }
-
-  return (
-    <div className="url-cell-inner">
-      <code title={upstream.base_url}>{upstream.base_url}</code>
-      <span className="url-cell-actions" aria-label="Base URL 操作">
-        <button
-          type="button"
-          className="secondary ghost url-action"
-          aria-label={`复制 ${upstream.name} 的 Base URL`}
-          title="复制 Base URL"
-          onClick={() => void copy()}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <rect x="9" y="9" width="10" height="10" rx="2" />
-            <path d="M5 15V7a2 2 0 0 1 2-2h8" />
-          </svg>
-        </button>
-        <button
-          type="button"
-          className="secondary ghost url-action"
-          aria-label={`打开 ${upstream.name} 的 Base URL`}
-          title={openable ? "打开 Base URL" : "不是可打开的 http(s) 地址"}
-          disabled={openable === null}
-          onClick={() => {
-            /* 只放行 http/https：httpUrlOrNull 已经过一道，这里再卡一道协议，
-               不让任何非白名单协议的地址进新标签。 */
-            const url = httpUrlOrNull(upstream.base_url);
-            if (!url || !/^https?:\/\//i.test(url)) return;
-            window.open(url, "_blank", "noopener,noreferrer");
-          }}
-        >
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M14 5h5v5" />
-            <path d="M10 14 19 5" />
-            <path d="M19 14v3a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h3" />
-          </svg>
-        </button>
-      </span>
-    </div>
-  );
-}
-
-/** 有效权重为 0 的原因。自动权重降到 0 时还要说清楚还有多久恢复。 */
-function zeroWeightNote(upstream: Upstream): string {
-  if (!upstream.auto_weight_enabled) return "固定权重 0 · 不参与路由";
-  if (Number(upstream.weight) === 0) return "基础权重 0 · 不参与动态路由";
-  const remaining = upstream.health_recovery_remaining_seconds;
-  return remaining ? `有效权重 0 · ${remaining}s 后恢复` : "有效权重 0 · 等待恢复周期";
-}
-
-/** 整数不带小数点，非整数保留两位再去尾零。照抄旧版 formatEffectiveWeight。 */
-function formatWeight(value: number): string {
-  const number = Number(value);
-  if (!Number.isFinite(number)) return "0";
-  return Number.isInteger(number)
-    ? String(number)
-    : number.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-/** 旧版 MAX_MODEL_CHIPS：只显示前几个，剩下的折成 +N。 */
-const MAX_MODEL_CHIPS = 5;
-
-type Chip = { label: string; type: string };
-
-/** 芯片列表。容器是 div 不是 span，全量标签放 title，和旧版 modelChipList 一致。 */
-function ChipList({ items }: { items: Chip[] }) {
-  const visible = items.slice(0, MAX_MODEL_CHIPS);
-  const hiddenCount = items.length - visible.length;
-  return (
-    <div className="model-chip-list" title={items.map((item) => item.label).join(", ")}>
-      {visible.map((item, index) => (
-        <span key={`${item.type}-${item.label}-${index}`} className={`model-chip ${item.type}`}>
-          {item.label}
-        </span>
-      ))}
-      {hiddenCount > 0 ? <span className="model-chip more">{`+${hiddenCount}`}</span> : null}
-    </div>
-  );
-}
-
-/** 映射在前、精确名在中、前缀在后，顺序照抄旧版 modelMatchItems。 */
-function modelMatchItems(upstream: Upstream): Chip[] {
-  return [
-    ...Object.entries(upstream.model_mappings || {}).map(([downstream, target]) => ({
-      label: `${downstream}=>${target}`,
-      type: "mapping",
-    })),
-    ...upstream.model_names.map((value) => ({ label: value, type: "name" })),
-    ...upstream.model_prefixes.map((value) => ({ label: `${value}*`, type: "prefix" })),
-  ];
-}
-
-function UpstreamRow({
-  upstream,
-  diagnostics,
-  groups,
-  busy,
-  menu,
-  checked,
-  onCheck,
-  editingPriority,
-  onPriorityEdit,
-  onPriorityCommit,
-  onPriorityCancel,
-  onToggle,
-}: {
-  upstream: Upstream;
-  diagnostics?: import("react").ReactNode;
-  groups: Array<{ id: number; name: string }>;
-  busy: boolean;
-  menu: MenuEntry[];
-  checked: boolean;
-  onCheck: (next: boolean) => void;
-  editingPriority: boolean;
-  onPriorityEdit: () => void;
-  onPriorityCommit: (raw: string) => void;
-  onPriorityCancel: () => void;
-  onToggle: () => void;
-}) {
-  const zeroWeight = upstream.effective_weight <= 0;
-  return (
-    <tr className={upstream.enabled ? undefined : "row-disabled"}>
-      <td className="col-check" data-col="check">
-        <input
-          type="checkbox"
-          className="upstream-row-check"
-          aria-label={`选择渠道 ${upstream.name}`}
-          checked={checked}
-          onChange={(event) => onCheck(event.target.checked)}
-        />
-      </td>
-      <td className="col-id" data-col="id">{upstream.id}</td>
-      <td className="name-cell" data-col="name">
-        <div className="name-stack">
-          {diagnostics}
-          <span className="name-inline">
-            <strong title={upstream.name}>{upstream.name}</strong>
-            {/* 一把 key 的渠道照旧不标；多把才值得在列表里看到。 */}
-            {upstream.key_count > 1 ? (
-              <span className="badge neutral" title="这个渠道的 Key 数，以及其中启用的">
-                {`${upstream.key_count} Key · ${upstream.enabled_key_count} 启用`}
-              </span>
-            ) : null}
-          </span>
-          <BaseUrlCell upstream={upstream} />
-        </div>
-      </td>
-      <td className="match-cell" data-col="models">
-        {modelMatchItems(upstream).length === 0 ? (
-          <span className="muted">默认候选</span>
-        ) : (
-          <ChipList items={modelMatchItems(upstream)} />
-        )}
-      </td>
-
-      {/* 分组格。漏了这一格表头 9 列、表体 8 列，其后所有单元格整体左移。 */}
-      <td className="match-cell" data-col="groups">
-        {upstream.group_ids.length === 0 ? (
-          <span className="muted">—</span>
-        ) : (
-          <ChipList
-            items={upstream.group_ids.map((id) => ({
-              label: groups.find((group) => group.id === id)?.name ?? `#${id}`,
-              type: "group",
-            }))}
-          />
-        )}
-      </td>
-
-      <td className="col-priority" data-col="priority">
-        {/* 点数字变输入框，和旧版一致。失焦或回车提交，Esc 放弃。 */}
-        {editingPriority ? (
-          <input
-            type="number"
-            className="priority-input"
-            min={0}
-            max={100000}
-            step={1}
-            defaultValue={upstream.priority}
-            autoFocus
-            aria-label={`渠道 ${upstream.name} 的优先级`}
-            onBlur={(event) => onPriorityCommit(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") onPriorityCommit(event.currentTarget.value);
-              else if (event.key === "Escape") onPriorityCancel();
-            }}
-          />
-        ) : (
-          <button
-            type="button"
-            className="priority-value"
-            aria-label={`修改渠道 ${upstream.name} 的优先级`}
-            title="点击修改优先级"
-            disabled={busy}
-            onClick={onPriorityEdit}
-          >
-            {upstream.priority}
-          </button>
-        )}
-      </td>
-      <td className="col-weight" data-col="weight">
-        {/* 动态权重显示「有效 / 基础」双值；关掉自动权重时只有基础值，
-            此时 effective_weight 不参与路由，拿出来显示会让人误以为它生效。 */}
-        <div className="weight-stack">
-          {upstream.auto_weight_enabled ? (
-            <>
-              <strong>{`${formatWeight(upstream.effective_weight)} / ${formatWeight(upstream.weight)}`}</strong>
-              <span>有效权重 / 基础权重</span>
-            </>
-          ) : (
-            <>
-              <strong>{formatWeight(upstream.weight)}</strong>
-              <span>固定权重</span>
-            </>
-          )}
-        </div>
-      </td>
-      <td className="col-status" data-col="status">
-        <div className="status-stack">
-          <button
-            type="button"
-            className={`status-switch ${upstream.enabled ? "on" : "off"}`}
-            role="switch"
-            aria-checked={upstream.enabled}
-            aria-label={`${upstream.enabled ? "停用" : "启用"}渠道 ${upstream.name}`}
-            title={upstream.enabled ? "点击停用" : "点击启用"}
-            disabled={busy}
-            onClick={onToggle}
-          >
-            <span className="status-switch-track" aria-hidden="true">
-              <span className="status-switch-thumb" />
-            </span>
-          </button>
-          {/* 三种 0 要分开说：固定权重 0、基础权重 0、被动态降到 0。
-              只说「有效权重为 0」的话，前两种看起来像故障，其实是配的。 */}
-          {zeroWeight ? (
-            <span className="effective-zero-note">{zeroWeightNote(upstream)}</span>
-          ) : null}
-        </div>
-      </td>
-      <td className="row-actions col-actions" data-col="actions">
-        <ActionMenu
-          label={`${upstream.name} 的操作菜单`}
-          entries={menu}
-          trigger={({ ref, onClick, expanded }) => (
-            <button
-              ref={ref}
-              type="button"
-              className="secondary action-menu-trigger"
-              aria-haspopup="menu"
-              aria-expanded={expanded}
-              aria-label={`打开 ${upstream.name} 的操作菜单`}
-              title="操作"
-              disabled={busy}
-              onClick={onClick}
-            >
-              <span aria-hidden="true">⋮</span>
-            </button>
-          )}
-        />
-      </td>
-    </tr>
   );
 }

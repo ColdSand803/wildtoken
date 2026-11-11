@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FocusEvent, KeyboardEvent, PointerEvent } from "react";
 
-import { UnauthorizedError, fetchDailyUsage } from "../api";
+import { fetchDailyUsage } from "../api";
 import { compactCount, scaleDailyUsage } from "../dashboardScale";
+import { readStored, writeStored } from "../storage";
 import type { DailyUsagePage } from "../types";
 import { CALENDAR_WEEKS, buildCalendar, metricOf } from "../usageCalendar";
 import type { CalendarCell, CalendarMetric, LevelRange } from "../usageCalendar";
+import { useFailure } from "../useFailure";
 
 const METRIC_KEY = "wildtoken_dashboard_calendar_metric";
 const WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"];
@@ -15,19 +17,11 @@ const METRICS: { key: CalendarMetric; label: string; unit: string }[] = [
 ];
 
 function readMetric(): CalendarMetric {
-  try {
-    return localStorage.getItem(METRIC_KEY) === "tokens" ? "tokens" : "requests";
-  } catch {
-    return "requests";
-  }
+  return readStored(METRIC_KEY) === "tokens" ? "tokens" : "requests";
 }
 
 function writeMetric(metric: CalendarMetric): void {
-  try {
-    localStorage.setItem(METRIC_KEY, metric);
-  } catch {
-    // 存不进去不影响当前页面。
-  }
+  writeStored(METRIC_KEY, metric);
 }
 
 /* 数据到之前先按浏览器的今天排一张空日历，卡片高度不跳。 */
@@ -89,6 +83,8 @@ export function UsageCalendar({
   const tipRef = useRef<HTMLDivElement>(null);
   const loadRequest = useRef(0);
 
+  const fail = useFailure(onUnauthorized);
+
   const load = useCallback(async () => {
     const request = ++loadRequest.current;
     try {
@@ -98,10 +94,9 @@ export function UsageCalendar({
       setError("");
     } catch (err) {
       if (request !== loadRequest.current) return;
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
+      fail(err, { into: setError });
     }
-  }, [onUnauthorized]);
+  }, [fail]);
 
   useEffect(() => {
     void load();

@@ -29,7 +29,7 @@ test("四份报文按固定顺序各占一个页签，元信息排在最前", ()
 test("打开详情不发请求：元信息来自列表行，报文按页签单独拉", () => {
   const page = read("web/src/pages/LogsPage.tsx");
   assert.doesNotMatch(page, /getLogDetail/);
-  assert.match(page, /function openDetail\(log: RequestLog\)/);
+  assert.match(page, /const openDetail = useCallback\(\(log: RequestLog\)/);
 
   const api = read("web/src/api.ts");
   assert.match(api, /\/api\/admin\/logs\/\$\{id\}\/snapshots\/\$\{field\}/);

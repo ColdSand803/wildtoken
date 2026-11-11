@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
-import { loadTS, read, setupDOM, jsonResponse, renderStatic, h } from "./react-harness.mjs";
+import { loadTS, read, setupDOM, jsonResponse, renderStatic, h, feedbackStub } from "./react-harness.mjs";
 const { logFilterQuery, matchesLogFilters, matchesActiveLogFilters, navigateToLogs, readLogDrilldown, saveLogDrilldown, clearLogDrilldown } = loadTS("web/src/logFilters.ts");
 const log = { id: 4, created_at: "2026-09-23 01:00:00", upstream_id: 2, downstream_token_id: 7, client_type: "pi", status_code: 200, stream: 1, duration_ms: 1000, model: "gpt-5", client_ip: "192.0.2.1" };
 const all = { search: " gpt ", clientType: "pi", status: "2xx", upstreamId: "2", tokenId: "7", start: "2026-09-23T00:00:00Z", end: "2026-09-23T02:00:00Z", stream: "true", minDurationMs: "0" };
@@ -81,6 +81,7 @@ test("channel ID input retains saved drill-down, incoming navigation and clear a
         return { items: [], has_more: false, active: [], active_total: 0 };
       } },
     "web/src/useLogStream.ts": { useLogStream: () => stream },
+    "web/src/components/feedback.tsx": feedbackStub,
   } });
   const view = ui.render(h(LogsPage, { onUnauthorized() {} }));
   try {
@@ -101,4 +102,31 @@ test("channel ID input retains saved drill-down, incoming navigation and clear a
     ui.cleanup();
     clearLogDrilldown();
   }
+});
+
+test("stream overflow keeps the page capped while allowing the next page", async () => {
+  ui.cleanup(); clearLogDrilldown();
+  const base = { ...log, method: "POST", path: "messages", request_model: "gpt-5", upstream_model: "gpt-5",
+    upstream_name: "channel", downstream_token_name: "cli", reasoning_effort: null,
+    upstream_reasoning_effort: null, response_reasoning_effort: null, upstream_key_id: 0,
+    upstream_key_name: "", prompt_tokens: 1, completion_tokens: 1, total_tokens: 2,
+    prompt_cached_tokens: null, cache_creation_tokens: null, completion_reasoning_tokens: null,
+    first_token_ms: 10, error: null, request_id: null, request_uid: null, attempt_index: null,
+    pre_upstream_ms: null, upstream_headers_ms: null, failure_stage: null, failure_retryable: null, retried: false };
+  const stream = { connected: true, logs: Array.from({ length: 60 }, (_, i) => ({ ...base, id: i + 1 })),
+    active: [], activeTotal: 0, evictedNewestId: 0 };
+  const { LogsPage } = loadTS("web/src/pages/LogsPage.tsx", { overrides: {
+    "web/src/components/feedback.tsx": feedbackStub,
+    "web/src/useLogStream.ts": { useLogStream: () => stream },
+    "web/src/api.ts": { UnauthorizedError: class extends Error {}, listLogClientTypes: async () => [],
+      listLogs: async () => ({ items: [], has_more: false, active: [], active_total: 0 }) },
+  } });
+  const view = ui.render(h(LogsPage, { onUnauthorized() {} }));
+  try {
+    await ui.waitFor(() => assert.equal(view.container.querySelectorAll("tbody > tr").length, 50));
+    assert.equal(view.getByRole("button", { name: "下一页" }).disabled, false);
+    ui.fireEvent.change(view.getByRole("combobox", { name: "日志每页条数" }), { target: { value: "20" } });
+    await ui.waitFor(() => assert.equal(view.container.querySelectorAll("tbody > tr").length, 20));
+    assert.equal(view.getByRole("button", { name: "下一页" }).disabled, false);
+  } finally { ui.cleanup(); clearLogDrilldown(); }
 });

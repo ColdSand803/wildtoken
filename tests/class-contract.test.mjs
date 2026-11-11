@@ -146,6 +146,8 @@ test("没有自造的 class", () => {
      上面那条测试已经保证每一个名字都能在共享 CSS 里找到，所以这里只是个
      次要信号。从 400 抬到 520：日志行对齐旧版时补回了 channel-stack、
      model-route 一系、status-active 一系，都是旧版真实在用的类。
-     看板的用量日历另加了 usage-calendar 一系，颜色取自主题变量。 */
-  assert.ok(used.size < 520, `用到的 class 涨到 ${used.size} 个，检查是否在自造样式`);
+     看板的用量日历另加了 usage-calendar 一系，颜色取自主题变量。
+     渠道编辑和快速导入另外加入了 ue-、qi-、mc- 三系，共用组件也沿用共享样式。
+     上限到 560，容纳这些共用件与 dev 原有诊断、瀑布图样式；类名仍须通过上面的 CSS 定义检查。 */
+  assert.ok(used.size < 560, `用到的 class 涨到 ${used.size} 个，检查是否在自造样式`);
 });

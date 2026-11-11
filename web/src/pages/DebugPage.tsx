@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { UnauthorizedError, listPromptTemplates, listUpstreams } from "../api";
+import { listPromptTemplates, listUpstreams } from "../api";
 import { Conversation } from "../components/Conversation";
 import { ChannelPicker, RunHead, formatResponse, runTone } from "../components/DebugParts";
 import { formatRequest } from "../components/ModelTestDialog";
@@ -18,6 +18,7 @@ import {
 import type { PromptTemplate, Upstream } from "../types";
 import { useDebugRuns } from "../useDebugRuns";
 import type { Run } from "../useDebugRuns";
+import { useFailure } from "../useFailure";
 
 /** 模板一条都没配时的兜底 prompt，保证默认请求体能直接发。 */
 const FALLBACK_PROMPT = "用一句话介绍你自己。";
@@ -47,6 +48,7 @@ export function DebugPage({
   const [templateId, setTemplateId] = useState("");
   const [bodyText, setBodyText] = useState(() => formatBody(defaultBody(DEBUG_PROTOCOLS[0].value, "", FALLBACK_PROMPT, true)));
   const { runs, running, now, send, stop } = useDebugRuns(onUnauthorized);
+  const fail = useFailure(onUnauthorized);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,13 +81,12 @@ export function DebugPage({
       })
       .catch((err) => {
         if (cancelled) return;
-        if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-        else setError(err instanceof Error ? err.message : String(err));
+        fail(err, { into: setError });
       });
     return () => {
       cancelled = true;
     };
-  }, [active, onUnauthorized]);
+  }, [active, fail]);
 
   const modelOptions = useMemo(() => candidateModels(upstreams, selected), [upstreams, selected]);
   const parsedBody = useMemo(() => parseBody(bodyText), [bodyText]);
