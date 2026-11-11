@@ -28,6 +28,7 @@ import {
 } from "../logSnapshots";
 import type { SnapshotCache, SnapshotSection, SnapshotState } from "../logSnapshots";
 import { reasoningChain } from "../reasoningChain";
+import { readStored, writeStored } from "../storage";
 import type { LogSnapshotField, RequestLog } from "../types";
 import { Conversation } from "./Conversation";
 import { useDialog } from "../useDialog";
@@ -41,11 +42,7 @@ type ViewMode = "conversation" | "raw";
 const VIEW_MODE_KEY = "wildtoken.logViewMode";
 
 function readViewMode(): ViewMode {
-  try {
-    return localStorage.getItem(VIEW_MODE_KEY) === "raw" ? "raw" : "conversation";
-  } catch {
-    return "conversation";
-  }
+  return readStored(VIEW_MODE_KEY) === "raw" ? "raw" : "conversation";
 }
 
 function prettyBody(text: string): string {
@@ -363,11 +360,7 @@ export function LogDetailDialog({
 
   function switchMode(next: ViewMode) {
     setMode(next);
-    try {
-      localStorage.setItem(VIEW_MODE_KEY, next);
-    } catch {
-      // 存不进去不影响当前页面。
-    }
+    writeStored(VIEW_MODE_KEY, next);
   }
 
   function selectTab(next: TabKey) {

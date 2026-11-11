@@ -16,7 +16,7 @@ function sourceFunction(source, name, indent = "") {
   return match[0];
 }
 
-const helpers = dialog.slice(dialog.indexOf("function requiredNumber("), dialog.indexOf("interface FormState {"));
+const helpers = dialog.slice(dialog.indexOf("function requiredNumber("), dialog.indexOf("export interface FormState {"));
 const functions = ["emptyForm", "formFromUpstream", "payloadFromForm"]
   .map((name) => sourceFunction(dialog, name)).join("\n");
 const group = dialog.match(/const DEFAULT_GROUP_ID = \d+;/)[0];

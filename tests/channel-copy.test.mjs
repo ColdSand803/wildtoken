@@ -54,6 +54,6 @@ test("复制前重新获取渠道和全部 Key，不把失败降级成无 Key", 
   assert.match(block, /const keys = await revealAllKeys\(full\);/);
   assert.match(block, /await copyText\(upstreamCredentialsText\(full\.base_url, keys\)\);/);
   assert.doesNotMatch(block, /\.catch\(/);
-  assert.match(block, /err instanceof UnauthorizedError\) onUnauthorized\(err\.message\)/);
+  assert.match(block, /fail\(err, \{ prefix: "复制失败" \}\)/);
   assert.match(block, /未配置 API Key/);
 });

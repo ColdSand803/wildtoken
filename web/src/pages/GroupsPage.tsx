@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from "react";
 import { useDialog } from "../useDialog";
 
 import {
-  UnauthorizedError,
   createGroup,
   deleteGroup,
   listGroupsFull,
@@ -11,6 +10,7 @@ import {
 } from "../api";
 import { useConfirm, useToast } from "../components/feedback";
 import type { Group } from "../types";
+import { useFailure } from "../useFailure";
 
 export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
   const [groups, setGroups] = useState<Group[]>([]);
@@ -21,18 +21,18 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
 
   const toast = useToast();
   const confirm = useConfirm();
+  const fail = useFailure(onUnauthorized);
 
   const reload = useCallback(async () => {
     try {
       setGroups(await listGroupsFull());
       setError("");
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
+      fail(err, { into: setError });
     } finally {
       setLoading(false);
     }
-  }, [onUnauthorized]);
+  }, [fail]);
 
   useEffect(() => {
     void reload();
@@ -49,8 +49,7 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
       await reload();
       toast(`分组 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`保存失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "保存失败" });
     } finally {
       setSaving(false);
     }
@@ -73,8 +72,7 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
       await reload();
       toast(`分组「${group.name}」已删除。`, { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`删除失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "删除失败" });
     }
   }
 
@@ -101,7 +99,7 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
         </div>
 
         {error ? (
-          <p className="field-hint" role="alert" style={{ color: "var(--danger)" }}>
+          <p className="field-hint field-hint-error" role="alert">
             {error}
           </p>
         ) : null}

@@ -6,7 +6,15 @@ const doc = { kind: "wildtoken.channels", version: 1, channels: [{ name: "test",
 test("channel parser keeps valid entries and accepts legacy documents without a header", () => { assert.deepEqual(parseChannelImportDocument(JSON.stringify(doc)), doc); assert.deepEqual(parseChannelImportDocument(JSON.stringify({ channels: doc.channels })), doc); });
 for (const item of [null, [], {}, { ...doc, kind: "wildtoken.config" }, { ...doc, version: 2 }, { ...doc, channels: [] }, { ...doc, channels: [null] }, { ...doc, channels: [{ name: "x" }] }, { ...doc, channels: Array(501).fill(doc.channels[0]) }]) test(`channel parser rejects ${JSON.stringify(item).slice(0, 75)}`, () => assert.throws(() => parseChannelImportDocument(JSON.stringify(item))));
 test("channel parser bounds byte size before parsing", () => assert.throws(() => parseChannelImportDocument("x".repeat(2 * 1024 * 1024 + 1)), /过大/));
-const { parseQuickImport } = loadTS("web/src/components/ImportExportDialogs.tsx");
-test("quick import prioritizes API endpoints and extracts a full credential", () => { const result = parseQuickImport("docs https://docs.test API https://api.test/v1 sk-abcdefghijklmnopqrstuv"); assert.equal(result.apiKey, "sk-abcdefghijklmnopqrstuv"); assert.match(result.baseUrl, /^https:\/\/api.test/); assert.deepEqual(parseQuickImport("nothing"), { baseUrl: null, apiKey: null }); });
+const { parseQuickImport, parseQuickImportCandidates } = loadTS("web/src/quickImport.ts");
+test("quick import ranks API endpoints and extracts credentials without choosing ambiguous URLs", () => {
+  const raw = "docs https://docs.test API https://api.test/v1 sk-abcdefghijklmnopqrstuv";
+  const candidates = parseQuickImportCandidates(raw);
+  assert.equal(candidates.keys[0].value, "sk-abcdefghijklmnopqrstuv");
+  assert.ok(candidates.urls[0].value.startsWith("https://api.test"));
+  assert.equal(candidates.urls.length, 2);
+  assert.equal(parseQuickImport(raw).baseUrl, null);
+  assert.deepEqual(parseQuickImport("nothing"), { baseUrl: null, apiKey: null });
+});
 const ui = setupDOM(); after(() => ui.close());
 test("selected export sends IDs and explicit key-inclusion policy; import keeps envelope and mode", async () => { const calls = []; globalThis.fetch = async (url, init) => { calls.push({ url, body: JSON.parse(init.body) }); return jsonResponse({}); }; const api = loadTS("web/src/api.ts"); await api.exportUpstreams([3, 7], false); await api.importUpstreams(doc, "skip"); assert.deepEqual(calls[0].body, { ids: [3, 7], include_api_keys: false }); assert.deepEqual(calls[1].body, { ...doc, mode: "skip" }); });

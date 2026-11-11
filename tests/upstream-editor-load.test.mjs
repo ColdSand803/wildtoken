@@ -14,10 +14,14 @@ function editor(getUpstream) {
   const opened = [];
   const errors = [];
   const auth = [];
-  const open = new Function("getUpstream", "setEditing", "UnauthorizedError", "onUnauthorized", "toast",
+  // fail 是页面统一的失败出口（useFailure）：未授权交给登录，其余弹提示。
+  const fail = (err, options) => {
+    if (err instanceof UnauthorizedError) auth.push(err.message);
+    else errors.push(`${options.prefix}：${err.message}`);
+  };
+  const open = new Function("getUpstream", "setEditing", "fail",
     compiled + "\nreturn openEditor;",
-  )(getUpstream, (value) => opened.push(value), UnauthorizedError,
-    (message) => auth.push(message), (message) => errors.push(message));
+  )(getUpstream, (value) => opened.push(value), fail);
   return { open, opened, errors, auth };
 }
 

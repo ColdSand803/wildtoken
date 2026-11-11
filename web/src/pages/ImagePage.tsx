@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { UnauthorizedError, listUpstreams } from "../api";
+import { listUpstreams } from "../api";
 import { ChannelPicker, RunHead, formatResponse, runTone } from "../components/DebugParts";
 import { formatRequest } from "../components/ModelTestDialog";
 import { candidateModels, formatBody, parseBody } from "../debugRequest";
@@ -16,6 +16,7 @@ import type { ImageItem } from "../imageRequest";
 import type { Upstream } from "../types";
 import { useDebugRuns } from "../useDebugRuns";
 import type { Run } from "../useDebugRuns";
+import { useFailure } from "../useFailure";
 
 const DEFAULT_PROMPT = "一只在窗台上晒太阳的橘猫，柔和的午后光线，写实摄影风格。";
 
@@ -55,6 +56,7 @@ export function ImagePage({
   const [selected, setSelected] = useState<number[]>([]);
   const [bodyText, setBodyText] = useState(() => formatBody(defaultImageBody("", DEFAULT_PROMPT)));
   const { runs, running, now, send, stop } = useDebugRuns(onUnauthorized);
+  const fail = useFailure(onUnauthorized);
 
   /* 页面常驻不卸载，渠道列表每次切回来重拉：渠道页的增删改归档不这样就
      看不到，删掉的渠道还能选，发出去是 404。 */
@@ -70,13 +72,12 @@ export function ImagePage({
       })
       .catch((err) => {
         if (cancelled) return;
-        if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-        else setError(err instanceof Error ? err.message : String(err));
+        fail(err, { into: setError });
       });
     return () => {
       cancelled = true;
     };
-  }, [active, onUnauthorized]);
+  }, [active, fail]);
 
   const modelOptions = useMemo(() => candidateModels(upstreams, selected), [upstreams, selected]);
   const body = useMemo(() => parseBody(bodyText), [bodyText]);

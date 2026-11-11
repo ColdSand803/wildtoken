@@ -31,7 +31,9 @@ export function loadTS(file, { overrides = {}, expose = [] } = {}) {
   }
   return load(path.join(root, file), expose);
 }
-export const feedbackStub = { useConfirm: () => async () => true, useToast: () => () => {} };
+const confirmStub = async () => true;
+const toastStub = () => {};
+export const feedbackStub = { useConfirm: () => confirmStub, useToast: () => toastStub };
 export function setupDOM() {
   const { JSDOM } = requireWeb("jsdom");
   const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { url: "http://localhost/console", pretendToBeVisual: true });

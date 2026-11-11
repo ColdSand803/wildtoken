@@ -2,7 +2,6 @@ import { DataManagement } from "../components/DataManagement";
 import { useCallback, useEffect, useState } from "react";
 
 import {
-  UnauthorizedError,
   createPromptTemplate,
   deletePromptTemplate,
   getSettings,
@@ -26,17 +25,15 @@ import {
   currentTheme,
 } from "../theme";
 import { formatTimestamp } from "../logFormat";
+import { readStored, writeStored } from "../storage";
 import type { PromptTemplate, RuntimeSettings, SystemInfo } from "../types";
+import { useFailure } from "../useFailure";
 
 /** 和 App 的路由共用一个键；改完下次打开控制台就落在这一页。 */
 const DEFAULT_HOME_KEY = "wildtoken_default_home";
 
 function readDefaultHome(): string {
-  try {
-    return localStorage.getItem(DEFAULT_HOME_KEY) ?? "dashboard";
-  } catch {
-    return "dashboard";
-  }
+  return readStored(DEFAULT_HOME_KEY) ?? "dashboard";
 }
 
 /** 每张卡管的字段。保存只提交本卡的，其余取服务端最近一次的值：原先整页
@@ -123,6 +120,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
 
   const toast = useToast();
   const confirm = useConfirm();
+  const fail = useFailure(onUnauthorized);
 
   const reload = useCallback(async () => {
     try {
@@ -137,12 +135,11 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
       setSystem(loadedSystem);
       setError("");
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else setError(err instanceof Error ? err.message : String(err));
+      fail(err, { into: setError });
     } finally {
       setLoading(false);
     }
-  }, [onUnauthorized]);
+  }, [fail]);
 
   useEffect(() => {
     void reload();
@@ -181,8 +178,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
       );
       toast("设置已保存。", { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`保存失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "保存失败" });
     } finally {
       setSavingCard(null);
     }
@@ -193,8 +189,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
     try {
       setSystem(await getSystemInfo());
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`读取运行信息失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "读取运行信息失败" });
     } finally {
       setRefreshingSystem(false);
     }
@@ -209,8 +204,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
       setRotatedToken(token);
       toast("管理员令牌已更换，当前控制台已改用新令牌。", { tone: "warn", durationMs: 9000 });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`更换失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "更换失败" });
     }
   }
 
@@ -226,11 +220,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
 
   function switchDefaultHome(next: string) {
     setDefaultHome(next);
-    try {
-      localStorage.setItem(DEFAULT_HOME_KEY, next);
-    } catch {
-      // 存不进去下次打开记不住，不影响当前页面。
-    }
+    writeStored(DEFAULT_HOME_KEY, next);
   }
 
   async function saveTemplate(name: string, prompt: string) {
@@ -242,8 +232,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
       setTemplates(await listPromptTemplates());
       toast(`Prompt「${name}」已${target ? "保存" : "创建"}。`, { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`保存失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "保存失败" });
     }
   }
 
@@ -259,8 +248,7 @@ export function SettingsPage({ onUnauthorized }: { onUnauthorized: (message: str
       setTemplates(await listPromptTemplates());
       toast(`Prompt「${template.name}」已删除。`, { tone: "ok" });
     } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(`删除失败：${err instanceof Error ? err.message : String(err)}`, { tone: "error" });
+      fail(err, { prefix: "删除失败" });
     }
   }
 
