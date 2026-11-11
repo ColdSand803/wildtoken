@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { useDialog } from "../useDialog";
 
@@ -11,48 +11,34 @@ import {
 import { useConfirm, useToast } from "../components/feedback";
 import type { Group } from "../types";
 import { useFailure } from "../useFailure";
+import { useKeyedActions } from "../useKeyedActions";
+import { useListResource } from "../useListResource";
+import { LoadError } from "../components/LoadError";
 
 export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const { items: groups, loading, error, refreshing, reload } = useListResource(listGroupsFull, onUnauthorized);
   const [editing, setEditing] = useState<{ group: Group | null } | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { pendingIds, run } = useKeyedActions<number | "save">();
+  const saving = pendingIds.has("save");
 
   const toast = useToast();
   const confirm = useConfirm();
   const fail = useFailure(onUnauthorized);
 
-  const reload = useCallback(async () => {
-    try {
-      setGroups(await listGroupsFull());
-      setError("");
-    } catch (err) {
-      fail(err, { into: setError });
-    } finally {
-      setLoading(false);
-    }
-  }, [fail]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
   async function save(name: string, description: string) {
     const target = editing?.group;
-    setSaving(true);
-    try {
-      const saved = target
-        ? await updateGroup(target.id, { name, description })
-        : await createGroup({ name, description });
-      setEditing(null);
-      await reload();
-      toast(`分组 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
-    } catch (err) {
-      fail(err, { prefix: "保存失败" });
-    } finally {
-      setSaving(false);
-    }
+    await run("save", async () => {
+      try {
+        const saved = target
+          ? await updateGroup(target.id, { name, description })
+          : await createGroup({ name, description });
+        setEditing(null);
+        await reload();
+        toast(`分组 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
+      } catch (err) {
+        fail(err, { prefix: "保存失败" });
+      }
+    });
   }
 
   async function remove(group: Group) {
@@ -67,13 +53,15 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
       confirmLabel: "删除",
     });
     if (!ok) return;
-    try {
-      await deleteGroup(group.id);
-      await reload();
-      toast(`分组「${group.name}」已删除。`, { tone: "ok" });
-    } catch (err) {
-      fail(err, { prefix: "删除失败" });
-    }
+    await run(group.id, async () => {
+      try {
+        await deleteGroup(group.id);
+        await reload();
+        toast(`分组「${group.name}」已删除。`, { tone: "ok" });
+      } catch (err) {
+        fail(err, { prefix: "删除失败" });
+      }
+    });
   }
 
   return (
@@ -90,7 +78,7 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
         <div className="view-toolbar">
           <div className="actions toolbar-actions">
             <button type="button" className="secondary" onClick={() => void reload()}>
-              刷新
+              {refreshing ? "刷新中…" : "刷新"}
             </button>
             <button type="button" className="primary" onClick={() => setEditing({ group: null })}>
               新增分组
@@ -98,11 +86,7 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
           </div>
         </div>
 
-        {error ? (
-          <p className="field-hint field-hint-error" role="alert">
-            {error}
-          </p>
-        ) : null}
+        <LoadError error={error} label="分组" onRetry={reload} />
 
         <div className="table-wrap">
           <table className="admin-table">
@@ -149,6 +133,7 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
                       <button
                         type="button"
                         className="secondary ghost"
+                        disabled={pendingIds.has(group.id)}
                         onClick={() => setEditing({ group })}
                       >
                         编辑
@@ -158,6 +143,7 @@ export function GroupsPage({ onUnauthorized }: { onUnauthorized: (message: strin
                         <button
                           type="button"
                           className="secondary ghost danger"
+                          disabled={pendingIds.has(group.id)}
                           onClick={() => void remove(group)}
                         >
                           删除
@@ -208,7 +194,8 @@ function GroupDialog({
   }, [open, group]);
 
   return (
-    <dialog className="upstream-dialog group-dialog dialog--drawer" ref={ref} onCancel={onClose}>
+    <dialog className="upstream-dialog group-dialog dialog--drawer" ref={ref}
+      onCancel={(event) => { if (busy) event.preventDefault(); else onClose(); }}>
       <form
         className="upstream-dialog-panel"
         onSubmit={(event) => {
@@ -229,6 +216,7 @@ function GroupDialog({
               className="secondary ghost icon-close"
               aria-label="关闭"
               title="关闭"
+              disabled={busy}
               onClick={onClose}
             >
               <svg className="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true">
@@ -240,7 +228,7 @@ function GroupDialog({
 
         {/* 三段：头、可滚动的正文、钉底的页脚。缺中间那层的话，满高抽屉里
             按钮不钉底。 */}
-        <div className="upstream-dialog-body">
+        <div className="upstream-dialog-body" inert={busy}>
           <section className="form-section">
             <div className="form-section-head">
               <div>
@@ -304,7 +292,7 @@ function GroupDialog({
 
         {/* modal-footer 而不是 modal-actions：面板的第三行是钉底的。 */}
         <div className="modal-footer">
-          <button type="button" className="secondary" onClick={onClose}>
+          <button type="button" className="secondary" disabled={busy} onClick={onClose}>
             取消
           </button>
           <button type="submit" className="primary" disabled={busy || !name.trim()}>

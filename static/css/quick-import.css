@@ -53,6 +53,12 @@
 .quick-import-recognition .qi-model-summary-row strong { font-size: var(--text-base); font-weight: 600; }
 .quick-import-recognition .qi-model-summary-row p { margin-top: 5px; overflow-wrap: anywhere; }
 .quick-import-recognition .qi-model-summary-row .qi-actions { flex-shrink: 0; justify-content: flex-end; }
+.quick-import-recognition .qi-model-names-label { margin-top: 16px; color: var(--muted); font-size: var(--text-sm); }
+.quick-import-recognition .qi-model-names { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 0 16px; max-height: 180px; overflow: auto; margin: 7px 0 0; padding: 0; border-top: 1px solid var(--line); list-style: none; scrollbar-width: thin; }
+.quick-import-recognition .qi-model-names li { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; min-height: 34px; border-bottom: 1px solid var(--line-soft); }
+.quick-import-recognition .qi-model-names code { min-width: 0; overflow: hidden; color: var(--text); font: var(--text-sm) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.quick-import-recognition .qi-model-names li > span { flex-shrink: 0; color: var(--muted); font-size: var(--text-xs); }
+.quick-import-recognition .qi-model-names li.is-selected > span { color: var(--ok-strong); }
 .quick-import-recognition .qi-model-note, .quick-import-recognition .qi-next-note { margin-top: 12px; }
 .quick-import-recognition .qi-pull-error { margin-top: 12px; color: var(--danger); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .quick-import-recognition .qi-footer-note { display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0; color: var(--muted); font-size: var(--text-sm); }

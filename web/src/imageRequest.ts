@@ -15,6 +15,10 @@
 
 type JSONObject = Record<string, unknown>;
 
+function isObject(value: unknown): value is JSONObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 /** 服务端存图后留在 b64_json 里的前缀，后面是图片的下载路径。和 imagestore.Marker 一致。 */
 export const STORED_IMAGE_MARKER = "@image:";
 
@@ -178,9 +182,9 @@ export function parseImageResponse(raw: string): ImageResult {
       const data = line.slice(5).trim();
       if (!data || data === "[DONE]") continue;
 
-      let event: JSONObject;
+      let event: unknown;
       try {
-        event = JSON.parse(data) as JSONObject;
+        event = JSON.parse(data);
       } catch {
         // 还没收全的最后一行：流还在收，或者日志把它截断了。能捞就捞。
         const partial = /"type"\s*:\s*"image_generation\.partial_image"/.test(data);
@@ -189,6 +193,10 @@ export function parseImageResponse(raw: string): ImageResult {
         continue;
       }
 
+      if (!isObject(event)) {
+        result.error = "图片事件不是 JSON 对象，请查看原始响应。";
+        continue;
+      }
       result.error = errorMessage(event) ?? result.error;
       if (event.usage) result.usage = event.usage;
       const partial = event.type === "image_generation.partial_image";
@@ -199,18 +207,22 @@ export function parseImageResponse(raw: string): ImageResult {
     return result;
   }
 
-  let body: JSONObject;
+  let body: unknown;
   try {
-    body = JSON.parse(text) as JSONObject;
+    body = JSON.parse(text);
   } catch {
     result.images = salvageImages(text, null);
+    return result;
+  }
+  if (!isObject(body)) {
+    result.error = "图片响应不是 JSON 对象，请查看原始响应。";
     return result;
   }
   result.error = errorMessage(body);
   result.usage = body.usage ?? null;
   if (Array.isArray(body.data)) {
     for (const entry of body.data) {
-      const item = entry && typeof entry === "object" ? fromEntry(entry as JSONObject, null) : null;
+      const item = isObject(entry) ? fromEntry(entry, null) : null;
       if (item) result.images.push(item);
     }
   }

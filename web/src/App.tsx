@@ -1,11 +1,12 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { UnauthorizedError, setAdminToken } from "./api";
+import { UnauthorizedError, getAdminToken, setAdminToken } from "./api";
 import { AdminTokenDialog } from "./components/AdminTokenDialog";
 import { CommandPalette } from "./components/CommandPalette";
 import type { Command } from "./components/CommandPalette";
 import { ConfirmProvider, ToastProvider } from "./components/feedback";
 import { Topbar } from "./components/Topbar";
+import { readStored } from "./storage";
 import {
   BUILTIN_THEMES,
   THEME_LABELS,
@@ -15,16 +16,34 @@ import {
   currentDensity,
   currentTheme,
 } from "./theme";
-import { DashboardPage } from "./pages/DashboardPage";
-import { DebugPage } from "./pages/DebugPage";
-import { GroupsPage } from "./pages/GroupsPage";
-import { ImagePage } from "./pages/ImagePage";
-import { LogsPage } from "./pages/LogsPage";
-import { SettingsPage } from "./pages/SettingsPage";
-import { TokensPage } from "./pages/TokensPage";
-import { UpstreamsPage } from "./pages/UpstreamsPage";
-import { getAdminToken } from "./api";
-import { readStored } from "./storage";
+const DashboardPage = lazy(() =>
+  import("./pages/DashboardPage").then((module) => ({ default: module.DashboardPage })),
+);
+const DebugPage = lazy(() =>
+  import("./pages/DebugPage").then((module) => ({ default: module.DebugPage })),
+);
+const GroupsPage = lazy(() =>
+  import("./pages/GroupsPage").then((module) => ({ default: module.GroupsPage })),
+);
+const ImagePage = lazy(() =>
+  import("./pages/ImagePage").then((module) => ({ default: module.ImagePage })),
+);
+const LogsPage = lazy(() =>
+  import("./pages/LogsPage").then((module) => ({ default: module.LogsPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage").then((module) => ({ default: module.SettingsPage })),
+);
+const TokensPage = lazy(() =>
+  import("./pages/TokensPage").then((module) => ({ default: module.TokensPage })),
+);
+const UpstreamsPage = lazy(() =>
+  import("./pages/UpstreamsPage").then((module) => ({ default: module.UpstreamsPage })),
+);
+
+function PageLoading() {
+  return <p className="settings-loading" role="status">加载中…</p>;
+}
 
 export type ViewId = "dashboard" | "upstreams" | "logs" | "tokens" | "groups" | "debug" | "images" | "settings";
 
@@ -187,30 +206,36 @@ export function App() {
         <div className="app-shell">
           <Topbar view={view} onNavigate={setView} />
           <main className="content">
-            {alive("debug") ? (
-              <DebugPage key={pageKey("debug")} active={view === "debug"} onUnauthorized={handleUnauthorized} />
-            ) : null}
-            {alive("images") ? (
-              <ImagePage key={pageKey("images")} active={view === "images"} onUnauthorized={handleUnauthorized} />
-            ) : null}
+            <Suspense fallback={view === "debug" ? <PageLoading /> : null}>
+              {alive("debug") ? (
+                <DebugPage key={pageKey("debug")} active={view === "debug"} onUnauthorized={handleUnauthorized} />
+              ) : null}
+            </Suspense>
+            <Suspense fallback={view === "images" ? <PageLoading /> : null}>
+              {alive("images") ? (
+                <ImagePage key={pageKey("images")} active={view === "images"} onUnauthorized={handleUnauthorized} />
+              ) : null}
+            </Suspense>
             {/* key 带前缀：和上面常驻页同处一层，裸用 pageKey(view) 会跟它们撞 key。 */}
-            <Fragment key={`routed-${pageKey(view)}`}>
-              {KEEP_ALIVE.includes(view) ? null : view === "upstreams" ? (
-                <UpstreamsPage onUnauthorized={handleUnauthorized} />
-              ) : view === "logs" ? (
-                <LogsPage onUnauthorized={handleUnauthorized} />
-              ) : view === "tokens" ? (
-                <TokensPage onUnauthorized={handleUnauthorized} />
-              ) : view === "groups" ? (
-                <GroupsPage onUnauthorized={handleUnauthorized} />
-              ) : view === "settings" ? (
-                <SettingsPage onUnauthorized={handleUnauthorized} />
-              ) : view === "dashboard" ? (
-                <DashboardPage onUnauthorized={handleUnauthorized} />
-              ) : (
-                <NotImplemented view={view} />
-              )}
-            </Fragment>
+            <Suspense fallback={<PageLoading />}>
+              <Fragment key={`routed-${pageKey(view)}`}>
+                {KEEP_ALIVE.includes(view) ? null : view === "upstreams" ? (
+                  <UpstreamsPage onUnauthorized={handleUnauthorized} />
+                ) : view === "logs" ? (
+                  <LogsPage onUnauthorized={handleUnauthorized} />
+                ) : view === "tokens" ? (
+                  <TokensPage onUnauthorized={handleUnauthorized} />
+                ) : view === "groups" ? (
+                  <GroupsPage onUnauthorized={handleUnauthorized} />
+                ) : view === "settings" ? (
+                  <SettingsPage onUnauthorized={handleUnauthorized} />
+                ) : view === "dashboard" ? (
+                  <DashboardPage onUnauthorized={handleUnauthorized} />
+                ) : (
+                  <NotImplemented view={view} />
+                )}
+              </Fragment>
+            </Suspense>
           </main>
           <AdminTokenDialog
             open={needsToken}

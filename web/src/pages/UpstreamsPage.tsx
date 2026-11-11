@@ -45,6 +45,9 @@ import { readStored, writeStored } from "../storage";
 import { upstreamCredentialsText } from "../upstreamCopy";
 import { useColumns } from "../useColumns";
 import { useFailure } from "../useFailure";
+import { useKeyedActions } from "../useKeyedActions";
+import { useListResource } from "../useListResource";
+import { LoadError } from "../components/LoadError";
 import type {
   ChannelExportDocument,
   DraftKey,
@@ -77,20 +80,20 @@ const VIEW_STORAGE_KEY = "wildtoken_upstream_view";
  * 照抄这些名字，6215 行主题样式一行不用改。
  */
 export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
-  const [upstreams, setUpstreams] = useState<Upstream[]>([]);
+  const { items: upstreams, update: setUpstreams, loading, error, refreshing, reload } = useListResource(listUpstreams, onUnauthorized);
   const [groups, setGroups] = useState<Array<{ id: number; name: string }>>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<StatusFilter>("");
-  const [pending, setPending] = useState<number | null>(null);
+  const { pendingIds, run: runRowAction } = useKeyedActions<number>();
+  const { pendingIds: pendingBatches, run: runBatch } = useKeyedActions<"enabled">();
   // 归档区默认收起，和旧版一致。
   const [archivedOpen, setArchivedOpen] = useState(false);
   // null = 关闭；{ upstream: null } = 新增；{ upstream } = 编辑。
   const [editing, setEditing] = useState<
     { upstream: Upstream | null; draftKeys?: DraftKey[]; startInModels?: boolean } | null
   >(null);
-  const [saving, setSaving] = useState(false);
+  const { pendingIds: pendingSaves, run: runSave } = useKeyedActions<"save">();
+  const saving = pendingSaves.has("save");
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   // 站点存储被禁用时，取 localStorage 这个全局本身就会抛错。
   const [sort, setSort] = useState<{ key: SortKey; desc: boolean }>(() => {
@@ -132,21 +135,6 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   const toast = useToast();
   const confirm = useConfirm();
   const fail = useFailure(onUnauthorized);
-
-  const reload = useCallback(async () => {
-    try {
-      setUpstreams(await listUpstreams());
-      setError("");
-    } catch (err) {
-      fail(err, { into: setError });
-    } finally {
-      setLoading(false);
-    }
-  }, [fail]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
 
   /* 分组只为表单里的多选服务，拿不到不影响列表。 */
   useEffect(() => {
@@ -219,31 +207,37 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
 
   /** 批量启停。一条失败不应该把剩下的也停下来，所以逐个跑完再报总数。 */
   async function batchSetEnabled(enabled: boolean) {
-    const targets = visibleSelected.filter((u) => u.enabled !== enabled);
-    if (targets.length === 0) {
-      toast(`选中的渠道已经都是${enabled ? "启用" : "停用"}状态。`);
-      return;
-    }
-    let ok = 0;
-    const failures: string[] = [];
-    for (const upstream of targets) {
-      try {
-        const updated = await setUpstreamEnabled(upstream.id, enabled);
-        setUpstreams((list) => list.map((u) => (u.id === updated.id ? updated : u)));
-        ok += 1;
-      } catch (err) {
-        if (err instanceof UnauthorizedError) {
-          onUnauthorized(err.message);
-          return;
-        }
-        failures.push(upstream.name);
+    await runBatch("enabled", async () => {
+      const targets = visibleSelected.filter((u) => u.enabled !== enabled);
+      if (targets.length === 0) {
+        toast(`选中的渠道已经都是${enabled ? "启用" : "停用"}状态。`);
+        return;
       }
-    }
-    if (failures.length === 0) {
-      toast(`已${enabled ? "启用" : "停用"} ${ok} 个渠道。`, { tone: "ok" });
-    } else {
-      toast(`${ok} 个成功，${failures.length} 个失败：${failures.join("、")}`, { tone: "error" });
-    }
+      let ok = 0;
+      let skipped = 0;
+      const failures: string[] = [];
+      for (const upstream of targets) {
+        try {
+          const result = await runRowAction(upstream.id, () => setUpstreamEnabled(upstream.id, enabled));
+          if (!result.started) { skipped += 1; continue; }
+          const updated = result.value;
+          setUpstreams((list) => list.map((u) => (u.id === updated.id ? updated : u)));
+          ok += 1;
+        } catch (err) {
+          if (err instanceof UnauthorizedError) {
+            onUnauthorized(err.message);
+            return;
+          }
+          failures.push(upstream.name);
+        }
+      }
+      const note = skipped ? `；${skipped} 个正在操作，已跳过` : "";
+      if (failures.length === 0) {
+        toast(`已${enabled ? "启用" : "停用"} ${ok} 个渠道${note}。`, { tone: skipped ? "warn" : "ok" });
+      } else {
+        toast(`${ok} 个成功，${failures.length} 个失败：${failures.join("、")}${note}`, { tone: "error" });
+      }
+    });
   }
 
   /** 优先级行内编辑提交。值没变就不发请求。 */
@@ -350,29 +344,26 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
   }
 
   async function mutate(id: number, run: () => Promise<Upstream>) {
-    setPending(id);
-    try {
-      const updated = await run();
-      setUpstreams((list) => list.map((u) => (u.id === updated.id ? updated : u)));
-    } catch (err) {
-      // 和其他操作一样弹提示；写进页面顶部的错误位不会自己消失。
-      fail(err, { prefix: "操作失败" });
-    } finally {
-      setPending(null);
-    }
+    await runRowAction(id, async () => {
+      try {
+        const updated = await run();
+        setUpstreams((list) => list.map((u) => (u.id === updated.id ? updated : u)));
+      } catch (err) {
+        fail(err, { prefix: "操作失败" });
+      }
+    });
   }
 
   /** 跑一个只报结果、不改列表的动作（测连接、拉模型、查余额）。 */
   async function runAction(id: number, label: string, run: () => Promise<unknown>) {
-    setPending(id);
-    try {
-      await run();
-      toast(`${label}成功。`, { tone: "ok" });
-    } catch (err) {
-      fail(err, { prefix: "${label}失败" });
-    } finally {
-      setPending(null);
-    }
+    await runRowAction(id, async () => {
+      try {
+        await run();
+        toast(`${label}成功。`, { tone: "ok" });
+      } catch (err) {
+        fail(err, { prefix: `${label}失败` });
+      }
+    });
   }
 
   async function saveUpstream(payload: UpstreamPayload) {
@@ -380,17 +371,16 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
     /* 克隆塞进来的是 id 0 的草稿：按新建保存，而不是 PUT /upstreams/0
        （后端对 0 查不到行，回 404，克隆就永远存不下）。 */
     const isEdit = target != null && target.id > 0;
-    setSaving(true);
-    try {
-      const saved = isEdit ? await updateUpstream(target.id, payload) : await createUpstream(payload);
-      setEditing(null);
-      await reload();
-      toast(`渠道 ${saved.name} 已${isEdit ? "保存" : "创建"}。`, { tone: "ok" });
-    } catch (err) {
-      fail(err, { prefix: "保存失败" });
-    } finally {
-      setSaving(false);
-    }
+    await runSave("save", async () => {
+      try {
+        const saved = isEdit ? await updateUpstream(target.id, payload) : await createUpstream(payload);
+        setEditing(null);
+        await reload();
+        toast(`渠道 ${saved.name} 已${isEdit ? "保存" : "创建"}。`, { tone: "ok" });
+      } catch (err) {
+        fail(err, { prefix: "保存失败" });
+      }
+    });
   }
 
   /**
@@ -426,7 +416,10 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
       confirmLabel: "删除",
     });
     if (!confirmed) return;
+    await runRowAction(upstream.id, () => deleteWithUndo(upstream));
+  }
 
+  async function deleteWithUndo(upstream: Upstream) {
     /* 先把配置和每把 key 拿到手，删掉之后才能提供「撤销」——后端没有回收站，
        撤销实际上是用同一份配置重建。取 key 失败就不给撤销：重建出来没有 key
        的渠道，不算撤销。 */
@@ -553,10 +546,10 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
           </label>
           {/* 批量条只在有选中时出现，和旧版一致。 */}
           <div className="toolbar-batch" hidden={visibleSelected.length === 0}>
-            <button type="button" className="secondary" onClick={() => void batchSetEnabled(true)}>
+            <button type="button" className="secondary" disabled={pendingBatches.has("enabled")} onClick={() => void batchSetEnabled(true)}>
               批量启用
             </button>
-            <button type="button" className="secondary" onClick={() => void batchSetEnabled(false)}>
+            <button type="button" className="secondary" disabled={pendingBatches.has("enabled")} onClick={() => void batchSetEnabled(false)}>
               批量停用
             </button>
           </div>
@@ -620,7 +613,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
               快速导入
             </button>
             <button type="button" className="secondary" onClick={refresh}>
-              刷新
+              {refreshing ? "刷新中…" : "刷新"}
             </button>
             <button type="button" className="primary" onClick={() => setEditing({ upstream: null })}>
               新增渠道
@@ -628,11 +621,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
           </div>
         </div>
 
-        {error ? (
-          <p className="field-hint field-hint-error" role="alert">
-            {error}
-          </p>
-        ) : null}
+        <LoadError error={error} label="渠道" onRetry={refresh} />
 
         {/* 卡片视图和表格视图二选一。两边用同一份 filtered，筛选和排序不分家。 */}
         {view === "grid" ? (
@@ -655,7 +644,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
                   upstream={upstream}
                   stats={stats[String(upstream.id)] ?? null}
                   health={health[String(upstream.id)] ?? null}
-                  busy={pending === upstream.id}
+                  busy={pendingIds.has(upstream.id)}
                   menu={menuFor(upstream)}
                   onToggle={() =>
                     void mutate(upstream.id, () => setUpstreamEnabled(upstream.id, !upstream.enabled))
@@ -672,7 +661,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
             loading={loading}
             emptyText={active.length === 0 ? "暂无渠道" : "无匹配渠道"}
             hiddenClasses={columns.hiddenClasses}
-            pendingId={pending}
+            pendingIds={pendingIds}
             selected={selected}
             onSelect={setSelected}
             sort={sort}
@@ -701,7 +690,7 @@ export function UpstreamsPage({ onUnauthorized }: { onUnauthorized: (message: st
               <span className="archived-hint">不参与路由</span>
             </button>
             <div className="archived-body" hidden={!archivedOpen}>
-              <ArchivedTable rows={archived} pendingId={pending} menuFor={menuFor} />
+              <ArchivedTable rows={archived} pendingIds={pendingIds} menuFor={menuFor} />
             </div>
           </section>
         ) : null}

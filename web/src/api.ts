@@ -56,6 +56,16 @@ export function clearAdminToken(): void {
   }
 }
 
+export class APIError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "APIError";
+    this.status = status;
+  }
+}
+
 /** 401 时抛这个，让调用方能弹出登录框而不是显示一条普通错误。 */
 export class UnauthorizedError extends Error {
   constructor(message: string) {
@@ -121,7 +131,7 @@ export async function send(path: string, init: RequestInit = {}): Promise<Respon
       rejectAdminToken(token, message);
       throw new UnauthorizedError(message);
     }
-    throw new Error(message);
+    throw new APIError(response.status, message);
   }
   return response;
 }
@@ -132,8 +142,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function listUpstreams(): Promise<Upstream[]> {
-  return api<Upstream[]>("/api/admin/upstreams/");
+export function listUpstreams(signal?: AbortSignal): Promise<Upstream[]> {
+  return api<Upstream[]>("/api/admin/upstreams/", { signal });
 }
 
 export function createUpstream(payload: unknown): Promise<Upstream> {
@@ -211,8 +221,8 @@ export function listGroups(): Promise<Array<{ id: number; name: string }>> {
 }
 
 /** 带计数的完整分组列表，分组页用。 */
-export function listGroupsFull(): Promise<Group[]> {
-  return api<Group[]>("/api/admin/groups/");
+export function listGroupsFull(signal?: AbortSignal): Promise<Group[]> {
+  return api<Group[]>("/api/admin/groups/", { signal });
 }
 
 export function createGroup(payload: { name: string; description: string }): Promise<Group> {
@@ -230,8 +240,8 @@ export function deleteGroup(id: number): Promise<null> {
   return api<null>(`/api/admin/groups/${id}`, { method: "DELETE" });
 }
 
-export function getSettings(): Promise<RuntimeSettings> {
-  return api<RuntimeSettings>("/api/admin/settings/");
+export function getSettings(signal?: AbortSignal): Promise<RuntimeSettings> {
+  return api<RuntimeSettings>("/api/admin/settings/", { signal });
 }
 
 /** 保存设置。revision 要原样带回去，后端靠它拒掉过期的写入。 */
@@ -275,12 +285,12 @@ export function rotateAdminToken(token: string): Promise<null> {
   });
 }
 
-export function getSystemInfo(): Promise<SystemInfo> {
-  return api<SystemInfo>("/api/admin/system");
+export function getSystemInfo(signal?: AbortSignal): Promise<SystemInfo> {
+  return api<SystemInfo>("/api/admin/system", { signal });
 }
 
-export function listPromptTemplates(): Promise<PromptTemplate[]> {
-  return api<PromptTemplate[]>("/api/admin/settings/model-test-prompts");
+export function listPromptTemplates(signal?: AbortSignal): Promise<PromptTemplate[]> {
+  return api<PromptTemplate[]>("/api/admin/settings/model-test-prompts", { signal });
 }
 
 export function createPromptTemplate(payload: {
@@ -362,8 +372,8 @@ export function listLogClientTypes(): Promise<string[]> {
   return api<{ client_types: string[] }>("/api/admin/logs/clients").then((body) => body.client_types);
 }
 
-export function listTokens(): Promise<APIToken[]> {
-  return api<APIToken[]>("/api/admin/tokens/");
+export function listTokens(signal?: AbortSignal): Promise<APIToken[]> {
+  return api<APIToken[]>("/api/admin/tokens/", { signal });
 }
 
 export function createToken(payload: unknown): Promise<APIToken> {
@@ -420,7 +430,7 @@ export function listLogs(params: {
   clientType?: string;
   status?: string;
   upstreamId?: string;
-}): Promise<RequestLogPage> {
+}, signal?: AbortSignal): Promise<RequestLogPage> {
   const query = new URLSearchParams({ limit: String(params.limit) });
   if (params.beforeCreatedAt && params.beforeId !== undefined) {
     query.set("before_created_at", params.beforeCreatedAt);
@@ -430,7 +440,7 @@ export function listLogs(params: {
   if (params.clientType) query.set("client_type", params.clientType);
   if (params.status) query.set("status", params.status);
   if (params.upstreamId) query.set("upstream_id", params.upstreamId);
-  return api<RequestLogPage>(`/api/admin/logs/?${query}`);
+  return api<RequestLogPage>(`/api/admin/logs/?${query}`, { signal });
 }
 
 /** 卡片视图的统计，一次拿全部渠道——按渠道逐个请求会变成 N 次往返。 */

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { listUpstreams } from "../api";
+import { LoadError } from "../components/LoadError";
 import { ChannelPicker, RunHead, formatResponse, runTone } from "../components/DebugParts";
 import { formatRequest } from "../components/ModelTestDialog";
-import { candidateModels, formatBody, parseBody } from "../debugRequest";
+import { ResultBoundary } from "../components/ResultBoundary";
+import { formatBody, parseBody } from "../debugRequest";
 import {
   collapseBase64,
   defaultImageBody,
@@ -13,10 +14,9 @@ import {
   withImageStream,
 } from "../imageRequest";
 import type { ImageItem } from "../imageRequest";
-import type { Upstream } from "../types";
 import { useDebugRuns } from "../useDebugRuns";
 import type { Run } from "../useDebugRuns";
-import { useFailure } from "../useFailure";
+import { useChannelSelection } from "../useChannelSelection";
 
 const DEFAULT_PROMPT = "一只在窗台上晒太阳的橘猫，柔和的午后光线，写实摄影风格。";
 
@@ -51,44 +51,14 @@ export function ImagePage({
   active: boolean;
   onUnauthorized: (message: string) => void;
 }) {
-  const [upstreams, setUpstreams] = useState<Upstream[]>([]);
-  const [error, setError] = useState("");
-  const [selected, setSelected] = useState<number[]>([]);
+  const { upstreams, selected, toggleChannel, modelOptions, error, loading, reload } = useChannelSelection(active, onUnauthorized);
   const [bodyText, setBodyText] = useState(() => formatBody(defaultImageBody("", DEFAULT_PROMPT)));
   const { runs, running, now, send, stop } = useDebugRuns(onUnauthorized);
-  const fail = useFailure(onUnauthorized);
-
-  /* 页面常驻不卸载，渠道列表每次切回来重拉：渠道页的增删改归档不这样就
-     看不到，删掉的渠道还能选，发出去是 404。 */
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    listUpstreams()
-      .then((channels) => {
-        if (cancelled) return;
-        const live = channels.filter((item) => !item.archived);
-        setUpstreams(live);
-        setSelected((current) => current.filter((id) => live.some((item) => item.id === id)));
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        fail(err, { into: setError });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [active, fail]);
-
-  const modelOptions = useMemo(() => candidateModels(upstreams, selected), [upstreams, selected]);
   const body = useMemo(() => parseBody(bodyText), [bodyText]);
 
   /** 控件改请求体。请求体坏了时控件是禁用的，这里不会被调到。 */
   function patch(update: (current: Record<string, unknown>) => Record<string, unknown>) {
     if (body) setBodyText(formatBody(update(body)));
-  }
-
-  function toggleChannel(id: number) {
-    setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
   }
 
   function sendAll() {
@@ -114,11 +84,7 @@ export function ImagePage({
           </div>
         </div>
 
-        {error ? (
-          <p className="settings-inline-status" data-tone="error" role="alert">
-            {error}
-          </p>
-        ) : null}
+        <LoadError error={error} label="渠道" onRetry={reload} />
 
         <div className="debug-layout">
           <form
@@ -130,7 +96,7 @@ export function ImagePage({
           >
             <div className="settings-card debug-params">
               <div className="debug-params-grid">
-                <ChannelPicker upstreams={upstreams} selected={selected} onToggle={toggleChannel} />
+                <ChannelPicker upstreams={upstreams} selected={selected} onToggle={toggleChannel} loading={loading} />
 
                 <div className="debug-params-side">
                   <label className="field">
@@ -271,7 +237,23 @@ export function ImagePage({
                 <p>选渠道、写 prompt，生成后图片出现在这里。</p>
               </div>
             ) : (
-              runs.map((run) => <ImageRunCard key={run.upstreamId} run={run} now={now} />)
+              runs.map((run) => (
+                <ResultBoundary
+                  key={`${run.batch}-${run.upstreamId}`}
+                  fallback={
+                    <article className="test-model-result debug-run" data-tone="error">
+                      <RunHead run={run} now={now} />
+                      <p className="debug-run-error" role="alert">图片预览失败，原始响应仍可查看。</p>
+                      <details className="test-model-details" open>
+                        <summary>完整响应（base64 已折叠）</summary>
+                        <pre>{formatResponse(run, collapseBase64(run.raw))}</pre>
+                      </details>
+                    </article>
+                  }
+                >
+                  <ImageRunCard run={run} now={now} />
+                </ResultBoundary>
+              ))
             )}
           </div>
         </div>

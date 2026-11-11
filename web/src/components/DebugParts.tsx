@@ -17,10 +17,12 @@ export function ChannelPicker({
   upstreams,
   selected,
   onToggle,
+  loading = false,
 }: {
   upstreams: Upstream[];
   selected: number[];
   onToggle: (id: number) => void;
+  loading?: boolean;
 }) {
   const [query, setQuery] = useState("");
 
@@ -44,7 +46,9 @@ export function ChannelPicker({
         onChange={(event) => setQuery(event.target.value)}
       />
       <div className="debug-channel-list" role="group" aria-label="目标渠道">
-        {visible.length === 0 ? (
+        {loading ? (
+          <p className="muted">加载渠道…</p>
+        ) : visible.length === 0 ? (
           <p className="muted">无匹配渠道</p>
         ) : (
           visible.map((item) => (

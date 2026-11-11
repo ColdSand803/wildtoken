@@ -35,7 +35,7 @@ export function UpstreamTable({
   loading,
   emptyText,
   hiddenClasses,
-  pendingId,
+  pendingIds,
   selected,
   onSelect,
   sort,
@@ -49,8 +49,8 @@ export function UpstreamTable({
   loading: boolean;
   emptyText: string;
   hiddenClasses: string[];
-  /** 正在请求中的渠道，它的行内操作暂时禁用。 */
-  pendingId: number | null;
+  /** 正在请求中的渠道，它们的行内操作暂时禁用。 */
+  pendingIds: ReadonlySet<number>;
   selected: ReadonlySet<number>;
   onSelect: (next: Set<number>) => void;
   sort: Sort;
@@ -122,7 +122,7 @@ export function UpstreamTable({
                 key={upstream.id}
                 upstream={upstream}
                 groups={groups}
-                busy={pendingId === upstream.id}
+                busy={pendingIds.has(upstream.id)}
                 menu={menuFor(upstream)}
                 checked={selected.has(upstream.id)}
                 onCheck={(next) => check(upstream.id, next)}
@@ -146,11 +146,11 @@ export function UpstreamTable({
 /** 归档区的表：没有表头，只有 ID、名称、状态和操作。 */
 export function ArchivedTable({
   rows,
-  pendingId,
+  pendingIds,
   menuFor,
 }: {
   rows: Upstream[];
-  pendingId: number | null;
+  pendingIds: ReadonlySet<number>;
   menuFor: (upstream: Upstream) => MenuEntry[];
 }) {
   return (
@@ -173,7 +173,7 @@ export function ArchivedTable({
                 </span>
               </td>
               <td className="row-actions col-actions">
-                <RowMenu upstream={upstream} entries={menuFor(upstream)} disabled={pendingId === upstream.id} />
+                <RowMenu upstream={upstream} entries={menuFor(upstream)} disabled={pendingIds.has(upstream.id)} />
               </td>
             </tr>
           ))}
