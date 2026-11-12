@@ -42,7 +42,7 @@ export function setupDOM() {
   globalThis.matchMedia = dom.window.matchMedia = media;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
-  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.setAttribute("open", ""); };
   dom.window.HTMLDialogElement.prototype.close = function () { this.removeAttribute("open"); };
   dom.window.HTMLElement.prototype.showPopover = function () { this.dataset.open = "true"; };

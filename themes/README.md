@@ -257,10 +257,50 @@ html[data-theme="soul-society"] button:not(:where(
 - **烟晶**（`liquid-glass-dark`）：烟蓝底色、深色玻璃与克制冷光。
 
 两套都是独立的 CSS-only 主题包，可从桌面侧栏的主题菜单或设置页的外观选项切换。
-仅借鉴液态玻璃的材质语言，不实现真实光学折射，也不引入 Three.js、WebGL、主题脚本或新图片/字体资源。
+包里依然只有 `theme.css` 和 `theme.json`，不引入 Three.js、WebGL、主题脚本或新图片/字体资源。
 桌面侧栏、移动端八入口导航、表格密度和抽屉布局沿用现有控制台。
 
-玻璃模糊只用于导航、KPI 和浮层；表格、图表、表单、模型清单及 HTTP 快照使用更实的背景，
-避免在每行/每格叠加滤镜。移动端关闭 KPI/Toast 模糊，其余浮层减弱效果。
-不支持 `backdrop-filter` 时自动使用实色表面；开启减少透明度时关闭模糊与玻璃高光，
+玻璃只用于导航、KPI 和浮层；表格、图表、表单、模型清单及 HTTP 快照使用更实的背景，
+避免在每行/每格叠加滤镜。移动端关闭 KPI/Toast 的玻璃效果，只保留底栏。
+不支持 `backdrop-filter` 时自动使用实色表面；开启减少透明度时关闭模糊、折射与玻璃高光，
 开启减少动态效果时缩短过渡和动画。
+
+### 边缘折射
+
+菜单、下拉面板、命令面板、Toast、KPI 卡片、居中对话框和移动端底栏的边缘会把背后的内容
+弯折进来，中央保持磨砂。折射不在主题包里：贴图必须和元素的像素尺寸一一对应，静态样式表
+给不出来，所以由控制台的 `web/src/liquidGlass.ts` 生成 SVG 滤镜，主题包只负责声明。
+算法移植自 [archisvaze/liquid-glass](https://github.com/archisvaze/liquid-glass)（MIT）。
+
+主题在 `html[data-theme="<id>"]` 上声明这些变量，引擎就会接管对应的表面：
+
+| 变量 | 含义 |
+| --- | --- |
+| `--lg-refraction-surfaces` | 带引号的选择器列表；`none` 或不声明表示不要折射 |
+| `--lg-refraction-tint` | 玻璃底色。引擎会清空元素自己的 `background-color`，改由滤镜上这层色 |
+| `--lg-refraction-bezel` | 弯折带宽度（px）；实际不会超过圆角半径 |
+| `--lg-refraction-thickness` | 玻璃厚度（px），越厚弯得越远 |
+| `--lg-refraction-ior` | 折射率，1 表示不弯 |
+| `--lg-refraction-blur` | 中央磨砂的模糊半径（px）；弯折带本身保持清晰 |
+| `--lg-refraction-specular` | 边缘高光的不透明度，0–1 |
+| `--lg-refraction-frost-edge` | 最外沿底色不透明度占中央的比例，0–1 |
+
+引擎把结果写回每个表面的内联样式，主题用带回退的 `var()` 消费，引擎没接管时就是普通模糊玻璃：
+
+```css
+html[data-theme="soul-society"] .toast {
+  background-color: var(--lg-refraction-fill, var(--glass-strong));
+  backdrop-filter: var(--lg-refraction, blur(18px) saturate(1.12));
+}
+```
+
+两点限制：只有 Chromium 会把 SVG 滤镜画进 `backdrop-filter`，Firefox 和 Safari 停在回退值上；
+表面需要四角一致、不小于 6px 的圆角，直角的抽屉和侧栏没有可折射的边。
+在响应式块或降级块里把 `--lg-refraction-surfaces` 改成别的列表或 `none`，引擎会跟着切换。
+
+### 连续曲率圆角
+
+玻璃和卡片表面在 `@supports (corner-shape: squircle)` 里改用 `corner-shape: squircle`，
+同时把半径放大（同样的半径下，连续曲率圆角看起来比圆弧小一圈）。不支持的浏览器保持圆弧。
+引擎读取 `corner-shape` 的计算值，折射贴图的角部跟着走超椭圆，所以两者不会错位。
+按钮、输入框和胶囊不参与：8–10px 下看不出差别，全圆角套超椭圆会变形。

@@ -183,6 +183,7 @@ for (const theme of variants) {
       assert.equal(fallback.length, 1);
       for (const token of ["--panel", "--glass", "--glass-strong", "--topbar-bg"])
         assert.ok(hasDecl(fallback[0], token, "var(--panel-solid)"));
+      assert.ok(hasDecl(fallback[0], "--lg-refraction-surfaces", "none"), "opaque surfaces have nothing to refract");
     }
     assert.ok(rules(theme.ast, (rule) => within(rule, "media", /prefers-reduced-transparency/) && hasDecl(rule, "backdrop-filter", "none")).length);
     assert.ok(rules(theme.ast, (rule) => within(rule, "media", /prefers-reduced-motion/) && hasDecl(rule, "animation-duration", "0.01ms") &&
@@ -191,6 +192,68 @@ for (const theme of variants) {
     assert.equal(mobile.length, 1);
     assert.ok(rules(theme.ast, (rule) => rule.selector.includes(":focus-visible") && hasDecl(rule, "outline", "2px solid var(--focus)")).length);
     assert.ok(rules(theme.ast, (rule) => rule.selector === `${theme.scope} .aurora` && hasDecl(rule, "display", "none")).length);
+  });
+
+  test(`${theme.label}: refraction is declared for the engine and consumed over a blur fallback`, () => {
+    const declared = theme.tokens["--lg-refraction-surfaces"];
+    assert.match(declared ?? "", /^"[^"]+"$/, "a quoted selector list the engine can hand to querySelectorAll");
+    const surfaces = declared.slice(1, -1).split(",").map((selector) => selector.trim());
+    const floating = [".kpi-card", ".dashboard-kpi", ".theme-menu", ".col-menu", ".upstream-action-menu", ".select-panel", ".command-palette-panel", ".toast"];
+    // Drawers are square and the rail is a full-height sheet: neither has a rim to bend light.
+    assert.deepEqual(surfaces, [...floating, "dialog:not(.command-palette-dialog):not(.dialog--drawer)"]);
+    assert.equal(theme.tokens["--lg-refraction-tint"], "var(--glass-strong)", "the glass keeps the tint the contrast checks cover");
+    for (const [token, minimum, maximum] of [["bezel", 8, 40], ["thickness", 1, 60], ["ior", 1.05, 2.5], ["blur", 4, 24], ["specular", 0, 1], ["frost-edge", 0.2, 1]]) {
+      const value = Number(theme.tokens[`--lg-refraction-${token}`]);
+      assert.ok(value >= minimum && value <= maximum, `--lg-refraction-${token} is ${theme.tokens[`--lg-refraction-${token}`]}`);
+    }
+    // The engine clears the element's own fill; the fallback restores it whenever the engine stays out.
+    const material = rules(theme.ast, (rule) => hasDecl(rule, "background-color", "var(--lg-refraction-fill, var(--lg-material-bg))") && !within(rule, "media", /./));
+    assert.equal(material.length, 1);
+    for (const selector of [...floating, "dialog:not(.command-palette-dialog)"]) assert.ok(material[0].selector.includes(selector), `${selector} must hand its fill over`);
+    const filtered = rules(theme.ast, (rule) => rule.selector.includes(".kpi-card") && within(rule, "supports", /^\(backdrop-filter/) && !within(rule, "media", /./));
+    assert.equal(filtered.length, 1);
+    for (const selector of [...floating, "dialog:not(.command-palette-dialog)"]) assert.ok(filtered[0].selector.includes(selector));
+    assert.doesNotMatch(filtered[0].selector, /topbar/, "the rail keeps a plain blur");
+    for (const prop of ["backdrop-filter", "-webkit-backdrop-filter"])
+      assert.ok(hasDecl(filtered[0], prop, "var(--lg-refraction, blur(var(--blur)) saturate(1.12))"), `${prop} falls back to the existing blur`);
+  });
+
+  test(`${theme.label}: on phones only the dock refracts`, () => {
+    const root = rules(theme.ast, (rule) => rule.selector === theme.scope && within(rule, "media", /max-width: 760px/) && !within(rule, "supports", /./));
+    assert.equal(root.length, 1);
+    assert.ok(hasDecl(root[0], "--lg-refraction-surfaces", '".topbar-nav"'));
+    // The dock is 54px tall with labels 9px off its lower edge: the desktop bezel
+    // would leave them on clear glass, with page content showing through the text.
+    const bezel = Number(root[0].nodes.find((decl) => decl.prop === "--lg-refraction-bezel")?.value);
+    assert.ok(bezel >= 6 && bezel <= 10, `dock bezel is ${bezel}`);
+    assert.ok(bezel < Number(theme.tokens["--lg-refraction-bezel"]));
+    const dock = rules(theme.ast, (rule) => rule.selector === `${theme.scope} .topbar-nav` && within(rule, "media", /max-width: 760px/));
+    assert.ok(dock.some((rule) => hasDecl(rule, "background-color", "var(--lg-refraction-fill, var(--lg-material-bg))")));
+    assert.ok(dock.some((rule) => within(rule, "supports", /^\(backdrop-filter/) &&
+      hasDecl(rule, "backdrop-filter", "var(--lg-refraction, blur(8px) saturate(1.08))") &&
+      hasDecl(rule, "-webkit-backdrop-filter", "var(--lg-refraction, blur(8px) saturate(1.08))")));
+  });
+
+  test(`${theme.label}: continuous corners are progressive and leave dialog geometry alone`, () => {
+    theme.ast.walkDecls(/^corner-/, (decl) => {
+      assert.equal(`${decl.prop}: ${decl.value}`, "corner-shape: squircle");
+      assert.ok(within(decl, "supports", /^\(corner-shape: squircle\)$/), "arcs stay the baseline for browsers without corner-shape");
+    });
+    const shaped = rules(theme.ast, (rule) => hasDecl(rule, "corner-shape", "squircle")).map((rule) => rule.selector).join(" ");
+    for (const selector of [".kpi-card", ".dashboard-kpi", ".theme-menu", ".col-menu", ".upstream-action-menu", ".select-panel", ".command-palette-panel",
+      ".toast", ".topbar-nav", ".table-wrap", ".dashboard-card", ".settings-card", ".channel-card", "dialog:not(.dialog--drawer)"])
+      assert.ok(shaped.includes(selector), `${selector} should use a continuous corner`);
+    // Full-round pills and dots would deform into lozenges; 8-10px controls show no difference.
+    assert.doesNotMatch(shaped, /button|input|textarea|pill|chip|badge|dot\b|nav-link/);
+    // A squircle reads tighter than an arc of the same radius, so the radius grows with it.
+    assert.equal(theme.tokens["--lg-radius"], "20px");
+    const grown = rules(theme.ast, (rule) => rule.selector === theme.scope && within(rule, "supports", /^\(corner-shape: squircle\)$/));
+    assert.equal(grown.length, 1);
+    const radius = grown[0].nodes.find((decl) => decl.prop === "--lg-radius")?.value;
+    assert.ok(Number.parseFloat(radius) > 20 && radius.endsWith("px"), `--lg-radius under corner-shape is ${radius}`);
+    const rounded = rules(theme.ast, (rule) => hasDecl(rule, "border-radius", "var(--lg-radius)")).map((rule) => rule.selector).join(" ");
+    for (const selector of [".kpi-card", ".dashboard-kpi", ".theme-menu", ".col-menu", ".upstream-action-menu", ".select-panel", ".command-palette-panel", ".toast", ".topbar-nav"])
+      assert.ok(rounded.includes(selector), `${selector} should take the glass radius`);
   });
 
   test(`${theme.label}: runtime and first-paint selection use matching manifests`, () => {
@@ -253,4 +316,18 @@ test("liquid-glass variants keep identical layout/material rules and existing ic
   rail.walkDecls((decl) => { if (decl.prop.startsWith("--rail-icon-") && decl.value.startsWith("url(")) icons.set(decl.prop, decl.value); });
   for (const theme of variants) for (const [token, value] of icons)
     assert.equal(theme.tokens[token] ?? rules(theme.ast, (rule) => hasDecl(rule, token, value))[0]?.nodes.find((decl) => decl.prop === token)?.value, value);
+});
+
+test("the console starts the refraction engine once, and theme and engine agree on its inputs", () => {
+  const main = read("web/src/main.tsx");
+  assert.match(main, /import \{ initLiquidGlass \} from "\.\/liquidGlass";/);
+  assert.equal(main.match(/initLiquidGlass\(\)/g)?.length, 1);
+  // A token the engine never reads is dead; one the theme never sets silently falls back to a default.
+  const engine = read("web/src/liquidGlass.ts");
+  const outputs = ["--lg-refraction-fill"];
+  const inputs = [...new Set([...engine.matchAll(/"(--lg-refraction-[a-z-]+)"/g)].map((match) => match[1]))]
+    .filter((name) => !outputs.includes(name)).sort();
+  assert.ok(inputs.length >= 8, `engine inputs: ${inputs.join(", ")}`);
+  for (const theme of variants)
+    assert.deepEqual(Object.keys(theme.tokens).filter((name) => name.startsWith("--lg-refraction-")).sort(), inputs, theme.id);
 });
