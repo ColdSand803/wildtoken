@@ -60,7 +60,8 @@ export function TokenDialog({
   onSubmit: (payload: TokenPayload) => void;
   onClose: () => void;
 }) {
-  const ref = useDialog(open, onClose);
+  const close = () => { if (!busy) onClose(); };
+  const ref = useDialog(open, close);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [enabled, setEnabled] = useState(true);
@@ -101,7 +102,8 @@ export function TokenDialog({
       : new Date(parsedExpiry.expiresAtMs).toLocaleString("zh-CN", { hour12: false });
 
   return (
-    <dialog className="upstream-dialog dialog--drawer" ref={ref} onCancel={onClose}>
+    <dialog className="upstream-dialog dialog--drawer" ref={ref}
+      onCancel={(event) => { if (busy) event.preventDefault(); else onClose(); }}>
       <form
         className="upstream-dialog-panel"
         onSubmit={(event) => {
@@ -138,7 +140,8 @@ export function TokenDialog({
               className="secondary ghost icon-close"
               aria-label="关闭"
               title="关闭"
-              onClick={onClose}
+              disabled={busy}
+              onClick={close}
             >
               <svg className="dialog-icon dialog-icon--close" viewBox="0 0 16 16" aria-hidden="true">
                 <path d="M4 4l8 8M12 4L4 12" />
@@ -150,7 +153,7 @@ export function TokenDialog({
         {/* 三段：头、可滚动的正文、钉底的页脚。upstream-dialog-panel 本来就是
             grid-template-rows: auto minmax(0,1fr) auto，缺了中间那层的话，满高抽屉里
             按钮不钉底，要滚到最下面才够得着。 */}
-        <div className="upstream-dialog-body">
+        <div className="upstream-dialog-body" inert={busy}>
           <section className="form-section">
             <div className="form-section-head">
               <div>
@@ -342,7 +345,7 @@ export function TokenDialog({
         {/* modal-footer 而不是 modal-actions：面板的第三行是钉底的，满高抽屉里
             按钮不该跟着正文滚到看不见的地方。 */}
         <div className="modal-footer">
-          <button type="button" className="secondary" onClick={onClose}>
+          <button type="button" className="secondary" disabled={busy} onClick={close}>
             取消
           </button>
           <button type="submit" className="primary" disabled={busy || !name.trim() || !parsedExpiry.ok || !parsedModels.ok}>

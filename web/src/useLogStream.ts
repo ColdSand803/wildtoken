@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 
 import { getAdminToken, rejectAdminToken } from "./api";
 import type { ActiveRequest, RequestLog } from "./types";
+import { parseStreamEvent } from "./driver/sse";
+import type { StreamEvent } from "./driver/sse";
+
+export { parseStreamEvent } from "./driver/sse";
 
 const STREAM_PATH = "/api/admin/logs/stream";
 
@@ -12,32 +16,6 @@ const RECONNECT_MAX_MS = 30000;
 /** 连上超过这个时长才把退避计数清零，否则一直闪断会立刻重试到上限。 */
 const STABLE_CONNECTION_MS = 5000;
 const MAX_BUFFER_CHARS = 1_000_000;
-
-/** SSE 帧解析结果。event 缺省是 "message"，和规范一致。 */
-interface StreamEvent {
-  type: string;
-  data: string;
-}
-
-/**
- * 解析一个 SSE 帧。
- *
- * 按字段名收集，data 可以有多行、用 \n 连接。冒号开头的是注释行，丢掉。
- */
-export function parseStreamEvent(frame: string): StreamEvent {
-  let type = "message";
-  const data: string[] = [];
-  for (const line of frame.split(/\r\n|\n|\r/)) {
-    if (!line || line.startsWith(":")) continue;
-    const separator = line.indexOf(":");
-    const field = separator === -1 ? line : line.slice(0, separator);
-    let value = separator === -1 ? "" : line.slice(separator + 1);
-    if (value.startsWith(" ")) value = value.slice(1);
-    if (field === "event") type = value || "message";
-    else if (field === "data") data.push(value);
-  }
-  return { type, data: data.join("\n") };
-}
 
 export interface LogStreamState {
   /** 已结束的请求，最新在前。 */

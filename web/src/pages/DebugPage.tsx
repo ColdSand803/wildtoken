@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { listPromptTemplates, listUpstreams } from "../api";
+import { listPromptTemplates } from "../api";
+import { LoadError } from "../components/LoadError";
 import { Conversation } from "../components/Conversation";
 import { ChannelPicker, RunHead, formatResponse, runTone } from "../components/DebugParts";
 import { formatRequest } from "../components/ModelTestDialog";
@@ -9,16 +10,15 @@ import type { DebugProtocol } from "../debugApi";
 import {
   DEBUG_PROTOCOLS,
   bodyModel,
-  candidateModels,
   defaultBody,
   formatBody,
   parseBody,
   withStream,
 } from "../debugRequest";
-import type { PromptTemplate, Upstream } from "../types";
+import type { PromptTemplate } from "../types";
 import { useDebugRuns } from "../useDebugRuns";
 import type { Run } from "../useDebugRuns";
-import { useFailure } from "../useFailure";
+import { useChannelSelection } from "../useChannelSelection";
 
 /** 模板一条都没配时的兜底 prompt，保证默认请求体能直接发。 */
 const FALLBACK_PROMPT = "用一句话介绍你自己。";
@@ -38,17 +38,15 @@ export function DebugPage({
   active: boolean;
   onUnauthorized: (message: string) => void;
 }) {
-  const [upstreams, setUpstreams] = useState<Upstream[]>([]);
+  const { upstreams, selected, toggleChannel, modelOptions, error, loading, reload } = useChannelSelection(active, onUnauthorized);
   const [templates, setTemplates] = useState<PromptTemplate[]>([]);
-  const [error, setError] = useState("");
-  const [selected, setSelected] = useState<number[]>([]);
   const [protocol, setProtocol] = useState<DebugProtocol>(DEBUG_PROTOCOLS[0].value);
   const [model, setModel] = useState("");
   const [stream, setStream] = useState(true);
   const [templateId, setTemplateId] = useState("");
   const [bodyText, setBodyText] = useState(() => formatBody(defaultBody(DEBUG_PROTOCOLS[0].value, "", FALLBACK_PROMPT, true)));
+  const draftTouched = useRef(false);
   const { runs, running, now, send, stop } = useDebugRuns(onUnauthorized);
-  const fail = useFailure(onUnauthorized);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +55,7 @@ export function DebugPage({
       .then((prompts) => {
         if (cancelled) return;
         setTemplates(prompts);
-        if (prompts[0]) {
+        if (prompts[0] && !draftTouched.current) {
           setTemplateId(String(prompts[0].id));
           setBodyText(formatBody(defaultBody(DEBUG_PROTOCOLS[0].value, "", prompts[0].prompt, true)));
         }
@@ -67,47 +65,26 @@ export function DebugPage({
     };
   }, []);
 
-  /* 页面常驻不卸载，渠道列表每次切回来重拉：渠道页的增删改归档不这样就
-     看不到，删掉的渠道还能选，发出去是 404。 */
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    listUpstreams()
-      .then((channels) => {
-        if (cancelled) return;
-        const live = channels.filter((item) => !item.archived);
-        setUpstreams(live);
-        setSelected((current) => current.filter((id) => live.some((item) => item.id === id)));
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        fail(err, { into: setError });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [active, fail]);
-
-  const modelOptions = useMemo(() => candidateModels(upstreams, selected), [upstreams, selected]);
   const parsedBody = useMemo(() => parseBody(bodyText), [bodyText]);
 
   function currentPrompt(): string {
     return templates.find((item) => String(item.id) === templateId)?.prompt ?? FALLBACK_PROMPT;
   }
 
+  function editBody(text: string) {
+    draftTouched.current = true;
+    setBodyText(text);
+  }
+
   /** 改了协议或模板：按新形状重建请求体，手改的内容会被覆盖。 */
   function rebuild(nextProtocol: DebugProtocol, prompt: string) {
-    setBodyText(formatBody(defaultBody(nextProtocol, model, prompt, stream)));
+    editBody(formatBody(defaultBody(nextProtocol, model, prompt, stream)));
   }
 
   /** 模型和流式只改对应字段，保留手改的其余部分。请求体坏了就不动它。 */
   function patchBody(patch: (body: Record<string, unknown>) => Record<string, unknown>) {
     const body = parseBody(bodyText);
-    if (body) setBodyText(formatBody(patch(body)));
-  }
-
-  function toggleChannel(id: number) {
-    setSelected((current) => (current.includes(id) ? current.filter((item) => item !== id) : [...current, id]));
+    if (body) editBody(formatBody(patch(body)));
   }
 
   function sendAll() {
@@ -132,11 +109,7 @@ export function DebugPage({
           </div>
         </div>
 
-        {error ? (
-          <p className="settings-inline-status" data-tone="error" role="alert">
-            {error}
-          </p>
-        ) : null}
+        <LoadError error={error} label="渠道" onRetry={reload} />
 
         <div className="debug-layout">
           <form
@@ -148,7 +121,7 @@ export function DebugPage({
           >
             <div className="settings-card debug-params">
               <div className="debug-params-grid">
-                <ChannelPicker upstreams={upstreams} selected={selected} onToggle={toggleChannel} />
+                <ChannelPicker upstreams={upstreams} selected={selected} onToggle={toggleChannel} loading={loading} />
 
                 <div className="debug-options">
                   <label className="field">
@@ -199,7 +172,9 @@ export function DebugPage({
                         rebuild(protocol, prompt ?? FALLBACK_PROMPT);
                       }}
                     >
-                      {templates.length === 0 ? <option value="">未配置模板</option> : null}
+                      {templateId === "" ? (
+                        <option value="">{templates.length === 0 ? "未配置模板" : "选择模板"}</option>
+                      ) : null}
                       {templates.map((item) => (
                         <option key={item.id} value={item.id}>
                           {item.name}
@@ -247,7 +222,7 @@ export function DebugPage({
                   rows={10}
                   value={bodyText}
                   aria-invalid={parsedBody === null}
-                  onChange={(event) => setBodyText(event.target.value)}
+                  onChange={(event) => editBody(event.target.value)}
                 />
                 <span className="field-hint">
                   {parsedBody === null

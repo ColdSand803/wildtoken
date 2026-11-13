@@ -52,5 +52,5 @@ test("状态行的默认隐藏仍由 [hidden] 承担", () => {
     /\.live-indicator\[hidden\] \{\n\s*display: none;/,
     "enhancements.css 必须保留 .live-indicator[hidden] 的隐藏",
   );
-  assert.match(read("web/src/pages/LogsPage.tsx"), /已暂停/);
+  assert.match(read("web/src/components/logs/LogToolbar.tsx"), /已暂停/);
 });

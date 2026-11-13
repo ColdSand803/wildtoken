@@ -167,6 +167,14 @@ function ModelSummary({ editor }: { editor: QuickImportController }) {
         </button>
       </div>
     </div>
+    {preview?.returned.size ? <>
+      <p className="qi-model-names-label">本次拉取到的模型</p>
+      <ul className="qi-model-names" aria-label="本次拉取到的模型">
+        {[...preview.returned].map((name) => <li key={name} className={preview.picked.has(name) ? "is-selected" : ""}>
+          <code title={name}>{name}</code><span>{preview.picked.has(name) ? "已选" : "未选"}</span>
+        </li>)}
+      </ul>
+    </> : null}
     {stale ? <div className="qi-notice qi-notice--warning"><Icon name="info" /><p>地址或 Key 已改变，旧目录不会自动带入新连接。请重新拉取，或明确选择“暂不带入模型”。</p></div> : null}
     {pullError ? <p className="qi-pull-error" role="alert">拉取失败：{pullError}</p> : null}
     {preview && !stale && !pulling && (preview.picked.size === 0 || preview.returned.size === 0) ?

@@ -1,6 +1,6 @@
-import { parseLogTime } from "./logFormat";
+import { parseLogTime } from "./logFormat.ts";
 import type { ActiveRequest, RequestLog } from "./types";
-import { activeMatchesFilters as matchesActiveCoreFilters } from "./logFilter";
+import { activeMatchesFilters as matchesActiveCoreFilters } from "./logFilter.ts";
 
 export interface LogFilters {
   search?: string;

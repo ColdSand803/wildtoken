@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   UnauthorizedError,
@@ -26,6 +26,9 @@ import {
 } from "../tokenFormat";
 import type { APIToken } from "../types";
 import { useFailure } from "../useFailure";
+import { useKeyedActions } from "../useKeyedActions";
+import { useListResource } from "../useListResource";
+import { LoadError } from "../components/LoadError";
 
 /** 创建于明文保存启用之前的令牌，完整值已经取不回来了。 */
 const SEALED_TITLE = "这个令牌创建于明文保存启用之前，完整值已经无法恢复。需要完整令牌只能删除后重建。";
@@ -91,34 +94,18 @@ function QuotaCell({ token }: { token: APIToken }) {
 }
 
 export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: string) => void }) {
-  const [tokens, setTokens] = useState<APIToken[]>([]);
+  const { items: tokens, update: setTokens, loading, error, refreshing, reload } = useListResource(listTokens, onUnauthorized);
   const [groups, setGroups] = useState<Array<{ id: number; name: string }>>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
   const [query, setQuery] = useState("");
-  const [pending, setPending] = useState<number | null>(null);
+  const { pendingIds, run: runRowAction } = useKeyedActions<number>();
   const [editing, setEditing] = useState<{ token: APIToken | null } | null>(null);
-  const [saving, setSaving] = useState(false);
+  const { pendingIds: pendingSaves, run: runSave } = useKeyedActions<"save">();
+  const saving = pendingSaves.has("save");
   const [copiedId, setCopiedId] = useState<number | null>(null);
 
   const toast = useToast();
   const confirm = useConfirm();
   const fail = useFailure(onUnauthorized);
-
-  const reload = useCallback(async () => {
-    try {
-      setTokens(await listTokens());
-      setError("");
-    } catch (err) {
-      fail(err, { into: setError });
-    } finally {
-      setLoading(false);
-    }
-  }, [fail]);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
 
   useEffect(() => {
     listGroups()
@@ -143,35 +130,32 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
 
   /** 返回是否成功：错误在这里就报了，调用方据此决定还要不要报成功。 */
   async function mutate(id: number, run: () => Promise<APIToken>): Promise<boolean> {
-    setPending(id);
-    try {
-      const updated = await run();
-      setTokens((list) => list.map((t) => (t.id === updated.id ? updated : t)));
-      return true;
-    } catch (err) {
-      if (err instanceof UnauthorizedError) onUnauthorized(err.message);
-      else toast(err instanceof Error ? err.message : String(err), { tone: "error" });
-      return false;
-    } finally {
-      setPending(null);
-    }
+    const result = await runRowAction(id, async () => {
+      try {
+        const updated = await run();
+        setTokens((list) => list.map((t) => (t.id === updated.id ? updated : t)));
+        return true;
+      } catch (err) {
+        if (err instanceof UnauthorizedError) onUnauthorized(err.message);
+        else toast(err instanceof Error ? err.message : String(err), { tone: "error" });
+        return false;
+      }
+    });
+    return result.started && result.value;
   }
 
   async function save(payload: TokenPayload) {
     const target = editing?.token;
-    setSaving(true);
-    try {
-      /* 更新也带 enabled：编辑框里有这个开关，原先发送前把它剔掉，
-         改了开关提示已保存，令牌却照旧可用。 */
-      const saved = target ? await updateToken(target.id, payload) : await createToken(payload);
-      setEditing(null);
-      await reload();
-      toast(`令牌 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
-    } catch (err) {
-      fail(err, { prefix: "保存失败" });
-    } finally {
-      setSaving(false);
-    }
+    await runSave("save", async () => {
+      try {
+        const saved = target ? await updateToken(target.id, payload) : await createToken(payload);
+        setEditing(null);
+        await reload();
+        toast(`令牌 ${saved.name} 已${target ? "保存" : "创建"}。`, { tone: "ok" });
+      } catch (err) {
+        fail(err, { prefix: "保存失败" });
+      }
+    });
   }
 
   async function remove(token: APIToken) {
@@ -181,13 +165,15 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
       confirmLabel: "删除",
     });
     if (!ok) return;
-    try {
-      await deleteToken(token.id);
-      await reload();
-      toast(`令牌「${token.name}」已删除。`, { tone: "ok" });
-    } catch (err) {
-      fail(err, { prefix: "删除失败" });
-    }
+    await runRowAction(token.id, async () => {
+      try {
+        await deleteToken(token.id);
+        await reload();
+        toast(`令牌「${token.name}」已删除。`, { tone: "ok" });
+      } catch (err) {
+        fail(err, { prefix: "删除失败" });
+      }
+    });
   }
 
   /** 复制完整令牌。封存的行没有明文可复制。 */
@@ -258,7 +244,7 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
           </label>
           <div className="actions toolbar-actions">
             <button type="button" className="secondary" onClick={() => void reload()}>
-              刷新
+              {refreshing ? "刷新中…" : "刷新"}
             </button>
             <button type="button" className="primary" onClick={() => setEditing({ token: null })}>
               新增令牌
@@ -266,11 +252,7 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
           </div>
         </div>
 
-        {error ? (
-          <p className="field-hint field-hint-error" role="alert">
-            {error}
-          </p>
-        ) : null}
+        <LoadError error={error} label="令牌" onRetry={reload} />
 
         <div className="table-wrap">
           <table className="admin-table token-table">
@@ -303,7 +285,7 @@ export function TokensPage({ onUnauthorized }: { onUnauthorized: (message: strin
                   <TokenRow
                     key={token.id}
                     token={token}
-                    busy={pending === token.id}
+                    busy={pendingIds.has(token.id)}
                     copied={copiedId === token.id}
                     menu={menuFor(token)}
                     onCopy={() => void copyToken(token)}

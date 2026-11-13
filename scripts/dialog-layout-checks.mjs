@@ -61,7 +61,7 @@ async function measureDrawer(page) {
 
     const style = getComputedStyle(dialog);
     const fields = [...body.querySelectorAll(".field")];
-    const rows = [...body.querySelectorAll(".model-option, .balance-row")];
+    const rows = [...body.querySelectorAll(".model-option, .mc-row, .balance-row")];
     const title = head.querySelector("h2");
     const close = head.querySelector(".icon-close");
     const controls = [...body.querySelectorAll("input:not([type=checkbox]), select")];
@@ -214,12 +214,15 @@ export async function checkDialogLayouts({ page, check, gotoView, openRowMenu, c
         await gotoView(page, "渠道");
         await clickText(page, ".view-toolbar", "快速导入");
         await page.waitForSelector(selector);
-        assert.ok(await page.evaluate((scope) => document.activeElement === document.querySelector(`${scope} textarea`), selector), "初始焦点不在原始文本框");
-
+        await clickText(page, selector, "清空重来");
+        await page.waitFor(() => document.activeElement === document.getElementById("quick-import-source"), { label: "原文输入焦点" });
         const key = "sk-layout-check-0123456789abcdef";
-        await page.fill(`${selector} textarea`, `https://api.example.com/v1 ${key}`);
-        const values = await page.evaluate((scope) => [...document.querySelectorAll(`${scope} input`)].map((input) => input.value), selector);
-        assert.deepEqual(values, ["api-example", "https://api.example.com", key], "识别结果没有回填");
+        await page.paste(`${selector} #quick-import-source`, `https://api.example.com/v1 ${key}`);
+        const values = await page.waitFor(() => {
+          const fields = ["quick-import-name", "quick-import-url", "quick-import-apikey"].map((id) => document.getElementById(id)?.value);
+          return fields[2] === "sk-layout-check-0123456789abcdef" ? fields : false;
+        }, { label: "粘贴识别回填" });
+        assert.deepEqual(values, ["example", "https://api.example.com/v1", key], "识别不得丢失接口路径或 Key");
 
         const box = await measureDrawer(page);
         await clickAt(page, box.body.left + 6, box.body.top + 6);
@@ -229,12 +232,26 @@ export async function checkDialogLayouts({ page, check, gotoView, openRowMenu, c
 
         await clickText(page, ".view-toolbar", "快速导入");
         await page.waitForSelector(selector);
-        const cleared = await page.evaluate((scope) => [...document.querySelectorAll(`${scope} input, ${scope} textarea`)].every((input) => input.value === ""), selector);
-        assert.ok(cleared, "重开后还留着上次输入");
+        const draft = await page.evaluate(() => ({
+          fields: ["quick-import-name", "quick-import-url", "quick-import-apikey"].map((id) => document.getElementById(id)?.value),
+          hidden: document.getElementById("quick-import-source").hidden,
+          password: document.getElementById("quick-import-apikey").type,
+          focused: document.activeElement === document.getElementById("quick-import-name"),
+        }));
+        assert.deepEqual(draft.fields, values, "关闭重开应保留尚未提交的草稿");
+        assert.ok(draft.hidden && draft.password === "password" && draft.focused, "重开应隐藏原文、遮住 Key 并聚焦名称");
+        await clickText(page, selector, "清空重来");
+        await page.waitFor(() => ["quick-import-name", "quick-import-url", "quick-import-apikey", "quick-import-source"]
+          .every((id) => document.getElementById(id).value === ""), { label: "清空快速导入草稿" });
         const reopened = await measureDrawer(page);
-        assert.ok(reopened.dialog.left > 12, "没有可点击的遮罩区域");
-        await clickAt(page, reopened.dialog.left - 12, 40);
-        await page.waitFor(() => !document.querySelector("dialog[open]"), { label: "遮罩关闭快速导入" });
+        if (reopened.dialog.left > 12) {
+          await clickAt(page, reopened.dialog.left - 12, 40);
+          await page.waitFor(() => !document.querySelector("dialog[open]"), { label: "遮罩关闭快速导入" });
+        } else {
+          assert.ok(Math.abs(reopened.dialog.left) <= 1, "无遮罩区域时抽屉应贴住左边缘");
+          await page.click(`${selector} .icon-close`);
+          await page.waitFor(() => !document.querySelector("dialog[open]"), { label: "关闭全宽快速导入" });
+        }
       } finally {
         if (await page.count("dialog[open]")) await closeDialog(page);
       }

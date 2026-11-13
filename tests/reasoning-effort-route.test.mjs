@@ -62,15 +62,12 @@ test("没有改写时的显示与从前一致", () => {
 /* 单值是一段纯文本，多环节才画成带箭头的路由并把完整说明放进 title。
    单值也套路由外壳的话，绝大多数行会白白多出一层缩进。 */
 test("单值渲染成纯文本，多环节渲染成带 title 的路由", () => {
-  const source = read("web/src/pages/LogsPage.tsx");
-  const cell = source.slice(
-    source.indexOf("function ReasoningCell"),
-    source.indexOf("const CLIENT_TYPES"),
-  );
+  const source = read("web/src/components/logs/LogCells.tsx");
+  const route = source.slice(source.indexOf("function RouteChain"), source.indexOf("const SENSITIVE_MASK"));
+  const cell = source.slice(source.indexOf("export function ReasoningCell"), source.indexOf("function RouteChain"));
 
-  assert.match(cell, /chain\.length === 1/, "单值要单独一条分支");
-  assert.match(cell, /className="model-text model-single"/);
-  assert.match(cell, /className="model-route" title=\{title\}/);
-  // title 把三段完整写出来，列里放不下的信息在这里补齐。
+  assert.match(route, /chain\.length === 1/, "单值要单独一条分支");
+  assert.match(route, /className="model-text model-single"/);
+  assert.match(route, /className="model-route" title=\{title\}/);
   assert.match(cell, /chain\.map\(\(step\) => `\$\{step\.label\}：\$\{step\.value\}`\)/);
 });
