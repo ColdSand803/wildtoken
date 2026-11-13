@@ -466,6 +466,16 @@ html[data-theme="liquid-glass-light"] .content > .view {
   width: 100%;
 }
 
+/* KPI refraction samples this scroll panel, not the page canvas behind it.
+   A quiet line field and colour wash give the glass rim something to bend. */
+html[data-theme="liquid-glass-light"] .dashboard-panel {
+  background-color: transparent;
+  background-image:
+    repeating-linear-gradient(135deg, transparent 0 31px, var(--line-soft) 32px, transparent 33px 64px),
+    radial-gradient(ellipse at 12% 8%, var(--lg-ambient-a), transparent 48%),
+    radial-gradient(ellipse at 92% 24%, var(--lg-ambient-c), transparent 46%);
+}
+
 /* Only navigation, KPI tiles and floating surfaces get the glass treatment.
    The default is opaque. Backdrop blur is an enhancement, never a dependency. */
 html[data-theme="liquid-glass-light"] :is(

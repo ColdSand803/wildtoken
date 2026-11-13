@@ -194,6 +194,16 @@ for (const theme of variants) {
     assert.ok(rules(theme.ast, (rule) => rule.selector === `${theme.scope} .aurora` && hasDecl(rule, "display", "none")).length);
   });
 
+  test(`${theme.label}: dashboard provides texture beneath refractive metrics`, () => {
+    const underlay = rules(theme.ast, (rule) => rule.selector === `${theme.scope} .dashboard-panel`);
+    assert.equal(underlay.length, 1);
+    assert.ok(hasDecl(underlay[0], "background-color", "transparent"));
+    const image = underlay[0].nodes.find((decl) => decl.prop === "background-image")?.value ?? "";
+    assert.match(image, /repeating-linear-gradient/);
+    assert.match(image, /var\(--lg-ambient-a\)/);
+    assert.match(image, /var\(--lg-ambient-c\)/);
+  });
+
   test(`${theme.label}: refraction is declared for the engine and consumed over a blur fallback`, () => {
     const declared = theme.tokens["--lg-refraction-surfaces"];
     assert.match(declared ?? "", /^"[^"]+"$/, "a quoted selector list the engine can hand to querySelectorAll");
