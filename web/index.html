@@ -28,8 +28,6 @@
             "co1dsand-light": "/theme-packs/co1dsand-light/theme.css",
             "co1dsand-dark": "/theme-packs/co1dsand-dark/theme.css",
             minegrub: "/theme-packs/minegrub/theme.css",
-            "liquid-glass-light": "/theme-packs/liquid-glass-light/theme.css",
-            "liquid-glass-dark": "/theme-packs/liquid-glass-dark/theme.css",
           };
           var t = localStorage.getItem("wildtoken_theme");
           if (!safeThemeId.test(t || "") || (t !== "dark" && t !== "light" && !bundledThemeCss[t])) t = "dark";

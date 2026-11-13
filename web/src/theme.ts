@@ -18,8 +18,6 @@ export const THEME_PACKS: Record<string, string> = {
   "co1dsand-light": "/theme-packs/co1dsand-light/theme.css",
   "co1dsand-dark": "/theme-packs/co1dsand-dark/theme.css",
   minegrub: "/theme-packs/minegrub/theme.css",
-  "liquid-glass-light": "/theme-packs/liquid-glass-light/theme.css",
-  "liquid-glass-dark": "/theme-packs/liquid-glass-dark/theme.css",
 };
 
 /** 内置主题不是主题包，没有额外 CSS 可加载。 */
@@ -37,8 +35,6 @@ export const THEME_LABELS: Record<string, string> = {
   "co1dsand-light": "素宣",
   "co1dsand-dark": "松烟",
   minegrub: "Minegrub (我的世界)",
-  "liquid-glass-light": "冰晶",
-  "liquid-glass-dark": "烟晶",
 };
 
 /** 色板取自旧版 THEMES：[底色, 强调色]，给主题菜单的小方块用。 */
@@ -54,8 +50,6 @@ export const THEME_SWATCHES: Record<string, [string, string]> = {
   "co1dsand-light": ["#ffffff", "#111111"],
   "co1dsand-dark": ["#050505", "#f0f0f0"],
   minegrub: ["#251c17", "#55ff55"],
-  "liquid-glass-light": ["#e9f1f8", "#1559b7"],
-  "liquid-glass-dark": ["#0b111b", "#8cc0ff"],
 };
 
 export const DENSITY_KEY = "wildtoken_density";

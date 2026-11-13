@@ -12,8 +12,6 @@ const themeFiles = {
   "sakura-mist": "themes/sakura-mist/theme.css",
   "co1dsand-light": "themes/co1dsand-light/theme.css",
   "co1dsand-dark": "themes/co1dsand-dark/theme.css",
-  "liquid-glass-light": "themes/liquid-glass-light/theme.css",
-  "liquid-glass-dark": "themes/liquid-glass-dark/theme.css",
 };
 
 function escapeRegExp(value) {
