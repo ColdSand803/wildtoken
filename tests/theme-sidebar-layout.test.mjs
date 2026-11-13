@@ -116,3 +116,20 @@ test("rail themes retain the mobile bottom navigation dock", () => {
   }
 });
 
+
+test("theme menu separates the two palette colors into visible circular swatches", () => {
+  const topbar = read("web/src/components/Topbar.tsx");
+  const css = read("static/css/base.css");
+  assert.match(topbar, /className="theme-swatch-pair" aria-hidden="true"/);
+  assert.match(topbar, /className="theme-swatch" style=\{\{ "--swatch-color": swatch\[0\] \}/);
+  assert.match(topbar, /className="theme-swatch" style=\{\{ "--swatch-color": swatch\[1\] \}/);
+  const group = css.match(/\.theme-swatch-pair\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.match(group, /display:\s*inline-flex/);
+  assert.match(group, /gap:\s*3px/);
+  const dot = css.match(/\.theme-swatch\s*\{([^}]+)\}/)?.[1] ?? "";
+  assert.match(dot, /background:\s*var\(--swatch-color/);
+  assert.match(dot, /border-radius:\s*50%/);
+  assert.match(dot, /height:\s*10px/);
+  assert.match(dot, /width:\s*10px/);
+  assert.doesNotMatch(dot, /linear-gradient/);
+});

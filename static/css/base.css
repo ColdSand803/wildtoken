@@ -1019,14 +1019,22 @@ html[data-theme="light"] .nav-link:hover {
   color: var(--accent);
 }
 
+.theme-swatch-pair {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
 .theme-swatch {
-  background: linear-gradient(135deg, var(--swatch-bg, var(--bg)) 50%, var(--swatch-accent, var(--accent)) 50%);
+  background: var(--swatch-color, var(--accent));
   border: 1px solid var(--line-strong);
   border-radius: 50%;
-  display: inline-block;
+  box-shadow: 0 0 0 1px var(--glass-strong);
+  display: block;
   flex: 0 0 auto;
-  height: 14px;
-  width: 14px;
+  height: 10px;
+  width: 10px;
 }
 
 /* ── Content / Panels ────────────────────────────────────── */

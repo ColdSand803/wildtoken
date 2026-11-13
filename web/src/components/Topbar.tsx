@@ -169,16 +169,10 @@ export function Topbar({
                   data-theme-choice={id}
                   onClick={() => chooseTheme(id)}
                 >
-                  <span
-                    className="theme-swatch"
-                    aria-hidden="true"
-                    style={
-                      {
-                        "--swatch-bg": swatch[0],
-                        "--swatch-accent": swatch[1],
-                      } as React.CSSProperties
-                    }
-                  />
+                  <span className="theme-swatch-pair" aria-hidden="true">
+                    <span className="theme-swatch" style={{ "--swatch-color": swatch[0] } as React.CSSProperties} />
+                    <span className="theme-swatch" style={{ "--swatch-color": swatch[1] } as React.CSSProperties} />
+                  </span>
                   <span>{THEME_LABELS[id] ?? id}</span>
                 </button>
               );
