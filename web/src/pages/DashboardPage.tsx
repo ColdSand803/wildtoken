@@ -1,5 +1,12 @@
 import { SegmentBar } from "../components/SegmentBar";
 import { AnimatedNumber, formatChineseUnit } from "../components/AnimatedNumber";
+import {
+  applyRubberBandBounds,
+  createSpringAnimator,
+  createVelocityTracker,
+  motionReduced,
+} from "../motion";
+import type { SpringAnimator } from "../motion";
 import { buildSmoothSparkPaths, smoothSeries } from "../sparkline";
 import { navigateToLogs } from "../logFilters";
 import type { LogFilters } from "../logFilters";
@@ -423,24 +430,217 @@ export function DashboardPage({ onUnauthorized }: { onUnauthorized: (message: st
     errorRate === null ? "" : Number(errorRate) >= 10 ? "tone-danger" : Number(errorRate) >= 2 ? "tone-warn" : "";
   /* 响应总是嵌套的：选了具体时间窗时，服务端把该窗的聚合值塞进 today。
      按扁平结构取字段全是 undefined，卡片渲染成 NaN。 */
-  /* 滑块要量选中那个按钮的实际几何。用 layout effect 是为了在浏览器绘制前
-     就定位，否则切档时能看见它从旧位置跳过去。 */
+  /* 滑块要量选中那个按钮的实际几何。首帧在 layout effect 里直接落位防止跳变；
+     后续切换与拖拽释放由 ζ = 1 临界阻尼弹簧驱动，携带脱手速度并在首尾边界回弹。 */
   const segRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLSpanElement>(null);
+  const thumbMountedRef = useRef(false);
+  const thumbReleaseVelRef = useRef<number | undefined>(undefined);
+  const thumbSpringsRef = useRef<{
+    x: SpringAnimator;
+    y: SpringAnimator;
+    w: SpringAnimator;
+    h: SpringAnimator;
+  } | null>(null);
 
   useLayoutEffect(() => {
     const thumb = thumbRef.current;
-    const active = segRef.current?.querySelector<HTMLElement>("[data-dashboard-range].is-active");
-    if (!thumb) return;
+    const seg = segRef.current;
+    const active = seg?.querySelector<HTMLElement>("[data-dashboard-range].is-active");
+    if (!thumb || !seg) return;
     if (!active) {
       thumb.style.opacity = "0";
       return;
     }
-    thumb.style.width = `${active.offsetWidth}px`;
-    thumb.style.height = `${active.offsetHeight}px`;
-    thumb.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+
+    const applyThumbGeometry = () => {
+      const springs = thumbSpringsRef.current;
+      if (!springs || !thumbRef.current) return;
+      thumbRef.current.style.width = `${springs.w.get().toFixed(2)}px`;
+      thumbRef.current.style.height = `${springs.h.get().toFixed(2)}px`;
+      thumbRef.current.style.transform = `translate(${springs.x.get().toFixed(2)}px, ${springs.y.get().toFixed(2)}px)`;
+    };
+
+    if (!thumbSpringsRef.current) {
+      thumbSpringsRef.current = {
+        x: createSpringAnimator(() => applyThumbGeometry(), { initial: active.offsetLeft, angularFrequency: 28 }),
+        y: createSpringAnimator(() => applyThumbGeometry(), { initial: active.offsetTop, angularFrequency: 28 }),
+        w: createSpringAnimator(() => applyThumbGeometry(), { initial: active.offsetWidth, angularFrequency: 30 }),
+        h: createSpringAnimator(() => applyThumbGeometry(), { initial: active.offsetHeight, angularFrequency: 30 }),
+      };
+    }
+
+    const buttons = [...seg.querySelectorAll<HTMLElement>("[data-dashboard-range]")];
+    const rowButtons = buttons.filter((btn) => Math.abs(btn.offsetTop - active.offsetTop) <= 4);
+    const lefts = (rowButtons.length > 0 ? rowButtons : [active]).map((btn) => btn.offsetLeft);
+    const minLeft = Math.min(...lefts);
+    const maxLeft = Math.max(...lefts);
+
+    thumb.dataset.springReady = "true";
     thumb.style.opacity = "1";
+
+    if (!thumbMountedRef.current || motionReduced()) {
+      thumbMountedRef.current = true;
+      thumbReleaseVelRef.current = undefined;
+      thumbSpringsRef.current.x.set(active.offsetLeft);
+      thumbSpringsRef.current.y.set(active.offsetTop);
+      thumbSpringsRef.current.w.set(active.offsetWidth);
+      thumbSpringsRef.current.h.set(active.offsetHeight);
+      return;
+    }
+
+    const releaseVel = thumbReleaseVelRef.current;
+    thumbReleaseVelRef.current = undefined;
+    thumbSpringsRef.current.x.to(active.offsetLeft, {
+      velocity: releaseVel,
+      bounds: { min: minLeft, max: maxLeft, maxOvershoot: 16 },
+    });
+    thumbSpringsRef.current.y.to(active.offsetTop);
+    thumbSpringsRef.current.w.to(active.offsetWidth);
+    thumbSpringsRef.current.h.to(active.offsetHeight);
   }, [range]);
+
+  const rangeActionRef = useRef({ range, switchRange });
+  rangeActionRef.current = { range, switchRange };
+
+  useEffect(() => {
+    const seg = segRef.current;
+    if (!seg) return;
+
+    let pointerId: number | null = null;
+    let startClientX = 0;
+    let startClientY = 0;
+    let startLeft = 0;
+    let dragging = false;
+    let suppressClick = false;
+    const velocityTracker = createVelocityTracker(90, 3200);
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (motionReduced() || event.button !== 0 || !thumbSpringsRef.current) return;
+      pointerId = event.pointerId;
+      startClientX = event.clientX;
+      startClientY = event.clientY;
+      startLeft = thumbSpringsRef.current.x.get();
+      dragging = false;
+      velocityTracker.reset();
+      velocityTracker.push(startLeft);
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId || !thumbSpringsRef.current) return;
+      const dx = event.clientX - startClientX;
+      const dy = event.clientY - startClientY;
+
+      if (!dragging) {
+        if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) {
+          pointerId = null;
+          return;
+        }
+        if (Math.abs(dx) < 5) return;
+        dragging = true;
+        suppressClick = true;
+        try {
+          seg.setPointerCapture?.(event.pointerId);
+        } catch {}
+      }
+
+      const buttons = [...seg.querySelectorAll<HTMLElement>("[data-dashboard-range]")];
+      if (!buttons.length) return;
+      const currentTop = thumbSpringsRef.current.y.get();
+      const rowButtons = buttons.filter((btn) => Math.abs(btn.offsetTop - currentTop) <= 8);
+      const candidates = rowButtons.length > 0 ? rowButtons : buttons;
+      const minLeft = Math.min(...candidates.map((btn) => btn.offsetLeft));
+      const maxLeft = Math.max(...candidates.map((btn) => btn.offsetLeft));
+      const clampedLeft = applyRubberBandBounds(startLeft + dx, minLeft, maxLeft, 28, 0.45);
+
+      velocityTracker.push(clampedLeft);
+      thumbSpringsRef.current.x.set(clampedLeft, velocityTracker.velocity());
+
+      const center = clampedLeft + thumbSpringsRef.current.w.get() / 2;
+      let nearest = candidates[0];
+      let nearestDist = Infinity;
+      for (const btn of candidates) {
+        const dist = Math.abs(btn.offsetLeft + btn.offsetWidth / 2 - center);
+        if (dist < nearestDist) {
+          nearestDist = dist;
+          nearest = btn;
+        }
+      }
+      thumbSpringsRef.current.w.to(nearest.offsetWidth, { angularFrequency: 34 });
+    };
+
+    const finishDrag = (event: PointerEvent, cancelled: boolean) => {
+      if (event.pointerId !== pointerId) return;
+      pointerId = null;
+      if (!dragging || !thumbSpringsRef.current) return;
+      dragging = false;
+
+      const releaseVel = cancelled ? 0 : velocityTracker.velocity();
+      const buttons = [...seg.querySelectorAll<HTMLElement>("[data-dashboard-range]")];
+      if (!buttons.length) return;
+      const currentTop = thumbSpringsRef.current.y.get();
+      const rowButtons = buttons.filter((btn) => Math.abs(btn.offsetTop - currentTop) <= 8);
+      const candidates = rowButtons.length > 0 ? rowButtons : buttons;
+      const minLeft = Math.min(...candidates.map((btn) => btn.offsetLeft));
+      const maxLeft = Math.max(...candidates.map((btn) => btn.offsetLeft));
+
+      // 按松手位置加脱手速度前瞻投影选出落点档位
+      const projectedCenter =
+        thumbSpringsRef.current.x.get() + thumbSpringsRef.current.w.get() / 2 + releaseVel * 0.055;
+      let targetBtn = candidates[0];
+      let bestDist = Infinity;
+      for (const btn of candidates) {
+        const dist = Math.abs(btn.offsetLeft + btn.offsetWidth / 2 - projectedCenter);
+        if (dist < bestDist) {
+          bestDist = dist;
+          targetBtn = btn;
+        }
+      }
+
+      const nextKey = targetBtn.dataset.dashboardRange;
+      const { range: currentRange, switchRange: applySwitch } = rangeActionRef.current;
+      if (!cancelled && nextKey && nextKey !== currentRange && VALID_RANGES.has(nextKey as typeof currentRange)) {
+        thumbReleaseVelRef.current = releaseVel;
+        applySwitch(nextKey as typeof currentRange);
+      } else {
+        const active = seg.querySelector<HTMLElement>("[data-dashboard-range].is-active") ?? targetBtn;
+        thumbSpringsRef.current.x.to(active.offsetLeft, {
+          velocity: releaseVel,
+          bounds: { min: minLeft, max: maxLeft, maxOvershoot: 16 },
+        });
+        thumbSpringsRef.current.w.to(active.offsetWidth);
+      }
+    };
+
+    const onPointerUp = (event: PointerEvent) => finishDrag(event, false);
+    const onPointerCancel = (event: PointerEvent) => finishDrag(event, true);
+    const onClickCapture = (event: MouseEvent) => {
+      if (!suppressClick) return;
+      suppressClick = false;
+      event.preventDefault();
+      event.stopPropagation();
+    };
+
+    seg.addEventListener("pointerdown", onPointerDown);
+    seg.addEventListener("pointermove", onPointerMove);
+    seg.addEventListener("pointerup", onPointerUp);
+    seg.addEventListener("pointercancel", onPointerCancel);
+    seg.addEventListener("click", onClickCapture, true);
+    return () => {
+      seg.removeEventListener("pointerdown", onPointerDown);
+      seg.removeEventListener("pointermove", onPointerMove);
+      seg.removeEventListener("pointerup", onPointerUp);
+      seg.removeEventListener("pointercancel", onPointerCancel);
+      seg.removeEventListener("click", onClickCapture, true);
+      if (thumbSpringsRef.current) {
+        thumbSpringsRef.current.x.destroy();
+        thumbSpringsRef.current.y.destroy();
+        thumbSpringsRef.current.w.destroy();
+        thumbSpringsRef.current.h.destroy();
+        thumbSpringsRef.current = null;
+      }
+    };
+  }, []);
 
   // 不叫 window：会遮蔽全局对象。
   const usageWindow = range === "default" ? usage?.thirty_days : usage?.today;

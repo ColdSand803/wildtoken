@@ -1,20 +1,65 @@
 import { useEffect, useRef, useState } from "react";
-import { motionReduced } from "../motion";
-/** Animate numeric updates, but keep the authoritative formatted value as the accessible label. */
+import { createSpringAnimator, motionReduced } from "../motion";
+import type { SpringAnimator } from "../motion";
+
+/** Animate numeric updates with a ζ = 1 spring (inheriting velocity across rapid SSE updates), keeping the authoritative value on aria-label. */
 export function AnimatedNumber({ value }: { value: string }) {
   const [shown, setShown] = useState(value);
-  const previous = useRef(value);
+  const previousUnit = useRef<string | null>(null);
+  const animatorRef = useRef<SpringAnimator | null>(null);
+  const formatRef = useRef<{ decimals: number; unit: string; finalText: string }>({
+    decimals: 0,
+    unit: "",
+    finalText: value,
+  });
+
   useEffect(() => {
-    const old = /^(-?[\d.]+)(.*)$/.exec(previous.current), next = /^(-?[\d.]+)(.*)$/.exec(value);
-    previous.current = value;
-    if (motionReduced() || !old || !next || old[2] !== next[2] || !Number.isFinite(Number(next[1]))) { setShown(value); return; }
-    const from = Number(old[1]), to = Number(next[1]), decimals = (next[1].split(".")[1] ?? "").length;
-    let frame = 0; const start = performance.now();
-    const step = (now: number) => { const t = Math.min(1, (now - start) / 520); setShown(`${(from + (to - from) * (1 - (1 - t) ** 3)).toFixed(decimals)}${next[2]}`); if (t < 1) frame = requestAnimationFrame(step); else setShown(value); };
-    frame = requestAnimationFrame(step); return () => cancelAnimationFrame(frame);
+    return () => {
+      animatorRef.current?.destroy();
+      animatorRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const parsed = /^(-?[\d.]+)(.*)$/.exec(value);
+    const num = parsed ? Number(parsed[1]) : Number.NaN;
+    if (motionReduced() || !parsed || !Number.isFinite(num)) {
+      animatorRef.current?.stop();
+      previousUnit.current = parsed ? parsed[2] : null;
+      setShown(value);
+      return;
+    }
+
+    const decimals = (parsed[1].split(".")[1] ?? "").length;
+    const unit = parsed[2];
+    formatRef.current = { decimals, unit, finalText: value };
+
+    if (!animatorRef.current || previousUnit.current !== unit) {
+      animatorRef.current?.destroy();
+      previousUnit.current = unit;
+      animatorRef.current = createSpringAnimator(
+        (current) => {
+          const { decimals: d, unit: u } = formatRef.current;
+          setShown(`${current.toFixed(d)}${u}`);
+        },
+        { initial: num, angularFrequency: 18, restDelta: 0.5 * 10 ** -decimals, restSpeed: 0.5 * 10 ** -decimals },
+      );
+      setShown(value);
+      return;
+    }
+
+    animatorRef.current.to(num, {
+      onRest: () => setShown(formatRef.current.finalText),
+    });
   }, [value]);
-  return <span className="kpi-number" aria-label={value}><span aria-hidden="true">{shown}</span></span>;
+
+  return (
+    <span className="kpi-number" aria-label={value}>
+      <span aria-hidden="true">{shown}</span>
+    </span>
+  );
 }
+
 export function formatChineseUnit(value: number): string {
   if (!Number.isFinite(value) || Math.abs(value) < 10000) return "";
   const unit = Math.abs(value) >= 1e12 ? 1e12 : Math.abs(value) >= 1e8 ? 1e8 : 1e4;

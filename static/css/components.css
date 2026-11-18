@@ -205,10 +205,15 @@
   position: absolute;
   top: 0;
   transition:
-    transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    width 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    height 220ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    transform var(--spring-duration, 260ms) var(--spring-easing, cubic-bezier(0.2, 0.8, 0.2, 1)),
+    width var(--spring-duration, 260ms) var(--spring-easing, cubic-bezier(0.2, 0.8, 0.2, 1)),
+    height var(--spring-duration, 260ms) var(--spring-easing, cubic-bezier(0.2, 0.8, 0.2, 1)),
     opacity 160ms ease;
+}
+
+/* 脚本弹簧接管几何帧时关掉 CSS 几何过渡，避免两套插值叠加拖慢脱手速度。 */
+.wt-seg-thumb[data-spring-ready="true"] {
+  transition: opacity 160ms ease;
 }
 
 button.wt-seg-btn {

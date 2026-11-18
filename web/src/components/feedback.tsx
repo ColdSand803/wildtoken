@@ -1,6 +1,13 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import {
+  animatePresence,
+  applyRubberBandBounds,
+  createSpringAnimator,
+  createVelocityTracker,
+  motionReduced,
+} from "../motion";
 
 export type ToastTone = "neutral" | "ok" | "error" | "warn";
 
@@ -134,7 +141,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 function ToastItem({ toast, onDismiss: dismissById }: { toast: Toast; onDismiss: (id: number) => void }) {
   const [paused, setPaused] = useState(false);
   const [busy, setBusy] = useState(false);
+  const toastRef = useRef<HTMLDivElement>(null);
   const onDismiss = useCallback(() => dismissById(toast.id), [dismissById, toast.id]);
+
+  useLayoutEffect(() => {
+    const el = toastRef.current;
+    if (!el) return;
+    return animatePresence(el, true, undefined, { axis: "x", offsetPx: 20, scaleFrom: 0.985 });
+  }, []);
 
   /* 悬停时暂停倒计时：正在读的消息不该自己消失。
      paused 变回 false 时重新计时，和旧版的 mouseleave 重启一致。 */
@@ -144,10 +158,117 @@ function ToastItem({ toast, onDismiss: dismissById }: { toast: Toast; onDismiss:
     return () => window.clearTimeout(timer);
   }, [paused, busy, toast.durationMs, onDismiss]);
 
+  // 支持横向滑动移除：向右脱手滑出继承速度，向左越过静止边界走橡皮筋阻尼并 ζ = 1 回弹
+  useEffect(() => {
+    const el = toastRef.current;
+    if (!el) return;
+
+    let pointerId: number | null = null;
+    let startX = 0;
+    let startY = 0;
+    let dragging = false;
+    let displayDx = 0;
+    let dismissed = false;
+    let exitCancel: (() => void) | null = null;
+    const tracker = createVelocityTracker(90, 3200);
+    const spring = createSpringAnimator(
+      (x) => {
+        if (dismissed) return;
+        if (Math.abs(x) < 0.2) {
+          el.style.transform = "";
+          el.style.opacity = "";
+        } else {
+          el.style.transform = `translateX(${x.toFixed(2)}px)`;
+          el.style.opacity = x > 0 ? String(Math.max(0.25, 1 - x / 280)) : "";
+        }
+      },
+      { initial: 0, angularFrequency: 30 },
+    );
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (motionReduced() || dismissed || event.button !== 0) return;
+      if ((event.target as HTMLElement | null)?.closest("button")) return;
+      pointerId = event.pointerId;
+      startX = event.clientX;
+      startY = event.clientY;
+      dragging = false;
+      displayDx = 0;
+      tracker.reset();
+      tracker.push(0);
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId || dismissed) return;
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      if (!dragging) {
+        if (Math.abs(dy) > 8 && Math.abs(dy) > Math.abs(dx)) {
+          pointerId = null;
+          return;
+        }
+        if (Math.abs(dx) < 5) return;
+        dragging = true;
+        setPaused(true);
+        try {
+          el.setPointerCapture?.(event.pointerId);
+        } catch {}
+      }
+      displayDx = applyRubberBandBounds(dx, 0, 360, 44, 0.45);
+      tracker.push(displayDx);
+      spring.set(displayDx, tracker.velocity());
+    };
+
+    const finish = (event: PointerEvent, cancelled: boolean) => {
+      if (event.pointerId !== pointerId) return;
+      pointerId = null;
+      if (!dragging) return;
+      dragging = false;
+
+      const releaseVel = cancelled ? 0 : tracker.velocity();
+      if (!cancelled && displayDx > 16 && (releaseVel > 400 || (displayDx > 88 && releaseVel > -150))) {
+        dismissed = true;
+        spring.stop();
+        el.style.transform = "";
+        el.style.opacity = "";
+        exitCancel = animatePresence(el, false, onDismiss, {
+          axis: "x",
+          offsetPx: 260,
+          fromOffsetPx: displayDx,
+          velocityPxPerSec: releaseVel,
+          scaleFrom: 1,
+        });
+        return;
+      }
+
+      setPaused(false);
+      spring.to(0, {
+        velocity: releaseVel,
+        bounds: { min: 0, max: 360, maxOvershoot: 16 },
+      });
+    };
+
+    const onPointerUp = (event: PointerEvent) => finish(event, false);
+    const onPointerCancel = (event: PointerEvent) => finish(event, true);
+
+    el.addEventListener("pointerdown", onPointerDown);
+    el.addEventListener("pointermove", onPointerMove);
+    el.addEventListener("pointerup", onPointerUp);
+    el.addEventListener("pointercancel", onPointerCancel);
+    return () => {
+      exitCancel?.();
+      spring.destroy();
+      el.removeEventListener("pointerdown", onPointerDown);
+      el.removeEventListener("pointermove", onPointerMove);
+      el.removeEventListener("pointerup", onPointerUp);
+      el.removeEventListener("pointercancel", onPointerCancel);
+    };
+  }, [onDismiss]);
+
   const hasAction = Boolean(toast.actionLabel && toast.onAction);
 
   return (
     <div
+      ref={toastRef}
       className={`toast${hasAction ? " has-action" : ""}`}
       data-tone={toast.tone}
       role={toast.tone === "error" ? "alert" : "status"}
@@ -224,11 +345,15 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   );
 
   // showModal 才有焦点陷阱和 Esc 关闭，setAttribute("open") 没有。
-  useEffect(() => {
+  useLayoutEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
-    if (pending && !dialog.open) dialog.showModal();
-    else if (!pending && dialog.open) dialog.close();
+    if (pending) {
+      if (!dialog.open) dialog.showModal();
+      const panel = (dialog.firstElementChild as HTMLElement | null) ?? dialog;
+      return animatePresence(panel, true);
+    }
+    if (dialog.open) dialog.close();
   }, [pending]);
 
   const settle = useCallback((value: boolean) => {

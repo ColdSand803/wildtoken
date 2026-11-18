@@ -1,5 +1,5 @@
 import { PlumBackground } from "./components/PlumBackground";
-import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { UnauthorizedError, getAdminToken, setAdminToken } from "./api";
 import { AdminTokenDialog } from "./components/AdminTokenDialog";
@@ -7,6 +7,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import type { Command } from "./components/CommandPalette";
 import { ConfirmProvider, ToastProvider } from "./components/feedback";
 import { Topbar } from "./components/Topbar";
+import { animatePresence, motionReduced } from "./motion";
 import { readStored } from "./storage";
 import {
   BUILTIN_THEMES,
@@ -98,6 +99,9 @@ export function App() {
   // 命令是 useMemo 里一次建好的，要靠 ref 读到当前视图。
   const viewRef = useRef(view);
   viewRef.current = view;
+  const contentRef = useRef<HTMLElement>(null);
+  const prevViewRef = useRef<ViewId>(view);
+  const navVelocityRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     if (!KEEP_ALIVE.includes(view)) return;
@@ -126,13 +130,81 @@ export function App() {
 
   /* 切视图就写 hash，让浏览器历史记住它。写回 state 的活交给下面那个
      hashchange 监听，这样点导航和按浏览器后退走的是同一条路。 */
-  const setView = useCallback((next: ViewId) => {
+  const setView = useCallback((next: ViewId, releaseVelocity?: number) => {
+    navVelocityRef.current = releaseVelocity;
     if (window.location.hash === `#${next}`) {
       setViewState(next);
       return;
     }
     window.location.hash = next;
   }, []);
+
+  // 菜单切换时按导航方向驱动页面舞台的 ζ = 1 临界阻尼弹簧入场（兼容首次懒加载与常驻页复用）
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return;
+    const canAnimate =
+      !motionReduced() &&
+      typeof Element !== "undefined" &&
+      typeof Element.prototype.animate === "function";
+
+    if (canAnimate) content.dataset.viewSpring = "true";
+    else delete content.dataset.viewSpring;
+
+    const previous = prevViewRef.current;
+    if (previous === view) return;
+    prevViewRef.current = view;
+
+    const prevIndex = VIEWS.indexOf(previous);
+    const nextIndex = VIEWS.indexOf(view);
+    const direction = nextIndex >= prevIndex ? 1 : -1;
+    const releaseVel = navVelocityRef.current;
+    navVelocityRef.current = undefined;
+
+    if (content.scrollTop > 0) content.scrollTop = 0;
+    if (!canAnimate) return;
+
+    const isMobileDock =
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(max-width: 760px), (orientation: portrait) and (max-width: 960px)").matches;
+    const axis: "x" | "y" = isMobileDock ? "x" : "y";
+    const offsetPx = direction * (isMobileDock ? 22 : 16);
+    const velocityPxPerSec =
+      releaseVel !== undefined && Math.abs(releaseVel) > 10
+        ? -Math.sign(offsetPx) * Math.min(Math.abs(releaseVel) * 0.4, 480)
+        : undefined;
+
+    let cancelAnim: (() => void) | null = null;
+    const runEntrance = (target: HTMLElement) => {
+      cancelAnim?.();
+      cancelAnim = animatePresence(target, true, undefined, {
+        axis,
+        offsetPx,
+        scaleFrom: 0.992,
+        velocityPxPerSec,
+      });
+    };
+
+    const currentViewEl = content.querySelector<HTMLElement>(`:scope > .view[data-view="${view}"]:not([hidden])`);
+    if (currentViewEl) {
+      runEntrance(currentViewEl);
+      return () => cancelAnim?.();
+    }
+
+    // 首次进入某个懒加载路由时，等 Suspense 解析挂载后立即补上同方向弹簧入场
+    const observer = new MutationObserver(() => {
+      const mounted = content.querySelector<HTMLElement>(`:scope > .view[data-view="${view}"]:not([hidden])`);
+      if (!mounted) return;
+      observer.disconnect();
+      runEntrance(mounted);
+    });
+    observer.observe(content, { childList: true, subtree: false });
+
+    return () => {
+      observer.disconnect();
+      cancelAnim?.();
+    };
+  }, [view]);
 
   useEffect(() => {
     const onHashChange = () => setViewState(viewFromHash());
@@ -210,7 +282,7 @@ export function App() {
         <PlumBackground />
         <div className="app-shell">
           <Topbar view={view} onNavigate={setView} />
-          <main className="content">
+          <main className="content" ref={contentRef}>
             <Suspense fallback={view === "debug" ? <PageLoading /> : null}>
               {alive("debug") ? (
                 <DebugPage key={pageKey("debug")} active={view === "debug"} onUnauthorized={handleUnauthorized} />

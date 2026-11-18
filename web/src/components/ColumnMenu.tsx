@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { animatePresence } from "../motion";
 import type { ColumnDef } from "../useColumns";
 
 /** “列”按钮和它的勾选菜单。点菜单外面或按 Esc 收起。 */
@@ -17,6 +18,12 @@ export function ColumnMenu<K extends string>({
 }) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (!open || !menuRef.current) return;
+    return animatePresence(menuRef.current, true);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -49,7 +56,7 @@ export function ColumnMenu<K extends string>({
       >
         列
       </button>
-      <div className="col-menu" hidden={!open} role="group" aria-label={label}>
+      <div className="col-menu" ref={menuRef} hidden={!open} role="group" aria-label={label}>
         {columns.map((column) => (
           <label key={column.key} className={column.locked ? "is-locked" : undefined}>
             <input

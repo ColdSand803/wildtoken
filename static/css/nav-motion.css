@@ -1,0 +1,228 @@
+/* ── 主导航菜单弹簧指示器与视图切换动效 ──────────────────────────────
+   由 Topbar 的 ζ = 1 临界阻尼弹簧驱动 .nav-active-thumb 在桌面竖排侧栏（Y 轴）
+   与手机悬浮底栏（X 轴）之间平滑滑行、承接拖拽脱手速度并在首尾边界回弹。
+   脚本未挂载或开启减少动态效果时，.nav-active-thumb 保持隐藏，完全回退到原有的
+   .nav-link.active 静态高亮。 */
+
+:where(.topbar-nav) {
+  position: relative;
+}
+
+:where(.nav-link) {
+  position: relative;
+  transition:
+    background-color var(--transition),
+    border-color var(--transition),
+    color var(--transition),
+    opacity var(--transition),
+    transform 180ms var(--spring-easing, cubic-bezier(0.2, 0.8, 0.2, 1));
+  user-select: none;
+  z-index: 1;
+}
+
+.topbar-nav .nav-link:active {
+  transform: scale(0.96);
+}
+
+.nav-active-thumb {
+  background: var(--accent-soft);
+  border-radius: var(--radius);
+  box-sizing: border-box;
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  will-change: transform, width, height;
+  z-index: 0;
+}
+
+/* ── 内置浅色与凉砂圆角适配 ──────────────────────────────────────── */
+
+html[data-theme="light"] .nav-active-thumb {
+  background: rgb(8 127 155 / 9%);
+}
+
+html[data-theme="co1dsand-light"] .nav-active-thumb,
+html[data-theme="co1dsand-dark"] .nav-active-thumb {
+  border-radius: var(--radius-sm);
+}
+
+/* ── 标准轨道主题左侧选中沟槽竖条跟随滑块一起运动 ──────────────── */
+
+html:is(
+  [data-theme="dark"],
+  [data-theme="light"],
+  [data-theme="anthropic"],
+  [data-theme="anthropic-dark"],
+  [data-theme="sakura-mist"],
+  [data-theme="co1dsand-light"],
+  [data-theme="co1dsand-dark"]
+) .nav-active-thumb::after {
+  background: var(--accent);
+  border-radius: 0 3px 3px 0;
+  content: "";
+  height: 18px;
+  left: 0;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+}
+
+/* 弹簧滑块就位后接管选中底色与沟槽条，避免切换瞬间原地残留静态底块。 */
+html:is(
+  [data-theme="dark"],
+  [data-theme="light"],
+  [data-theme="anthropic"],
+  [data-theme="anthropic-dark"],
+  [data-theme="sakura-mist"],
+  [data-theme="co1dsand-light"],
+  [data-theme="co1dsand-dark"]
+) .app-shell .topbar .topbar-nav[data-nav-spring="true"] .nav-link.active,
+html:is(
+  [data-theme="dark"],
+  [data-theme="light"],
+  [data-theme="anthropic"],
+  [data-theme="anthropic-dark"],
+  [data-theme="sakura-mist"],
+  [data-theme="co1dsand-light"],
+  [data-theme="co1dsand-dark"]
+) .app-shell .topbar .topbar-nav[data-nav-spring="true"] .nav-link.active:hover {
+  background: transparent;
+  box-shadow: none;
+}
+
+html:is(
+  [data-theme="dark"],
+  [data-theme="light"],
+  [data-theme="anthropic"],
+  [data-theme="anthropic-dark"],
+  [data-theme="sakura-mist"],
+  [data-theme="co1dsand-light"],
+  [data-theme="co1dsand-dark"]
+) .app-shell .topbar .topbar-nav[data-nav-spring="true"] .nav-link.active::after {
+  opacity: 0;
+}
+
+/* ── 五条悟主题：无下限渐变框与侧边光条随滑块滑行（保留 ::after 编号） ── */
+
+html[data-theme="gojo"] .nav-active-thumb {
+  background:
+    linear-gradient(96deg, rgb(99 220 255 / 16%) 0 46%, rgb(169 131 255 / 9%) 100%),
+    rgb(15 20 33 / 88%);
+  border: 1px solid rgb(99 220 255 / 34%);
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 18px rgb(99 220 255 / 10%);
+}
+
+html[data-theme="gojo"] .nav-active-thumb::before {
+  background: linear-gradient(180deg, var(--gojo-blue), #ffffff 50%, var(--gojo-purple));
+  border-radius: 0 2px 2px 0;
+  content: "";
+  inset: 0 auto 0 0;
+  position: absolute;
+  width: 3px;
+}
+
+html[data-theme="gojo"] .app-shell .topbar .topbar-nav[data-nav-spring="true"] .nav-link.active,
+html[data-theme="gojo"] .app-shell .topbar .topbar-nav[data-nav-spring="true"] .nav-link.active:hover {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+html[data-theme="gojo"] .app-shell .topbar .topbar-nav[data-nav-spring="true"] .nav-link.active::before {
+  opacity: 0;
+}
+
+/* ── Ark / Endfield / Minegrub：保留各自硬朗直角/像素边框，仅随滑块平移 ── */
+
+html[data-theme="ark"] .nav-active-thumb {
+  background: rgb(24 209 255 / 11%);
+  border: 1px solid rgb(24 209 255 / 38%);
+  border-radius: 0;
+  box-shadow: inset 3px 0 0 var(--ark-signal);
+}
+
+html[data-theme="endfield"] .nav-active-thumb {
+  background: var(--ef-ink);
+  border: 1px solid var(--ef-ink);
+  border-radius: 0;
+  box-shadow: inset 4px 0 0 var(--ef-signal);
+}
+
+html[data-theme="minegrub"] .nav-active-thumb {
+  background: #33251c;
+  border-radius: 0;
+  box-shadow: inset 3px 0 0 #55ff55, inset 2px 2px 0 #4a3729;
+}
+
+html:is([data-theme="ark"], [data-theme="endfield"], [data-theme="minegrub"]) .app-shell .topbar .topbar-nav[data-nav-spring="true"] .nav-link.active,
+html:is([data-theme="ark"], [data-theme="endfield"], [data-theme="minegrub"]) .app-shell .topbar .topbar-nav[data-nav-spring="true"] .nav-link.active:hover {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+/* ── 连续曲率圆角（排除 ark / endfield / minegrub） ───────────────── */
+
+@supports (corner-shape: squircle) {
+  :where(html:not([data-theme="ark"]):not([data-theme="endfield"]):not([data-theme="minegrub"])) .nav-active-thumb,
+  :where(html:not([data-theme="ark"]):not([data-theme="endfield"]):not([data-theme="minegrub"])) .nav-active-thumb::after,
+  html[data-theme="gojo"] .nav-active-thumb::before {
+    corner-shape: var(--corner-shape);
+  }
+}
+
+/* ── 手机端悬浮底部菜单适配 ──────────────────────────────────────── */
+
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html:is(
+    [data-theme="dark"],
+    [data-theme="light"],
+    [data-theme="anthropic"],
+    [data-theme="anthropic-dark"],
+    [data-theme="sakura-mist"],
+    [data-theme="co1dsand-light"],
+    [data-theme="co1dsand-dark"]
+  ) .nav-active-thumb::after {
+    display: none;
+  }
+
+  html[data-theme="gojo"] .nav-active-thumb::before {
+    background: linear-gradient(90deg, var(--gojo-blue), #ffffff 50%, var(--gojo-purple));
+    border-radius: 0 0 2px 2px;
+    height: 2px;
+    inset: 0 18% auto;
+    width: auto;
+  }
+
+  html[data-theme="ark"] .nav-active-thumb {
+    background: rgb(24 209 255 / 14%);
+    border-color: rgb(24 209 255 / 44%);
+    box-shadow: inset 0 -3px 0 var(--ark-signal);
+  }
+
+  html[data-theme="endfield"] .nav-active-thumb {
+    background: var(--ef-paper);
+    border-color: var(--ef-paper);
+    box-shadow: inset 0 3px 0 var(--ef-signal);
+  }
+}
+
+/* ── 视图舞台切换：JS 方向性弹簧启用时接管静态 panel-in ─────────── */
+
+.content[data-view-spring="true"] .panel {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .topbar-nav .nav-link:active {
+    transform: none;
+  }
+
+  .nav-active-thumb {
+    display: none;
+  }
+}

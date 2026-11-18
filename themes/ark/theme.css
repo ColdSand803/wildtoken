@@ -97,7 +97,7 @@ html[data-theme="ark"] {
   --topbar-height: 72px;
   --control-h: 38px;
   --control-h-sm: 30px;
-  --transition: 200ms cubic-bezier(.22, .8, .2, 1);
+  --transition: 240ms var(--spring-easing, cubic-bezier(.22, .8, .2, 1));
   --blur: 0px;
 }
 

@@ -4,7 +4,7 @@
   --drawer-width: 720px;
   --drawer-gutter: 20px;
 
-  animation: drawer-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: drawer-in 240ms var(--spring-easing, cubic-bezier(0.2, 0.8, 0.2, 1));
   border-radius: 0;
   border-width: 0 0 0 1px;
   height: 100dvh;

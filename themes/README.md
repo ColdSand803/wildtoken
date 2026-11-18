@@ -63,7 +63,7 @@ themes/
 - 代码块：`--code-frame-bg`、`--code-bg`、`--code-text`、`--code-muted`、`--code-border`
 - 交互面：`--row-hover`、`--row-disabled`、`--topbar-bg`、`--backdrop`、`--neutral-chip`、`--toast-neutral`
 - 背景光晕：`--aurora-a`、`--aurora-b`、`--aurora-c`
-- 排版与骨架：`--radius*`、`--space-*`、`--font-sans|mono`、`--text-xs…2xl`、`--topbar-height`、`--control-h`、`--transition`、`--blur`
+- 排版与骨架：`--radius*`、`--corner-shape`、`--space-*`、`--font-sans|mono`、`--text-xs…2xl`、`--topbar-height`、`--control-h`、`--spring-easing`、`--spring-duration`、`--transition`、`--blur`
 
 只覆盖需要改的变量即可，其余会继承深色默认值。别忘了同时声明 `color-scheme`，
 它决定滚动条和原生表单控件跟随明还是暗：

@@ -111,7 +111,7 @@ html[data-theme="gojo"] {
      the CJK run; the Latin faces still win for the identifiers that matter. */
   --font-mono: "JetBrains Mono", "Fira Code", "SFMono-Regular", ui-monospace, Consolas, "Noto Sans SC", monospace;
   --font-secret: "JetBrains Mono", "Cascadia Mono", "SFMono-Regular", ui-monospace, Consolas, monospace;
-  --transition: 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --transition: 240ms var(--spring-easing, cubic-bezier(0.2, 0.8, 0.2, 1));
   --blur: 0px;
 
   --gojo-blue: #63dcff;
@@ -1365,7 +1365,7 @@ html[data-theme="gojo"] .status-switch-thumb {
   box-shadow: none;
   transition:
     background-color 160ms ease,
-    transform 160ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform var(--spring-duration, 240ms) var(--spring-easing, cubic-bezier(0.2, 0.8, 0.2, 1));
 }
 
 html[data-theme="gojo"] .status-switch.off:hover:not(:disabled) .status-switch-track {
@@ -1622,4 +1622,16 @@ html[data-theme="gojo"] ::-webkit-scrollbar-corner {
 html[data-theme="gojo"] .nav-link::before {
   mask-image: none;
   -webkit-mask-image: none;
+}
+
+/* Continuous-curvature corners read tighter than circular arcs at the same radius. */
+@supports (corner-shape: squircle) {
+  html[data-theme="gojo"] {
+    --radius-xs: 4px;
+    --radius-sm: 4px;
+    --radius: 6px;
+    --radius-md: 9px;
+    --radius-lg: 10px;
+    --gojo-control-radius: 8px;
+  }
 }
