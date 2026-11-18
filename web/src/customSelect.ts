@@ -1,3 +1,5 @@
+import { animatePresence } from "./motion";
+
 let activeSelect: HTMLSelectElement | null = null;
 let selectActiveIndex = -1;
 let selectOptionButtons: HTMLButtonElement[] = [];
@@ -266,6 +268,7 @@ export function openCustomSelect(select: HTMLSelectElement) {
     if (activeSelect !== select) return;
     positionCustomSelect();
     panel.style.visibility = "visible";
+    animatePresence(panel, true);
     const selectedPos = selectOptionButtons.findIndex((button) =>
       button.classList.contains("is-selected"),
     );

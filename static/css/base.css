@@ -111,18 +111,43 @@ html[data-theme="dark"] {
   --text-2xl: 20px;
   --text-3xl: 26px;
 
-  /* Layout */
+  /* Layout & critically damped spring (ζ = 1) */
   --topbar-height: 56px;
   --content-max: 1440px;
   --control-h: 34px;
   --control-h-sm: 28px;
-  --transition: 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --spring-duration: 260ms;
+  --spring-easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --transition: var(--spring-duration) var(--spring-easing);
   --blur: 16px;
 
   /* Native checkboxes, radios and progress bars follow each theme's accent:
      declared once here, the property inherits everywhere while the var
      resolves against whichever theme block is active. */
   accent-color: var(--accent);
+}
+
+/* 临界阻尼弹簧（ζ = 1, ωT = 8）：1 - (1 + 8t)·e^(-8t)，无过冲最快收敛。 */
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring-easing: linear(
+      0,
+      0.0618 5%,
+      0.1915 10%,
+      0.3379 15%,
+      0.4758 20%,
+      0.5949 25%,
+      0.6926 30%,
+      0.7702 35%,
+      0.8499 42%,
+      0.9098 50%,
+      0.9537 60%,
+      0.977 70%,
+      0.9891 80%,
+      0.9953 90%,
+      1
+    );
+  }
 }
 
 html[data-theme="light"] {
@@ -1019,14 +1044,22 @@ html[data-theme="light"] .nav-link:hover {
   color: var(--accent);
 }
 
+.theme-swatch-pair {
+  align-items: center;
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
 .theme-swatch {
-  background: linear-gradient(135deg, var(--swatch-bg, var(--bg)) 50%, var(--swatch-accent, var(--accent)) 50%);
+  background: var(--swatch-color, var(--accent));
   border: 1px solid var(--line-strong);
   border-radius: 50%;
-  display: inline-block;
+  box-shadow: 0 0 0 1px var(--glass-strong);
+  display: block;
   flex: 0 0 auto;
-  height: 14px;
-  width: 14px;
+  height: 10px;
+  width: 10px;
 }
 
 /* ── Content / Panels ────────────────────────────────────── */
@@ -1041,7 +1074,7 @@ html[data-theme="light"] .nav-link:hover {
 }
 
 .panel {
-  animation: panel-in 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: panel-in 360ms var(--spring-easing) both;
   margin: 0;
   padding: 0;
 }

@@ -36,7 +36,7 @@ function loadFunction(source, name) {
 /* SSE 帧解析。不能用 EventSource——认证走 x-admin-token 头，原生
    EventSource 不支持自定义请求头，所以协议得自己解。 */
 test("SSE 帧解析：event 与多行 data", () => {
-  const parse = loadFunction(read("web/src/useLogStream.ts"), "parseStreamEvent");
+  const parse = loadFunction(read("web/src/driver/sse.ts"), "parseStreamEvent");
   /* 比标量不比对象：解析函数在 vm 里跑，返回的对象属于沙箱的
      Object 原型，deepEqual 会报「结构相同但不是同一引用」。 */
   const shape = (frame) => {

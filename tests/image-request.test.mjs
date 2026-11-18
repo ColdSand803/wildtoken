@@ -57,6 +57,29 @@ test("上游错误体解析出 message", () => {
   assert.equal(parseImageResponse('{"error":{"message":"bad size"}}').error, "bad size");
 });
 
+for (const value of [null, false, 42, "image", []]) {
+  const raw = JSON.stringify(value);
+  test(`普通响应 ${raw} 不抛异常，并说明结构错误`, () => {
+    const result = parseImageResponse(raw);
+    assert.deepEqual(result.images, []);
+    assert.match(result.error, /不是 JSON 对象/);
+  });
+
+  test(`SSE 的 ${raw} 不阻断后续有效图片`, () => {
+    const good = JSON.stringify({ type: "image_generation.completed", b64_json: PNG });
+    const result = parseImageResponse(`data: ${raw}\n\ndata: ${good}\n\n`);
+    assert.equal(result.images.length, 1);
+    assert.equal(result.images[0].truncated, false);
+    assert.match(result.error, /不是 JSON 对象/);
+  });
+}
+
+test("data 内无效项不影响有效图片", () => {
+  const result = parseImageResponse(JSON.stringify({ data: [null, 42, [], { b64_json: PNG }] }));
+  assert.equal(result.images.length, 1);
+  assert.equal(result.error, null);
+});
+
 test("流式：中间帧带序号，最终图没有；没收全的最后一行捞成截断的中间帧", () => {
   const raw = [
     "event: image_generation.partial_image",

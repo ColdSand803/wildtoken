@@ -6,7 +6,7 @@ import test from "node:test";
 import { exactTokens, firstTokenTone, formatCount, formatDuration, formatSeconds } from "../web/src/logFormat.ts";
 
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-const source = read("web/src/pages/LogsPage.tsx");
+const source = read("web/src/components/logs/LogTable.tsx");
 
 /**
  * 取一个单元格的源码。
@@ -16,7 +16,7 @@ const source = read("web/src/pages/LogsPage.tsx");
  */
 function cellSource(col) {
   // 从 LogRow 开始找：data-col 在表头先出现一轮，从头找会切到表头去。
-  const rowAt = source.indexOf("function LogRow");
+  const rowAt = source.indexOf("const LogRow = memo(");
   assert.notEqual(rowAt, -1, "日志行组件必须存在");
 
   const start = source.indexOf(`data-col="${col}"`, rowAt);

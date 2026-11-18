@@ -62,6 +62,7 @@ test("筛选控件不带文字标签", () => {
   const pages = ["LogsPage", "UpstreamsPage", "TokensPage"].map((name) =>
     read(`web/src/pages/${name}.tsx`),
   );
+  pages.push(read("web/src/components/logs/LogToolbar.tsx"));
 
   for (const source of pages) {
     for (const selector of ["filter-field", "log-filter"]) {

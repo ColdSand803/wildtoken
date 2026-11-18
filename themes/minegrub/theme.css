@@ -327,3 +327,14 @@ html[data-theme="minegrub"] .dialog-surface {
   background: #201712;
   box-shadow: inset 3px 3px 0 #3a2b22, inset -3px -3px 0 #100b08, 6px 6px 0 rgba(0, 0, 0, 0.6);
 }
+
+/* Navigation uses no rail icons: this pack keeps the classic menu look, where the
+   label alone carries the item and aria-current paints the green bar. The shared
+   stylesheet gives .nav-link::before a background-color of currentColor plus a
+   per-view mask-image, so a pack that does not opt into icons must clear the mask
+   or that colour fills the whole 16x16 box as a plain square. Last in the file, so
+   it wins on source order at equal specificity. */
+html[data-theme="minegrub"] .nav-link::before {
+  mask-image: none;
+  -webkit-mask-image: none;
+}

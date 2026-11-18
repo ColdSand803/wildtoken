@@ -19,6 +19,8 @@
 @import url("./css/upstream-editor.css");
 @import url("./css/lists.css");
 @import url("./css/react-integration.css");
+@import url("./css/squircle.css");
+@import url("./css/nav-motion.css");
 
 html[data-theme] .token-preview-code,
 html[data-theme] #api-key,

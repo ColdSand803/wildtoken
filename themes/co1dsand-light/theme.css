@@ -766,3 +766,14 @@ html[data-theme="co1dsand-light"] .content > .view {
     width: 100%;
   }
 }
+
+/* 连续曲率圆角在对角线上比同半径圆弧更紧，适度放大以维持原有克制的圆润感。 */
+@supports (corner-shape: squircle) {
+  html[data-theme="co1dsand-light"] {
+    --radius-xs: 4px;
+    --radius-sm: 5px;
+    --radius: 8px;
+    --radius-md: 10px;
+    --radius-lg: 15px;
+  }
+}

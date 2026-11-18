@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, HTTPError } from "../api";
+import { api, APIError } from "../api";
 import { formatTimestamp } from "../logFormat";
 
 export interface ProbeResult { upstream_id: number; ok: boolean; status_code: number | null; duration_ms: number | null; error_summary: string | null; checked_at: string }
@@ -39,7 +39,7 @@ export function useChannelDiagnostics() {
       setProbe({ ...result, running: false });
     } catch (err) {
       if (current.signal.aborted) return;
-      if (err instanceof HTTPError && err.status === 409) await reload(current.signal).catch(() => setError("已有测活任务，状态同步失败，请刷新重试。"));
+      if (err instanceof APIError && err.status === 409) await reload(current.signal).catch(() => setError("已有测活任务，状态同步失败，请刷新重试。"));
       else setError(err instanceof Error ? err.message : String(err));
     } finally { if (!current.signal.aborted) setBusy(false); }
   }

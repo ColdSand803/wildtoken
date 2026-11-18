@@ -51,6 +51,17 @@ test("调试、生图依次排在设置前面", () => {
   assert.ok(order[0] < order[1] && order[1] < order[2], "顶栏顺序应为调试、生图、设置");
 });
 
+test("页面通过独立动态导入加载，调试与生图仍保留页面实例", () => {
+  const app = read("web/src/App.tsx");
+  for (const id of ["Dashboard", "Debug", "Groups", "Image", "Logs", "Settings", "Tokens", "Upstreams"]) {
+    assert.match(app, new RegExp(`lazy\\(\\(\\) =>\\s*import\\(\\"\\./pages/${id}Page\\"\\)`), `${id} 页面应按需加载`);
+    assert.doesNotMatch(app, new RegExp(`import \\{ ${id}Page \\} from \\"\\./pages/${id}Page\\"`));
+  }
+  assert.match(app, /KEEP_ALIVE: readonly ViewId\[\] = \["debug", "images"\]/);
+  assert.match(app, /<Suspense fallback=\{view === "debug" \? <PageLoading \/> : null\}>/);
+  assert.match(app, /<Suspense fallback=\{view === "images" \? <PageLoading \/> : null\}>/);
+});
+
 // 切页不能打断调试：两页常驻，切走只隐藏；刷新命令只重挂当前页。
 test("调试和生图切页后仍挂着，只是隐藏", () => {
   const app = read("web/src/App.tsx");

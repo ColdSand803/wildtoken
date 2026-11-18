@@ -221,6 +221,21 @@ class Page {
     await sleep(30);
   }
 
+  async paste(selector, text) {
+    const ok = await this.evaluate((sel, value) => {
+      const input = document.querySelector(sel);
+      if (!input) return false;
+      input.focus();
+      const event = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", {
+        value: { getData: (type) => type === "text/plain" ? value : "" },
+      });
+      input.dispatchEvent(event);
+      return true;
+    }, selector, text);
+    if (!ok) throw new Error(`粘贴目标不存在：${selector}`);
+  }
+
   async press(key) {
     await this.evaluate((k) => {
       document.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
@@ -625,14 +640,15 @@ async function openProxiedLogDetail(page) {
 
 /** 按导航文案切视图，并等那一页的面板出来。 */
 async function gotoView(page, label) {
-  await page.evaluate((text) => {
+  const view = await page.evaluate((text) => {
     const button = [...document.querySelectorAll(".topbar-nav .nav-link")].find(
       (node) => node.textContent.trim() === text,
     );
     if (!button) throw new Error(`找不到导航项 ${text}`);
     button.click();
+    return button.dataset.view;
   }, label);
-  await page.waitForSelector("section.view .panel", { label: `${label}页` });
+  await page.waitForSelector(`section.view[data-view="${view}"] .panel`, { label: `${label}页` });
 }
 
 async function clickMenuItem(page, label) {
@@ -650,7 +666,80 @@ async function clickMenuItem(page, label) {
 
 // ── 断言 ─────────────────────────────────────────────────────────────────────
 
+const UPSTREAM_EDITOR = "dialog.upstream-editor[open]";
+const MODEL_WORKSPACE = `${UPSTREAM_EDITOR} .mc:not([hidden])`;
+
+async function clickButton(page, scope, text, prefix = false) {
+  await page.evaluate((scope, text, prefix) => {
+    const button = [...document.querySelectorAll(`${scope} button`)].find((item) =>
+      prefix ? item.textContent.trim().startsWith(text) : item.textContent.trim() === text,
+    );
+    if (!button || button.disabled) throw new Error(`按钮不可用：${text}`);
+    button.click();
+  }, scope, text, prefix);
+}
+
+async function editorTab(page, tab) {
+  await page.click(`${UPSTREAM_EDITOR} #ue-tab-${tab}`);
+  await page.waitFor((id) => document.getElementById(`ue-tab-${id}`)?.getAttribute("aria-selected") === "true",
+    { label: `${tab} 编辑页签` }, tab);
+}
+
+async function editorField(page, field) {
+  const tab = ["modelNames", "modelPrefixes", "modelMappings", "effortMappings", "manual"].includes(field)
+    ? "models" : ["groupIds", "priority", "weight", "timeoutSeconds", "rateLimit"].includes(field) ? "traffic" : "connection";
+  await editorTab(page, tab);
+  const selector = `${UPSTREAM_EDITOR} [data-ue-field=${field}]`;
+  await page.evaluate((selector) => {
+    const node = document.querySelector(selector);
+    if (!node) throw new Error(`编辑字段不存在：${selector}`);
+    for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    }
+  }, selector);
+  return selector;
+}
+
+async function saveEditor(page) {
+  await page.click(`${UPSTREAM_EDITOR} button[type=submit]`);
+  await page.waitFor(() => !document.querySelector("dialog.upstream-editor[open]"),
+    { label: "渠道保存", timeout: 10_000 }).catch(async (error) => {
+    const details = await page.evaluate(() => [...document.querySelectorAll(".upstream-editor .ue-error, .toast-message")]
+      .map((item) => item.textContent).filter(Boolean).join(" | "));
+    throw new Error(`${error.message}：${details}`);
+  });
+}
+
+async function closeEditor(page) {
+  await page.click(`${UPSTREAM_EDITOR} .icon-close`);
+  const next = await page.waitFor(() => {
+    if (!document.querySelector("dialog.upstream-editor[open]")) return "closed";
+    return document.querySelector("dialog.confirm-dialog[open]") ? "confirm" : false;
+  }, { label: "关闭渠道编辑器" });
+  if (next === "confirm") await clickButton(page, "dialog.confirm-dialog[open]", "放弃修改");
+  await page.waitFor(() => !document.querySelector("dialog.upstream-editor[open]"), { label: "编辑器已关闭" });
+}
+
+async function storedUpstream(page, name = "auto-weight-channel") {
+  return page.evaluate(async (name) => {
+    const response = await fetch("/api/admin/upstreams/", {
+      headers: { "x-admin-token": localStorage.getItem("wildtoken_admin_token") },
+    });
+    if (!response.ok) throw new Error(`读取渠道失败：${response.status}`);
+    return (await response.json()).find((item) => item.name === name);
+  }, name);
+}
+
+async function modelRows(page) {
+  return page.evaluate((selector) => [...document.querySelectorAll(`${selector} .mc-row`)].map((row) => ({
+    name: row.querySelector("code").textContent,
+    checked: row.querySelector("input").checked,
+    missing: Boolean(row.querySelector("span")),
+  })), MODEL_WORKSPACE);
+}
+
 const results = [];
+let cleanupFailedCase = async () => {};
 
 function reportResults() {
   const failed = results.filter((result) => !result.ok);
@@ -666,6 +755,7 @@ async function check(name, fn) {
   } catch (error) {
     results.push({ name, ok: false, error });
     console.log(`  ✘ ${name}\n      ${error.message.split("\n").join("\n      ")}`);
+    await cleanupFailedCase().catch((error) => console.log(`      清理失败：${error.message}`));
   }
 }
 
@@ -766,6 +856,19 @@ async function main() {
     chrome = launched.chrome;
     cdp = await attachPage(launched.port);
     const page = new Page(cdp);
+    cleanupFailedCase = async () => {
+      for (let attempts = 0; attempts < 4 && await page.count("dialog[open]"); attempts += 1) {
+        await page.evaluate(() => {
+          const dialog = [...document.querySelectorAll("dialog[open]")].at(-1);
+          const buttons = [...dialog.querySelectorAll("button")];
+          const button = buttons.find((item) => ["放弃修改", "取消"].includes(item.textContent.trim()))
+            ?? dialog.querySelector(".icon-close") ?? buttons.find((item) => item.textContent.trim() === "关闭");
+          if (!button || button.disabled) throw new Error("无法关闭失败用例的对话框");
+          button.click();
+        });
+      }
+      await page.waitFor(() => !document.querySelector("dialog[open]"), { label: "失败用例清理" });
+    };
 
     // 收噪音。三条来路各收各的：console.error、未捕获异常、失败请求。
     const noise = { console: [], exceptions: [], requests: [] };
@@ -802,8 +905,12 @@ async function main() {
       const request = urlByRequest.get(event.requestId);
       const url = request?.url ?? "";
       if (!ours(url)) return;
-      // 离开日志页时 SSE 连接是被主动 abort 掉的，不算缺陷。
-      if (event.canceled && url.includes("/api/admin/logs/stream")) return;
+      // 只豁免有取消语义的读取，其他端点的中断仍然报错。
+      const path = new URL(url).pathname;
+      const cancellableRead = request?.method === "GET"
+        && /^\/api\/admin\/(?:logs\/(?:stream)?|upstreams\/|tokens\/|groups\/|settings\/|system)$/.test(path);
+      const modelPreview = request?.method === "POST" && path === "/api/admin/upstreams/fetch-models";
+      if ((event.canceled || event.errorText === "net::ERR_ABORTED") && (cancellableRead || modelPreview)) return;
       if (responded.has(event.requestId)) return;
       noise.requests.push(`失败 ${event.errorText} ${request?.method ?? "?"} ${url}`);
     });
@@ -1143,19 +1250,12 @@ async function main() {
       await page.waitForSelector("dialog.upstream-dialog[open]", { label: "克隆对话框" });
       const seen = await page.evaluate(() => {
         const dialog = document.querySelector("dialog.upstream-dialog[open]");
-        const field = [...dialog.querySelectorAll(".field")].find(
-          (node) => node.querySelector(".field-label")?.textContent.trim() === "名称",
-        );
         return {
-          title: dialog.querySelector(".modal-head h2").textContent.trim(),
-          name: field.querySelector("input").value,
+          title: dialog.querySelector(".ue-eyebrow").textContent.trim(),
+          name: dialog.querySelector('[data-ue-field="name"]').value,
         };
       });
-      // 先关窗还原，再断言——断言挂掉也不该把对话框留给后面的检查。
-      await page.click("dialog.upstream-dialog[open] .icon-close");
-      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
-        label: "克隆对话框关闭",
-      });
+      await closeEditor(page);
       assertEqual(seen.title, "新增渠道", `克隆对话框标题：${seen.title}`);
       assertEqual(seen.name, "auto-weight-channel-copy", `克隆预填的名字：${seen.name}`);
     });
@@ -1328,26 +1428,32 @@ async function main() {
       });
       await page.waitForSelector(dialog, { label: "快速导入窗" });
 
-      // 真实粘贴的样子：面板地址、密钥、备用地址混在一起，都要被认出来。
       const key = "sk-quick-import-0123456789abcdef";
-      await page.fill(
-        `${dialog} textarea`,
-        `面板：http://127.0.0.1:${fakeUpstreamPort}/v1\n密钥 ${key}\n备用 https://backup.example.com`,
-      );
-
-      const pulled = await page.evaluate(async (scope) => {
-        const button = [...document.querySelectorAll(`${scope} button`)].find(
-          (node) => node.textContent.trim() === "拉取模型",
-        );
-        if (!button) throw new Error("找不到拉取模型按钮");
-        button.click();
-        return true;
-      }, dialog);
-      assert(pulled, "拉取按钮点不到");
+      const baseUrl = `http://127.0.0.1:${fakeUpstreamPort}/v1`;
+      await clickButton(page, dialog, "清空重来");
+      await page.paste(`${dialog} #quick-import-source`, `面板：${baseUrl}\n密钥 ${key}\n备用 https://backup.example.com`);
+      await page.waitForSelector(`${dialog} #quick-import-url-choice`);
+      await page.evaluate((url) => {
+        const select = document.getElementById("quick-import-url-choice");
+        const option = [...select.options].find((item) => item.textContent.includes(url));
+        if (!option) throw new Error("没有本地上游候选");
+        select.value = option.value;
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      }, baseUrl);
+      await page.waitFor((url) => document.getElementById("quick-import-url").value === url
+        && ![...document.querySelectorAll(".qi-model-summary button")].find((item) => item.textContent === "拉取模型").disabled,
+        { label: "确认上游候选" }, baseUrl);
+      await clickButton(page, dialog, "拉取模型");
+      await page.waitFor((count) => document.querySelector(".qi-model-summary-row strong")?.textContent.includes(`已选 ${count} / ${count}`),
+        { label: "拉取模型完成" }, FAKE_MODELS.length);
+      const summaryNames = await page.evaluate((scope) =>
+        [...document.querySelectorAll(`${scope} .qi-model-names code`)].map((node) => node.textContent), dialog);
+      assertEqual(summaryNames.join(","), FAKE_MODELS.join(","), "快速导入摘要直接显示拉取到的模型");
+      await clickButton(page, dialog, "调整选择");
 
       const names = await page.waitFor(
         (scope) => {
-          const list = [...document.querySelectorAll(`${scope} .quick-import-models .model-option-name`)].map(
+          const list = [...document.querySelectorAll(`${scope} .mc:not([hidden]) .mc-row code`)].map(
             (node) => node.textContent,
           );
           return list.length > 0 ? list : false;
@@ -1360,7 +1466,7 @@ async function main() {
       // 拉回来就默认全选，否则等于没拉。
       const allChecked = await page.evaluate(
         (scope) =>
-          [...document.querySelectorAll(`${scope} .quick-import-models input`)].every(
+          [...document.querySelectorAll(`${scope} .mc:not([hidden]) .mc-row input`)].every(
             (input) => input.checked,
           ),
         dialog,
@@ -1369,31 +1475,14 @@ async function main() {
 
       // 摘掉一个，看它会不会跟着渠道存进去。
       await page.evaluate((scope) => {
-        const input = [...document.querySelectorAll(`${scope} .quick-import-models input`)][1];
+        const input = [...document.querySelectorAll(`${scope} .mc:not([hidden]) .mc-row input`)][1];
         input.click();
       }, dialog);
 
-      /* 名称框：原始文本框下面、Base URL 上面那个。按顺序数比按 placeholder
-         数稳——自适应识别会把名称填成 api-example。 */
       const name = `quick-import-${Date.now()}`;
-      await page.evaluate(
-        (scope, value) => {
-          const input = document.querySelectorAll(`${scope} .field input`)[0];
-          const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
-          setter.call(input, value);
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-        },
-        dialog,
-        name,
-      );
-
-      await page.evaluate((scope) => {
-        const button = [...document.querySelectorAll(`${scope} .modal-footer button`)].find(
-          (node) => node.textContent.trim() === "填入表单",
-        );
-        if (!button) throw new Error("找不到填入表单按钮");
-        button.click();
-      }, dialog);
+      await clickButton(page, dialog, "返回连接");
+      await page.fill(`${dialog} #quick-import-name`, name);
+      await clickButton(page, `${dialog} .modal-footer`, "继续配置", true);
 
       /* 关键：这一步不该落库，只该把值交给新增表单。等编辑抽屉出现，
          同时确认快速导入窗已经让位。 */
@@ -1407,24 +1496,17 @@ async function main() {
         "填入表单后快速导入窗该关掉",
       );
 
+      await editorTab(page, "models");
       const form = await page.evaluate(() => {
-        const dialog = document.querySelector("dialog.upstream-dialog[open]");
-        const value = (label) => {
-          const field = [...dialog.querySelectorAll(".field")].find(
-            (node) => node.querySelector(".field-label")?.textContent?.trim() === label,
-          );
-          return field?.querySelector("input")?.value ?? null;
-        };
+        const dialog = document.querySelector("dialog.upstream-editor[open]");
+        const value = (field) => dialog.querySelector(`[data-ue-field=${field}]`)?.value ?? null;
         return {
-          title: dialog.querySelector(".modal-head h2")?.textContent?.trim() ?? "",
-          name: value("名称"),
-          baseUrl: value("Base URL"),
-          apiKey: value("API Key"),
-          priority: value("优先级"),
-          chips: [...dialog.querySelectorAll(".model-selection-chip-name")].map(
-            (node) => node.textContent,
-          ),
-          // 草稿没有已存密钥，这个勾选框不该出现——勾了会把刚填的 Key 清掉。
+          title: dialog.querySelector(".ue-eyebrow").textContent.trim(),
+          name: value("name"),
+          baseUrl: value("baseUrl"),
+          apiKey: dialog.querySelector(".key-row-secret").value,
+          priority: value("priority"),
+          chips: [...dialog.querySelectorAll(".ue-preview-chip")].map((node) => node.textContent),
           hasClearKey: dialog.textContent.includes("清空 API Key"),
         };
       });
@@ -1432,7 +1514,7 @@ async function main() {
       // id 0 的草稿要按新建对待，标题写「编辑渠道 #0」就说明走错了分支。
       assertEqual(form.title, "新增渠道", "草稿应按新建对待");
       assertEqual(form.name, name, "名称带进表单");
-      assertEqual(form.baseUrl, `http://127.0.0.1:${fakeUpstreamPort}`, "Base URL 带进表单");
+      assertEqual(form.baseUrl, baseUrl, "Base URL 保留 /v1 路径");
       assertEqual(form.apiKey, key, "API Key 带进表单");
       assertEqual(form.priority, "999", "优先级预填 999");
       assertEqual(form.hasClearKey, false, "草稿不该出现清空 API Key");
@@ -1445,27 +1527,8 @@ async function main() {
         `被摘掉的 ${FAKE_MODELS[1]} 不该在已选模型里：${form.chips}`,
       );
 
-      /* 没保存就关掉：这条只验预填，不该往库里留东西。顺便确认真的没建——
-         「不落库」是这次改动的全部意义，光看表单填对了证明不了。 */
-      await page.click("dialog.upstream-dialog[open] .icon-close");
-      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
-        label: "表单关闭",
-      });
-      await page.evaluate(() => {
-        const button = [...document.querySelectorAll(".view-toolbar button")].find(
-          (node) => node.textContent.trim() === "刷新",
-        );
-        if (!button) throw new Error("找不到刷新按钮");
-        button.click();
-      });
-      const leaked = await page.evaluate(
-        (fragment) =>
-          [...document.querySelectorAll("table.upstream-table tbody tr")].some((node) =>
-            node.querySelector("[data-col=name]")?.textContent?.includes(fragment),
-          ),
-        name,
-      );
-      assertEqual(leaked, false, "只填表单不该建出渠道");
+      await closeEditor(page);
+      assertEqual(await storedUpstream(page, name), undefined, "只填表单不该建出渠道");
     });
 
     /* 不带密钥的备份看着完整，导回去每个渠道都要重填。直接比导出文本里
@@ -1587,99 +1650,79 @@ async function main() {
     // ── 模型选择器 ──────────────────────────────────────────
     console.log("\n模型选择器");
 
-    await check("菜单拉取模型后开出选择器", async () => {
+    await check("菜单拉取模型后打开编辑器内的模型清单", async () => {
       await openRowMenu(page, "auto-weight");
       await clickMenuItem(page, "拉取模型");
-      await page.waitForSelector("dialog.model-dialog[open]", { label: "选择器", timeout: 10_000 });
-      const summary = await page.text("dialog.model-dialog .modal-head p");
-      assert(summary?.includes(`上游返回 ${FAKE_MODELS.length}`), `摘要不对：${summary}`);
-      assert(summary?.includes("1 个未由上游返回"), `应数出未返回的：${summary}`);
+      await page.waitForSelector(MODEL_WORKSPACE, { label: "模型工作区" });
+      await page.waitFor((count) => document.querySelector('.mc:not([hidden]) .mc-batch [role=status]')?.textContent.includes(`已拉取 ${count} 个模型`),
+        { label: "模型目录" }, FAKE_MODELS.length);
+      const rows = await modelRows(page);
+      assert(FAKE_MODELS.every((name) => rows.some((row) => row.name === name)), "返回模型没有完整展示");
     });
 
     await check("已选但上游没返回的模型标出来", async () => {
-      const marked = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.model-dialog .model-option")]
-          .filter((option) => option.querySelector(".model-option-state"))
-          .map((option) => option.querySelector(".model-option-name")?.textContent),
-      );
-      assertEqual(marked.join(","), "retired-model", "标为未返回的模型");
+      const missing = (await modelRows(page)).filter((row) => row.missing);
+      assertEqual(missing.map((row) => row.name).join(","), "retired-model", "未返回模型");
+      assert(missing[0].checked, "拉取目录不能擅自取消已有选择");
     });
 
-    await check("映射单独成行且默认选中", async () => {
-      const mapping = await page.evaluate(() => {
-        const option = document.querySelector("dialog.model-dialog .model-option.is-mapping");
-        return {
-          text: option?.querySelector(".model-option-name")?.textContent ?? null,
-          checked: option?.querySelector("input")?.checked ?? null,
-        };
-      });
-      assertEqual(mapping.text, "fast => gpt-4o-mini", "映射行文本");
-      assertEqual(mapping.checked, true, "映射默认勾选");
+    await check("映射与精确模型独立管理，拉目录不改变映射", async () => {
+      assert(!(await modelRows(page)).some((row) => row.name.includes("=>")), "映射不能混进精确模型清单");
+      await editorTab(page, "models");
+      const mapping = await page.evaluate((scope) => [...document.querySelectorAll(`${scope} .ue-mapping-row input`)].map((input) => input.value), UPSTREAM_EDITOR);
+      assertEqual(mapping.join("=>"), "fast=>gpt-4o-mini", "已有映射应保留");
+      await page.click(`${UPSTREAM_EDITOR} #ue-manage-models`);
+      await page.waitForSelector(MODEL_WORKSPACE);
     });
 
-    await check("筛选只留匹配项", async () => {
-      await page.fill("dialog.model-dialog input[type=search]", "mini");
-      const names = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.model-dialog .model-option-name")].map((n) => n.textContent),
-      );
-      assertEqual(names.join(","), "fast => gpt-4o-mini,gpt-4o-mini", "筛选结果");
+    await check("筛选只留匹配的精确模型", async () => {
+      await page.fill(`${MODEL_WORKSPACE} input[type=search]`, "mini");
+      assertEqual((await modelRows(page)).map((row) => row.name).join(","), "gpt-4o-mini", "筛选结果");
     });
 
     await check("全选只作用于可见项", async () => {
-      await page.click("dialog.model-dialog .model-toolbar-actions button:nth-of-type(1)");
-      await page.fill("dialog.model-dialog input[type=search]", "");
-      const checked = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.model-dialog .model-option")]
-          .filter((option) => option.querySelector("input")?.checked)
-          .map((option) => option.querySelector(".model-option-name")?.textContent),
-      );
-      // 原本选中 gpt-4o / retired-model / 映射，筛出 mini 后全选只该多出 gpt-4o-mini。
-      assert(checked.includes("gpt-4o-mini"), `可见项没被选中：${checked}`);
-      assert(!checked.includes("claude-sonnet-5"), `不可见项被误选：${checked}`);
+      await clickButton(page, `${MODEL_WORKSPACE} .mc-batch`, "选中匹配", true);
+      await page.fill(`${MODEL_WORKSPACE} input[type=search]`, "");
+      const selected = (await modelRows(page)).filter((row) => row.checked).map((row) => row.name);
+      assert(selected.includes("gpt-4o-mini") && selected.includes("gpt-4o"), `可见项或原选择丢失：${selected}`);
+      assert(!selected.includes("claude-sonnet-5"), `不可见项被误选：${selected}`);
     });
 
-    await check("移除未返回只去掉那一个", async () => {
-      await page.evaluate(() => {
-        const button = [...document.querySelectorAll("dialog.model-dialog .model-toolbar-actions button")]
-          .find((b) => b.textContent.trim() === "移除未返回");
-        if (!button) throw new Error("找不到移除未返回按钮");
-        button.click();
-      });
-      const summary = await page.text("dialog.model-dialog .modal-head p");
-      assert(!summary?.includes("未由上游返回"), `还剩着未返回项：${summary}`);
+    await check("取消未返回的选择不影响其他模型", async () => {
+      await clickButton(page, `${MODEL_WORKSPACE} .mc-scopes`, "本次未返回");
+      await clickButton(page, `${MODEL_WORKSPACE} .mc-batch`, "取消匹配", true);
+      assert(!(await modelRows(page)).some((row) => row.checked), "未返回项应取消选择");
+      await clickButton(page, `${MODEL_WORKSPACE} .mc-scopes`, "全部");
+      const selected = (await modelRows(page)).filter((row) => row.checked).map((row) => row.name);
+      assert(selected.includes("gpt-4o") && selected.includes("gpt-4o-mini"), "其他模型选择不能丢失");
     });
 
-    await check("手动输入带箭头的登记为映射", async () => {
-      await page.fill("dialog.model-dialog .model-manual-entry input", "cheap => gpt-4o-mini");
-      await page.click("dialog.model-dialog .model-manual-entry button");
-      const mappings = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.model-dialog .model-option.is-mapping .model-option-name")]
-          .map((n) => n.textContent),
-      );
-      assert(mappings.includes("cheap => gpt-4o-mini"), `映射没登记上：${mappings}`);
+    await check("批量模型输入拒绝映射并保留原选择", async () => {
+      await clickButton(page, `${MODEL_WORKSPACE} .mc-search`, "批量输入");
+      await page.fill(`${MODEL_WORKSPACE} #ue-manual`, "cheap => gpt-4o-mini");
+      await clickButton(page, `${MODEL_WORKSPACE} #ue-manual-panel`, "添加到已选");
+      await page.waitFor(() => document.querySelector("#ue-manual-help")?.textContent.includes("这里只填写模型名"),
+        { label: "映射输入被拒绝" });
+      assert(!(await modelRows(page)).some((row) => row.name === "cheap"), "被拒绝的内容不能改变选择");
+      await page.fill(`${MODEL_WORKSPACE} #ue-manual`, "");
     });
 
-    await check("保存选择后回写到渠道", async () => {
-      await page.evaluate(() => {
-        const button = [...document.querySelectorAll("dialog.model-dialog .modal-footer button")]
-          .find((b) => b.textContent.trim().startsWith("保存"));
-        if (!button) throw new Error("找不到保存按钮");
-        button.click();
-      });
-      await page.waitFor(() => document.querySelector("dialog.model-dialog[open]") === null, {
-        label: "选择器关闭",
-        timeout: 10_000,
-      });
-      const cell = await page.waitFor(
-        () => {
-          const rows = [...document.querySelectorAll("table.upstream-table tbody tr")];
-          const row = rows.find((r) => r.querySelector("[data-col=name]")?.textContent?.includes("auto-weight"));
-          const text = row?.querySelector("[data-col=models]")?.textContent ?? "";
-          return text.includes("cheap=>gpt-4o-mini") ? text : false;
-        },
-        { label: "模型匹配格更新" },
-      );
-      assert(!cell.includes("retired-model"), `移除的模型还在：${cell}`);
+    await check("批量编辑模型映射保留箭头两侧的名称", async () => {
+      const scope = await editorField(page, "modelMappings");
+      await clickButton(page, scope, "批量编辑");
+      await page.fill(`${scope} textarea`, "fast => gpt-4o-mini\ncheap => gpt-4o-mini");
+      await clickButton(page, scope, "返回逐行");
+      const values = await page.evaluate((scope) => [...document.querySelectorAll(`${scope} .ue-mapping-row input`)].map((input) => input.value), scope);
+      assertEqual(values.join(","), "fast,gpt-4o-mini,cheap,gpt-4o-mini", "映射输入");
+    });
+
+    await check("保存渠道后选择和映射一起落库", async () => {
+      await saveEditor(page);
+      const saved = await storedUpstream(page);
+      assert(!saved.model_names.includes("retired-model"), "取消的模型仍在数据库");
+      assert(saved.model_names.includes("gpt-4o-mini"), "新增选择没有保存");
+      assertEqual(saved.model_mappings.cheap, "gpt-4o-mini", "新映射没有保存");
+      assertEqual(saved.model_mappings.fast, "gpt-4o-mini", "旧映射丢失");
     });
 
     // ── 测试模型 ──────────────────────────────────────────────
@@ -1882,296 +1925,169 @@ async function main() {
     // ── 渠道编辑表单 ─────────────────────────────────────────
     console.log("\n渠道编辑表单");
 
-    await check("分四节，高级区可折叠", async () => {
+    await check("渠道编辑器有三个页签，额外配置可折叠", async () => {
       await openRowMenu(page, "auto-weight");
       await clickMenuItem(page, "编辑");
-      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
-      const heads = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.upstream-dialog[open] .form-section-head h3")].map(
-          (h) => h.textContent,
-        ),
-      );
-      assertEqual(heads.join(","), "基础信息,模型路由,运行设置", "分节标题");
-      const collapsible = await page.count("dialog.upstream-dialog[open] details.form-section-collapsible");
-      assertEqual(collapsible, 1, "可折叠的高级区");
+      await page.waitForSelector(UPSTREAM_EDITOR);
+      const layout = await page.evaluate((scope) => {
+        const dialog = document.querySelector(scope);
+        return {
+          tabs: [...dialog.querySelectorAll(".ue-tab")].map((tab) => tab.firstChild.textContent.trim()),
+          panels: dialog.querySelectorAll('[role=tabpanel]').length,
+          extraCollapsed: !dialog.querySelector(".ue-disclosure").open,
+        };
+      }, UPSTREAM_EDITOR);
+      assertEqual(layout.tabs.join(","), "连接与认证,模型规则,流量策略", "配置页签");
+      assertEqual(layout.panels, 3, "页签面板数量");
+      assert(layout.extraCollapsed, "额外请求头默认应收起");
     });
 
     await check("所属分组预勾上", async () => {
-      const checked = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.upstream-dialog[open] .group-checkbox")]
-          .filter((label) => label.querySelector("input")?.checked)
-          .map((label) => label.querySelector("span")?.textContent),
-      );
+      await editorTab(page, "traffic");
+      const checked = await page.evaluate((scope) => [...document.querySelectorAll(`${scope} .ue-group`)]
+        .filter((label) => label.querySelector("input").checked).map((label) => label.textContent.trim()), UPSTREAM_EDITOR);
       assertEqual(checked.join(","), "vip", "已勾分组");
     });
 
-    /* 模型名是芯片，映射单独一个多行文本框，每行一条 `a => b`。
-       高级区是 details，所以 section 里的 textarea 只有映射这一个。 */
-    const MAPPINGS_TEXTAREA = "dialog.upstream-dialog[open] section.form-section textarea";
-
-    await check("已选模型渲染成芯片，映射不在芯片里", async () => {
-      const chips = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.upstream-dialog[open] .model-selection-chip-name")].map(
-          (chip) => chip.textContent,
-        ),
-      );
-      assert(chips.includes("gpt-4o"), `模型名没渲染成芯片：${chips}`);
-      assert(!chips.some((chip) => chip.includes("=>")), `映射混进了芯片：${chips}`);
+    await check("精确模型在预览区显示，映射独立展示", async () => {
+      await editorTab(page, "models");
+      const chips = await page.evaluate((scope) => [...document.querySelectorAll(`${scope} .ue-preview-chip`)].map((item) => item.textContent), UPSTREAM_EDITOR);
+      assert(chips.includes("gpt-4o"), `缺少已选模型：${chips}`);
+      assert(!chips.some((chip) => chip.includes("=>")), "映射不能混入精确模型预览");
     });
 
-    await check("映射回填到自己的文本框", async () => {
-      const lines = await page.evaluate(
-        (sel) => document.querySelector(sel).value.split("\n").filter(Boolean),
-        MAPPINGS_TEXTAREA,
-      );
-      assertEqual(lines.join("|"), "fast => gpt-4o-mini", "映射文本框内容");
+    await check("映射回填到独立编辑器", async () => {
+      const entries = await page.evaluate((scope) => [...document.querySelectorAll(`${scope} .ue-mapping-row`)]
+        .map((row) => [...row.querySelectorAll("input")].map((input) => input.value)), UPSTREAM_EDITOR);
+      const stored = await storedUpstream(page);
+      assertEqual(JSON.stringify(Object.fromEntries(entries)), JSON.stringify(stored.model_mappings), "回填的模型映射");
     });
 
-    await check("芯片可以就地摘掉", async () => {
-      const before = await page.count("dialog.upstream-dialog[open] .model-selection-chip");
-      await page.click("dialog.upstream-dialog[open] .model-selection-remove");
-      const after = await page.count("dialog.upstream-dialog[open] .model-selection-chip");
-      assertEqual(after, before - 1, "摘掉一个后的芯片数");
+    await check("管理区取消选择后预览同步更新，重新选择可恢复", async () => {
+      const before = await page.count(`${UPSTREAM_EDITOR} .ue-preview-chip`);
+      await page.click(`${UPSTREAM_EDITOR} #ue-manage-models`);
+      await page.evaluate((scope) => {
+        const input = [...document.querySelectorAll(`${scope} .mc-row input`)].find((input) => input.value === "gpt-4o-mini");
+        if (!input?.checked) throw new Error("没有可取消的已选模型");
+        input.click();
+      }, MODEL_WORKSPACE);
+      await clickButton(page, MODEL_WORKSPACE, "← 模型规则");
+      assertEqual(await page.count(`${UPSTREAM_EDITOR} .ue-preview-chip`), before - 1, "取消后的预览数量");
+      await page.click(`${UPSTREAM_EDITOR} #ue-manage-models`);
+      await page.evaluate((scope) => [...document.querySelectorAll(`${scope} .mc-row input`)]
+        .find((input) => input.value === "gpt-4o-mini").click(), MODEL_WORKSPACE);
+      await clickButton(page, MODEL_WORKSPACE, "← 模型规则");
+      assertEqual(await page.count(`${UPSTREAM_EDITOR} .ue-preview-chip`), before, "重新选择后的预览数量");
     });
 
-    /* 第二条入口：渠道编辑表单里的两个按钮。它走的是另一个接口（探一个还没
-       存下来的 Base URL），也不碰服务端，和行菜单那条没有任何共用逻辑。 */
-    await check("编辑表单里管理模型不拉取", async () => {
-      await page.evaluate(() => {
-        const button = [
-          ...document.querySelectorAll("dialog.upstream-dialog[open] .form-section-head-actions button"),
-        ].find((b) => b.textContent.trim() === "管理模型");
-        if (!button) throw new Error("找不到管理模型按钮");
-        button.click();
-      });
-      await page.waitForSelector("dialog.model-dialog[open]", { label: "选择器" });
-      const summary = await page.text("dialog.model-dialog .modal-head p");
-      assert(summary?.includes("列表"), `没拉取时该报列表数：${summary}`);
-      assert(!summary?.includes("上游返回"), `没拉取却声称上游返回：${summary}`);
-      // 没拉过就没有判断依据，这个按钮不该出现。
-      const hasRemove = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.model-dialog .model-toolbar-actions button")]
-          .some((b) => b.textContent.trim() === "移除未返回"),
-      );
-      assertEqual(hasRemove, false, "未拉取时的移除未返回按钮");
+    await check("编辑表单里的管理模型不发目录请求", async () => {
+      const seen = [];
+      const collect = (event) => seen.push(event.request.url);
+      cdp.on("Network.requestWillBeSent", collect);
+      try {
+        await page.click(`${UPSTREAM_EDITOR} #ue-manage-models`);
+        await page.waitForSelector(`${MODEL_WORKSPACE} .mc-row`);
+        const missingDisabled = await page.evaluate((scope) => [...document.querySelectorAll(`${scope} .mc-scopes button`)]
+          .find((button) => button.textContent === "本次未返回").disabled, MODEL_WORKSPACE);
+        assert(missingDisabled, "未拉目录时不能判断未返回项");
+        assert(!seen.some((url) => url.includes("fetch-models") || /\/upstreams\/\d+\/models/.test(url)), "打开管理区不能拉取目录");
+      } finally {
+        cdp.off("Network.requestWillBeSent", collect);
+      }
     });
 
-    await check("选择器写回表单而不是直接存库", async () => {
-      await page.fill("dialog.model-dialog .model-manual-entry input", "draft-only");
-      await page.click("dialog.model-dialog .model-manual-entry button");
-      await page.evaluate(() => {
-        const button = [...document.querySelectorAll("dialog.model-dialog .modal-footer button")]
-          .find((b) => b.textContent.trim().startsWith("保存"));
-        button.click();
-      });
-      await page.waitFor(() => document.querySelector("dialog.model-dialog[open]") === null, {
-        label: "选择器关闭",
-      });
-      const chips = await page.evaluate(() =>
-        [...document.querySelectorAll("dialog.upstream-dialog[open] .model-selection-chip-name")].map(
-          (chip) => chip.textContent,
-        ),
-      );
-      assert(chips.includes("draft-only"), `没写回芯片：${chips}`);
-      // 表单没提交，库里不该有这个名字。
-      const stored = await page.evaluate(async () => {
-        const response = await fetch("/api/admin/upstreams/", {
-          headers: { "x-admin-token": localStorage.getItem("wildtoken_admin_token") },
-        });
-        const list = await response.json();
-        return list.some((item) => item.model_names.includes("draft-only"));
-      });
-      assertEqual(stored, false, "未保存的选择不该落库");
+    await check("模型工作区更新草稿，不直接写入数据库", async () => {
+      await clickButton(page, `${MODEL_WORKSPACE} .mc-search`, "批量输入");
+      await page.fill(`${MODEL_WORKSPACE} #ue-manual`, "draft-only");
+      await clickButton(page, `${MODEL_WORKSPACE} #ue-manual-panel`, "添加到已选");
+      await page.waitFor((scope) => [...document.querySelectorAll(`${scope} .mc-row input`)]
+        .some((input) => input.value === "draft-only" && input.checked), { label: "草稿新增模型" }, MODEL_WORKSPACE);
+      await clickButton(page, MODEL_WORKSPACE, "← 模型规则");
+      const chips = await page.evaluate((scope) => [...document.querySelectorAll(`${scope} .ue-preview-chip`)].map((item) => item.textContent), UPSTREAM_EDITOR);
+      assert(chips.includes("draft-only"), "新增模型没有回写草稿");
+      assert(!(await storedUpstream(page)).model_names.includes("draft-only"), "未保存的模型不能落库");
     });
 
-    await check("表单里拉取模型走预览接口", async () => {
-      await page.evaluate(() => {
-        const button = [
-          ...document.querySelectorAll("dialog.upstream-dialog[open] .form-section-head-actions button"),
-        ].find((b) => b.textContent.trim() === "拉取模型");
-        if (!button) throw new Error("找不到拉取模型按钮");
-        button.click();
-      });
-      await page.waitForSelector("dialog.model-dialog[open]", { label: "选择器", timeout: 10_000 });
-      const summary = await page.text("dialog.model-dialog .modal-head p");
-      assert(summary?.includes(`上游返回 ${FAKE_MODELS.length}`), `摘要不对：${summary}`);
-      await page.click("dialog.model-dialog .modal-footer button.secondary");
+    await check("编辑表单拉目录使用预览接口并保留草稿选择", async () => {
+      const seen = [];
+      const collect = (event) => seen.push(event.request.url);
+      cdp.on("Network.requestWillBeSent", collect);
+      try {
+        await page.click(`${UPSTREAM_EDITOR} #ue-manage-models`);
+        await clickButton(page, `${MODEL_WORKSPACE} .mc-search`, "拉取目录");
+        await page.waitFor((count) => document.querySelector('.mc:not([hidden]) .mc-batch [role=status]')?.textContent.includes(`已拉取 ${count} 个模型`),
+          { label: "编辑器模型目录" }, FAKE_MODELS.length);
+        assert(seen.some((url) => url.endsWith("/upstreams/fetch-models")), "没有使用预览接口");
+        const rows = await modelRows(page);
+        assert(rows.some((row) => row.name === "draft-only" && row.checked && row.missing), "目录刷新丢失了本地选择");
+        await clickButton(page, MODEL_WORKSPACE, "← 模型规则");
+      } finally {
+        cdp.off("Network.requestWillBeSent", collect);
+      }
     });
 
-    /* 旧控制台把映射显示成 `a => b`。从那边复制过来的内容必须能原样吃下；
-       只找第一个 `=` 的写法会把它切成 `a` 和 `> b`，而且不报错。 */
     await check("思考强度映射吃得下箭头写法", async () => {
-      await page.evaluate(() => {
-        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
-        details.open = true;
-      });
-      await page.evaluate(() => {
-        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-        setter.call(areas[1], "max => xhigh");
-        areas[1].dispatchEvent(new Event("input", { bubbles: true }));
-      });
-      await page.evaluate(() => {
-        document
-          .querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]")
-          .click();
-      });
-      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
-        label: "编辑对话框关闭",
-        timeout: 10_000,
-      });
-      const stored = await page.evaluate(async () => {
-        const response = await fetch("/api/admin/upstreams/", {
-          headers: { "x-admin-token": localStorage.getItem("wildtoken_admin_token") },
-        });
-        const list = await response.json();
-        return list.find((item) => item.name.includes("auto-weight"))?.effort_mappings ?? null;
-      });
-      assertEqual(JSON.stringify(stored), '{"max":"xhigh"}', "落库的思考强度映射");
+      const field = await editorField(page, "effortMappings");
+      await page.fill(field, "max => xhigh");
+      await saveEditor(page);
+      assertEqual(JSON.stringify((await storedUpstream(page)).effort_mappings), '{"max":"xhigh"}', "落库的思考强度映射");
     });
 
-    /* 后端也拦，但报回来只是一条 400。在这里拦能直接指出是哪一个头。 */
     await check("不可覆盖的传输头被点名拦下", async () => {
       await openRowMenu(page, "auto-weight");
       await clickMenuItem(page, "编辑");
-      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
-      await page.evaluate(() => {
-        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
-        details.open = true;
-        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-        setter.call(areas[0], '{"Host":"evil.example"}');
-        areas[0].dispatchEvent(new Event("input", { bubbles: true }));
-      });
-      await page.evaluate(() => {
-        document.querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]").click();
-      });
-      await sleepInPage(page, 300);
-      const toast = await page.evaluate(() => {
-        const node = [...document.querySelectorAll(".toast")].find((n) =>
-          n.textContent.includes("Host"),
-        );
-        return node?.textContent ?? null;
-      });
-      assert(toast?.includes("不能覆盖"), `没点名 Host：${toast}`);
-      assertEqual(
-        await page.evaluate(() => document.querySelector("dialog.upstream-dialog[open]") !== null),
-        true,
-        "拦下时对话框应留着",
-      );
-      await page.click("dialog.upstream-dialog[open] .icon-close");
-      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
-        label: "编辑对话框关闭",
-      });
+      await page.waitForSelector(UPSTREAM_EDITOR);
+      const field = await editorField(page, "extraHeaders");
+      await page.fill(field, '{"Host":"evil.example"}');
+      await page.click(`${UPSTREAM_EDITOR} button[type=submit]`);
+      await page.waitFor(() => [...document.querySelectorAll(".upstream-editor .ue-error")]
+        .some((item) => item.textContent.includes("Host") && item.textContent.includes("不能覆盖")), { label: "非法 Header 提示" });
+      assertEqual(await page.count(UPSTREAM_EDITOR), 1, "被拒绝的表单应保留");
+      assertEqual((await storedUpstream(page)).extra_headers.host, undefined, "非法 Header 不得落库");
+      await closeEditor(page);
     });
 
-    /* 标准报文写法：从 curl -v 或浏览器网络面板拷出来直接粘。重点测两件事——
-       值里的冒号不能被切，回显要是每行一条而不是 JSON。 */
     await check("Header 收报文写法且回显成行", async () => {
       await openRowMenu(page, "auto-weight");
       await clickMenuItem(page, "编辑");
-      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
-      await page.evaluate(() => {
-        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
-        details.open = true;
-        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-        // 第二条的值里带冒号，只能按第一个切。
-        setter.call(areas[0], "X-Tenant: acme\nX-Origin: https://a.example:8443/v1");
-        areas[0].dispatchEvent(new Event("input", { bubbles: true }));
-      });
-      await page.evaluate(() => {
-        document.querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]").click();
-      });
-      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
-        label: "编辑对话框关闭",
-        timeout: 10_000,
-      });
-
-      const stored = await page.evaluate(async () => {
-        const admin = localStorage.getItem("wildtoken_admin_token");
-        const list = await (
-          await fetch("/api/admin/upstreams/", { headers: { "x-admin-token": admin } })
-        ).json();
-        return list.find((item) => item.name.includes("auto-weight"))?.extra_headers ?? null;
-      });
-      assertEqual(stored["x-tenant"], "acme", "第一条落库");
-      assertEqual(
-        stored["x-origin"],
-        "https://a.example:8443/v1",
-        "值里的冒号不该被切断",
-      );
-
-      // 重新打开：回显要是每行一条，不是 JSON。
+      await page.waitForSelector(UPSTREAM_EDITOR);
+      const field = await editorField(page, "extraHeaders");
+      await page.fill(field, "X-Tenant: acme\nX-Origin: https://a.example:8443/v1");
+      await saveEditor(page);
+      const headers = (await storedUpstream(page)).extra_headers;
+      assertEqual(headers["x-tenant"], "acme", "第一条 Header");
+      assertEqual(headers["x-origin"], "https://a.example:8443/v1", "Header 值里的冒号应保留");
       await openRowMenu(page, "auto-weight");
       await clickMenuItem(page, "编辑");
-      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
-      const shown = await page.evaluate(() => {
-        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
-        details.open = true;
-        return document.querySelectorAll("dialog.upstream-dialog[open] details textarea")[0].value;
-      });
-      assert(!shown.includes("{"), `回显成了 JSON：${shown}`);
-      assert(shown.includes("x-tenant: acme"), `回显不是报文写法：${shown}`);
+      await page.waitForSelector(UPSTREAM_EDITOR);
+      const shown = await page.evaluate((field) => document.querySelector(field).value, await editorField(page, "extraHeaders"));
+      assert(!shown.includes("{") && shown.includes("x-tenant: acme"), `回显应为报文写法：${shown}`);
     });
 
-    await check("仍然收旧的 JSON 写法", async () => {
-      await page.evaluate(() => {
-        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-        setter.call(areas[0], '{"X-Legacy":"kept"}');
-        areas[0].dispatchEvent(new Event("input", { bubbles: true }));
-      });
-      await page.evaluate(() => {
-        document.querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]").click();
-      });
-      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
-        label: "编辑对话框关闭",
-        timeout: 10_000,
-      });
-      const stored = await page.evaluate(async () => {
-        const admin = localStorage.getItem("wildtoken_admin_token");
-        const list = await (
-          await fetch("/api/admin/upstreams/", { headers: { "x-admin-token": admin } })
-        ).json();
-        return list.find((item) => item.name.includes("auto-weight"))?.extra_headers ?? null;
-      });
-      assertEqual(stored["x-legacy"], "kept", "JSON 写法仍然能存");
+    await check("仍然收旧的 JSON Header 写法", async () => {
+      await page.fill(await editorField(page, "extraHeaders"), '{"X-Legacy":"kept"}');
+      await saveEditor(page);
+      assertEqual((await storedUpstream(page)).extra_headers["x-legacy"], "kept", "JSON 写法应落库");
     });
 
-    await check("Header 不是合法 JSON 就不保存", async () => {
+    await check("非法 Header JSON 不发保存请求", async () => {
       await openRowMenu(page, "auto-weight");
       await clickMenuItem(page, "编辑");
-      await page.waitForSelector("dialog.upstream-dialog[open]", { label: "编辑对话框" });
-      await page.evaluate(() => {
-        const details = document.querySelector("dialog.upstream-dialog[open] details.form-section");
-        details.open = true;
-        const areas = [...document.querySelectorAll("dialog.upstream-dialog[open] details textarea")];
-        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
-        setter.call(areas[0], "{not json");
-        areas[0].dispatchEvent(new Event("input", { bubbles: true }));
-      });
-      await page.evaluate(() => {
-        document
-          .querySelector("dialog.upstream-dialog[open] .modal-footer button[type=submit]")
-          .click();
-      });
-      await sleepInPage(page, 300);
-      const stillOpen = await page.evaluate(
-        () => document.querySelector("dialog.upstream-dialog[open]") !== null,
-      );
-      assertEqual(stillOpen, true, "解析失败时对话框应留着");
-      // 以 { 开头会走 JSON 分支，文案是「看起来是 JSON 但解析失败」。
-      const toasted = await page.evaluate(() =>
-        [...document.querySelectorAll(".toast")].some((node) =>
-          node.textContent.includes("解析失败"),
-        ),
-      );
-      assertEqual(toasted, true, "应提示解析失败");
-      await page.click("dialog.upstream-dialog[open] .icon-close");
-      await page.waitFor(() => document.querySelector("dialog.upstream-dialog[open]") === null, {
-        label: "编辑对话框关闭",
-      });
+      await page.waitForSelector(UPSTREAM_EDITOR);
+      await page.fill(await editorField(page, "extraHeaders"), "{not json");
+      const writes = [];
+      const collect = (event) => { if (event.request.method === "PUT") writes.push(event.request.url); };
+      cdp.on("Network.requestWillBeSent", collect);
+      try {
+        await page.click(`${UPSTREAM_EDITOR} button[type=submit]`);
+        await page.waitFor(() => [...document.querySelectorAll(".upstream-editor .ue-error")]
+          .some((item) => item.textContent.includes("Header JSON 格式无效")), { label: "Header 格式错误" });
+        assertEqual(writes.length, 0, "校验失败不得发出写请求");
+        assertEqual(await page.count(UPSTREAM_EDITOR), 1, "失败表单应保留");
+        await closeEditor(page);
+      } finally {
+        cdp.off("Network.requestWillBeSent", collect);
+      }
     });
 
     // ── 日志详情与会话视图 ─────────────────────────────────────
@@ -2408,16 +2324,22 @@ async function main() {
       assert(measured.channelWidth <= 210, `渠道列 ${measured.channelWidth}px，太宽`);
     });
 
-    await check("客户端档位是固定清单而不是从当前页凑", async () => {
-      const options = await page.evaluate(() => {
-        const select = [...document.querySelectorAll(".log-toolbar select")].find((node) =>
-          node.textContent.includes("全部客户端"),
-        );
-        return [...select.options].map((option) => option.value);
+    await check("客户端筛选包含服务端全库清单", async () => {
+      const clients = await page.evaluate(async () => {
+        const response = await fetch("/api/admin/logs/clients", {
+          headers: { "x-admin-token": localStorage.getItem("wildtoken_admin_token") },
+        });
+        if (!response.ok) throw new Error(`读取客户端清单失败：${response.status}`);
+        return (await response.json()).client_types;
       });
-      // 当前页肯定没有 channel-test 这类探测，但档位必须在。
-      assert(options.includes("channel-test"), `档位不全：${options}`);
-      assertEqual(options.length, 12, "客户端档位数（含全部）");
+      assert(clients.length > 0, "没有客户端清单可验证");
+      const options = await page.waitFor((clients) => {
+        const select = document.querySelector('.log-toolbar select[aria-label="按客户端筛选日志"]');
+        const values = [...select.options].map((option) => option.value);
+        return clients.every((client) => values.includes(client)) ? values : false;
+      }, { label: "全库客户端清单" }, clients);
+      assertEqual(options[0], "", "默认项应表示全部客户端");
+      assertEqual(new Set(options).size, options.length, "客户端选项不能重复");
     });
 
     /* 筛选必须回服务端。前端过滤当前页的话，选 5xx 看到的是「这几十行里的
@@ -2582,15 +2504,17 @@ async function main() {
     /* 页签要像「贴在面板上的盖子」，不是一排文字加下划线。量几何：选中项有
        上/左边框、圆角只在上方、底色与面板一致，且底边盖住接缝。 */
     await check("选中的页签和面板连成一块", async () => {
-      const seen = await page.evaluate(() => {
+      const seen = await page.waitFor(() => {
         const tab = document.querySelector(
           "dialog.log-detail-dialog [role=tab][aria-selected=true]",
         );
         const panel = document.querySelector(".log-detail-tabpanel");
-        if (!tab || !panel) return null;
+        if (!tab || !panel) return false;
         const style = getComputedStyle(tab);
         const panelStyle = getComputedStyle(panel);
+        if (style.backgroundColor !== panelStyle.backgroundColor) return false;
         const tabBox = tab.getBoundingClientRect();
+        const tabsBox = tab.parentElement.getBoundingClientRect();
         const panelBox = panel.getBoundingClientRect();
         return {
           topBorder: style.borderTopWidth,
@@ -2602,7 +2526,8 @@ async function main() {
           panelBg: panelStyle.backgroundColor,
           /* 页签底边与面板顶边的距离：贴住时应为 0。 */
           gap: Math.round(panelBox.top - tabBox.bottom),
-          leftAligned: Math.round(panelBox.left - tabBox.left),
+          tabsLeft: Math.round(tabsBox.left),
+          leftAligned: Math.round(panelBox.left - tabsBox.left),
         };
       });
       assert(seen !== null, "找不到选中的页签或面板");
@@ -2613,7 +2538,7 @@ async function main() {
       assertEqual(seen.bottomRadius, "0px", "选中页签下方不该有圆角");
       assertEqual(seen.tabBg, seen.panelBg, "选中页签底色和面板不一致");
       assert(seen.gap <= 0, `页签和面板之间有缝：${seen.gap}px`);
-      assertEqual(seen.leftAligned, 0, "页签左边缘和面板没对齐");
+      assertEqual(seen.leftAligned, 0, "页签面板应与页签栏容器的左边缘对齐");
     });
 
     await check("会话模式把请求体还原成对话", async () => {
@@ -2970,73 +2895,52 @@ async function main() {
     // ── 看板页 ──────────────────────────────────────────────
     console.log("\n看板页");
 
-    await check("指标卡打散成一片", async () => {
+    await check("看板的六项流量指标在同一网格", async () => {
       await gotoView(page, "看板");
-      const flat = await page.waitFor(
-        () => {
-          const grid = document.querySelector(".dashboard-kpis--flat");
-          if (!grid) return false;
-          const cards = [...grid.querySelectorAll(".dashboard-kpi")];
-          if (cards.length < 11) return false;
-          return {
-            count: cards.length,
-            labels: cards.map((card) => card.querySelector(".dashboard-kpi-label")?.textContent),
-            columns: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
-            // 分区标题和外框都要没了。
-            sections: document.querySelectorAll(".dashboard-layout .dashboard-metric-head").length,
-            boards: document.querySelectorAll(".dashboard-ops.wt-board").length,
-          };
-        },
-        { label: "打散的指标网格", timeout: 10_000 },
-      );
-      assertEqual(flat.count, 11, "四区共 11 张卡全进同一网格");
-      assertEqual(flat.sections, 0, "分区标题要去掉");
-      assertEqual(flat.boards, 0, "分区外框要去掉");
-      assert(
-        flat.columns >= 4 && flat.columns <= 6,
-        `每行应 4–6 列，实际 ${flat.columns}`,
-      );
-      // 四个区的卡一张不能丢。
-      for (const label of ["请求数", "错误率", "启用渠道", "Tokens", "缓存率", "活跃流", "清理任务"]) {
-        assert(flat.labels.includes(label), `丢了卡片：${label}`);
-      }
+      const flat = await page.waitFor(() => {
+        const grid = document.querySelector(".dashboard-kpis--flat");
+        const cards = [...(grid?.querySelectorAll(".dashboard-kpi") ?? [])];
+        return cards.length === 6 ? {
+          labels: cards.map((card) => card.querySelector(".dashboard-kpi-label").textContent),
+          columns: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+          sections: document.querySelectorAll(".dashboard-layout .dashboard-metric-head").length,
+          boards: document.querySelectorAll(".dashboard-ops.wt-board").length,
+        } : false;
+      }, { label: "看板指标网格" });
+      assertEqual(flat.labels.join(","), "请求数,错误率,平均耗时,Tokens,缓存率,请求（全部）", "流量指标");
+      assertEqual(flat.sections, 0, "不应保留旧分区标题");
+      assertEqual(flat.boards, 0, "不应保留旧分区外框");
+      assert(flat.columns >= 4 && flat.columns <= 6, `宽屏指标列数不合理：${flat.columns}`);
       assertEqual(await page.count(".wt-page-body.dashboard-layout"), 1, "页体容器");
     });
 
-    await check("核心指标读到真数", async () => {
-      /* 卡片带着「—」占位符立刻就在，等它“存在”等于没等。要等真数据落到。 */
-      const kpis = await page.waitFor(
-        () => {
-          const cards = [...document.querySelectorAll(".dashboard-kpis .dashboard-kpi")];
-          if (cards.length === 0) return false;
-          const entries = Object.fromEntries(
-            cards.map((card) => [
-              card.querySelector(".dashboard-kpi-label")?.textContent,
-              card.querySelector(".dashboard-kpi-value")?.textContent,
-            ]),
-          );
-          return entries["启用渠道"] && entries["启用渠道"] !== "—" ? entries : false;
-        },
-        { label: "核心指标拿到数据", timeout: 15_000 },
-      );
-      // 种子里三个渠道，其中一个已归档——归档的不进分母。
-      assertEqual(kpis["启用渠道"], "2/2", "启用渠道（归档不计）");
-      assert(kpis["请求数"] !== undefined, "请求数卡缺失");
-      assert(kpis["错误率"] !== undefined, "错误率卡缺失");
+    await check("核心流量指标读到真实数据", async () => {
+      const kpis = await page.waitFor(() => {
+        const cards = [...document.querySelectorAll(".dashboard-kpis .dashboard-kpi")];
+        const values = Object.fromEntries(cards.map((card) => [
+          card.querySelector(".dashboard-kpi-label").textContent,
+          card.querySelector(".dashboard-kpi-value").textContent,
+        ]));
+        return values["平均耗时"] && values["平均耗时"] !== "—" ? values : false;
+      }, { label: "看板请求数据" });
+      assert(parseFloat(kpis["请求数"]) > 0, "种子请求没有计入看板");
+      for (const name of ["请求数", "错误率", "平均耗时", "Tokens", "请求（全部）"]) {
+        assert(/\d/.test(kpis[name]) && !/NaN|undefined/.test(kpis[name]), `${name} 不是有效数值：${kpis[name]}`);
+      }
     });
 
-    await check("状态分布按四档分段", async () => {
+    await check("状态分布独立列出客户端取消", async () => {
       // 同理：图表区先渲染空壳，等图例真的出来。
       const legend = await page.waitFor(
         () => {
           const labels = [...document.querySelectorAll(".status-legend .status-legend-label")].map(
             (node) => node.textContent,
           );
-          return labels.length === 4 ? labels : false;
+          return labels.length === 5 ? labels : false;
         },
         { label: "状态分布图例", timeout: 15_000 },
       );
-      assertEqual(legend.join(","), "2xx,4xx,5xx,其他", "图例档位");
+      assertEqual(legend.join(","), "2xx,4xx,5xx,取消,其他", "图例档位");
       const segs = await page.evaluate(() =>
         [...document.querySelectorAll(".ops-bar-track .ops-bar-seg")].map((node) => ({
           tone: node.className.replace("ops-bar-seg ", ""),
@@ -3226,20 +3130,18 @@ async function main() {
     // ── 设置页 ──────────────────────────────────────────────
     console.log("\n设置页");
 
-    await check("八张设置卡齐全", async () => {
+    await check("九张设置卡齐全", async () => {
       await gotoView(page, "设置");
-      /* 等满 8 张再比。三张服务端卡要等设置读回来才渲染，只等「大于 0」的话
-         会在只有 5 张时就截下来。 */
       const titles = await page.waitFor(
         () => {
           const heads = [...document.querySelectorAll(".settings-stack .settings-card-head h3")];
-          return heads.length >= 8 ? heads.map((node) => node.textContent) : false;
+          return heads.length === 9 ? heads.map((node) => node.textContent) : false;
         },
         { label: "设置卡", timeout: 10_000 },
       );
       assertEqual(
         titles.join(","),
-        "控制台偏好,日志与存储,路由、有效权重与重试,出站代理,模型测试 Prompt,网关默认值,安全,运行信息",
+        "控制台偏好,日志与存储,路由、有效权重与重试,出站代理,模型测试 Prompt,网关默认值,看板显示,安全,运行信息",
         "设置卡标题",
       );
     });
@@ -3400,7 +3302,7 @@ async function main() {
         };
       });
       assert(layout !== null, "缺正文层或页脚层");
-      assertEqual(layout.sections, 3, "分三节：基础信息 / 配额限速 / 有效期状态");
+      assertEqual(layout.sections, 4, "分四节：基础信息 / 配额限速 / 模型限制 / 有效期状态");
       assertEqual(layout.bodyScrolls, true, "正文要能独立滚动");
       assertEqual(layout.footerAtBottom, true, "页脚要钉在抽屉底部");
       assertEqual(layout.footerVisible, true, "页脚不能被推出可视区");
@@ -3605,8 +3507,8 @@ async function main() {
       const labels = await page.evaluate(() =>
         [...document.querySelectorAll(".topbar-nav .nav-link")].map((b) => b.textContent.trim()),
       );
-      assert(labels.length === 6, `导航项应 6 个，实际 ${labels.length}`);
-      assertEqual(labels.join(","), "看板,渠道,日志,令牌,分组,设置", "导航顺序");
+      assert(labels.length === 8, `导航项应 8 个，实际 ${labels.length}`);
+      assertEqual(labels.join(","), "看板,渠道,日志,令牌,分组,调试,生图,设置", "导航顺序");
     });
 
     await check("主题菜单能开且能选", async () => {
@@ -3839,8 +3741,10 @@ async function main() {
       await page.click("dialog.log-detail-dialog .icon-close");
     });
 
-    console.log("\n抽屉布局");
-    await checkDialogLayouts({ page, check, gotoView, openRowMenu, clickMenuItem });
+    if (!process.argv.includes("--no-layout")) {
+      console.log("\n抽屉布局");
+      await checkDialogLayouts({ page, check, gotoView, openRowMenu, clickMenuItem });
+    }
 
     // ── 退出 ────────────────────────────────────────────────────────────────
     console.log("\n退出");
@@ -3873,4 +3777,6 @@ async function main() {
   reportResults();
 }
 
-await main();
+export { Page, attachPage, launchChrome };
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) await main();

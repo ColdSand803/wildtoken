@@ -15,10 +15,10 @@ test("listLogs sends all filters, with cursors kept separate", async () => {
   const { listLogs } = loadTS("web/src/api.ts"); await listLogs({ ...all, limit: 20, beforeCreatedAt: "2026-09-23 01:00:00", beforeId: 5 });
   const query = new URL(url, "http://localhost").searchParams; for (const [key, value] of logFilterQuery(all)) assert.equal(query.get(key), value); assert.equal(query.get("before_id"), "5");
 });
-test("SSE reconnects on filter changes, clears buffered rows, and stale list responses are ignored", () => { const stream = read("web/src/useLogStream.ts"), page = read("web/src/pages/LogsPage.tsx"); assert.match(stream, /\[enabled, filterQuery\]/); assert.match(stream, /setState\(\{ logs: \[\]/); assert.match(page, /request !== loadRequest\.current/); assert.match(page, /matchesLogFilters\(log, filters\)/); });
+test("SSE reconnects on filter changes, clears buffered rows, and stale list responses are ignored", () => { const stream = read("web/src/useLogStream.ts"), query = read("web/src/useLogQuery.ts"); assert.match(stream, /\[enabled, filterQuery\]/); assert.match(stream, /setState\(\{ logs: \[\]/); assert.match(query, /request\.current\(\)/); assert.match(query, /matchesLogFilters/); });
 test("clearing drill-down filters clears sessionStorage so refresh does not resurrect old search", () => { navigateToLogs({ search: "10086", start: "2026-09-23T00:00:00Z" }); assert.equal(readLogDrilldown().search, "10086"); saveLogDrilldown({ search: "" }); assert.equal(readLogDrilldown().search, undefined); clearLogDrilldown(); assert.deepEqual(readLogDrilldown(), {}); });
 test("sensitive mask hides client IP alongside token and upstream name in log table and detail dialog", () => {
-  const { IpCell } = loadTS("web/src/pages/LogsPage.tsx", { expose: ["IpCell"] });
+  const { IpCell } = loadTS("web/src/components/logs/LogCells.tsx", { expose: ["IpCell"] });
   const normalHtml = renderStatic(h(IpCell, { ip: "192.0.2.1", sensitiveHidden: false }));
   assert.match(normalHtml, /192\.0\.2\.1/);
   assert.doesNotMatch(normalHtml, /\*{6}/);
@@ -28,8 +28,9 @@ test("sensitive mask hides client IP alongside token and upstream name in log ta
   assert.match(maskedHtml, /\*{6}/);
 
   const pageSource = read("web/src/pages/LogsPage.tsx");
-  assert.match(pageSource, /IpCell ip=\{log\.client_ip\} sensitiveHidden=\{sensitiveHidden\}/);
-  assert.match(pageSource, /IpCell ip=\{request\.client_ip\} sensitiveHidden=\{sensitiveHidden\}/);
+  const tableSource = read("web/src/components/logs/LogTable.tsx");
+  assert.match(tableSource, /IpCell ip=\{log\.client_ip\} sensitiveHidden=\{sensitiveHidden\}/);
+  assert.match(tableSource, /IpCell ip=\{request\.client_ip\} sensitiveHidden=\{sensitiveHidden\}/);
 });
 
 test("a client cancellation remains a 4xx but is not a failed request", () => {

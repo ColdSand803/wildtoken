@@ -131,16 +131,17 @@ test("重试换渠道和上游模型后按新快照筛", () => {
 });
 
 test("日志页对新日志、SSE 在途和断线快照套同一组筛选", () => {
-  const page = readFileSync(new URL("../web/src/pages/LogsPage.tsx", import.meta.url), "utf8");
+  const page = readFileSync(new URL("../web/src/useLogQuery.ts", import.meta.url), "utf8");
+  const merge = readFileSync(new URL("../web/src/logQuery.ts", import.meta.url), "utf8");
 
-  assert.match(page, /stream\.logs\.filter\(\(log\) => logMatchesFilters\(log, filters\)\)/);
+  assert.match(merge, /streamed\.filter\(\(log\) => logMatchesFilters\(log, filters\)\)/);
   assert.match(page, /const activeLatest = stream\.connected \? stream\.active : activeFromPage;/);
   assert.match(page, /const active = onLatestPage\s*\? activeLatest\.filter\(\(request\) => activeMatchesFilters\(request, filters\)\)\s*: \[\];/);
-  assert.match(page, /hasActive=\{active\.length > 0\}/);
+  assert.match(readFileSync(new URL("../web/src/pages/LogsPage.tsx", import.meta.url), "utf8"), /active=\{query\.active\}/);
 });
 
 test("切筛选不重置在途计时基准", () => {
-  const page = readFileSync(new URL("../web/src/pages/LogsPage.tsx", import.meta.url), "utf8");
-  assert.match(page, /<ActiveRows active=\{active\} snapshot=\{activeLatest\}/);
-  assert.match(page, /const signature = snapshot\.map\(/);
+  const table = readFileSync(new URL("../web/src/components/logs/LogTable.tsx", import.meta.url), "utf8");
+  assert.match(table, /<ActiveRows active=\{active\} snapshot=\{activeLatest\}/);
+  assert.match(table, /const signature = snapshot\.map\(/);
 });

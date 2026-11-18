@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
+import { animatePresence } from "../motion";
 
 export interface MenuItem {
   key: string;
@@ -83,6 +84,7 @@ export function ActionMenu({
        popover 元素不受祖先 transform 影响——旧控制台也是这么做的。 */
     if (menu && !menu.matches(":popover-open")) menu.showPopover();
     reposition();
+    if (menu) return animatePresence(menu, true);
   }, [open, reposition]);
 
   useEffect(() => {

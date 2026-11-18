@@ -6,17 +6,19 @@ import test from "node:test";
 const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
 
 const ADMIN_SOURCE = "internal/handlers/admin.go";
-const LOGS_SOURCE = "web/src/pages/LogsPage.tsx";
+const LOGS_SOURCE = "web/src/components/logs/LogTable.tsx";
+const COLUMNS_SOURCE = "web/src/components/logs/columns.ts";
 
 /** 日志表声明的列。表头由 COLUMNS 生成，所以读列定义而不是 <thead>。 */
 function logTableColumns() {
-  const source = read(LOGS_SOURCE);
-  const start = source.indexOf("const COLUMNS:");
+  const source = read(COLUMNS_SOURCE);
+  const table = read(LOGS_SOURCE);
+  const start = source.indexOf("export const COLUMNS:");
   assert.notEqual(start, -1, "日志表必须有列定义");
   const block = source.slice(start, source.indexOf("];", start));
   const columns = [...block.matchAll(/key: "([a-z-]+)"/g)].map((match) => match[1]);
   assert.notEqual(columns.length, 0, "列定义不能为空");
-  assert.match(source, /COLUMNS\.map\(\(column\) => \(\s*<th key=\{column\.key\}/, "表头必须由列定义生成");
+  assert.match(table, /COLUMNS\.map\(\(column\) => \(\s*<th key=\{column\.key\}/, "表头必须由列定义生成");
   return columns;
 }
 
@@ -67,7 +69,7 @@ test("在途登记与 abort 日志从同一处取走 prepared 的全部字段", 
 test("并发胶囊读总数，不是被截断的列表长度", () => {
   /* 列表封顶 ActiveSnapshotLimit，计数不封顶。读长度的话，并发超过上限后
      胶囊会死在上限值上。 */
-  assert.match(read(LOGS_SOURCE), /active_total/);
+  assert.match(read("web/src/useLogQuery.ts"), /active_total/);
 
   // 服务端两条路径都得带上总数。
   const handler = read(ADMIN_SOURCE);
@@ -81,6 +83,7 @@ test("占位行的 colspan 等于表头列数", () => {
   const source = read(LOGS_SOURCE);
   // 列数从列定义算出来，不是手写的数字：加一列不会忘了改。
   assert.match(source, /LOG_TABLE_COLUMN_COUNT = COLUMNS\.length;/, "列数应取自列定义");
+  assert.match(read("web/src/pages/LogsPage.tsx"), /<LogTable /, "日志页必须使用独立表格组件");
 
   const spans = [...source.matchAll(/colSpan=\{([^}]+)\}/g)].map((match) => match[1]);
   assert.notEqual(spans.length, 0, "占位行必须存在");

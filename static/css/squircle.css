@@ -1,0 +1,246 @@
+/* ── 连续曲率圆角（G2 超椭圆 / Squircle）──────────────────────────────
+   通过原生盒模型属性 corner-shape: squircle 实现平滑圆角：边框、投影、焦点环与
+   backdrop-filter 毛玻璃裁剪区都会自然贴合超椭圆轮廓，无需 clip-path / SVG 遮罩。
+   不支持 corner-shape 的浏览器停留在原有 border-radius 圆弧上。
+
+   作用范围：所有带圆角的主题（内置 dark / light、anthropic*、sakura-mist、
+   co1dsand*、gojo 及自定义圆角主题）。直角与像素风主题（ark、endfield、minegrub）
+   将 --corner-shape 置回 round，保留硬朗方角。
+
+   圆点（50%）与全圆角胶囊/轨道（999px / --radius-full）不参与：超椭圆会把正圆压成
+   方圆、把半圆端帽拉平。抽屉（.dialog--drawer）维持 0 圆角。 */
+
+/* 手机端悬浮底部导航菜单（.topbar-nav）：
+   桌面竖排侧栏将 .topbar-nav 设为 border-radius: 0，而移动端收折为底栏悬浮块时未重设圆角。
+   借真实存在的祖先层级 .app-shell .topbar 提高权重压过各主题桌面规则，赋予圆角；
+   直角与像素风主题（ark、endfield、minegrub）显式排除，保持原样。 */
+@media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+  html[data-theme]:not([data-theme="ark"]):not([data-theme="endfield"]):not([data-theme="minegrub"]) .app-shell .topbar .topbar-nav {
+    border-radius: var(--radius-md);
+  }
+}
+
+@supports (corner-shape: squircle) {
+  :root {
+    --corner-shape: squircle;
+
+    /* 同数值半径下，超椭圆（n=4）对角线内缩约 0.159R，圆弧（n=2）约 0.293R，
+       不做补偿在视觉上会小一圈；放大约 1.25 倍以对齐原有圆润度。 */
+    --radius-xs: 5px;
+    --radius-sm: 8px;
+    --radius: 10px;
+    --radius-md: 15px;
+    --radius-lg: 20px;
+  }
+
+  /* 直角工业风与像素风主题退出连续曲率，也不做半径放大。 */
+  html[data-theme="ark"],
+  html[data-theme="endfield"],
+  html[data-theme="minegrub"] {
+    --corner-shape: round;
+    --radius-xs: 0px;
+  }
+
+  /* 1. 浮层、居中对话框、卡片、面板与容器表面 */
+  :where(html:not([data-theme="ark"]):not([data-theme="endfield"]):not([data-theme="minegrub"])) :is(
+    dialog:not(.dialog--drawer),
+    .command-palette-panel,
+    .select-panel,
+    .theme-menu,
+    .col-menu,
+    .upstream-action-menu,
+    .toast,
+    .dashboard-kpi,
+    .kpi-card,
+    .dashboard-card,
+    .settings-card,
+    .wt-card,
+    .channel-card,
+    .metric-tile,
+    .dashboard-panel[data-dashboard-window="single"] .dashboard-ops-usage,
+    .dashboard-ops .dashboard-metric-section,
+    .table-wrap,
+    .status,
+    .summary-strip,
+    .system-info-grid,
+    .system-info-item,
+    .config-migration-card fieldset,
+    .disaster-recovery-card fieldset,
+    .config-migrate-pane,
+    .config-scope-set,
+    .config-secret-row,
+    .config-import-errors,
+    .restore-pending,
+    .restore-staged,
+    .log-new-entries-notice,
+    .log-detail-head,
+    .log-detail-meta,
+    .log-detail-tabs,
+    .log-detail-tab,
+    .log-detail-tabpanel,
+    .log-detail-attempts ol,
+    .log-detail-retry-chain,
+    .retry-chain-step,
+    .log-detail-code-frame,
+    .log-detail-code-frame > pre,
+    .conv-msg,
+    .conv-block--tool-use .conv-block-body,
+    .conv-block--tool-result .conv-block-body,
+    .conv-block--tool-call .conv-block-body,
+    .conv-block--other .conv-block-body,
+    .conv-image img,
+    .conv-empty,
+    .conv-truncated,
+    .model-picker,
+    .model-manual-entry,
+    .model-options,
+    .toggle-row,
+    .form-section-collapsible summary,
+    .channel-transfer-summary,
+    .group-checklist,
+    .settings-note,
+    .settings-action-row,
+    .rotate-confirm-check,
+    .test-model-result,
+    .test-model-prompt,
+    .test-model-response,
+    .debug-channel-list,
+    .debug-channel,
+    .image-figure img,
+    .quick-import-recognition .qi-source,
+    .quick-import-recognition .qi-source-mask,
+    .quick-import-recognition .qi-candidates,
+    .quick-import-recognition .qi-notice,
+    .upstream-editor .ue-change-panel,
+    .upstream-editor .ue-manual,
+    .upstream-editor .ue-group,
+    .upstream-editor .ue-weight-options label
+  ) {
+    corner-shape: var(--corner-shape);
+  }
+
+  :where(html:not([data-theme="ark"]):not([data-theme="endfield"]):not([data-theme="minegrub"])) :is(
+    .kpi-card::before,
+    .dashboard-kpi::before,
+    .nav-link.active::after
+  ) {
+    corner-shape: var(--corner-shape);
+  }
+
+  :where(html:not([data-theme="ark"]):not([data-theme="endfield"]):not([data-theme="minegrub"])) .channel-card {
+    border-radius: var(--radius-md);
+  }
+
+  /* 2. 按钮、输入控件、分段滑块、悬浮提示与有限圆角徽标 */
+  :where(html:not([data-theme="ark"]):not([data-theme="endfield"]):not([data-theme="minegrub"])) :is(
+    button:not(.conv-fold-all),
+    input:not([type="radio"]),
+    select,
+    textarea,
+    .wt-seg,
+    .wt-seg-thumb,
+    .segmented-control,
+    .wt-inline-range,
+    .dashboard-date-field,
+    .wt-hovercard,
+    .dashboard-chart-tooltip,
+    .kpi-spark-tooltip,
+    .channel-spark-tooltip,
+    .usage-calendar-tip,
+    .badge,
+    .model-chip,
+    .model-selection-chip,
+    .model-selection-more,
+    .channel-card-badge,
+    .command-palette-hint,
+    .command-palette-item,
+    .section-summary-state,
+    .model-option,
+    .model-option-tag,
+    .token-preview-code,
+    .effective-zero-note,
+    .skeleton-block,
+    .first-token-time,
+    .duration-time,
+    .dashboard-card-meta,
+    .dashboard-rank-index,
+    .dashboard-rank-meta,
+    .dashboard-rank-row.is-clickable,
+    .status-legend-item.is-clickable,
+    .status-error-cell,
+    .usage-calendar-swatch,
+    .col-menu label,
+    .log-token-filter-badge,
+    .probe-badge,
+    .log-detail-route-attempt,
+    .log-row-attempt-badge,
+    .log-failure-stage-tag,
+    .log-detail-failure-stage-badge,
+    .log-detail-retryable-badge,
+    .retry-step-status,
+    .retry-step-stage,
+    .routing-summary-details > summary,
+    .routing-chip,
+    .latency-routing-tag,
+    .token-model-tag,
+    .token-model-more,
+    .quota-period-badge,
+    .metrics-endpoint-warn,
+    .log-detail-status,
+    .log-detail-status-error,
+    .conv-block-tag,
+    .quick-import-recognition .qi-badge,
+    .upstream-editor .ue-count,
+    .upstream-editor .ue-preview-chip,
+    .field-hint code,
+    .archived-toggle:focus-visible
+  ) {
+    corner-shape: var(--corner-shape);
+  }
+
+  :where(html:not([data-theme="ark"]):not([data-theme="endfield"]):not([data-theme="minegrub"])) :is(
+    input[type="file"]::file-selector-button,
+    .usage-calendar-cell::before
+  ) {
+    corner-shape: var(--corner-shape);
+  }
+
+  /* 3. 手机端底部悬浮菜单：排除 ark / endfield / minegrub，其余圆角主题走连续曲率。 */
+  @media (max-width: 760px), (orientation: portrait) and (max-width: 960px) {
+    html[data-theme]:not([data-theme="ark"]):not([data-theme="endfield"]):not([data-theme="minegrub"]) .app-shell .topbar .topbar-nav {
+      corner-shape: var(--corner-shape);
+    }
+  }
+
+  /* 4. 五条悟主题额外把主面板与部分胶囊收成了有限圆角，一并接入超椭圆。 */
+  html[data-theme="gojo"] :is(
+    .view > .panel,
+    .log-view-mode,
+    .settings-local-tag,
+    .settings-readonly-tag,
+    .settings-security-mark,
+    .settings-revision,
+    .dashboard-rank-track,
+    .ops-bar-track,
+    .status-chip,
+    .token-chip
+  ),
+  html[data-theme="gojo"] .view > .panel::before,
+  html[data-theme="gojo"] .nav-link::before {
+    corner-shape: var(--corner-shape);
+  }
+
+  /* 5. 抽屉始终保持贴边直角，不被任何圆角或超椭圆规则覆盖。 */
+  :root dialog.dialog--drawer,
+  :root dialog.dialog--drawer > :is(
+    .upstream-dialog-panel,
+    .model-dialog-panel,
+    .log-detail-panel,
+    .quick-import-panel,
+    .balance-panel
+  ),
+  :root .dialog--drawer .modal-head {
+    border-radius: 0;
+    corner-shape: round;
+  }
+}

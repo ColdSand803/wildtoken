@@ -9,8 +9,8 @@ func TestClientVersionCoversReleaseGoInstallAndDevelopment(t *testing.T) {
 	for _, tc := range []struct {
 		override, module, want string
 	}{
-		{"0.2.4", "(devel)", "0.2.4"},
-		{"dev", "v0.2.4", "0.2.4"},
+		{"0.2.5", "(devel)", "0.2.5"},
+		{"dev", "v0.2.5", "0.2.5"},
 		{"dev", "v0.2.5-0.20261106120000-abcdefabcdef", "0.2.5-0.20261106120000-abcdefabcdef"},
 		{"dev", "(devel)", "dev"},
 		{"dev", "", "dev"},
